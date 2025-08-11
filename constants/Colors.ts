@@ -23,4 +23,28 @@ export const Colors = {
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
   },
+  // New colors for Won-Of-One app
+  purple: {
+    primary: '#8B5CF6',
+    light: '#A78BFA',
+    gradient: ['#8B5CF6', '#C4B5FD'],
+  },
+  pink: {
+    light: '#FCE7F3',
+  },
+  blue: {
+    light: '#DBEAFE',
+  },
+  red: {
+    light: '#FEE2E2',
+    accent: '#EF4444',
+  },
+  yellow: {
+    accent: '#F59E0B',
+  },
+  gray: {
+    dark: '#1F2937',
+    medium: '#374151',
+    light: '#6B7280',
+  },
 };

@@ -1,50 +1,105 @@
-# Welcome to your Expo app 👋
+# Won-Of-One
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A user-first training & competition platform built by athletes for athletes. Start with fencing, designed to expand to other sports without rework.
 
-## Get started
+## Features
 
-1. Install dependencies
+### Home Dashboard
+- **User Profile**: Personalized greeting with avatar and settings
+- **Progress Tracking**: Weekly sessions progress with visual indicators
+- **Summary Cards**: Hours trained and win rate statistics
+- **Goal Management**: Current goals with progress circles and action buttons
+- **Recent Matches**: Horizontal scrollable match history
+- **Quick Actions**: Train Now, Log Match, and Mindset tools
 
+### Core Components
+- **ProgressCard**: Purple gradient progress cards with decorative elements
+- **SummaryCard**: Light colored summary cards for key metrics
+- **GoalCard**: Goal tracking with circular progress indicators
+- **RecentMatches**: Match history with opponent profiles
+- **QuickActions**: Action buttons for common tasks
+- **UserHeader**: User profile section with avatar and settings
+
+### Design System
+- **Dark Theme**: Modern, minimal design with dark backgrounds
+- **Color Palette**: Purple gradients, light pink/blue accents, red highlights
+- **Typography**: Clear hierarchy with proper font weights
+- **Spacing**: Consistent padding and margins throughout
+- **Icons**: Emoji-based icons for quick recognition
+
+## Tech Stack
+
+- **React Native** with Expo
+- **TypeScript** for type safety
+- **Expo Linear Gradient** for gradient backgrounds
+- **Custom Components** for reusability
+- **Responsive Design** for mobile-first experience
+
+## Getting Started
+
+1. Install dependencies:
    ```bash
    npm install
    ```
 
-2. Start the app
-
+2. Start the development server:
    ```bash
-   npx expo start
+   npm start
    ```
 
-In the output, you'll find options to open the app in a
+3. Run on your device or simulator
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## Project Structure
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+```
+app/
+  (tabs)/
+    index.tsx          # Home dashboard
+    calendar.tsx       # Calendar view (placeholder)
+    insights.tsx       # Insights view (placeholder)
+    profile.tsx        # Profile view (placeholder)
+    _layout.tsx        # Tab navigation layout
 
-## Get a fresh project
+components/
+  ProgressCard.tsx     # Progress tracking cards
+  SummaryCard.tsx      # Summary metric cards
+  GoalCard.tsx         # Goal management cards
+  RecentMatches.tsx    # Match history component
+  QuickActions.tsx     # Action buttons
+  UserHeader.tsx       # User profile header
+  StatusBar.tsx        # Custom status bar
+  CircularProgress.tsx # Progress indicators
 
-When you're ready, run:
-
-```bash
-npm run reset-project
+constants/
+  Colors.ts            # Color definitions and theme
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Development Status
 
-## Learn more
+- ✅ Home Dashboard UI complete
+- ✅ Component architecture established
+- ✅ Dark theme implemented
+- ✅ Tab navigation structure
+- 🔄 Training Tracker (next phase)
+- 🔄 Match Logging (planned)
+- 🔄 Mindset Tools (planned)
 
-To learn more about developing your project with Expo, look at the following resources:
+## Design Principles
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- **Simple & Quick**: Fast interactions for athletes on the go
+- **Playful**: Gamified elements to maintain engagement
+- **Reliable**: Offline-first with real-time sync
+- **Privacy-First**: User data protection and control
+- **Accessible**: WCAG AA compliance for all users
 
-## Join the community
+## Next Steps
 
-Join our community of developers creating universal apps.
+1. Implement Training Tracker functionality
+2. Add Match Logging with Fencing Remote
+3. Integrate Mindset Builder tools
+4. Connect to backend services
+5. Add authentication and user management
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+
+Built with ❤️ for athletes who want to track their progress and improve their game.

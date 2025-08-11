@@ -1,75 +1,133 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import React from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import { GoalCard } from '@/components/GoalCard';
+import { ProgressCard } from '@/components/ProgressCard';
+import { QuickActions } from '@/components/QuickActions';
+import { RecentMatches } from '@/components/RecentMatches';
+import { SummaryCard } from '@/components/SummaryCard';
+import { UserHeader } from '@/components/UserHeader';
+import { Colors } from '@/constants/Colors';
 
 export default function HomeScreen() {
+  // Mock data - in real app this would come from state/API
+  const mockMatches = [
+    {
+      id: '1',
+      youScore: 5,
+      opponentScore: 2,
+      date: '11/6/2025',
+      opponentName: 'Alex',
+    },
+  ];
+
+  const quickActions = [
+    {
+      id: 'train-now',
+      title: 'Train Now',
+      icon: '🏋️',
+      onPress: () => Alert.alert('Train Now', 'Training session started!'),
+    },
+    {
+      id: 'log-match',
+      title: 'Log Match',
+      icon: '⚔️',
+      onPress: () => Alert.alert('Log Match', 'Match logging started!'),
+    },
+    {
+      id: 'mindset',
+      title: 'Mindset',
+      icon: '🧠',
+      onPress: () => Alert.alert('Mindset', 'Mindset tools opened!'),
+    },
+  ];
+
+  const handleSettings = () => {
+    Alert.alert('Settings', 'Settings opened!');
+  };
+
+  const handleSetNewGoal = () => {
+    Alert.alert('Set New Goal', 'New goal creation started!');
+  };
+
+  const handleUpdateGoal = () => {
+    Alert.alert('Update Goal', 'Goal update started!');
+  };
+
+  const handleViewAllMatches = () => {
+    Alert.alert('View All Matches', 'Opening match history!');
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <>
+      <ExpoStatusBar style="light" />
+      <ScrollView 
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <UserHeader
+          userName="Sophia"
+          onSettingsPress={handleSettings}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        
+        <ProgressCard
+          title="Sessions this Week"
+          current={3}
+          total={5}
+          daysRemaining={3}
+        />
+        
+        <View style={styles.summaryRow}>
+          <SummaryCard
+            icon={<Text style={styles.icon}>🕐</Text>}
+            value="12h 30m"
+            label="Hours Trained"
+            backgroundColor={Colors.pink.light}
+          />
+          <SummaryCard
+            icon={<Text style={styles.icon}>🏆</Text>}
+            value="91%"
+            label="Win Rate"
+            backgroundColor={Colors.blue.light}
+          />
+        </View>
+        
+        <GoalCard
+          daysLeft={2}
+          title="Goal"
+          description="3 Sparing Sessions"
+          progress={75}
+          onSetNewGoal={handleSetNewGoal}
+          onUpdateGoal={handleUpdateGoal}
+        />
+        
+        <RecentMatches
+          matches={mockMatches}
+          onViewAll={handleViewAllMatches}
+        />
+        
+        <QuickActions actions={quickActions} />
+      </ScrollView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: Colors.dark.background,
+  },
+  contentContainer: {
+    padding: 20,
+    paddingTop: 60,
+  },
+  summaryRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginBottom: 16,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  icon: {
+    fontSize: 24,
   },
 });
