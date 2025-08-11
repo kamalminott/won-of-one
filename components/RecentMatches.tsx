@@ -1,6 +1,6 @@
 import { Colors } from '@/constants/Colors';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface Match {
   id: string;
@@ -29,11 +29,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
         </TouchableOpacity>
       </View>
       
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.matchesContainer}
-      >
+      <View style={styles.matchesContainer}>
         {matches.map((match) => (
           <View key={match.id} style={styles.matchCard}>
             <View style={styles.playerSection}>
@@ -60,7 +56,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
             </View>
           </View>
         ))}
-      </ScrollView>
+      </View>
       
       {/* Pagination dots */}
       <View style={styles.pagination}>
@@ -74,7 +70,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 20,
+    marginBottom: 8,
   },
   header: {
     flexDirection: 'row',
@@ -93,14 +89,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   matchesContainer: {
-    paddingHorizontal: 4,
+    width: '100%',
   },
   matchCard: {
     backgroundColor: Colors.gray.dark,
     borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 4,
-    minWidth: 200,
+    padding: 12,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

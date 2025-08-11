@@ -36,8 +36,8 @@ export const GoalCard: React.FC<GoalCardProps> = ({
         <View style={styles.progressCircle}>
           <CircularProgress
             progress={progress}
-            size={100}
-            strokeWidth={8}
+            size={60}
+            strokeWidth={5}
             backgroundColor={Colors.gray.light}
             progressColor={Colors.red.accent}
           />
@@ -61,39 +61,39 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.gray.dark,
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 8,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   daysLeftTag: {
     backgroundColor: Colors.yellow.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
   },
   daysLeftText: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     color: Colors.gray.dark,
   },
   title: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
     color: 'white',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   description: {
-    fontSize: 16,
+    fontSize: 13,
     color: Colors.gray.light,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   progressSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   progressCircle: {
     position: 'relative',
@@ -101,40 +101,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressText: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '700',
     color: 'white',
   },
   buttonContainer: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   secondaryButton: {
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: Colors.gray.light,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
     alignItems: 'center',
   },
   secondaryButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
   },
   primaryButton: {
     flex: 1,
     backgroundColor: Colors.purple.primary,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
     alignItems: 'center',
   },
   primaryButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
   },
 });

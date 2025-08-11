@@ -42,10 +42,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
+    paddingHorizontal: 0,
+    width: '100%',
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 16,
   },
   avatar: {
     width: 50,
@@ -82,6 +86,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gray.medium,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   settingsIcon: {
     fontSize: 20,

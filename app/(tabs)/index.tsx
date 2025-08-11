@@ -122,10 +122,11 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 20,
     paddingTop: 60,
+    width: '100%',
   },
   summaryRow: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   icon: {
     fontSize: 24,

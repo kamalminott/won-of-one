@@ -58,10 +58,10 @@ const styles = StyleSheet.create({
   container: {
     borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   gradientBackground: {
-    padding: 20,
+    padding: 14,
     position: 'relative',
   },
   content: {
