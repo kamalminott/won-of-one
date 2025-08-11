@@ -29,19 +29,23 @@ export const GoalCard: React.FC<GoalCardProps> = ({
         </View>
       </View>
       
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.description}>{description}</Text>
-      
-      <View style={styles.progressSection}>
-        <View style={styles.progressCircle}>
-          <CircularProgress
-            progress={progress}
-            size={60}
-            strokeWidth={5}
-            backgroundColor={Colors.gray.light}
-            progressColor={Colors.red.accent}
-          />
-          <Text style={styles.progressText}>{`${progress}%`}</Text>
+      <View style={styles.contentRow}>
+        <View style={styles.textSection}>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.description}>{description}</Text>
+        </View>
+        
+        <View style={styles.progressSection}>
+          <View style={styles.progressCircle}>
+            <CircularProgress
+              progress={progress}
+              size={60}
+              strokeWidth={5}
+              backgroundColor={Colors.gray.light}
+              progressColor={Colors.red.accent}
+            />
+            <Text style={styles.progressText}>{`${progress}%`}</Text>
+          </View>
         </View>
       </View>
       
@@ -89,11 +93,21 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 13,
     color: Colors.gray.light,
+    marginBottom: 0,
+  },
+  contentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
+  },
+  textSection: {
+    flex: 1,
+    marginRight: 16,
   },
   progressSection: {
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
   },
   progressCircle: {
     position: 'relative',
@@ -101,6 +115,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressText: {
+    position: 'absolute',
     fontSize: 14,
     fontWeight: '700',
     color: 'white',

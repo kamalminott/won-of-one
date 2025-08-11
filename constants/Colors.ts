@@ -39,6 +39,9 @@ export const Colors = {
     light: '#FEE2E2',
     accent: '#EF4444',
   },
+  green: {
+    accent: '#10B981',
+  },
   yellow: {
     accent: '#F59E0B',
   },

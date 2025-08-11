@@ -2,11 +2,12 @@ import { Colors } from '@/constants/Colors';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function CalendarScreen() {
+export default function DiaryScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Calendar</Text>
-      <Text style={styles.subtitle}>Coming soon...</Text>
+      <Text style={styles.title}>Diary</Text>
+      <Text style={styles.subtitle}>Match history and records</Text>
+      <Text style={styles.description}>Coming soon...</Text>
     </View>
   );
 }
@@ -27,6 +28,12 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 18,
+    color: Colors.purple.primary,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  description: {
+    fontSize: 16,
     color: Colors.gray.light,
   },
 });

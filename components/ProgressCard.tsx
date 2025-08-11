@@ -34,7 +34,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           
           <View style={styles.progressBarContainer}>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+              <View style={[styles.progressFill, { width: `${progress * 50}%` }]} />
             </View>
           </View>
           
@@ -81,6 +81,7 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     marginBottom: 16,
+    width: '50%',
   },
   progressBar: {
     height: 8,
@@ -104,11 +105,11 @@ const styles = StyleSheet.create({
   },
   decorativeShape: {
     position: 'absolute',
-    right: -20,
-    top: -20,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    right: 20,
+    top: 40,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     zIndex: 1,
   },

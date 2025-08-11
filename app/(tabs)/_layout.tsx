@@ -49,24 +49,55 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="calendar"
+        name="remote"
         options={{
-          title: 'Calendar',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="calendar" color={color} />,
+          title: 'Remote',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={28} 
+              name="gamecontroller.fill" 
+              color={focused ? Colors.red.accent : color} 
+            />
+          ),
         }}
       />
       <Tabs.Screen
-        name="insights"
+        name="training"
         options={{
-          title: 'Insights',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.bar.fill" color={color} />,
+          title: 'Training',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={28} 
+              name="figure.run" 
+              color={focused ? Colors.red.accent : color} 
+            />
+          ),
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="mindset"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.fill" color={color} />,
+          title: 'Mindset',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={28} 
+              name="brain.head.profile" 
+              color={focused ? Colors.red.accent : color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="diary"
+        options={{
+          title: 'Diary',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={28} 
+              name="book.fill" 
+              color={focused ? Colors.red.accent : color} 
+            />
+          ),
         }}
       />
     </Tabs>

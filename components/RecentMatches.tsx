@@ -30,32 +30,38 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       </View>
       
       <View style={styles.matchesContainer}>
-        {matches.map((match) => (
-          <View key={match.id} style={styles.matchCard}>
-            <View style={styles.playerSection}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>S</Text>
+        {matches.map((match) => {
+          const isWinner = match.youScore > match.opponentScore;
+          const youDotColor = isWinner ? Colors.green.accent : Colors.red.accent;
+          const opponentDotColor = isWinner ? Colors.red.accent : Colors.green.accent;
+          
+          return (
+            <View key={match.id} style={styles.matchCard}>
+              <View style={styles.playerSection}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>S</Text>
+                </View>
+                <Text style={styles.playerLabel}>You</Text>
               </View>
-              <Text style={styles.playerLabel}>You</Text>
-            </View>
-            
-            <View style={styles.scoreSection}>
-              <View style={styles.scoreContainer}>
-                <View style={styles.scoreDot} />
-                <Text style={styles.score}>{`${match.youScore} - ${match.opponentScore}`}</Text>
-                <View style={[styles.scoreDot, styles.scoreDotRed]} />
+              
+              <View style={styles.scoreSection}>
+                <View style={styles.scoreContainer}>
+                  <View style={[styles.scoreDot, { backgroundColor: youDotColor }]} />
+                  <Text style={styles.score}>{`${match.youScore} - ${match.opponentScore}`}</Text>
+                  <View style={[styles.scoreDot, { backgroundColor: opponentDotColor }]} />
+                </View>
+                <Text style={styles.date}>{match.date}</Text>
               </View>
-              <Text style={styles.date}>{match.date}</Text>
-            </View>
-            
-            <View style={styles.playerSection}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{match.opponentName.charAt(0)}</Text>
+              
+              <View style={styles.playerSection}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{match.opponentName.charAt(0)}</Text>
+                </View>
+                <Text style={styles.playerLabel}>{match.opponentName}</Text>
               </View>
-              <Text style={styles.playerLabel}>{match.opponentName}</Text>
             </View>
-          </View>
-        ))}
+          );
+        })}
       </View>
       
       {/* Pagination dots */}
@@ -99,6 +105,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 12,
   },
   playerSection: {
     alignItems: 'center',
@@ -136,11 +143,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: Colors.red.accent,
     marginHorizontal: 8,
-  },
-  scoreDotRed: {
-    backgroundColor: Colors.red.accent,
   },
   score: {
     fontSize: 18,
