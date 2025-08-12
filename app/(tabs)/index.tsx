@@ -53,6 +53,7 @@ export default function HomeScreen() {
         <View style={styles.stickyHeader}>
           <UserHeader
             userName="Sophia"
+            streak={7}
             onSettingsPress={handleSettings}
           />
         </View>
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.background,
     paddingHorizontal: 20,
     paddingTop: 60,
-    paddingBottom: 20,
+    paddingBottom: 12,
     zIndex: 10,
   },
   scrollView: {

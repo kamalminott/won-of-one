@@ -5,12 +5,14 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 interface UserHeaderProps {
   userName: string;
   avatarUrl?: string;
+  streak: number;
   onSettingsPress: () => void;
 }
 
 export const UserHeader: React.FC<UserHeaderProps> = ({
   userName,
   avatarUrl,
+  streak,
   onSettingsPress,
 }) => {
   return (
@@ -26,6 +28,10 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
         <View style={styles.textContainer}>
           <Text style={styles.greeting}>Hi, {userName}</Text>
           <Text style={styles.subtitle}>Your Daily Fitness Goals</Text>
+          <View style={styles.streakContainer}>
+            <Text style={styles.fireEmoji}>🔥</Text>
+            <Text style={styles.streakText}>{streak} day streak</Text>
+          </View>
         </View>
       </View>
       
@@ -41,7 +47,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
     paddingHorizontal: 0,
     width: '100%',
   },
@@ -49,46 +55,60 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    marginRight: 16,
+    marginRight: 12,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: Colors.purple.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
   avatarText: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
   },
   textContainer: {
     flex: 1,
   },
   greeting: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: 'white',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: Colors.gray.light,
     fontWeight: '500',
+    marginBottom: 6,
+  },
+  streakContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  fireEmoji: {
+    fontSize: 14,
+  },
+  streakText: {
+    fontSize: 12,
+    color: Colors.yellow.accent,
+    fontWeight: '600',
   },
   settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.gray.medium,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
   settingsIcon: {
-    fontSize: 20,
+    fontSize: 18,
   },
 });

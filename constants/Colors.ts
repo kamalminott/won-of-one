@@ -27,6 +27,7 @@ export const Colors = {
   purple: {
     primary: '#8B5CF6',
     light: '#A78BFA',
+    dark: '#4C1D95',
     gradient: ['#8B5CF6', '#C4B5FD'],
   },
   pink: {
