@@ -1,0 +1,42 @@
+---
+description: Enforces responsive design rules for all React Native screens in this project. Avoids fixed pixels and uses flex/percentages/tokens by default.
+globs:
+  - "src/**/*.tsx"
+  - "src/**/*.ts"
+  - "app/**/*.tsx"   # add this if you use Expo Router
+alwaysApply: true
+---
+
+# React Native Responsive Layout Rules
+
+You are coding in React Native for a fully responsive mobile app.
+
+**Hard rules:**
+- Do NOT use fixed pixel sizes for layout (width, height, margin, padding, etc.).
+- Use Flexbox for layout (`flex`, `flexDirection`, `justifyContent`, `alignItems`).
+- Use percentages (`'90%'`) or ratios (`Dimensions.get('window').width * 0.9`) for relative sizing.
+- For text, use responsive font helpers (e.g., `RFValue`) or PixelRatio scaling.
+- Use `useWindowDimensions()` or a device-size hook for breakpoints.
+- Use shared tokens for spacing, radii, and typography (SPACING, RADIUS, TYPO).
+- Exceptions: small icons (≤ 24px), borders, or hairline separators.
+
+**Patterns to follow:**
+- Layout: `<Container><Row><Col/></Row></Container>` using flexbox.
+- Widths: `width: '90%'` instead of `width: 360`.
+- Images: `resizeMode='contain'` and style with `aspectRatio`.
+- Typography: `<ResponsiveText variant="body">` rather than inline fontSize.
+
+**Example:**
+```jsx
+// Before
+<View style={{ width: 320, height: 60, padding: 16 }} />
+
+// After
+<View
+  style={{
+    width: '90%',
+    aspectRatio: 5.33,
+    paddingHorizontal: SPACING[4],
+    paddingVertical: SPACING[3],
+  }}
+/>

@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
 
 export default function RemoteScreen() {
   const [currentPeriod, setCurrentPeriod] = useState(3);
@@ -15,6 +16,8 @@ export default function RemoteScreen() {
   const [editTimeInput, setEditTimeInput] = useState('');
   const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
   const [timerInterval, setTimerInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [swipeProgress, setSwipeProgress] = useState(0); // 0 to 1 for swipe progress
+  const [isSwiping, setIsSwiping] = useState(false);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -122,6 +125,27 @@ export default function RemoteScreen() {
     }
     setIsPlaying(false);
     setTimeRemaining(matchTime); // Reset to original time
+  };
+
+  const handleSwipeGesture = (event: any) => {
+    const { translationX, state } = event.nativeEvent;
+    
+    if (state === State.ACTIVE) {
+      setIsSwiping(true);
+      // Calculate progress based on swipe distance (assuming button width is ~300px)
+      const progress = Math.max(0, Math.min(1, translationX / 300));
+      setSwipeProgress(progress);
+    } else if (state === State.END) {
+      setIsSwiping(false);
+      if (swipeProgress >= 0.8) { // 80% swipe required to complete
+        // Complete the match
+        Alert.alert('Match Completed!', 'The match has been completed successfully.');
+        setSwipeProgress(0); // Reset progress
+      } else {
+        // Reset progress if not swiped far enough
+        setSwipeProgress(0);
+      }
+    }
   };
 
   const handleTimeInputChange = (text: string) => {
@@ -350,11 +374,19 @@ export default function RemoteScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Complete Match Button */}
-      <TouchableOpacity style={styles.completeMatchButton}>
-        <Text style={styles.completeMatchIcon}>{'>>'}</Text>
-        <Text style={styles.completeMatchText}>Complete The Match</Text>
-      </TouchableOpacity>
+      {/* Swipe to Complete Match */}
+      <GestureHandlerRootView>
+        <PanGestureHandler onGestureEvent={handleSwipeGesture}>
+          <View style={styles.swipeContainer}>
+            <View style={styles.swipeTrack}>
+              <Text style={styles.swipeMainText}>Complete The Match</Text>
+              <View style={[styles.swipeThumb, { transform: [{ translateX: swipeProgress * 240 }] }]}>
+                <Text style={styles.swipeThumbText}>{'>>'}</Text>
+              </View>
+            </View>
+          </View>
+        </PanGestureHandler>
+      </GestureHandlerRootView>
 
       {/* Edit Time Popup */}
       {showEditPopup && (
@@ -774,6 +806,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+  },
+
+  // Swipe to Complete Styles
+  swipeContainer: {
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  swipeTrack: {
+    width: 380,
+    height: 60,
+    backgroundColor: '#6A35F7', // Dark purple background
+    borderRadius: 30,
+    position: 'relative',
+    overflow: 'visible',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  swipeMainText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
+    textAlign: 'center',
+    position: 'absolute',
+    width: '100%',
+    zIndex: 1,
+  },
+  swipeThumb: {
+    position: 'absolute',
+    left: -10,
+    top: 5,
+    width: 50,
+    height: 50,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 2,
+  },
+  swipeThumbText: {
+    fontSize: 18,
+    color: '#374151', // Dark gray color
+    fontWeight: '700',
   },
 
   // Edit Time Popup
