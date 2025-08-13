@@ -1,6 +1,6 @@
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { GoalCard } from '@/components/GoalCard';
 import { ProgressCard } from '@/components/ProgressCard';
@@ -44,6 +44,10 @@ export default function HomeScreen() {
 
   const handleViewAllMatches = () => {
     Alert.alert('View All Matches', 'Opening match history!');
+  };
+
+  const handleAddNewMatch = () => {
+    Alert.alert('Add New Match', 'New match creation started!');
   };
 
   return (
@@ -94,6 +98,11 @@ export default function HomeScreen() {
             onUpdateGoal={handleUpdateGoal}
           />
           
+          <TouchableOpacity style={styles.addMatchLink} onPress={handleAddNewMatch}>
+            <Text style={styles.addMatchText}>Add new match</Text>
+            <Text style={styles.addMatchIcon}>+</Text>
+          </TouchableOpacity>
+          
           <RecentMatches
             matches={mockMatches}
             onViewAll={handleViewAllMatches}
@@ -130,5 +139,23 @@ const styles = StyleSheet.create({
   },
   icon: {
     fontSize: 24,
+  },
+  addMatchLink: {
+    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingRight: 20,
+    gap: 8,
+  },
+  addMatchText: {
+    color: '#9CA3AF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  addMatchIcon: {
+    color: Colors.purple.light || '#A78BFA',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

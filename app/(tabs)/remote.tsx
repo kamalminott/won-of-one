@@ -1,5 +1,5 @@
 import { Colors } from '@/constants/Colors';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function RemoteScreen() {
@@ -7,12 +7,23 @@ export default function RemoteScreen() {
   const [aliceScore, setAliceScore] = useState(3);
   const [bobScore, setBobScore] = useState(2);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [matchTime, setMatchTime] = useState(0); // in seconds
+  const [matchTime, setMatchTime] = useState(180); // 3 minutes in seconds
   const [period1Time, setPeriod1Time] = useState(0); // in seconds
   const [period2Time, setPeriod2Time] = useState(0); // in seconds
   const [period3Time, setPeriod3Time] = useState(0); // in seconds
   const [showEditPopup, setShowEditPopup] = useState(false);
   const [editTimeInput, setEditTimeInput] = useState('');
+  const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
+  const [timerInterval, setTimerInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+    };
+  }, [timerInterval]);
 
   const incrementPeriod = () => {
     if (currentPeriod < 5) setCurrentPeriod(currentPeriod + 1);
@@ -27,7 +38,32 @@ export default function RemoteScreen() {
   const incrementBobScore = () => setBobScore(bobScore + 1);
   const decrementBobScore = () => setBobScore(Math.max(0, bobScore - 1));
 
-  const togglePlay = () => setIsPlaying(!isPlaying);
+  const togglePlay = () => {
+    if (isPlaying) {
+      // Stop timer
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        setTimerInterval(null);
+      }
+      setIsPlaying(false);
+    } else {
+      // Start timer
+      setIsPlaying(true);
+      const interval = setInterval(() => {
+        setTimeRemaining((prev) => {
+          if (prev <= 0) {
+            // Timer finished
+            clearInterval(interval);
+            setTimerInterval(null);
+            setIsPlaying(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      setTimerInterval(interval);
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -72,10 +108,20 @@ export default function RemoteScreen() {
       const totalSeconds = minutes * 60 + seconds;
       if (totalSeconds <= 599) { // Max 9:59
         setMatchTime(totalSeconds);
+        setTimeRemaining(totalSeconds); // Update countdown timer
         setShowEditPopup(false);
         setEditTimeInput('');
       }
     }
+  };
+
+  const resetTimer = () => {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      setTimerInterval(null);
+    }
+    setIsPlaying(false);
+    setTimeRemaining(matchTime); // Reset to original time
   };
 
   const handleTimeInputChange = (text: string) => {
@@ -123,7 +169,18 @@ export default function RemoteScreen() {
         </View>
         
                 <View style={styles.timerDisplay}>
-          <View style={styles.timerPickerContainer}>
+          {/* Countdown Display - only shows when actively playing */}
+          {isPlaying && (
+            <View style={styles.countdownDisplay}>
+              <Text style={styles.countdownText}>
+                {formatTime(timeRemaining)}
+              </Text>
+            </View>
+          )}
+          
+          {/* Timer Picker - shows when not playing (allows time editing) */}
+          {!isPlaying && (
+            <View style={styles.timerPickerContainer}>
             <ScrollView 
               style={styles.timerScroll}
               contentContainerStyle={styles.timerScrollContent}
@@ -132,10 +189,10 @@ export default function RemoteScreen() {
               scrollEventThrottle={16}
               snapToInterval={54}
               decelerationRate="fast"
-              contentOffset={{ x: 0, y: getCurrentTimeIndex(matchTime) * 54 }}
+              contentOffset={{ x: 0, y: getCurrentTimeIndex(timeRemaining) * 54 }}
             >
               {timeOptions.map((time, index) => {
-                const currentIndex = getCurrentTimeIndex(matchTime);
+                const currentIndex = getCurrentTimeIndex(timeRemaining);
                 const distance = Math.abs(index - currentIndex);
                 
                 let opacity = 1;
@@ -179,6 +236,7 @@ export default function RemoteScreen() {
             <View style={styles.timerPickerMask} />
             <View style={styles.timerPickerCenterHighlight} />
           </View>
+          )}
         </View>
         
         <View style={styles.periodControl}>
@@ -283,11 +341,11 @@ export default function RemoteScreen() {
       {/* Play and Reset Controls */}
       <View style={styles.playControls}>
         <TouchableOpacity style={styles.playButton} onPress={togglePlay}>
-          <Text style={styles.playIcon}>▶️</Text>
-          <Text style={styles.playText}>Play</Text>
+          <Text style={styles.playIcon}>{isPlaying ? '⏸️' : '▶️'}</Text>
+          <Text style={styles.playText}>{isPlaying ? 'Pause' : 'Play'}</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.resetButton}>
+        <TouchableOpacity style={styles.resetButton} onPress={resetTimer}>
           <Text style={styles.resetIcon}>🔄</Text>
         </TouchableOpacity>
       </View>
@@ -336,14 +394,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.background,
     padding: 20,
     paddingTop: 60,
+    paddingBottom: 20, // Add bottom padding for tab bar spacing
   },
   
   // Match Timer Section
   matchTimerCard: {
-    backgroundColor: Colors.purple.dark || '#4C1D95',
+    backgroundColor: 'rgba(76, 29, 149, 0.8)', // Semi-translucent purple
+    borderWidth: 2,
+    borderColor: 'rgba(168, 85, 247, 0.6)', // Light purple border
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+    padding: 8, // Reduced from 10 to 8
+    marginTop: 16, // Reduced from 16 to 8 to move timer higher
+    marginBottom: 8, // Reduced from 10 to 8
     position: 'relative',
   },
   timerLabel: {
@@ -352,7 +414,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     position: 'absolute',
-    top: -12,
+    top: -25, // Adjusted from -35 to -25 to position pill properly half in/half out
     left: '50%',
     transform: [{ translateX: -40 }],
     zIndex: 10,
@@ -364,26 +426,44 @@ const styles = StyleSheet.create({
   },
   timerDisplay: {
     alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 8,
+    justifyContent: 'center', // Center content horizontally
+    marginBottom: 0, // Reduced from 10 to 0
+    marginTop: 0, // Reduced from 2 to 0 to move timer higher inside card
+    width: '100%', // Take full width for proper centering
+  },
+  countdownDisplay: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 100,
+    width: '100%',
+  },
+  countdownText: {
+    fontSize: 48,
+    color: 'white',
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   timerScroll: {
-    height: 162,
+    height: 100, // Reduced from 120 to 100
     overflow: 'hidden',
     borderRadius: 8,
   },
   timerScrollContent: {
     alignItems: 'center',
-    paddingVertical: 54,
+    paddingVertical: 25, // Reduced from 54 to 25 to move timer numbers higher
   },
   timerPickerContainer: {
     position: 'relative',
     width: 120,
-    height: 162,
+    height: 100, // Reduced from 120 to 100
     alignSelf: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    backgroundColor: 'transparent', // Completely transparent background
     borderRadius: 12,
     padding: 4,
+    marginHorizontal: 'auto', // Ensure perfect horizontal centering
   },
   timerPickerMask: {
     position: 'absolute',
@@ -396,7 +476,7 @@ const styles = StyleSheet.create({
   },
   timerPickerCenterHighlight: {
     position: 'absolute',
-    top: 56,
+    top: 30, // Adjusted from 50 to 30 to match new timer position
     left: 0,
     right: 0,
     height: 50,
@@ -429,7 +509,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 6, // Reduced from 8 to 6 to move timer higher
   },
   editButton: {
     width: 32,
@@ -595,7 +675,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 16, // Reduced from 20 to 16
   },
   decorativeCards: {
     flexDirection: 'row',
@@ -637,9 +717,10 @@ const styles = StyleSheet.create({
   playControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
+    justifyContent: 'space-between', // Changed from center to space-between
+    marginBottom: 12, // Reduced from 16 to 12
     gap: 16,
+    width: '100%', // Take full width
   },
   playButton: {
     backgroundColor: Colors.gray.dark,
@@ -649,6 +730,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+    flex: 1, // Take up most of the available width
+    marginRight: 16, // Add space between play and reset buttons
   },
   playIcon: {
     fontSize: 20,
@@ -659,12 +742,13 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   resetButton: {
-    width: 48,
+    width: 60, // Slightly wider than before
     height: 48,
     borderRadius: 24,
     backgroundColor: Colors.red.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0, // Don't shrink the reset button
   },
   resetIcon: {
     fontSize: 20,
@@ -674,11 +758,12 @@ const styles = StyleSheet.create({
   completeMatchButton: {
     backgroundColor: Colors.purple.primary,
     borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingHorizontal: 20, // Reduced from 24 to 20
+    paddingVertical: 12, // Reduced from 14 to 12
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
+    gap: 10, // Reduced from 12 to 10
+    marginBottom: 12, // Reduced from 16 to 12
   },
   completeMatchIcon: {
     fontSize: 18,
