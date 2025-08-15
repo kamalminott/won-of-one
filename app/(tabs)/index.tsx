@@ -1,6 +1,6 @@
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
 import { GoalCard } from '@/components/GoalCard';
 import { ProgressCard } from '@/components/ProgressCard';
@@ -10,6 +10,8 @@ import { UserHeader } from '@/components/UserHeader';
 import { Colors } from '@/constants/Colors';
 
 export default function HomeScreen() {
+  const { width, height } = useWindowDimensions();
+  
   // Mock data - in real app this would come from state/API
   const mockMatches = [
     {
@@ -27,8 +29,6 @@ export default function HomeScreen() {
       opponentName: 'Sarah',
     },
   ];
-
-
 
   const handleSettings = () => {
     Alert.alert('Settings', 'Settings opened!');
@@ -49,6 +49,53 @@ export default function HomeScreen() {
   const handleAddNewMatch = () => {
     Alert.alert('Add New Match', 'New match creation started!');
   };
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: Colors.dark.background,
+    },
+    stickyHeader: {
+      backgroundColor: Colors.dark.background,
+      paddingHorizontal: '5%',
+      paddingTop: height * 0.08,
+      paddingBottom: height * 0.015,
+      zIndex: 10,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    contentContainer: {
+      padding: '5%',
+      paddingTop: 0,
+      width: '100%',
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      marginBottom: height * 0.01,
+    },
+    icon: {
+      fontSize: width * 0.06,
+    },
+      addMatchLink: {
+    marginBottom: height * 0.02,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingRight: '5%',
+    gap: width * 0.02,
+  },
+    addMatchText: {
+      color: '#9CA3AF',
+      fontSize: width * 0.04,
+      fontWeight: '500',
+    },
+    addMatchIcon: {
+      color: Colors.purple.light || '#A78BFA',
+      fontSize: width * 0.04,
+      fontWeight: '600',
+    },
+  });
 
   return (
     <>
@@ -112,50 +159,3 @@ export default function HomeScreen() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.dark.background,
-  },
-  stickyHeader: {
-    backgroundColor: Colors.dark.background,
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 12,
-    zIndex: 10,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  contentContainer: {
-    padding: 20,
-    paddingTop: 0,
-    width: '100%',
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  icon: {
-    fontSize: 24,
-  },
-  addMatchLink: {
-    marginBottom: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingRight: 20,
-    gap: 8,
-  },
-  addMatchText: {
-    color: '#9CA3AF',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  addMatchIcon: {
-    color: Colors.purple.light || '#A78BFA',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});

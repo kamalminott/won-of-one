@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Platform } from 'react-native';
+import { Platform, useWindowDimensions } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -8,6 +8,7 @@ import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 
 export default function TabLayout() {
+  const { height } = useWindowDimensions();
 
   return (
     <Tabs
@@ -25,13 +26,13 @@ export default function TabLayout() {
             bottom: 0,
             left: 0,
             right: 0,
-            height: 90,
-            paddingBottom: 20,
+            height: height * 0.11,
+            paddingBottom: height * 0.025,
           },
           default: {
             backgroundColor: 'rgba(31, 41, 55, 0.9)',
             borderTopWidth: 0,
-            height: 70,
+            height: height * 0.085,
           },
         }),
       }}>
@@ -41,7 +42,7 @@ export default function TabLayout() {
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
-              size={28} 
+              size={height * 0.035} 
               name="house.fill" 
               color={focused ? Colors.red.accent : color} 
             />
@@ -54,7 +55,7 @@ export default function TabLayout() {
           title: 'Remote',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
-              size={28} 
+              size={height * 0.035} 
               name="gamecontroller.fill" 
               color={focused ? Colors.red.accent : color} 
             />
@@ -67,7 +68,7 @@ export default function TabLayout() {
           title: 'Training',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
-              size={28} 
+              size={height * 0.035} 
               name="figure.run" 
               color={focused ? Colors.red.accent : color} 
             />
@@ -80,7 +81,7 @@ export default function TabLayout() {
           title: 'Mindset',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
-              size={28} 
+              size={height * 0.035} 
               name="brain.head.profile" 
               color={focused ? Colors.red.accent : color} 
             />
@@ -93,7 +94,7 @@ export default function TabLayout() {
           title: 'Diary',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
-              size={28} 
+              size={height * 0.035} 
               name="book.fill" 
               color={focused ? Colors.red.accent : color} 
             />

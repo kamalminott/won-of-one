@@ -1,20 +1,93 @@
 import { Colors } from '@/constants/Colors';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
 interface UserHeaderProps {
   userName: string;
-  avatarUrl?: string;
   streak: number;
+  avatarUrl?: string;
   onSettingsPress: () => void;
 }
 
 export const UserHeader: React.FC<UserHeaderProps> = ({
   userName,
-  avatarUrl,
   streak,
+  avatarUrl,
   onSettingsPress,
 }) => {
+  const { width, height } = useWindowDimensions();
+
+  const styles = StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: height * 0.015,
+      paddingHorizontal: 0,
+      width: '100%',
+    },
+    userInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      marginRight: width * 0.03,
+    },
+    avatar: {
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      backgroundColor: Colors.purple.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: width * 0.025,
+    },
+    avatarText: {
+      color: 'white',
+      fontSize: width * 0.04,
+      fontWeight: '700',
+    },
+    textContainer: {
+      flex: 1,
+    },
+    greeting: {
+      fontSize: width * 0.042,
+      fontWeight: '700',
+      color: 'white',
+      marginBottom: height * 0.003,
+    },
+    subtitle: {
+      fontSize: width * 0.03,
+      color: Colors.gray.light,
+      fontWeight: '500',
+      marginBottom: height * 0.006,
+    },
+    streakContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.01,
+    },
+    fireEmoji: {
+      fontSize: width * 0.035,
+    },
+    streakText: {
+      fontSize: width * 0.03,
+      color: Colors.yellow.accent,
+      fontWeight: '600',
+    },
+    settingsButton: {
+      width: width * 0.075,
+      height: width * 0.075,
+      borderRadius: width * 0.0375,
+      backgroundColor: Colors.gray.medium,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    settingsIcon: {
+      fontSize: width * 0.045,
+    },
+  });
+
   return (
     <View style={styles.container}>
       <View style={styles.userInfo}>
@@ -41,74 +114,3 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingHorizontal: 0,
-    width: '100%',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.purple.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  textContainer: {
-    flex: 1,
-  },
-  greeting: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 3,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: Colors.gray.light,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  streakContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  fireEmoji: {
-    fontSize: 14,
-  },
-  streakText: {
-    fontSize: 12,
-    color: Colors.yellow.accent,
-    fontWeight: '600',
-  },
-  settingsButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.gray.medium,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  settingsIcon: {
-    fontSize: 18,
-  },
-});
