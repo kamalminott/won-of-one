@@ -46,6 +46,9 @@ export const Colors = {
   yellow: {
     accent: '#F59E0B',
   },
+  orange: {
+    accent: '#F97316',
+  },
   gray: {
     dark: '#1F2937',
     medium: '#374151',
