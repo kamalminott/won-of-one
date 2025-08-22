@@ -3,9 +3,11 @@ import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   
   const [currentPeriod, setCurrentPeriod] = useState(1);
   const [aliceScore, setAliceScore] = useState(3);
@@ -2138,9 +2140,17 @@ export default function RemoteScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom + 50 }]}>
       {/* Match Timer Section */}
-      <View style={styles.matchTimerCard}>
+      <View style={[
+        styles.matchTimerCard,
+        // Make match timer card smaller when timer is ready AND cards are present
+        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+          padding: width * 0.006, // Reduce padding even more
+          marginTop: height * 0.015, // Reduce top margin even more
+          marginBottom: height * 0.001, // Reduce bottom margin even more
+        } : {}
+      ]}>
         <View style={styles.timerHeader}>
           <View style={styles.timerLabel}>
             <Text style={styles.timerLabelText}>Match Timer</Text>
@@ -2364,7 +2374,16 @@ export default function RemoteScreen() {
       
       <View style={styles.fencersContainer}>
         {/* Alice's Card */}
-        <View style={[styles.fencerCard, { backgroundColor: 'rgb(252,187,187)' }]}>
+        <View style={[
+          styles.fencerCard, 
+          { backgroundColor: 'rgb(252,187,187)' },
+          // Make fencer card smaller when timer is ready AND cards are present
+          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+            width: width * 0.38, // Reduce width from 0.42 to 0.38
+            padding: width * 0.03, // Reduce padding from 0.04 to 0.03
+            minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+          } : {}
+        ]}>
           {/* Sliding Switch - Top Left */}
           <View style={[styles.slidingSwitch, { 
             position: 'absolute', 
@@ -2466,7 +2485,16 @@ export default function RemoteScreen() {
         </TouchableOpacity>
 
         {/* Bob's Card */}
-        <View style={[styles.fencerCard, {backgroundColor: 'rgb(176,232,236)'}]}>
+        <View style={[
+          styles.fencerCard, 
+          {backgroundColor: 'rgb(176,232,236)'},
+          // Make fencer card smaller when timer is ready AND cards are present
+          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+            width: width * 0.38, // Reduce width from 0.42 to 0.38
+            padding: width * 0.03, // Reduce padding from 0.04 to 0.03
+            minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+          } : {}
+        ]}>
           <View style={styles.profileContainer}>
             <View style={styles.profilePicture}>
               <Text style={styles.profileInitial}>👨</Text>
@@ -2542,16 +2570,45 @@ export default function RemoteScreen() {
       </View>
 
       {/* Bottom Controls */}
-      <View style={styles.bottomControls}>
-        <View style={styles.decorativeCards}>
-          <TouchableOpacity style={[styles.decorativeCard, styles.cardYellow]} onPress={addYellowCardToAlice}>
+      <View style={[
+        styles.bottomControls,
+        // Only make controls smaller when timer is ready AND cards are present
+        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+          marginBottom: height * 0.002, // Reduce bottom margin
+          gap: width * 0.03, // Reduce gap between elements
+        } : {}
+      ]}>
+        <View style={[
+          styles.decorativeCards,
+          // Only make cards smaller when timer is ready AND cards are present
+          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+            gap: width * 0.02, // Reduce gap between cards
+          } : {}
+        ]}>
+          <TouchableOpacity style={[
+            styles.decorativeCard, 
+            styles.cardYellow,
+            // Only make individual cards smaller when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              width: width * 0.07, // Reduce width
+              height: width * 0.10, // Reduce height
+            } : {}
+          ]} onPress={addYellowCardToAlice}>
             {aliceYellowCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
                 {aliceYellowCards.length}
               </Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.decorativeCard, styles.cardRed]} onPress={addRedCardToAlice}>
+          <TouchableOpacity style={[
+            styles.decorativeCard, 
+            styles.cardRed,
+            // Only make individual cards smaller when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              width: width * 0.07, // Reduce width
+              height: width * 0.10, // Reduce height
+            } : {}
+          ]} onPress={addRedCardToAlice}>
             {aliceRedCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
                 {aliceRedCards[0]}
@@ -2560,11 +2617,19 @@ export default function RemoteScreen() {
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={[styles.assignPriorityButton, {
-            backgroundColor: (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
-              Colors.yellow.accent :
-              isInjuryTimer ? '#EF4444' : Colors.purple.primary
-          }]}
+          style={[
+            styles.assignPriorityButton, 
+            {
+              backgroundColor: (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
+                Colors.yellow.accent :
+                isInjuryTimer ? '#EF4444' : Colors.purple.primary
+            },
+            // Only make button smaller when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              paddingHorizontal: width * 0.025, // Reduce horizontal padding
+              paddingVertical: height * 0.010, // Reduce vertical padding
+            } : {}
+          ]}
           onPress={
             (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
               () => setShowPriorityPopup(true) :
@@ -2581,15 +2646,37 @@ export default function RemoteScreen() {
             }
           </Text>
         </TouchableOpacity>
-        <View style={styles.decorativeCards}>
-          <TouchableOpacity style={[styles.decorativeCard, styles.cardYellow]} onPress={addYellowCardToBob}>
+        <View style={[
+          styles.decorativeCards,
+          // Only make cards smaller when timer is ready AND cards are present
+          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+            gap: width * 0.02, // Reduce gap between cards
+          } : {}
+        ]}>
+          <TouchableOpacity style={[
+            styles.decorativeCard, 
+            styles.cardYellow,
+            // Only make individual cards smaller when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              width: width * 0.07, // Reduce width
+              height: width * 0.10, // Reduce height
+            } : {}
+          ]} onPress={addYellowCardToBob}>
             {bobYellowCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
                 {bobYellowCards.length}
               </Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.decorativeCard, styles.cardRed]} onPress={addRedCardToBob}>
+          <TouchableOpacity style={[
+            styles.decorativeCard, 
+            styles.cardRed,
+            // Only make individual cards smaller when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              width: width * 0.07, // Reduce width
+              height: width * 0.10, // Reduce height
+            } : {}
+          ]} onPress={addRedCardToBob}>
             {bobRedCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
                 {bobRedCards[0]}
@@ -2600,17 +2687,23 @@ export default function RemoteScreen() {
       </View>
 
       {/* Play and Reset Controls - REBUILT */}
-      <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginVertical: 10,
-        marginTop: 5,
-        paddingHorizontal: 15,
-        backgroundColor: 'transparent',
-        borderRadius: 8,
-        minHeight: 60
-      }}>
+      <View style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginVertical: 10,
+          marginTop: 5,
+          paddingHorizontal: 15,
+          backgroundColor: 'transparent',
+          borderRadius: 8,
+          minHeight: 60
+        },
+        // Add bottom margin when timer is ready AND cards are present to make room for swipe container
+        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+          marginBottom: height * 0.10, // Add moderate space below controls when cards present
+        } : {}
+      ]}>
         
         {/* Play Button / Skip Button */}
         <TouchableOpacity 
@@ -2697,10 +2790,20 @@ export default function RemoteScreen() {
       {/* Swipe to Complete Match */}
       <GestureHandlerRootView>
         <PanGestureHandler onGestureEvent={handleSwipeGesture}>
-          <View style={[styles.swipeContainer, { 
-            marginTop: -(height * 0.01), // Negative margin to pull swipe container higher up
-            marginBottom: height * 0.01 
-          }]}>
+          <View style={[
+            styles.swipeContainer, 
+            // Only move closer to bottom tab bar when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              position: 'absolute',
+              bottom: height * 0.05, // Position from bottom when conditions met
+              left: 0,
+              right: 0,
+            } : {
+              position: 'relative', // Normal positioning when no cards or match in progress
+              marginTop: -(height * 0.01),
+              marginBottom: height * 0.01,
+            }
+          ]}>
             <View style={styles.swipeTrack}>
               <Text style={styles.swipeMainText}>Complete The Match</Text>
               {/* Progress indicator */}

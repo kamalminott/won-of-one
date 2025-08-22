@@ -77,14 +77,14 @@ export default function HomeScreen() {
     icon: {
       fontSize: width * 0.06,
     },
-      addMatchLink: {
-    marginBottom: height * 0.02,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingRight: '5%',
-    gap: width * 0.02,
-  },
+    addMatchLink: {
+      marginBottom: height * 0.02,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      paddingRight: '5%',
+      gap: width * 0.02,
+    },
     addMatchText: {
       color: '#9CA3AF',
       fontSize: width * 0.04,
