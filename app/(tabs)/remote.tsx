@@ -23,11 +23,12 @@ export default function RemoteScreen() {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [fencerNames, setFencerNames] = useState({ alice: 'Alice', bob: 'Bob' });
   const [showEditNamesPopup, setShowEditNamesPopup] = useState(false);
-  const [editAliceName, setEditAliceName] = useState('');
+    const [editAliceName, setEditAliceName] = useState('');
   const [editBobName, setEditBobName] = useState('');
   const [scoreChangeCount, setScoreChangeCount] = useState(0);
   const [showScoreWarning, setShowScoreWarning] = useState(false);
   const [pendingScoreAction, setPendingScoreAction] = useState<(() => void) | null>(null);
+ 
   const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
   const [swipeProgress, setSwipeProgress] = useState(0); // 0 to 1 for swipe progress
   const [isSwiping, setIsSwiping] = useState(false);
@@ -48,6 +49,10 @@ export default function RemoteScreen() {
   const [isInjuryTimer, setIsInjuryTimer] = useState(false); // Track if injury timer is active
   const [injuryTimeRemaining, setInjuryTimeRemaining] = useState(300); // 5 minutes in seconds
   const [injuryTimerRef, setInjuryTimerRef] = useState<number | null>(null); // Injury timer reference
+  const [previousMatchState, setPreviousMatchState] = useState<{
+    timeRemaining: number;
+    wasPlaying: boolean;
+  } | null>(null);
 
   // Use useRef for timer to ensure proper cleanup
   const timerRef = useRef<number | null>(null);
@@ -135,17 +140,22 @@ export default function RemoteScreen() {
   };
 
   const incrementAliceScore = () => {
-    // Only track score changes during active matches (when timer has started)
-    if (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)) {
+    // Check if this is an active match (timer has been started and is either running or paused)
+    if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
       const newCount = scoreChangeCount + 1;
       setScoreChangeCount(newCount);
       
-      if (newCount >= 2) { // Changed from > 1 to >= 2 to show warning on second change
+      if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => () => {
           setAliceScore(aliceScore + 1);
           setScoreChangeCount(0); // Reset counter
+          
+          // Pause timer if it's currently running
+          if (isPlaying) {
+            pauseTimer();
+          }
         });
         setShowScoreWarning(true);
         return;
@@ -158,25 +168,33 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
+      
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      // Timer ready state or reset - no warning needed, just update score
+      // Not an active match - no warning needed, just update score
       setAliceScore(aliceScore + 1);
       setScoreChangeCount(0); // Reset counter for new match
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
   
   const decrementAliceScore = () => {
-    // Only track score changes during active matches (when timer has started)
-    if (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)) {
+    // Check if this is an active match (timer has been started and is either running or paused)
+    if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
       const newCount = scoreChangeCount + 1;
       setScoreChangeCount(newCount);
       
-      if (newCount >= 2) { // Changed from > 1 to >= 2 to show warning on second change
+      if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => () => {
           setAliceScore(Math.max(0, aliceScore - 1));
           setScoreChangeCount(0); // Reset counter
+          
+          // Pause timer if it's currently running
+          if (isPlaying) {
+            pauseTimer();
+          }
         });
         setShowScoreWarning(true);
         return;
@@ -189,25 +207,33 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
+      
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      // Timer ready state or reset - no warning needed, just update score
+      // Not an active match - no warning needed, just update score
       setAliceScore(Math.max(0, aliceScore - 1));
       setScoreChangeCount(0); // Reset counter for new match
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
   
   const incrementBobScore = () => {
-    // Only track score changes during active matches (when timer has started)
-    if (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)) {
+    // Check if this is an active match (timer has been started and is either running or paused)
+    if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
       const newCount = scoreChangeCount + 1;
       setScoreChangeCount(newCount);
       
-      if (newCount >= 2) { // Changed from > 1 to >= 2 to show warning on second change
+      if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => () => {
           setBobScore(bobScore + 1);
           setScoreChangeCount(0); // Reset counter
+          
+          // Pause timer if it's currently running
+          if (isPlaying) {
+            pauseTimer();
+          }
         });
         setShowScoreWarning(true);
         return;
@@ -220,25 +246,33 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
+      
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      // Timer ready state or reset - no warning needed, just update score
+      // Not an active match - no warning needed, just update score
       setBobScore(bobScore + 1);
       setScoreChangeCount(0); // Reset counter for new match
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
   
   const decrementBobScore = () => {
-    // Only track score changes during active matches (when timer has started)
-    if (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)) {
+    // Check if this is an active match (timer has been started and is either running or paused)
+    if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
       const newCount = scoreChangeCount + 1;
       setScoreChangeCount(newCount);
       
-      if (newCount >= 2) { // Changed from > 1 to >= 2 to show warning on second change
+      if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => () => {
           setBobScore(Math.max(0, bobScore - 1));
           setScoreChangeCount(0); // Reset counter
+          
+          // Pause timer if it's currently running
+          if (isPlaying) {
+            pauseTimer();
+          }
         });
         setShowScoreWarning(true);
         return;
@@ -251,10 +285,13 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
+      
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      // Timer ready state or reset - no warning needed, just update score
+      // Not an active match - no warning needed, just update score
       setBobScore(Math.max(0, bobScore - 1));
       setScoreChangeCount(0); // Reset counter for new match
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
@@ -331,6 +368,15 @@ export default function RemoteScreen() {
     setBobYellowCards([]); // Reset Bob's yellow cards
     setAliceRedCards([]); // Reset Alice's red cards
     setBobRedCards([]); // Reset Bob's red cards
+    
+    // Reset the new card state structure
+    setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
+    setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
+    
+    setScoreChangeCount(0); // Reset score change counter
+    setShowScoreWarning(false); // Reset warning popup
+    setPendingScoreAction(null); // Reset pending action
+    setPreviousMatchState(null); // Reset previous match state
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsManualReset(true); // Set flag to prevent auto-sync
   }, []);
@@ -357,6 +403,8 @@ export default function RemoteScreen() {
     setScoreChangeCount(0); // Reset score change counter
     setShowScoreWarning(false); // Reset warning popup
     setPendingScoreAction(null); // Reset pending action
+    setPreviousMatchState(null); // Reset previous match state
+
     setPriorityLightPosition(null); // Reset priority light
     setPriorityFencer(null); // Reset priority fencer
     setShowPriorityPopup(false); // Reset priority popup
@@ -364,6 +412,11 @@ export default function RemoteScreen() {
     setBobYellowCards([]); // Reset Bob's yellow cards
     setAliceRedCards([]); // Reset Alice's red cards
     setBobRedCards([]); // Reset Bob's red cards
+    
+    // Reset the new card state structure
+    setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
+    setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
+    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsManualReset(true); // Set flag to prevent auto-sync
   }, [breakTimerRef]);
@@ -374,19 +427,52 @@ export default function RemoteScreen() {
     setIsSwapping(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
+    // Swap all fencer data
+    const tempAliceScore = aliceScore;
+    const tempBobScore = bobScore;
+    const tempAliceName = fencerNames.alice;
+    const tempBobName = fencerNames.bob;
+    const tempAliceYellowCards = aliceYellowCards;
+    const tempBobYellowCards = bobYellowCards;
+    const tempAliceRedCards = aliceRedCards;
+    const tempBobRedCards = bobRedCards;
+    const tempAliceCards = aliceCards;
+    const tempBobCards = bobCards;
+    
     // Animate the swap
     setTimeout(() => {
+      // Swap scores
+      setAliceScore(tempBobScore);
+      setBobScore(tempAliceScore);
+      
+      // Swap names
+      setFencerNames({
+        alice: tempBobName,
+        bob: tempAliceName
+      });
+      
+      // Swap cards
+      setAliceYellowCards(tempBobYellowCards);
+      setBobYellowCards(tempAliceYellowCards);
+      setAliceRedCards(tempBobRedCards);
+      setBobRedCards(tempAliceRedCards);
+      setAliceCards(tempBobCards);
+      setBobCards(tempAliceCards);
+      
+      // Swap positions
       setFencerPositions(prev => ({
         alice: prev.alice === 'left' ? 'right' : 'left',
         bob: prev.bob === 'left' ? 'right' : 'left'
       }));
+      
+      console.log('🔄 Fencers swapped successfully');
       
       // Reset swapping state after animation
       setTimeout(() => {
         setIsSwapping(false);
       }, 300);
     }, 150);
-  }, [isSwapping]);
+  }, [isSwapping, aliceScore, bobScore, fencerNames, aliceYellowCards, bobYellowCards, aliceRedCards, bobRedCards, aliceCards, bobCards]);
 
   const toggleUserProfile = useCallback(() => {
     setShowUserProfile(prev => !prev);
@@ -795,6 +881,10 @@ export default function RemoteScreen() {
   const startInjuryTimer = () => {
     if (isInjuryTimer) return; // Prevent multiple injury timers
     
+    // Store the current match time state before starting injury timer
+    const previousMatchTime = timeRemaining;
+    const wasMatchPlaying = isPlaying;
+    
     // Pause the main match timer if it's running
     if (isPlaying) {
       pauseTimer();
@@ -802,6 +892,12 @@ export default function RemoteScreen() {
     
     setIsInjuryTimer(true);
     setInjuryTimeRemaining(300); // 5 minutes
+    
+    // Store the previous match state to restore later
+    setPreviousMatchState({
+      timeRemaining: previousMatchTime,
+      wasPlaying: wasMatchPlaying
+    });
     
     // Start the injury countdown
     const interval = setInterval(() => {
@@ -811,6 +907,15 @@ export default function RemoteScreen() {
           clearInterval(interval);
           setIsInjuryTimer(false);
           setInjuryTimeRemaining(300);
+          
+          // Restore the previous match state
+          if (previousMatchState) {
+            setTimeRemaining(previousMatchState.timeRemaining);
+            if (previousMatchState.wasPlaying) {
+              // Resume the match timer if it was playing before
+              startTimer();
+            }
+          }
           
           // Show injury time complete message
           Alert.alert('Injury Time Complete!', 'The 5-minute injury time has ended.');
@@ -824,6 +929,30 @@ export default function RemoteScreen() {
     setInjuryTimerRef(interval);
     
     // Haptic feedback for starting injury timer
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const skipInjuryTimer = () => {
+    if (!isInjuryTimer) return;
+    
+    // Stop the injury timer
+    if (injuryTimerRef) {
+      clearInterval(injuryTimerRef);
+    }
+    setIsInjuryTimer(false);
+    setInjuryTimeRemaining(300);
+    
+    // Restore the previous match state
+    if (previousMatchState) {
+      setTimeRemaining(previousMatchState.timeRemaining);
+      // Always return to paused state, don't auto-resume
+      // User must manually click resume to continue the match
+    }
+    
+    // Clear the stored previous state
+    setPreviousMatchState(null);
+    
+    // Haptic feedback for skipping injury timer
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
@@ -1242,9 +1371,12 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
+      borderWidth: 2,
+      borderColor: 'white',
     },
     swapIcon: {
       fontSize: width * 0.065,
+      color: 'white',
     },
 
     // Bottom Controls
@@ -1747,34 +1879,174 @@ export default function RemoteScreen() {
     },
   });
 
+  // NEW CLEAN CARD SYSTEM - Simple state structure
+  const [aliceCards, setAliceCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
+  const [bobCards, setBobCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
+
+  // Pure logic functions (exported so you can unit test if you want)
+  const applyYellow = (prev: { yellow: 0 | 1; red: number }): { yellow: 0 | 1; red: number } => {
+    // Case A: no reds yet
+    if (prev.red === 0) {
+      // First yellow -> show 1 yellow
+      if (prev.yellow === 0) return { yellow: 1, red: 0 };
+      // Second yellow -> convert to 1 red, clear yellow
+      return { yellow: 0, red: 1 };
+    }
+
+    // Case B: already have at least one red
+    // Every new yellow adds another red immediately; yellow remains cleared.
+    return { yellow: 0, red: prev.red + 1 };
+  };
+
+  const resetAliceCards = () => {
+    console.log('🔄 RESETTING ALICE CARDS');
+    setAliceCards({ yellow: 0, red: 0 });
+    setAliceYellowCards([]);
+    setAliceRedCards([]);
+    console.log('  All cards cleared for Alice');
+  };
+
+  const resetBobCards = () => {
+    console.log('🔄 RESETTING BOB CARDS');
+    setBobCards({ yellow: 0, red: 0 });
+    setBobYellowCards([]);
+    setBobRedCards([]);
+    console.log('  All cards cleared for Bob');
+  };
+
+  const resetAllCards = () => {
+    console.log('🔄 RESETTING ALL CARDS FOR BOTH FENCERS');
+    // Reset Alice's cards
+    setAliceCards({ yellow: 0, red: 0 });
+    setAliceYellowCards([]);
+    setAliceRedCards([]);
+    
+    // Reset Bob's cards  
+    setBobCards({ yellow: 0, red: 0 });
+    setBobYellowCards([]);
+    setBobRedCards([]);
+    
+    console.log('  All cards cleared for both Alice and Bob');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
   const addYellowCardToAlice = () => {
-    if (aliceYellowCards.length > 0) {
-      // Show popup asking if user wants to assign or remove
+    // Pause timer when card is issued
+    if (isPlaying) {
+      pauseTimer();
+    }
+    
+    // NEW CLEAN LOGIC: Use pure function with case statement
+    setAliceCards(prev => {
+      const newState = applyYellow(prev);
+      console.log('🟡 ALICE - Adding Yellow Card:');
+      console.log('  Previous state:', prev);
+      console.log('  New state:', newState);
+      
+      // Update the display arrays to match the new state
+      if (newState.yellow === 1) {
+        setAliceYellowCards([1]);
+        setAliceRedCards([]);
+        console.log('  → Display: 1 yellow card');
+      } else {
+        setAliceYellowCards([]);
+        setAliceRedCards([newState.red]);
+        console.log('  → Display: 1 red card with "' + newState.red + '" inside');
+        
+        // If this yellow card resulted in a red card, give opponent a point
+        if (newState.red > prev.red) {
+          setBobScore(prevScore => prevScore + 1);
+          console.log('🔴 Alice yellow converted to red → Bob gets +1 point');
+        }
+      }
+      
+      return newState;
+    });
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const addYellowCardToBob = () => {
+    // Pause timer when card is issued
+    if (isPlaying) {
+      pauseTimer();
+    }
+    
+    // NEW CLEAN LOGIC: Use pure function with case statement
+    setBobCards(prev => {
+      const newState = applyYellow(prev);
+      console.log('🟡 BOB - Adding Yellow Card:');
+      console.log('  Previous state:', prev);
+      console.log('  New state:', newState);
+      
+      // Update the display arrays to match the new state
+      if (newState.yellow === 1) {
+        setBobYellowCards([1]);
+        setBobRedCards([]);
+        console.log('  → Display: 1 yellow card');
+      } else {
+        setBobYellowCards([]);
+        setBobRedCards([newState.red]);
+        console.log('  → Display: 1 red card with "' + newState.red + '" inside');
+        
+        // If this yellow card resulted in a red card, give opponent a point
+        if (newState.red > prev.red) {
+          setAliceScore(prevScore => prevScore + 1);
+          console.log('🔴 Bob yellow converted to red → Alice gets +1 point');
+        }
+      }
+      
+      return newState;
+    });
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  // Red card management functions
+  const addRedCardToAlice = () => {
+    if (aliceRedCards.length > 0) {
+      // Show popup asking if user wants to remove or add
       Alert.alert(
-        'Yellow Cards',
-        'Alice already has yellow cards. What would you like to do?',
+        'Red Cards',
+        'Alice already has red cards. What would you like to do?',
         [
           {
             text: 'Remove One',
             style: 'destructive',
             onPress: () => {
-              setAliceYellowCards(prev => prev.slice(0, -1));
-              // Recalculate red cards when removing yellow
-              const newYellowCount = aliceYellowCards.length - 1;
-              const newRedCount = Math.floor(newYellowCount / 2);
-              setAliceRedCards(Array.from({ length: newRedCount }, (_, i) => i + 1));
+              const newRedCount = Math.max(0, aliceRedCards[0] - 1);
+              if (newRedCount === 0) {
+                setAliceRedCards([]);
+                setAliceCards(prev => ({ ...prev, red: 0 }));
+              } else {
+                setAliceRedCards([newRedCount]);
+                setAliceCards(prev => ({ ...prev, red: newRedCount }));
+              }
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }
           },
           {
             text: 'Add Another',
             onPress: () => {
-              const newYellowCount = aliceYellowCards.length + 1;
-              setAliceYellowCards(prev => [...prev, newYellowCount]);
-              // Calculate red cards: every 2 yellow = 1 red
-              const newRedCount = Math.floor(newYellowCount / 2);
-              setAliceRedCards(Array.from({ length: newRedCount }, (_, i) => i + 1));
+              // Pause timer when card is issued
+              if (isPlaying) {
+                pauseTimer();
+              }
+              const newRedCount = aliceRedCards[0] + 1;
+              setAliceRedCards([newRedCount]);
+              setAliceCards(prev => ({ ...prev, red: newRedCount }));
+              // Give opponent (Bob) 1 point for Alice's red card
+              setBobScore(prev => prev + 1);
+              console.log('🔴 Alice red card issued → Bob gets +1 point');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }
+          },
+          {
+            text: 'Reset All Cards',
+            style: 'destructive',
+            onPress: () => {
+              resetAliceCards();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }
           },
           {
@@ -1784,41 +2056,64 @@ export default function RemoteScreen() {
         ]
       );
     } else {
-      // First card - add directly
-      const newCardNumber = aliceYellowCards.length + 1;
-      setAliceYellowCards(prev => [...prev, newCardNumber]);
+      // Pause timer when card is issued
+      if (isPlaying) {
+        pauseTimer();
+      }
+      // First red card - add directly
+      setAliceRedCards([1]);
+      setAliceCards(prev => ({ ...prev, red: 1 }));
+      // Give opponent (Bob) 1 point for Alice's red card
+      setBobScore(prev => prev + 1);
+      console.log('🔴 Alice red card issued → Bob gets +1 point');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
-  const addYellowCardToBob = () => {
-    if (bobYellowCards.length > 0) {
-      // Show popup asking if user wants to assign or remove
+  const addRedCardToBob = () => {
+    if (bobRedCards.length > 0) {
+      // Show popup asking if user wants to remove or add
       Alert.alert(
-        'Yellow Cards',
-        'Bob already has yellow cards. What would you like to do?',
+        'Red Cards',
+        'Bob already has red cards. What would you like to do?',
         [
           {
             text: 'Remove One',
             style: 'destructive',
             onPress: () => {
-              setBobYellowCards(prev => prev.slice(0, -1));
-              // Recalculate red cards when removing yellow
-              const newYellowCount = bobYellowCards.length - 1;
-              const newRedCount = Math.floor(newYellowCount / 2);
-              setBobRedCards(Array.from({ length: newRedCount }, (_, i) => i + 1));
+              const newRedCount = Math.max(0, bobRedCards[0] - 1);
+              if (newRedCount === 0) {
+                setBobRedCards([]);
+                setBobCards(prev => ({ ...prev, red: 0 }));
+              } else {
+                setBobRedCards([newRedCount]);
+                setBobCards(prev => ({ ...prev, red: newRedCount }));
+              }
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }
           },
           {
             text: 'Add Another',
             onPress: () => {
-              const newYellowCount = bobYellowCards.length + 1;
-              setBobYellowCards(prev => [...prev, newYellowCount]);
-              // Calculate red cards: every 2 yellow = 1 red
-              const newRedCount = Math.floor(newYellowCount / 2);
-              setBobRedCards(Array.from({ length: newRedCount }, (_, i) => i + 1));
+              // Pause timer when card is issued
+              if (isPlaying) {
+                pauseTimer();
+              }
+              const newRedCount = bobRedCards[0] + 1;
+              setBobRedCards([newRedCount]);
+              setBobCards(prev => ({ ...prev, red: newRedCount }));
+              // Give opponent (Alice) 1 point for Bob's red card
+              setAliceScore(prev => prev + 1);
+              console.log('🔴 Bob red card issued → Alice gets +1 point');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }
+          },
+          {
+            text: 'Reset All Cards',
+            style: 'destructive',
+            onPress: () => {
+              resetBobCards();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }
           },
           {
@@ -1828,9 +2123,16 @@ export default function RemoteScreen() {
         ]
       );
     } else {
-      // First card - add directly
-      const newCardNumber = bobYellowCards.length + 1;
-      setBobYellowCards(prev => [...prev, newCardNumber]);
+      // Pause timer when card is issued
+      if (isPlaying) {
+        pauseTimer();
+      }
+      // First red card - add directly
+      setBobRedCards([1]);
+      setBobCards(prev => ({ ...prev, red: 1 }));
+      // Give opponent (Alice) 1 point for Bob's red card
+      setAliceScore(prev => prev + 1);
+      console.log('🔴 Bob red card issued → Alice gets +1 point');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -1901,6 +2203,11 @@ export default function RemoteScreen() {
               <Text style={[styles.countdownWarningText, { color: '#EF4444', fontSize: width * 0.035 }]}>
                 🏥 INJURY TIME - 5:00
               </Text>
+              {previousMatchState && (
+                <Text style={[styles.countdownWarningText, { color: '#EF4444', fontSize: width * 0.03 }]}>
+                  Match paused at {formatTime(previousMatchState.timeRemaining)}
+                </Text>
+              )}
             </View>
           )}
           
@@ -2135,7 +2442,7 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
-            }]} onPress={decrementAliceScore} disabled={isPlaying || timeRemaining < matchTime}>
+            }]} onPress={decrementAliceScore}>
               <Text style={[styles.scoreButtonText, {color: 'black'}]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -2147,7 +2454,7 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
-            }]} onPress={incrementAliceScore} disabled={isPlaying || timeRemaining < matchTime}>
+            }]} onPress={incrementAliceScore}>
               <Text style={[styles.scoreButtonText, {color: 'black'}]}>+</Text>
             </TouchableOpacity>
           </View>
@@ -2215,7 +2522,7 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
-            }]} onPress={decrementBobScore} disabled={isPlaying || timeRemaining < matchTime}>
+            }]} onPress={decrementBobScore}>
               <Text style={[styles.scoreButtonText, {color: 'black'}]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -2227,7 +2534,7 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
-            }]} onPress={incrementBobScore} disabled={isPlaying || timeRemaining < matchTime}>
+            }]} onPress={incrementBobScore}>
               <Text style={[styles.scoreButtonText, {color: 'black'}]}>+</Text>
             </TouchableOpacity>
           </View>
@@ -2244,13 +2551,13 @@ export default function RemoteScreen() {
               </Text>
             )}
           </TouchableOpacity>
-          <View style={[styles.decorativeCard, styles.cardRed]}>
+          <TouchableOpacity style={[styles.decorativeCard, styles.cardRed]} onPress={addRedCardToAlice}>
             {aliceRedCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
-                {aliceRedCards.length}
+                {aliceRedCards[0]}
               </Text>
             )}
-          </View>
+          </TouchableOpacity>
         </View>
         <TouchableOpacity
           style={[styles.assignPriorityButton, {
@@ -2261,7 +2568,7 @@ export default function RemoteScreen() {
           onPress={
             (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
               () => setShowPriorityPopup(true) :
-              (isInjuryTimer ? stopInjuryTimer : startInjuryTimer)
+              (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
           }
         >
           <Text style={styles.assignPriorityIcon}>
@@ -2270,7 +2577,7 @@ export default function RemoteScreen() {
           <Text style={styles.assignPriorityText}>
             {(currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
               'Assign Priority' :
-              (isInjuryTimer ? `Stop (${formatTime(injuryTimeRemaining)})` : 'Injury Timer')
+              (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')
             }
           </Text>
         </TouchableOpacity>
@@ -2282,13 +2589,13 @@ export default function RemoteScreen() {
               </Text>
             )}
           </TouchableOpacity>
-          <View style={[styles.decorativeCard, styles.cardRed]}>
+          <TouchableOpacity style={[styles.decorativeCard, styles.cardRed]} onPress={addRedCardToBob}>
             {bobRedCards.length > 0 && (
               <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
-                {bobRedCards.length}
+                {bobRedCards[0]}
               </Text>
             )}
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -2310,6 +2617,7 @@ export default function RemoteScreen() {
           style={{
             flex: 1,
             backgroundColor: isBreakTime ? '#F59E0B' : // Orange for skip button
+                             isInjuryTimer ? '#EF4444' : // Red for injury timer skip button
                              isPlaying ? '#F97316' : 
                              (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? '#3B82F6' : 
                              timeRemaining === 0 ? '#9CA3AF' : '#10B981',
@@ -2323,9 +2631,15 @@ export default function RemoteScreen() {
             borderWidth: 2,
             borderColor: 'white',
             minHeight: 45,
-            opacity: (timeRemaining === 0 && !isBreakTime) ? 0.6 : 1
+            opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
           }} 
           onPress={() => {
+            // Skip button during injury time
+            if (isInjuryTimer) {
+              skipInjuryTimer();
+              return;
+            }
+            
             // Skip button during break time
             if (isBreakTime) {
               skipBreak();
@@ -2351,10 +2665,11 @@ export default function RemoteScreen() {
           }}
         >
           <Text style={{fontSize: 18, marginRight: 6}}>
-            {isBreakTime ? '⏭️' : isPlaying ? '⏸️' : '▶️'}
+            {isInjuryTimer ? '⏭️' : isBreakTime ? '⏭️' : isPlaying ? '⏸️' : '▶️'}
           </Text>
           <Text style={{fontSize: 14, fontWeight: '600', color: 'white'}}>
-            {isBreakTime ? 'Skip Break' : 
+            {isInjuryTimer ? 'Skip Injury' : 
+             isBreakTime ? 'Skip Break' : 
              isPlaying ? 'Pause' : 
              (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? 'Resume' : 'Play'}
           </Text>
@@ -2460,6 +2775,12 @@ export default function RemoteScreen() {
               }}>
                 <Text style={styles.saveButtonText}>Reset Period</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.yellow.accent }]} onPress={() => {
+                resetAllCards();
+                setShowResetPopup(false);
+              }}>
+                <Text style={styles.saveButtonText}>Reset Cards</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={() => {
                 resetAll();
                 setShowResetPopup(false);
@@ -2526,6 +2847,8 @@ export default function RemoteScreen() {
           </KeyboardAvoidingView>
         </View>
       )}
+
+
 
       {/* Score Warning Popup */}
       {showScoreWarning && (
