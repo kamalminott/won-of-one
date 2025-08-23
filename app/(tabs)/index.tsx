@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
@@ -47,7 +48,7 @@ export default function HomeScreen() {
   };
 
   const handleAddNewMatch = () => {
-    Alert.alert('Add New Match', 'New match creation started!');
+    router.push('/add-match');
   };
 
   const styles = StyleSheet.create({
@@ -58,27 +59,27 @@ export default function HomeScreen() {
     stickyHeader: {
       backgroundColor: Colors.dark.background,
       paddingHorizontal: '5%',
-      paddingTop: height * 0.08,
-      paddingBottom: height * 0.015,
+      paddingTop: height * 0.06,
+      paddingBottom: height * 0.02,
       zIndex: 10,
     },
     scrollView: {
       flex: 1,
     },
     contentContainer: {
-      padding: '5%',
+      padding: '4%',
       paddingTop: 0,
       width: '100%',
     },
     summaryRow: {
       flexDirection: 'row',
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.008,
     },
     icon: {
       fontSize: width * 0.06,
     },
     addMatchLink: {
-      marginBottom: height * 0.02,
+      marginBottom: height * 0.015,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'flex-end',

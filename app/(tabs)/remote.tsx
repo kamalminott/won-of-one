@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
@@ -55,6 +55,10 @@ export default function RemoteScreen() {
     timeRemaining: number;
     wasPlaying: boolean;
   } | null>(null);
+
+  // NEW CLEAN CARD SYSTEM - Simple state structure
+  const [aliceCards, setAliceCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
+  const [bobCards, setBobCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
 
   // Use useRef for timer to ensure proper cleanup
   const timerRef = useRef<number | null>(null);
@@ -1094,9 +1098,9 @@ export default function RemoteScreen() {
     container: {
       flex: 1,
       backgroundColor: Colors.dark.background,
-      padding: '3%',
-      paddingTop: height * 0.04,
-      paddingBottom: height * 0.02,
+      padding: '1%',
+      paddingTop: height * 0.005,
+      paddingBottom: height * 0.002,
       overflow: 'hidden',
     },
     
@@ -1107,8 +1111,8 @@ export default function RemoteScreen() {
       borderColor: 'rgba(168, 85, 247, 0.6)',
       borderRadius: width * 0.04,
       padding: width * 0.01,
-      marginTop: height * 0.03,
-      marginBottom: height * 0.003,
+      marginTop: 0,
+      marginBottom: height * 0.001,
       position: 'relative',
     },
     timerLabel: {
@@ -1205,7 +1209,7 @@ export default function RemoteScreen() {
       backgroundColor: 'rgb(230,222,255)',
       borderRadius: width * 0.03,
       padding: width * 0.025,
-      marginTop: height * 0.01, // Reverted back to original size
+      marginTop: height * 0.002, // Reduced for tighter spacing
       borderWidth: 1,
       borderColor: 'rgba(168, 85, 247, 0.3)',
     },
@@ -1348,12 +1352,12 @@ export default function RemoteScreen() {
     },
     scoreControls: {
       flexDirection: 'row',
-      gap: width * 0.045,
+      gap: width * 0.035,
     },
     scoreButton: {
-      width: width * 0.105,
-      height: width * 0.105,
-      borderRadius: width * 0.0525,
+      width: width * 0.09,
+      height: width * 0.09,
+      borderRadius: width * 0.045,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1361,7 +1365,7 @@ export default function RemoteScreen() {
       borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     scoreButtonText: {
-      fontSize: width * 0.075,
+      fontSize: width * 0.065,
       fontWeight: '700',
       color: 'white',
     },
@@ -1410,7 +1414,7 @@ export default function RemoteScreen() {
     yellowCardsContainer: {
       flexDirection: 'row',
       gap: width * 0.02,
-      marginTop: height * 0.01,
+      marginTop: height * 0.005,
       marginLeft: width * 0.02,
     },
     yellowCard: {
@@ -1459,7 +1463,7 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.005,
       gap: width * 0.04,
       width: '100%',
     },
@@ -1881,10 +1885,6 @@ export default function RemoteScreen() {
     },
   });
 
-  // NEW CLEAN CARD SYSTEM - Simple state structure
-  const [aliceCards, setAliceCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
-  const [bobCards, setBobCards] = useState<{ yellow: 0 | 1; red: number }>({ yellow: 0, red: 0 });
-
   // Pure logic functions (exported so you can unit test if you want)
   const applyYellow = (prev: { yellow: 0 | 1; red: number }): { yellow: 0 | 1; red: number } => {
     // Case A: no reds yet
@@ -2140,15 +2140,16 @@ export default function RemoteScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom + 50 }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
+      <View style={[styles.container, { paddingBottom: insets.bottom + 5 }]}>
       {/* Match Timer Section */}
       <View style={[
         styles.matchTimerCard,
         // Make match timer card smaller when timer is ready AND cards are present
         (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-          padding: width * 0.006, // Reduce padding even more
-          marginTop: height * 0.015, // Reduce top margin even more
-          marginBottom: height * 0.001, // Reduce bottom margin even more
+          padding: width * 0.004, // Reduce padding even more
+          marginTop: height * 0.003, // Reduce top margin even more
+          marginBottom: height * 0.0005, // Reduce bottom margin even more
         } : {}
       ]}>
         <View style={styles.timerHeader}>
@@ -2362,7 +2363,7 @@ export default function RemoteScreen() {
       </View>
 
       {/* Fencers Section */}
-      <View style={[styles.fencersHeader, { marginTop: -(height * 0.015) }]}>
+              <View style={[styles.fencersHeader, { marginTop: -(height * 0.035) }]}>
         <Text style={styles.fencersHeading}>Fencers</Text>
         <TouchableOpacity 
           style={styles.editNamesButton}
@@ -2379,7 +2380,7 @@ export default function RemoteScreen() {
           { backgroundColor: 'rgb(252,187,187)' },
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-            width: width * 0.38, // Reduce width from 0.42 to 0.38
+            width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
             padding: width * 0.03, // Reduce padding from 0.04 to 0.03
             minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
           } : {}
@@ -2392,12 +2393,34 @@ export default function RemoteScreen() {
             zIndex: 5 
           }]}>
             <TouchableOpacity 
-              style={[styles.switchTrack, { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' }]}
+              style={[
+                styles.switchTrack, 
+                { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' },
+                // Make toggle switch smaller when timer is ready AND cards are present
+                (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+                  width: width * 0.08,
+                  height: width * 0.04,
+                  borderRadius: width * 0.02,
+                } : {}
+              ]}
               onPress={() => setShowUserProfile(!showUserProfile)}
             >
-              <View style={[styles.switchThumb, { 
-                transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }] 
-              }]}>
+              <View style={[
+                styles.switchThumb, 
+                { 
+                  transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }],
+                  // Make toggle thumb smaller when timer is ready AND cards are present
+                  ...((!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+                    width: width * 0.035,
+                    height: width * 0.035,
+                    borderRadius: width * 0.0175,
+                    top: width * 0.0025,
+                    left: width * 0.0025,
+                    // Adjust transform for smaller track
+                    transform: [{ translateX: showUserProfile ? width * 0.045 : 0 }]
+                  } : {})
+                }
+              ]}>
               </View>
             </TouchableOpacity>
           </View>
@@ -2490,7 +2513,7 @@ export default function RemoteScreen() {
           {backgroundColor: 'rgb(176,232,236)'},
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-            width: width * 0.38, // Reduce width from 0.42 to 0.38
+            width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
             padding: width * 0.03, // Reduce padding from 0.04 to 0.03
             minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
           } : {}
@@ -3004,6 +3027,7 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
