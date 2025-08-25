@@ -24,6 +24,8 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="add-match" options={{ headerShown: false }} />
+          <Stack.Screen name="recent-matches" options={{ headerShown: false }} />
+          <Stack.Screen name="match-summary" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </Stack>
         <StatusBar style="auto" />

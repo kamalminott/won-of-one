@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 interface ProgressCardProps {
   title: string;
@@ -18,16 +18,78 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   subtitle,
   daysRemaining,
 }) => {
+  const { width, height } = useWindowDimensions();
   const progress = current / total;
+  
+  const styles = StyleSheet.create({
+    container: {
+      borderRadius: width * 0.04,
+      overflow: 'hidden',
+      marginBottom: height * 0.01,
+    },
+    gradientBackground: {
+      padding: width * 0.025,
+      position: 'relative',
+    },
+    content: {
+      zIndex: 2,
+    },
+    title: {
+      fontSize: Math.round(width * 0.04),
+      fontWeight: '600',
+      color: 'white',
+      marginBottom: height * 0.008,
+    },
+    progressText: {
+      fontSize: Math.round(width * 0.05),
+      fontWeight: '700',
+      color: 'white',
+      marginBottom: height * 0.015,
+    },
+    progressBarContainer: {
+      marginBottom: height * 0.015,
+      width: '50%',
+    },
+    progressBar: {
+      height: height * 0.008,
+      backgroundColor: 'rgba(255, 255, 255, 0.3)',
+      borderRadius: width * 0.008,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: 'white',
+      borderRadius: width * 0.008,
+    },
+    daysRemaining: {
+      fontSize: Math.round(width * 0.03),
+      color: 'rgba(255, 255, 255, 0.8)',
+    },
+    subtitle: {
+      fontSize: Math.round(width * 0.035),
+      color: 'rgba(255, 255, 255, 0.7)',
+      marginTop: height * 0.01,
+    },
+    decorativeShape: {
+      position: 'absolute',
+      top: -height * 0.05,
+      right: -width * 0.05,
+      width: width * 0.2,
+      height: height * 0.2,
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      borderRadius: width * 0.1,
+      zIndex: 1,
+    },
+  });
   
   return (
     <View style={styles.container}>
-              <LinearGradient
-          colors={Colors.purple.gradient as [string, string]}
-          style={styles.gradientBackground}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-        >
+      <LinearGradient
+        colors={Colors.purple.gradient as [string, string]}
+        style={styles.gradientBackground}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+      >
         <View style={styles.content}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.progressText}>{`${current}/${total}`}</Text>
@@ -53,64 +115,3 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  gradientBackground: {
-    padding: 10,
-    position: 'relative',
-  },
-  content: {
-    zIndex: 2,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 6,
-  },
-  progressText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 12,
-  },
-  progressBarContainer: {
-    marginBottom: 12,
-    width: '50%',
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: 'white',
-    borderRadius: 3,
-  },
-  daysRemaining: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  subtitle: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 2,
-  },
-  decorativeShape: {
-    position: 'absolute',
-    right: 15,
-    top: 30,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    zIndex: 1,
-  },
-});

@@ -44,7 +44,7 @@ export default function HomeScreen() {
   };
 
   const handleViewAllMatches = () => {
-    Alert.alert('View All Matches', 'Opening match history!');
+    router.push('/recent-matches');
   };
 
   const handleAddNewMatch = () => {

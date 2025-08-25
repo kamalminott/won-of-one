@@ -196,8 +196,8 @@ export default function AddMatchScreen() {
       alignItems: 'center',
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       borderRadius: getDimension(0.02, width),
-      paddingHorizontal: getDimension(0.03, width),
-      paddingVertical: getDimension(0.01, height),
+      paddingHorizontal: getDimension(0.01, width),
+      paddingVertical: getDimension(0.004, height),
       borderWidth: 1,
       borderColor: 'rgba(255, 255, 255, 0.2)',
     },
@@ -210,13 +210,13 @@ export default function AddMatchScreen() {
       paddingVertical: getDimension(0.01, height),
     },
     calendarIcon: {
-      width: getDimension(0.06, width),
-      height: getDimension(0.06, width),
-      borderRadius: getDimension(0.03, width),
+      width: getDimension(0.08, width),
+      height: getDimension(0.08, width),
+      borderRadius: getDimension(0.015, width),
       backgroundColor: Colors.purple.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: getDimension(0.02, width),
+      marginLeft: getDimension(0.015, width),
     },
     dropdownContainer: {
       flexDirection: 'row',
@@ -374,6 +374,12 @@ export default function AddMatchScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: getDimension(0.015, height),
+      // Drop shadow effects from reusable gradientButton style
+      shadowColor: Colors.gradientButton.shadowColor,
+      shadowOffset: Colors.gradientButton.shadowOffset,
+      shadowOpacity: Colors.gradientButton.shadowOpacity,
+      shadowRadius: Colors.gradientButton.shadowRadius,
+      elevation: Colors.gradientButton.elevation,
     },
     saveButtonText: {
       fontSize: getDimension(0.045, width),
@@ -591,12 +597,12 @@ export default function AddMatchScreen() {
     pickerItemSelected: {
       ...Platform.select({
         ios: {
-          color: Colors.purple.primary,
-          fontWeight: '600',
+          color: 'white',
+          fontWeight: '700',
         },
         android: {
-          color: Colors.purple.primary,
-          fontWeight: '600',
+          color: 'white',
+          fontWeight: '700',
         },
       }),
     },
@@ -853,8 +859,10 @@ export default function AddMatchScreen() {
             </TouchableOpacity>
             
             <LinearGradient
-              colors={[Colors.purple.primary, Colors.purple.light]}
-              style={styles.differentialCard}
+              colors={Colors.glassyGradient.colors}
+              style={[styles.differentialCard, { borderWidth: 2, borderColor: Colors.glassyGradient.borderColor }]}
+              start={Colors.glassyGradient.start}
+              end={Colors.glassyGradient.end}
             >
               <View style={styles.scoreInputContainer}>
                 <Text style={styles.scoreInput}>
@@ -897,8 +905,10 @@ export default function AddMatchScreen() {
       {/* Save Match Button */}
       <View style={{ padding: getDimension(0.04, width) }}>
         <LinearGradient
-          colors={[Colors.purple.primary, Colors.purple.light]}
+          colors={Colors.gradientButton.colors}
           style={styles.saveButton}
+          start={Colors.gradientButton.start}
+          end={Colors.gradientButton.end}
         >
           <TouchableOpacity onPress={handleSaveMatch} style={{ width: '100%', alignItems: 'center' }}>
             <Text style={styles.saveButtonText}>Save Match</Text>

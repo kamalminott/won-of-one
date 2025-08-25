@@ -1,13 +1,15 @@
 import { Colors } from '@/constants/Colors';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   
   const [currentPeriod, setCurrentPeriod] = useState(1);
   const [aliceScore, setAliceScore] = useState(3);
@@ -32,8 +34,7 @@ export default function RemoteScreen() {
   const [pendingScoreAction, setPendingScoreAction] = useState<(() => void) | null>(null);
  
   const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
-  const [swipeProgress, setSwipeProgress] = useState(0); // 0 to 1 for swipe progress
-  const [isSwiping, setIsSwiping] = useState(false);
+
   const [pulseOpacity, setPulseOpacity] = useState(1); // For pulsing animation
   const [isBreakTime, setIsBreakTime] = useState(false); // For break timer
   const [breakTimeRemaining, setBreakTimeRemaining] = useState(60); // 1 minute break
@@ -63,6 +64,9 @@ export default function RemoteScreen() {
   // Use useRef for timer to ensure proper cleanup
   const timerRef = useRef<number | null>(null);
   const currentPeriodRef = useRef<number>(1); // Ref to track current period value
+
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [tempValue, setTempValue] = useState<string>('');
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -611,13 +615,20 @@ export default function RemoteScreen() {
           } else {
             // Scores are not tied - show match completion
             Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
-              { text: 'OK', onPress: () => setTimeRemaining(0) }
+              { 
+                text: 'OK', 
+                onPress: () => {
+                  setTimeRemaining(0);
+                  // Navigate to match summary
+                  router.push('/match-summary');
+                }
+              }
             ]);
           }
         }
       }
     }, 100); // Update more frequently for smoother countdown
-  }, [timeRemaining, currentPeriod, matchTime]);
+  }, [timeRemaining, currentPeriod, matchTime, router]);
 
   const resumeTimer = useCallback(() => {
     if (!isPlaying && timeRemaining > 0) {
@@ -694,14 +705,21 @@ export default function RemoteScreen() {
             } else {
               // Scores are not tied - show match completion
               Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
-                { text: 'OK', onPress: () => setTimeRemaining(0) }
+                { 
+                  text: 'OK', 
+                  onPress: () => {
+                    setTimeRemaining(0);
+                    // Navigate to match summary
+                    router.push('/match-summary');
+                  }
+                }
               ]);
             }
           }
         }
       }, 100); // Update more frequently for smoother countdown
     }
-  }, [isPlaying, timeRemaining, currentPeriod, matchTime]);
+  }, [isPlaying, timeRemaining, currentPeriod, matchTime, router]);
 
   const addTime = useCallback((seconds: number) => {
     if (isPlaying || (!isPlaying && timeRemaining > 0 && timeRemaining < matchTime) || isBreakTime || hasMatchStarted) {
@@ -975,42 +993,7 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
-  const handleSwipeGesture = (event: any) => {
-    const { translationX, state, velocityX } = event.nativeEvent;
-    
-    if (state === State.ACTIVE) {
-      setIsSwiping(true);
-      // Calculate progress based on full swipe box width minus button width
-      const buttonWidth = height * 0.05; // Button width
-      const maxSwipeDistance = (width * 0.95) - buttonWidth; // Full box width minus button width
-      const progress = Math.max(0, Math.min(1, translationX / maxSwipeDistance));
-      setSwipeProgress(progress);
-      
-      // Add haptic feedback during swipe
-      if (progress > 0.5 && progress < 0.8) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
-    } else if (state === State.END) {
-      setIsSwiping(false);
-      
-      // Check if swipe was completed based on distance and velocity
-      const buttonWidth = height * 0.05;
-      const maxSwipeDistance = (width * 0.95) - buttonWidth;
-      const progress = Math.max(0, Math.min(1, translationX / maxSwipeDistance));
-      const hasVelocity = Math.abs(velocityX) > 500; // Check if user swiped with intent
-      
-      if (progress >= 0.7 || (progress >= 0.5 && hasVelocity)) { // Lower threshold with velocity
-        // Complete the match with haptic feedback
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert('Match Completed!', 'The match has been completed successfully.');
-        setSwipeProgress(0); // Reset progress
-      } else {
-        // Reset progress with smooth animation
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setSwipeProgress(0);
-      }
-    }
-  };
+
 
   const handleTimeInputChange = (text: string) => {
     // Remove any non-numeric characters except colon
@@ -1106,14 +1089,20 @@ export default function RemoteScreen() {
     
     // Match Timer Section
     matchTimerCard: {
-      backgroundColor: 'rgba(76, 29, 149, 0.4)',
+      // Background will be handled by LinearGradient
       borderWidth: 2,
-      borderColor: 'rgba(168, 85, 247, 0.6)',
+      borderColor: Colors.timerBackground.borderColors[0],
       borderRadius: width * 0.04,
       padding: width * 0.01,
       marginTop: 0,
       marginBottom: height * 0.001,
       position: 'relative',
+      // Shadow effects
+      shadowColor: Colors.timerBackground.shadowColor,
+      shadowOffset: Colors.timerBackground.shadowOffset,
+      shadowOpacity: Colors.timerBackground.shadowOpacity,
+      shadowRadius: Colors.timerBackground.shadowRadius,
+      elevation: Colors.timerBackground.elevation,
     },
     timerLabel: {
       backgroundColor: Colors.yellow.accent,
@@ -1121,7 +1110,7 @@ export default function RemoteScreen() {
       paddingVertical: height * 0.004,
       borderRadius: width * 0.04,
       position: 'absolute',
-      top: height * -0.01,
+      top: height * -0.02, // Moved further up to appear outside the card
       left: '50%',
       transform: [{ translateX: -width * 0.08 }], // Moved more to the left
       zIndex: 10,
@@ -1143,6 +1132,8 @@ export default function RemoteScreen() {
       justifyContent: 'center',
       height: height * 0.08, // Reverted back to original size
       width: '100%',
+      // Timer background styling removed - now handled by main container
+      borderRadius: width * 0.03,
     },
     countdownText: {
       fontSize: width * 0.12,
@@ -1206,7 +1197,7 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: 'rgb(230,222,255)',
+      backgroundColor: '#E6DDFF',
       borderRadius: width * 0.03,
       padding: width * 0.025,
       marginTop: height * 0.002, // Reduced for tighter spacing
@@ -1498,67 +1489,7 @@ export default function RemoteScreen() {
       fontSize: width * 0.05,
     },
 
-    // Swipe to Complete Styles
-    swipeContainer: {
-      alignItems: 'center',
-      overflow: 'visible', // Allow the button to move freely
-    },
-    swipeTrack: {
-      width: width * 0.95,
-      height: height * 0.05,
-      backgroundColor: '#6A35F7',
-      borderRadius: height * 0.01,
-      position: 'relative',
-      overflow: 'hidden', // Keep progress bar contained
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 5,
-    },
-    swipeMainText: {
-      fontSize: width * 0.04,
-      fontWeight: '700',
-      color: 'white',
-      textAlign: 'center',
-      position: 'absolute',
-      width: '100%',
-      zIndex: 1,
-    },
-    swipeProgressBar: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      height: '100%',
-      borderRadius: height * 0.01,
-      zIndex: 0,
-    },
-    swipeThumb: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      width: height * 0.05, // Same height as swipe box
-      height: height * 0.05, // Same height as swipe box
-      backgroundColor: 'white',
-      borderRadius: height * 0.01, // Same border radius as swipe box
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.3, // Match the swipe box shadow
-      shadowRadius: 8, // Match the swipe box shadow
-      elevation: 5,
-      zIndex: 2,
-      borderWidth: 1, // Add subtle border for definition
-      borderColor: 'rgba(0, 0, 0, 0.1)', // Subtle border color
-    },
-    swipeThumbText: {
-      fontSize: width * 0.045,
-      color: '#374151',
-      fontWeight: '700',
-    },
+
 
     // Edit Time Popup
     popupOverlay: {
@@ -1883,6 +1814,27 @@ export default function RemoteScreen() {
       fontWeight: '700',
       color: 'white',
     },
+
+    // Complete Match Button
+    completeMatchButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: height * 0.005,
+      gap: width * 0.05,
+    },
+    completeButton: {
+      width: width * 0.35,
+      height: width * 0.06,
+      borderRadius: width * 0.03,
+      backgroundColor: Colors.green.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    completeButtonText: {
+      fontSize: width * 0.04,
+      fontWeight: '600',
+      color: 'white',
+    },
   });
 
   // Pure logic functions (exported so you can unit test if you want)
@@ -2143,15 +2095,20 @@ export default function RemoteScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
       <View style={[styles.container, { paddingBottom: insets.bottom + 5 }]}>
       {/* Match Timer Section */}
-      <View style={[
-        styles.matchTimerCard,
-        // Make match timer card smaller when timer is ready AND cards are present
-        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-          padding: width * 0.004, // Reduce padding even more
-          marginTop: height * 0.003, // Reduce top margin even more
-          marginBottom: height * 0.0005, // Reduce bottom margin even more
-        } : {}
-      ]}>
+      <LinearGradient
+        colors={Colors.timerBackground.colors}
+        style={[
+          styles.matchTimerCard,
+          // Make match timer card smaller when timer is ready AND cards are present
+          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+            padding: width * 0.004, // Reduce padding even more
+            marginTop: height * 0.003, // Reduce top margin even more
+            marginBottom: height * 0.0005, // Reduce bottom margin even more
+          } : {}
+        ]}
+        start={Colors.timerBackground.start}
+        end={Colors.timerBackground.end}
+      >
         <View style={styles.timerHeader}>
           <View style={styles.timerLabel}>
             <Text style={styles.timerLabelText}>Match Timer</Text>
@@ -2277,7 +2234,7 @@ export default function RemoteScreen() {
                     0:00
                   </Text>
                   <Text style={styles.countdownWarningText}>
-                    ⏰ Period {currentPeriod} Complete - Ready for Next!
+                    🍃 Period {currentPeriod} Complete - Break Time!
                   </Text>
                 </View>
               )}
@@ -2347,8 +2304,7 @@ export default function RemoteScreen() {
           </TouchableOpacity>
         </View>
         
-
-      </View>
+      </LinearGradient>
 
       {/* Match Status Display */}
       <View style={styles.matchStatusContainer}>
@@ -2810,40 +2766,31 @@ export default function RemoteScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Swipe to Complete Match */}
-      <GestureHandlerRootView>
-        <PanGestureHandler onGestureEvent={handleSwipeGesture}>
-          <View style={[
-            styles.swipeContainer, 
-            // Only move closer to bottom tab bar when timer is ready AND cards are present
-            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-              position: 'absolute',
-              bottom: height * 0.05, // Position from bottom when conditions met
-              left: 0,
-              right: 0,
-            } : {
-              position: 'relative', // Normal positioning when no cards or match in progress
-              marginTop: -(height * 0.01),
-              marginBottom: height * 0.01,
-            }
-          ]}>
-            <View style={styles.swipeTrack}>
-              <Text style={styles.swipeMainText}>Complete The Match</Text>
-              {/* Progress indicator */}
-              <View style={[styles.swipeProgressBar, { 
-                width: `${swipeProgress * 100}%`,
-                backgroundColor: swipeProgress > 0.5 ? '#10B981' : '#6A35F7'
-              }]} />
-              <View style={[styles.swipeThumb, { 
-                transform: [{ translateX: swipeProgress * ((width * 0.95) - (height * 0.05)) }],
-                opacity: 0.8 + (swipeProgress * 0.2), // Fade in as user swipes
-              }]}>
-                <Text style={styles.swipeThumbText}>{'>>'}</Text>
-              </View>
-            </View>
-          </View>
-        </PanGestureHandler>
-      </GestureHandlerRootView>
+      {/* Complete Match Button */}
+      <View style={[
+        styles.completeMatchButton, 
+        // Only move closer to bottom tab bar when timer is ready AND cards are present
+        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+          position: 'absolute',
+          bottom: height * 0.05, // Position from bottom when conditions met
+          left: 0,
+          right: 0,
+        } : {
+          position: 'relative', // Normal positioning when no cards or match in progress
+          marginTop: -(height * 0.01),
+          marginBottom: height * 0.01,
+        }
+      ]}>
+        <TouchableOpacity 
+          style={styles.completeButton}
+          onPress={() => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            router.push('/match-summary');
+          }}
+        >
+          <Text style={styles.completeButtonText}>Complete The Match</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Edit Time Popup */}
       {showEditPopup && (
@@ -3027,6 +2974,32 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
+
+      {/* Complete Match Button */}
+      <View style={[
+        styles.completeMatchButton, 
+        // Only move closer to bottom tab bar when timer is ready AND cards are present
+        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+          position: 'absolute',
+          bottom: height * 0.05, // Position from bottom when conditions met
+          left: 0,
+          right: 0,
+        } : {
+          position: 'relative', // Normal positioning when no cards or match in progress
+          marginTop: -(height * 0.01),
+          marginBottom: height * 0.01,
+        }
+      ]}>
+        <TouchableOpacity 
+          style={styles.completeButton}
+          onPress={() => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            router.push('/match-summary');
+          }}
+        >
+          <Text style={styles.completeButtonText}>Complete The Match</Text>
+        </TouchableOpacity>
+      </View>
       </View>
     </SafeAreaView>
   );
