@@ -1,7 +1,9 @@
 import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { DefeatPill, MatchTypePill, VictoryPill } from './index';
+import { DefeatPill } from './DefeatPill';
+import { MatchTypePill } from './MatchTypePill';
+import { VictoryPill } from './VictoryPill';
 
 interface Match {
   id: string;
@@ -27,7 +29,7 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
 
   const styles = StyleSheet.create({
     matchCard: {
-      backgroundColor: 'rgb(42, 42, 42)',
+      backgroundColor: '#2A2A2A',
       borderRadius: width * 0.025,
       padding: width * 0.04,
       marginBottom: height * 0.015,

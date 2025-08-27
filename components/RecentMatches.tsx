@@ -45,7 +45,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       width: '100%',
     },
     matchCard: {
-      backgroundColor: Colors.gray.dark,
+      backgroundColor: '#2A2A2A',
       borderRadius: width * 0.035,
       padding: width * 0.025,
       width: '100%',

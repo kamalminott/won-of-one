@@ -15,6 +15,7 @@ export { RecentMatchCard } from './RecentMatchCard';
 export { RecentMatches } from './RecentMatches';
 export { ScoreProgressionChart } from './ScoreProgressionChart';
 export { SummaryCard } from './SummaryCard';
+export { SwipeToCompleteButton } from './SwipeToCompleteButton';
 export { ThemedText } from './ThemedText';
 export { ThemedView } from './ThemedView';
 export { TouchesByPeriodChart } from './TouchesByPeriodChart';

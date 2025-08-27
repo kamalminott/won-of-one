@@ -93,7 +93,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
     rowContainer: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      marginTop: height * 0.02,
+      marginTop: height * 0.002,
       gap: width * 0.02,
       marginHorizontal: width * 0.02,
     },

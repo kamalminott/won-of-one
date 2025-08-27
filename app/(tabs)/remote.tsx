@@ -1,9 +1,12 @@
+import { SwipeToCompleteButton } from '@/components/SwipeToCompleteButton';
 import { Colors } from '@/constants/Colors';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RemoteScreen() {
@@ -67,6 +70,12 @@ export default function RemoteScreen() {
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState<string>('');
+
+  // Profile emojis for fencer cards
+  const [aliceProfileEmoji, setAliceProfileEmoji] = useState('👩');
+  const [bobProfileEmoji, setBobProfileEmoji] = useState('👨');
+
+  const [toggleCardPosition, setToggleCardPosition] = useState<'left' | 'right'>('left'); // Track which card has the toggle
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -383,6 +392,14 @@ export default function RemoteScreen() {
     setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
     setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
     
+    // Reset injury timer state
+    setIsInjuryTimer(false);
+    setInjuryTimeRemaining(300);
+    if (injuryTimerRef) {
+      clearInterval(injuryTimerRef);
+      setInjuryTimerRef(null);
+    }
+    
     setScoreChangeCount(0); // Reset score change counter
     setShowScoreWarning(false); // Reset warning popup
     setPendingScoreAction(null); // Reset pending action
@@ -427,6 +444,14 @@ export default function RemoteScreen() {
     setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
     setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
     
+    // Reset injury timer state
+    setIsInjuryTimer(false);
+    setInjuryTimeRemaining(300);
+    if (injuryTimerRef) {
+      clearInterval(injuryTimerRef);
+      setInjuryTimerRef(null);
+    }
+    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsManualReset(true); // Set flag to prevent auto-sync
   }, [breakTimerRef]);
@@ -448,6 +473,8 @@ export default function RemoteScreen() {
     const tempBobRedCards = bobRedCards;
     const tempAliceCards = aliceCards;
     const tempBobCards = bobCards;
+    const tempAliceEmoji = aliceProfileEmoji;
+    const tempBobEmoji = bobProfileEmoji;
     
     // Animate the swap
     setTimeout(() => {
@@ -460,6 +487,10 @@ export default function RemoteScreen() {
         alice: tempBobName,
         bob: tempAliceName
       });
+      
+      // Swap emojis
+      setAliceProfileEmoji(tempBobEmoji);
+      setBobProfileEmoji(tempAliceEmoji);
       
       // Swap cards
       setAliceYellowCards(tempBobYellowCards);
@@ -475,6 +506,9 @@ export default function RemoteScreen() {
         bob: prev.bob === 'left' ? 'right' : 'left'
       }));
       
+      // Swap toggle position
+      setToggleCardPosition(prev => prev === 'left' ? 'right' : 'left');
+      
       console.log('🔄 Fencers swapped successfully');
       
       // Reset swapping state after animation
@@ -482,7 +516,7 @@ export default function RemoteScreen() {
         setIsSwapping(false);
       }, 300);
     }, 150);
-  }, [isSwapping, aliceScore, bobScore, fencerNames, aliceYellowCards, bobYellowCards, aliceRedCards, bobRedCards, aliceCards, bobCards]);
+  }, [isSwapping, aliceScore, bobScore, fencerNames, aliceYellowCards, bobYellowCards, aliceRedCards, bobRedCards, aliceCards, bobCards, aliceProfileEmoji, bobProfileEmoji, toggleCardPosition]);
 
   const toggleUserProfile = useCallback(() => {
     setShowUserProfile(prev => !prev);
@@ -1044,8 +1078,6 @@ export default function RemoteScreen() {
     if (!hasMatchStarted && !isPlaying && timeRemaining === matchTime) {
       return {
         timerDisplayMargin: height * 0.02, // Less margin for ready state
-        progressBarMargin: height * 0.005, // Smaller progress bar margin
-        showProgressBar: false // No progress bar in ready state
       };
     }
     
@@ -1053,8 +1085,6 @@ export default function RemoteScreen() {
     if (hasMatchStarted && !isBreakTime) {
       return {
         timerDisplayMargin: height * 0.04, // More margin for active state
-        progressBarMargin: height * 0.01, // Standard progress bar margin
-        showProgressBar: true // Show progress bar
       };
     }
     
@@ -1062,16 +1092,12 @@ export default function RemoteScreen() {
     if (isBreakTime) {
       return {
         timerDisplayMargin: height * 0.03, // Medium margin for break state
-        progressBarMargin: height * 0.01, // Standard progress bar margin
-        showProgressBar: false // No progress bar during break
       };
     }
     
     // Default state
     return {
       timerDisplayMargin: height * 0.03,
-      progressBarMargin: height * 0.01,
-      showProgressBar: false
     };
   };
 
@@ -1110,7 +1136,7 @@ export default function RemoteScreen() {
       paddingVertical: height * 0.004,
       borderRadius: width * 0.04,
       position: 'absolute',
-      top: height * -0.02, // Moved further up to appear outside the card
+      top: height * 0.001, // Changed from negative to positive to move down in the card
       left: '50%',
       transform: [{ translateX: -width * 0.08 }], // Moved more to the left
       zIndex: 10,
@@ -1143,7 +1169,7 @@ export default function RemoteScreen() {
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015), // Reduced from -0.02 to prevent overlap with progress bar
+      marginTop: -(height * 0.015),
     },
     countdownTextWarning: {
       fontSize: width * 0.12,
@@ -1153,7 +1179,7 @@ export default function RemoteScreen() {
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015), // Reduced from -0.02 to prevent overlap with progress bar
+      marginTop: -(height * 0.015),
     },
     countdownTextDanger: {
       fontSize: width * 0.12,
@@ -1163,7 +1189,7 @@ export default function RemoteScreen() {
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015), // Reduced from -0.02 to prevent overlap with progress bar
+      marginTop: -(height * 0.015),
     },
     countdownTextDangerPulse: {
       fontSize: width * 0.12,
@@ -1173,7 +1199,7 @@ export default function RemoteScreen() {
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015), // Reduced from -0.02 to prevent overlap with progress bar
+      marginTop: -(height * 0.015),
     },
 
     timerHeader: {
@@ -1251,6 +1277,7 @@ export default function RemoteScreen() {
       justifyContent: 'space-between',
       alignItems: 'center',
       marginBottom: height * 0.005,
+      marginLeft: width * 0.05,
     },
     editNamesButton: {
       width: width * 0.06,
@@ -1259,6 +1286,7 @@ export default function RemoteScreen() {
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
+      marginRight: width * 0.05,
     },
     editNamesButtonText: {
       fontSize: width * 0.04,
@@ -1346,9 +1374,9 @@ export default function RemoteScreen() {
       gap: width * 0.035,
     },
     scoreButton: {
-      width: width * 0.09,
-      height: width * 0.09,
-      borderRadius: width * 0.045,
+      width: width * 0.15,
+      height: width * 0.15,
+      borderRadius: width * 0.075,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1364,12 +1392,11 @@ export default function RemoteScreen() {
       width: width * 0.13,
       height: width * 0.13,
       borderRadius: width * 0.065,
-      backgroundColor: Colors.purple.primary,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
-      borderWidth: 2,
-      borderColor: 'white',
+      borderWidth: 1,
+      borderColor: '#FFFFFF',
     },
     swapIcon: {
       fontSize: width * 0.065,
@@ -1596,24 +1623,7 @@ export default function RemoteScreen() {
       color: 'white',
     },
 
-    // Timer Progress Bar
-    timerProgressContainer: {
-      width: '100%',
-      height: height * 0.008,
-      backgroundColor: 'rgba(255, 255, 255, 0.2)',
-      borderRadius: height * 0.004,
-      marginBottom: height * 0.008,
-      overflow: 'hidden',
-    },
-    timerProgressBar: {
-      height: '100%',
-      backgroundColor: 'transparent',
-      borderRadius: height * 0.004,
-    },
-    timerProgressFill: {
-      height: '100%',
-      borderRadius: height * 0.004,
-    },
+
     countdownWarningText: {
       fontSize: width * 0.03, // Reduced from 0.04 to 0.03 to fit better
       color: Colors.yellow.accent,
@@ -1633,6 +1643,7 @@ export default function RemoteScreen() {
       color: 'white',
       textAlign: 'center',
       marginBottom: height * 0.005,
+      marginTop: height * 0.01,
     },
     matchStatusSubtext: {
       fontSize: width * 0.03,
@@ -2092,8 +2103,9 @@ export default function RemoteScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
-      <View style={[styles.container, { paddingBottom: insets.bottom + 5 }]}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
+        <View style={[styles.container, { paddingBottom: insets.bottom + 5 }]}>
       {/* Match Timer Section */}
       <LinearGradient
         colors={Colors.timerBackground.colors}
@@ -2115,35 +2127,17 @@ export default function RemoteScreen() {
           </View>
           {!isPlaying && !hasMatchStarted && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
-              <Text style={styles.editButtonText}>✏️</Text>
+              <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
           )}
         </View>
         
-        {/* Timer Progress Bar - moved outside to stay at top */}
-        {timerStyles.showProgressBar && (
-          <View style={[styles.timerProgressContainer, { marginTop: timerStyles.progressBarMargin }]}>
-            <View style={styles.timerProgressBar}>
-              <View 
-                style={[
-                  styles.timerProgressFill, 
-                  { 
-                    width: `${(timeRemaining / matchTime) * 100}%`,
-                    backgroundColor: !isPlaying && timeRemaining > 0 && timeRemaining < matchTime ? 
-                                 Colors.orange.accent : // Orange when paused
-                                 timeRemaining <= 30 ? Colors.red.accent : 
-                                 timeRemaining <= 60 ? Colors.yellow.accent : Colors.green.accent
-                  }
-                ]} 
-              />
-            </View>
-          </View>
-        )}
+
         
         <View style={[styles.timerDisplay, { marginTop: timerStyles.timerDisplayMargin }]}>
           {/* Debug overlay removed */}
            
-           {/* Timer Progress Bar - REMOVED FROM HERE */}
+ 
           
           {/* Break Timer Display - shows when break is active (absolute priority) */}
           {isBreakTime && (
@@ -2160,19 +2154,33 @@ export default function RemoteScreen() {
           {/* Injury Timer Display - shows when injury timer is active (higher priority than match timer) */}
           {!isBreakTime && isInjuryTimer && (
             <View style={[styles.countdownDisplay, { 
-              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+              backgroundColor: hasMatchStarted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)',
               borderWidth: 2,
-              borderColor: '#EF4444',
-              borderRadius: 12
+              borderColor: hasMatchStarted ? '#EF4444' : '#6B7280',
+              borderRadius: 12,
+              paddingVertical: height * 0.02,
+              paddingHorizontal: width * 0.04,
+              minHeight: height * 0.12,
+              marginBottom: height * 0.02,
+              opacity: hasMatchStarted ? 1 : 0.6
             }]}>
-              <Text style={[styles.countdownText, { color: '#EF4444', fontSize: width * 0.08 }]}>
+              <Text style={[styles.countdownText, { 
+                color: hasMatchStarted ? '#EF4444' : '#6B7280', 
+                fontSize: width * 0.08 
+              }]}>
                 {formatTime(injuryTimeRemaining)}
               </Text>
-              <Text style={[styles.countdownWarningText, { color: '#EF4444', fontSize: width * 0.035 }]}>
+              <Text style={[styles.countdownWarningText, { 
+                color: hasMatchStarted ? '#EF4444' : '#6B7280', 
+                fontSize: width * 0.035 
+              }]}>
                 🏥 INJURY TIME - 5:00
               </Text>
               {previousMatchState && (
-                <Text style={[styles.countdownWarningText, { color: '#EF4444', fontSize: width * 0.03 }]}>
+                <Text style={[styles.countdownWarningText, { 
+                  color: hasMatchStarted ? '#EF4444' : '#6B7280', 
+                  fontSize: width * 0.03 
+                }]}>
                   Match paused at {formatTime(previousMatchState.timeRemaining)}
                 </Text>
               )}
@@ -2293,14 +2301,14 @@ export default function RemoteScreen() {
         {/* Period Control - moved to bottom of card */}
         <View style={styles.periodControl}>
           <TouchableOpacity style={styles.periodButton} onPress={decrementPeriod}>
-            <Text style={styles.periodButtonText}>-</Text>
+            <Ionicons name="remove" size={16} color="white" />
           </TouchableOpacity>
           <View style={styles.periodDisplay}>
             <Text style={styles.periodText}>Period</Text>
             <Text style={styles.periodNumber}>{currentPeriod}/3</Text>
           </View>
           <TouchableOpacity style={styles.periodButton} onPress={incrementPeriod}>
-            <Text style={styles.periodButtonText}>+</Text>
+            <Ionicons name="add" size={16} color="white" />
           </TouchableOpacity>
         </View>
         
@@ -2319,17 +2327,27 @@ export default function RemoteScreen() {
       </View>
 
       {/* Fencers Section */}
-              <View style={[styles.fencersHeader, { marginTop: -(height * 0.035) }]}>
+                            <View style={[styles.fencersHeader, { 
+                marginTop: (hasMatchStarted && aliceYellowCards.length === 0 && aliceRedCards.length === 0 && bobYellowCards.length === 0 && bobRedCards.length === 0)
+                  ? -(height * 0.02)  // Move up when match in progress and no cards
+                  : -(height * 0.035)  // Original positioning for other states
+              }]}>
         <Text style={styles.fencersHeading}>Fencers</Text>
         <TouchableOpacity 
           style={styles.editNamesButton}
           onPress={openEditNamesPopup}
         >
-          <Text style={styles.editNamesButtonText}>✏️</Text>
+          <Ionicons name="pencil" size={16} color="white" />
         </TouchableOpacity>
       </View>
       
-      <View style={styles.fencersContainer}>
+      <View style={[
+        styles.fencersContainer,
+        // Reduce margin when match is in progress and no cards issued
+        (hasMatchStarted && aliceYellowCards.length === 0 && aliceRedCards.length === 0 && bobYellowCards.length === 0 && bobRedCards.length === 0) ? {
+          marginBottom: height * 0.005, // Reduce margin from 0.015 to 0.005
+        } : {}
+      ]}>
         {/* Alice's Card */}
         <View style={[
           styles.fencerCard, 
@@ -2339,52 +2357,44 @@ export default function RemoteScreen() {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
             padding: width * 0.03, // Reduce padding from 0.04 to 0.03
             minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+          } : 
+          // Make fencer cards longer when match is in progress and no cards issued
+          (hasMatchStarted && aliceYellowCards.length === 0 && aliceRedCards.length === 0 && bobYellowCards.length === 0 && bobRedCards.length === 0) ? {
+            width: width * 0.42, // Keep width at 0.42
+            padding: width * 0.04, // Keep normal padding
+            minHeight: height * 0.32, // Increase height from 0.25 to 0.32
           } : {}
         ]}>
-          {/* Sliding Switch - Top Left */}
-          <View style={[styles.slidingSwitch, { 
-            position: 'absolute', 
-            top: width * 0.02, 
-            left: width * 0.02, 
-            zIndex: 5 
-          }]}>
-            <TouchableOpacity 
-              style={[
-                styles.switchTrack, 
-                { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' },
-                // Make toggle switch smaller when timer is ready AND cards are present
-                (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-                  width: width * 0.08,
-                  height: width * 0.04,
-                  borderRadius: width * 0.02,
-                } : {}
-              ]}
-              onPress={() => setShowUserProfile(!showUserProfile)}
-            >
-              <View style={[
-                styles.switchThumb, 
-                { 
-                  transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }],
-                  // Make toggle thumb smaller when timer is ready AND cards are present
-                  ...((!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-                    width: width * 0.035,
-                    height: width * 0.035,
-                    borderRadius: width * 0.0175,
-                    top: width * 0.0025,
-                    left: width * 0.0025,
-                    // Adjust transform for smaller track
-                    transform: [{ translateX: showUserProfile ? width * 0.045 : 0 }]
-                  } : {})
-                }
-              ]}>
-              </View>
-            </TouchableOpacity>
-          </View>
+          {/* Sliding Switch - Top Left - Only show when toggle is on left card */}
+          {toggleCardPosition === 'left' && (
+            <View style={[styles.slidingSwitch, { 
+              position: 'absolute', 
+              top: width * 0.02, 
+              left: width * 0.02, 
+              zIndex: 5 
+            }]}>
+              <TouchableOpacity 
+                style={[
+                  styles.switchTrack, 
+                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
+                ]}
+                onPress={() => setShowUserProfile(!showUserProfile)}
+              >
+                <View style={[
+                  styles.switchThumb, 
+                  { 
+                    transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }]
+                  }
+                ]}>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
           
           <View style={styles.profileContainer}>
             <View style={styles.profilePicture}>
               <Text style={styles.profileInitial}>
-                {showUserProfile ? '👤' : '👩'}
+                {toggleCardPosition === 'left' && showUserProfile ? '👤' : aliceProfileEmoji}
               </Text>
               <View style={styles.cameraIcon}>
                 <Text style={styles.cameraIconText}>📷</Text>
@@ -2426,7 +2436,7 @@ export default function RemoteScreen() {
           )}
           
           <Text style={[styles.fencerName, {color: 'black'}]}>
-            {showUserProfile ? 'You' : fencerNames.alice}
+            {toggleCardPosition === 'left' && showUserProfile ? 'You' : fencerNames.alice}
           </Text>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{aliceScore.toString().padStart(2, '0')}</Text>
           
@@ -2441,7 +2451,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={decrementAliceScore}>
-              <Text style={[styles.scoreButtonText, {color: 'black'}]}>-</Text>
+              <Ionicons name="remove" size={36} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -2453,15 +2463,30 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={incrementAliceScore}>
-              <Text style={[styles.scoreButtonText, {color: 'black'}]}>+</Text>
+              <Ionicons name="add" size={36} color="black" />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Swap Fencers Button */}
-        <TouchableOpacity style={[styles.swapButton, { position: 'absolute', zIndex: 10, left: width * 0.5 - width * 0.095 }]} onPress={swapFencers}>
-          <Text style={styles.swapIcon}>↔️</Text>
-        </TouchableOpacity>
+        <LinearGradient
+          colors={['#D6A4F0', '#969DFA']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.swapButton, { position: 'absolute', zIndex: 10, left: width * 0.5 - width * 0.075 }]}
+        >
+          <TouchableOpacity 
+            style={{ 
+              width: '100%', 
+              height: '100%', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }} 
+            onPress={swapFencers}
+          >
+            <Ionicons name="swap-horizontal" size={28} color="white" />
+          </TouchableOpacity>
+        </LinearGradient>
 
         {/* Bob's Card */}
         <View style={[
@@ -2472,11 +2497,45 @@ export default function RemoteScreen() {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
             padding: width * 0.03, // Reduce padding from 0.04 to 0.03
             minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+          } : 
+          // Make fencer cards longer when match is in progress and no cards issued
+          (hasMatchStarted && aliceYellowCards.length === 0 && aliceRedCards.length === 0 && bobYellowCards.length === 0 && bobRedCards.length === 0) ? {
+            width: width * 0.42, // Keep width at 0.42
+            padding: width * 0.04, // Keep normal padding
+            minHeight: height * 0.32, // Increase height from 0.25 to 0.32
           } : {}
         ]}>
+          {/* Sliding Switch - Top Right - Only show when toggle is on right card */}
+          {toggleCardPosition === 'right' && (
+            <View style={[styles.slidingSwitch, { 
+              position: 'absolute', 
+              top: width * 0.02, 
+              right: width * 0.02, // Position on right side instead of left
+              zIndex: 5 
+            }]}>
+              <TouchableOpacity 
+                style={[
+                  styles.switchTrack, 
+                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
+                ]}
+                onPress={() => setShowUserProfile(!showUserProfile)}
+              >
+                <View style={[
+                  styles.switchThumb, 
+                  { 
+                    transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }]
+                  }
+                ]}>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+          
           <View style={styles.profileContainer}>
             <View style={styles.profilePicture}>
-              <Text style={styles.profileInitial}>👨</Text>
+              <Text style={styles.profileInitial}>
+                {toggleCardPosition === 'right' && showUserProfile ? '👤' : bobProfileEmoji}
+              </Text>
               <View style={styles.cameraIcon}>
                 <Text style={styles.cameraIconText}>📷</Text>
               </View>
@@ -2516,7 +2575,9 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <Text style={[styles.fencerName, {color: 'black'}]}>{fencerNames.bob}</Text>
+          <Text style={[styles.fencerName, {color: 'black'}]}>
+            {toggleCardPosition === 'right' && showUserProfile ? 'You' : fencerNames.bob}
+          </Text>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{bobScore.toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
@@ -2530,7 +2591,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={decrementBobScore}>
-              <Text style={[styles.scoreButtonText, {color: 'black'}]}>-</Text>
+              <Ionicons name="remove" size={36} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -2542,7 +2603,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={incrementBobScore}>
-              <Text style={[styles.scoreButtonText, {color: 'black'}]}>+</Text>
+              <Ionicons name="add" size={36} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2601,19 +2662,26 @@ export default function RemoteScreen() {
             {
               backgroundColor: (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
                 Colors.yellow.accent :
-                isInjuryTimer ? '#EF4444' : Colors.purple.primary
+                hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
             },
             // Only make button smaller when timer is ready AND cards are present
             (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
               paddingHorizontal: width * 0.025, // Reduce horizontal padding
               paddingVertical: height * 0.010, // Reduce vertical padding
-            } : {}
+            } : {},
+            // Grey out when match hasn't started
+            !hasMatchStarted && {
+              opacity: 0.6
+            }
           ]}
           onPress={
-            (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
-              () => setShowPriorityPopup(true) :
-              (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
+            hasMatchStarted ? (
+              (currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ?
+                () => setShowPriorityPopup(true) :
+                (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
+            ) : undefined
           }
+          disabled={!hasMatchStarted}
         >
           <Text style={styles.assignPriorityIcon}>
             {(currentPeriod === 3 && timeRemaining === 0 && aliceScore === bobScore) ? '🎲' : '🏥'}
@@ -2688,11 +2756,7 @@ export default function RemoteScreen() {
         <TouchableOpacity 
           style={{
             flex: 1,
-            backgroundColor: isBreakTime ? '#F59E0B' : // Orange for skip button
-                             isInjuryTimer ? '#EF4444' : // Red for injury timer skip button
-                             isPlaying ? '#F97316' : 
-                             (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? '#3B82F6' : 
-                             timeRemaining === 0 ? '#9CA3AF' : '#10B981',
+            backgroundColor: '#2A2A2A',
             paddingVertical: 10,
             paddingHorizontal: 15,
             borderRadius: 8,
@@ -2736,9 +2800,17 @@ export default function RemoteScreen() {
             }
           }}
         >
-          <Text style={{fontSize: 18, marginRight: 6}}>
-            {isInjuryTimer ? '⏭️' : isBreakTime ? '⏭️' : isPlaying ? '⏸️' : '▶️'}
-          </Text>
+          <Ionicons 
+            name={
+              isInjuryTimer ? 'play-forward' : 
+              isBreakTime ? 'play-forward' : 
+              isPlaying ? 'pause' : 
+              'play'
+            }
+            size={18} 
+            color="white" 
+            style={{marginRight: 6}}
+          />
           <Text style={{fontSize: 14, fontWeight: '600', color: 'white'}}>
             {isInjuryTimer ? 'Skip Injury' : 
              isBreakTime ? 'Skip Break' : 
@@ -2751,45 +2823,49 @@ export default function RemoteScreen() {
         <TouchableOpacity 
           style={{
             width: 60,
-            backgroundColor: '#374151',
+            backgroundColor: '#FB5D5C',
             paddingVertical: 10,
-            borderRadius: 8,
+            borderRadius: 20,
             alignItems: 'center',
             justifyContent: 'center',
             borderWidth: 2,
-            borderColor: 'white',
-            minHeight: 45
+            borderColor: 'transparent',
+            minHeight: 45,
+            shadowColor: '#6C5CE7',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.25,
+            shadowRadius: 14,
+            elevation: 8
           }} 
           onPress={resetTimer}
         >
-          <Text style={{fontSize: 18}}>🔄</Text>
+          <Ionicons name="refresh" size={24} color="white" />
         </TouchableOpacity>
       </View>
 
       {/* Complete Match Button */}
-      <View style={[
-        styles.completeMatchButton, 
-        // Only move closer to bottom tab bar when timer is ready AND cards are present
-        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-          position: 'absolute',
-          bottom: height * 0.05, // Position from bottom when conditions met
-          left: 0,
-          right: 0,
-        } : {
-          position: 'relative', // Normal positioning when no cards or match in progress
-          marginTop: -(height * 0.01),
-          marginBottom: height * 0.01,
-        }
-      ]}>
-        <TouchableOpacity 
-          style={styles.completeButton}
-          onPress={() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      <View style={styles.completeMatchButton}>
+        <SwipeToCompleteButton
+          title="Complete The Match"
+          customStyle={
+            // Only move closer to bottom tab bar when timer is ready AND cards are present
+            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
+              position: 'absolute',
+              bottom: height * 0.05, // Position from bottom when conditions met
+              left: 0,
+              right: 0,
+              marginLeft: 2, // Move right only when cards are issued
+            } : {
+              position: 'relative', // Normal positioning when no cards or match in progress
+              // No fixed marginTop - maintains natural distance from play button
+              marginBottom: height * 0.01,
+              // No marginLeft when no cards - stays in normal position
+            }
+          }
+          onSwipeSuccess={() => {
             router.push('/match-summary');
           }}
-        >
-          <Text style={styles.completeButtonText}>Complete The Match</Text>
-        </TouchableOpacity>
+        />
       </View>
 
       {/* Edit Time Popup */}
@@ -2974,33 +3050,8 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
-
-      {/* Complete Match Button */}
-      <View style={[
-        styles.completeMatchButton, 
-        // Only move closer to bottom tab bar when timer is ready AND cards are present
-        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-          position: 'absolute',
-          bottom: height * 0.05, // Position from bottom when conditions met
-          left: 0,
-          right: 0,
-        } : {
-          position: 'relative', // Normal positioning when no cards or match in progress
-          marginTop: -(height * 0.01),
-          marginBottom: height * 0.01,
-        }
-      ]}>
-        <TouchableOpacity 
-          style={styles.completeButton}
-          onPress={() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            router.push('/match-summary');
-          }}
-        >
-          <Text style={styles.completeButtonText}>Complete The Match</Text>
-        </TouchableOpacity>
-      </View>
       </View>
     </SafeAreaView>
+  </GestureHandlerRootView>
   );
 }

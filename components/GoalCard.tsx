@@ -301,7 +301,7 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const styles = StyleSheet.create({
     container: {
-      backgroundColor: Colors.gray.dark,
+      backgroundColor: '#2A2A2A',
       borderRadius: width * 0.04,
       padding: width * 0.025,
       marginBottom: height * 0.01,

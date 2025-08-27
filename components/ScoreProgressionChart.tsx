@@ -18,17 +18,17 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     container: {
       backgroundColor: '#2B2B2B',
       borderRadius: width * 0.03,
-      padding: width * 0.04,
-      marginBottom: height * 0.02,
+      padding: width * 0.03,
+      marginBottom: height * 0.015,
       marginHorizontal: width * 0.04,
       left: 0,
       right: 0,
     },
     title: {
-      fontSize: Math.round(width * 0.04),
+      fontSize: Math.round(width * 0.035),
       fontWeight: '600',
       color: 'white',
-      marginBottom: height * 0.02,
+      marginBottom: height * 0.015,
       textAlign: 'center',
       alignSelf: 'center',
     },
@@ -41,8 +41,8 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     legend: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginTop: height * 0.02,
-      gap: width * 0.05,
+      marginTop: height * 0.015,
+      gap: width * 0.04,
     },
     legendItem: {
       flexDirection: 'row',
@@ -84,7 +84,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               { value: 9, dataPointText: '9' },
               { value: 12, dataPointText: '12' },
             ]}
-            height={height * 0.2}
+            height={height * 0.15}
             width={width * 0.8}
             color="#10B981"
             secondaryLineConfig={{
