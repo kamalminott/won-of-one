@@ -62,6 +62,9 @@ export default function HomeScreen() {
       paddingTop: height * 0.06,
       paddingBottom: height * 0.02,
       zIndex: 10,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
     },
     scrollView: {
       flex: 1,
@@ -96,6 +99,17 @@ export default function HomeScreen() {
       fontSize: width * 0.04,
       fontWeight: '600',
     },
+    loginButton: {
+      backgroundColor: Colors.purple.primary,
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.01,
+      borderRadius: 8,
+    },
+    loginButtonText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+    },
   });
 
   return (
@@ -108,6 +122,12 @@ export default function HomeScreen() {
             streak={7}
             onSettingsPress={handleSettings}
           />
+          <TouchableOpacity 
+            style={styles.loginButton} 
+            onPress={() => router.push('/login')}
+          >
+            <Text style={styles.loginButtonText}>Login</Text>
+          </TouchableOpacity>
         </View>
         
         <ScrollView 
