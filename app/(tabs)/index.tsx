@@ -32,7 +32,7 @@ export default function HomeScreen() {
   ];
 
   const handleSettings = () => {
-    Alert.alert('Settings', 'Settings opened!');
+    router.push('/settings');
   };
 
   const handleSetNewGoal = () => {

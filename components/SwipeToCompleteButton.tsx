@@ -16,22 +16,27 @@ export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
   customStyle
 }) => {
   const { width, height } = useWindowDimensions();
+  
+  // Responsive breakpoints for small screens
+  const isSmallScreen = width < 400;
+  const isTinyScreen = width < 360;
+  const isNexusS = width <= 360; // Nexus S specific optimization
 
   const styles = StyleSheet.create({
     container: {
-      width: '94%',
-      height: 45,
-      borderRadius: 12,
+      width: isNexusS ? '98%' : '94%', // Wider on Nexus S for better fit
+      height: isNexusS ? 35 : 45, // Smaller height on Nexus S
+      borderRadius: isNexusS ? 8 : 12, // Smaller border radius on Nexus S
       ...customStyle, // Apply custom styles from parent
     },
     swipeButton: {
-      height: 45,
+      height: isNexusS ? 35 : 45, // Smaller height on Nexus S
       width: '100%',
-      borderRadius: 12,
+      borderRadius: isNexusS ? 8 : 12, // Smaller border radius on Nexus S
     },
     titleStyle: {
       color: 'white',
-      fontSize: 16,
+      fontSize: isNexusS ? 14 : 16, // Smaller font on Nexus S
       fontWeight: '600',
       textAlign: 'center',
     },
@@ -50,17 +55,17 @@ export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
         title={title}
         titleStyles={styles.titleStyle}
         containerStyles={styles.swipeButton}
-        height={32}
+        height={isNexusS ? 28 : 32} // Smaller height on Nexus S
         railBackgroundColor="#6C5CE7"
         railFillBorderColor="transparent"
         railFillBackgroundColor="transparent"
         thumbIconBorderColor='transparent'
         thumbIconBackgroundColor="white"
-        thumbIconWidth={30}
-        thumbIconComponent={() => <Ionicons name="chevron-forward" size={20} color="#6C5CE7" />}
-        thumbIconStyles={{ borderRadius: 10, transform: [{ translateX: 5 }] }}
+        thumbIconWidth={isNexusS ? 24 : 30} // Smaller thumb on Nexus S
+        thumbIconComponent={() => <Ionicons name="chevron-forward" size={isNexusS ? 16 : 20} color="#6C5CE7" />}
+        thumbIconStyles={{ borderRadius: isNexusS ? 8 : 10, transform: [{ translateX: isNexusS ? 3 : 5 }] }}
         onSwipeSuccess={handleSuccess}
-        swipeSuccessThreshold={50}
+        swipeSuccessThreshold={isNexusS ? 40 : 50} // Smaller threshold on Nexus S
         disabled={false}
       />
     </View>

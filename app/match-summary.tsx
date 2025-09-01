@@ -1,3 +1,4 @@
+import { BackButton } from '@/components/BackButton';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { Colors } from '@/constants/Colors';
@@ -97,9 +98,7 @@ export default function MatchSummaryScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
+        <BackButton onPress={handleBack} />
         <Text style={styles.title}>Match Summary</Text>
         <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
           <Ionicons name="pencil" size={24} color="white" />

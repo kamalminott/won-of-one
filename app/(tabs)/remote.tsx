@@ -14,6 +14,11 @@ export default function RemoteScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   
+  // Responsive breakpoints for small screens
+  const isSmallScreen = width < 400;
+  const isTinyScreen = width < 360;
+  const isNexusS = width <= 360; // Nexus S specific optimization
+  
   const [currentPeriod, setCurrentPeriod] = useState(1);
   const [aliceScore, setAliceScore] = useState(3);
   const [bobScore, setBobScore] = useState(2);
@@ -76,6 +81,40 @@ export default function RemoteScreen() {
   const [bobProfileEmoji, setBobProfileEmoji] = useState('👨');
 
   const [toggleCardPosition, setToggleCardPosition] = useState<'left' | 'right'>('left'); // Track which card has the toggle
+
+  // Match History Logging
+  const [matchHistory, setMatchHistory] = useState<Array<{
+    type: 'score' | 'card';
+    fencer: 'alice' | 'bob';
+    action: 'increase' | 'decrease' | 'yellow' | 'red';
+    timestamp: number; // Time elapsed in match
+    score: number; // Score after the change (for score events)
+    cards: { alice: number; bob: number }; // Card state after change (for card events)
+    period: number;
+  }>>([]);
+
+  // Logging function for match events
+  const logMatchEvent = (
+    type: 'score' | 'card',
+    fencer: 'alice' | 'bob', 
+    action: 'increase' | 'decrease' | 'yellow' | 'red'
+  ) => {
+    const newEntry = {
+      type,
+      fencer,
+      action,
+      timestamp: matchTime - timeRemaining,
+      score: aliceScore + bobScore, // Total match score
+      cards: {
+        alice: aliceCards.yellow + aliceCards.red,
+        bob: bobCards.yellow + bobCards.red
+      },
+      period: currentPeriod
+    };
+    
+    setMatchHistory(prev => [...prev, newEntry]);
+    console.log(`Match Event Logged: ${fencer} ${action} at ${formatTime(newEntry.timestamp)} (Period ${currentPeriod})`);
+  };
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -182,6 +221,7 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setAliceScore(aliceScore + 1);
+      logMatchEvent('score', 'alice', 'increase'); // Log the score increase
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -192,6 +232,7 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setAliceScore(aliceScore + 1);
+      logMatchEvent('score', 'alice', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -221,6 +262,7 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setAliceScore(Math.max(0, aliceScore - 1));
+      logMatchEvent('score', 'alice', 'decrease'); // Log the score decrease
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -231,6 +273,7 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setAliceScore(Math.max(0, aliceScore - 1));
+      logMatchEvent('score', 'alice', 'decrease'); // Log the score decrease
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -260,6 +303,7 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setBobScore(bobScore + 1);
+      logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -270,6 +314,7 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setBobScore(bobScore + 1);
+      logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -299,6 +344,7 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setBobScore(Math.max(0, bobScore - 1));
+      logMatchEvent('score', 'bob', 'decrease'); // Log the score decrease
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -309,6 +355,7 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setBobScore(Math.max(0, bobScore - 1));
+      logMatchEvent('score', 'bob', 'decrease'); // Log the score decrease
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -361,6 +408,8 @@ export default function RemoteScreen() {
   const resetScores = useCallback(() => {
     setAliceScore(0);
     setBobScore(0);
+    logMatchEvent('score', 'alice', 'decrease'); // Log score reset
+    logMatchEvent('score', 'bob', 'decrease'); // Log score reset
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
@@ -425,6 +474,8 @@ export default function RemoteScreen() {
     setTimeRemaining(180); // Same as matchTime = no paused state
     setAliceScore(0); // Reset scores
     setBobScore(0);
+    logMatchEvent('score', 'alice', 'decrease'); // Log score reset
+    logMatchEvent('score', 'bob', 'decrease'); // Log score reset
     setIsBreakTime(false); // Reset break state
     setBreakTimeRemaining(60); // Reset break timer
     setScoreChangeCount(0); // Reset score change counter
@@ -1077,27 +1128,27 @@ export default function RemoteScreen() {
     // Timer Ready State (never started, can edit)
     if (!hasMatchStarted && !isPlaying && timeRemaining === matchTime) {
       return {
-        timerDisplayMargin: height * 0.02, // Less margin for ready state
+        timerDisplayMargin: isNexusS ? height * 0.015 : height * 0.02, // Less margin for ready state
       };
     }
     
     // Match Active State (running or paused)
     if (hasMatchStarted && !isBreakTime) {
       return {
-        timerDisplayMargin: height * 0.04, // More margin for active state
+        timerDisplayMargin: isNexusS ? height * 0.03 : height * 0.04, // More margin for active state
       };
     }
     
     // Break State
     if (isBreakTime) {
       return {
-        timerDisplayMargin: height * 0.03, // Medium margin for break state
+        timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03, // Medium margin for break state
       };
     }
     
     // Default state
     return {
-      timerDisplayMargin: height * 0.03,
+      timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03,
     };
   };
 
@@ -1107,21 +1158,21 @@ export default function RemoteScreen() {
     container: {
       flex: 1,
       backgroundColor: Colors.dark.background,
-      padding: '1%',
-      paddingTop: height * 0.005,
-      paddingBottom: height * 0.002,
+      padding: isNexusS ? width * 0.005 : width * 0.01,
+      paddingTop: isNexusS ? height * 0.002 : height * 0.005,
+      paddingBottom: isNexusS ? height * 0.001 : height * 0.002,
       overflow: 'hidden',
     },
     
     // Match Timer Section
     matchTimerCard: {
       // Background will be handled by LinearGradient
-      borderWidth: 2,
+      borderWidth: isNexusS ? width * 0.003 : width * 0.005,
       borderColor: Colors.timerBackground.borderColors[0],
-      borderRadius: width * 0.04,
-      padding: width * 0.01,
+      borderRadius: isNexusS ? width * 0.03 : width * 0.04,
+      padding: isNexusS ? width * 0.005 : width * 0.01,
       marginTop: 0,
-      marginBottom: height * 0.001,
+      marginBottom: isNexusS ? height * 0.0005 : height * 0.001,
       position: 'relative',
       // Shadow effects
       shadowColor: Colors.timerBackground.shadowColor,
@@ -1156,30 +1207,30 @@ export default function RemoteScreen() {
     countdownDisplay: {
       alignItems: 'center',
       justifyContent: 'center',
-      height: height * 0.08, // Reverted back to original size
+      height: isNexusS ? height * 0.06 : height * 0.08, // Smaller height on Nexus S
       width: '100%',
       // Timer background styling removed - now handled by main container
-      borderRadius: width * 0.03,
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
     },
     countdownText: {
-      fontSize: width * 0.12,
+      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      textShadowOffset: { width: 0, height: height * 0.002 },
+      textShadowRadius: width * 0.005,
+      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
     },
     countdownTextWarning: {
-      fontSize: width * 0.12,
+      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
       color: Colors.yellow.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      textShadowOffset: { width: 0, height: height * 0.002 },
+      textShadowRadius: width * 0.005,
+      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
     },
     countdownTextDanger: {
       fontSize: width * 0.12,
@@ -1224,25 +1275,25 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'space-between',
       backgroundColor: '#E6DDFF',
-      borderRadius: width * 0.03,
-      padding: width * 0.025,
-      marginTop: height * 0.002, // Reduced for tighter spacing
-      borderWidth: 1,
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      padding: isNexusS ? width * 0.015 : width * 0.025, // Smaller padding on Nexus S
+      marginTop: isNexusS ? height * 0.001 : height * 0.002, // Smaller margin on Nexus S
+      borderWidth: isNexusS ? width * 0.002 : width * 0.0025,
       borderColor: 'rgba(168, 85, 247, 0.3)',
     },
     periodButton: {
-      width: width * 0.07,
-      height: width * 0.07,
-      borderRadius: width * 0.035,
+      width: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
+      height: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
+      borderRadius: isNexusS ? width * 0.03 : width * 0.035,
       backgroundColor: 'rgb(98,80,242)',
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 3 },
+      shadowOffset: { width: 0, height: height * 0.004 },
       shadowOpacity: 0.3,
-      shadowRadius: 4,
+      shadowRadius: width * 0.01,
       elevation: 6,
-      borderWidth: 2,
+      borderWidth: isNexusS ? width * 0.003 : width * 0.005, // Thinner border on Nexus S
       borderColor: 'rgba(255,255,255,0.2)',
     },
     periodButtonText: {
@@ -1266,43 +1317,43 @@ export default function RemoteScreen() {
 
     // Fencers Section
     fencersHeading: {
-      fontSize: width * 0.05,
+      fontSize: isNexusS ? Math.max(width * 0.045, 16) : width * 0.05, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
-      marginBottom: height * 0.005,
-      marginTop: height * -0.01,
+      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
+      marginTop: isNexusS ? height * -0.008 : height * -0.01, // Smaller margin on Nexus S
     },
     fencersHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.005,
-      marginLeft: width * 0.05,
+      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
+      marginLeft: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButton: {
-      width: width * 0.06,
-      height: width * 0.06,
-      borderRadius: width * 0.03,
+      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
+      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
+      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: width * 0.05,
+      marginRight: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButtonText: {
-      fontSize: width * 0.04,
+      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
     },
     fencersContainer: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginBottom: height * 0.015,
-      gap: width * 0.03,
+      marginBottom: isNexusS ? height * 0.01 : height * 0.015, // Smaller margin on Nexus S
+      gap: isNexusS ? width * 0.02 : width * 0.03, // Smaller gap on Nexus S
     },
     fencerCard: {
-      width: width * 0.42,
-      padding: width * 0.04,
-      minHeight: height * 0.25,
+      width: isNexusS ? width * 0.44 : width * 0.42, // Slightly wider on Nexus S for better fit
+      padding: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
+      minHeight: isNexusS ? height * 0.2 : height * 0.25, // Smaller height on Nexus S
       backgroundColor: Colors.purple.primary,
-      borderRadius: width * 0.03,
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
@@ -1319,16 +1370,16 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     profilePicture: {
-      width: width * 0.16,
-      height: width * 0.16,
-      borderRadius: width * 0.08,
+      width: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
+      height: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
+      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
       backgroundColor: Colors.gray.medium,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
     },
     profileInitial: {
-      fontSize: width * 0.075,
+      fontSize: isNexusS ? Math.max(width * 0.065, 20) : width * 0.075, // Smaller font on Nexus S, minimum 20px
       fontWeight: '700',
       color: 'white',
     },
@@ -1358,48 +1409,48 @@ export default function RemoteScreen() {
       fontSize: width * 0.045,
     },
     fencerName: {
-      fontSize: width * 0.055,
+      fontSize: isNexusS ? Math.max(width * 0.05, 14) : width * 0.055, // Smaller font on Nexus S, minimum 14px
       fontWeight: '600',
       color: 'white',
-      marginBottom: height * 0.006,
+      marginBottom: isNexusS ? height * 0.004 : height * 0.006, // Smaller margin on Nexus S
     },
     fencerScore: {
-      fontSize: width * 0.105,
+      fontSize: isNexusS ? Math.max(width * 0.08, 32) : width * 0.105, // Smaller font on Nexus S, minimum 32px
       fontWeight: '700',
       color: 'white',
-      marginBottom: height * 0.015,
+      marginBottom: isNexusS ? height * 0.01 : height * 0.015,
     },
     scoreControls: {
       flexDirection: 'row',
       gap: width * 0.035,
     },
     scoreButton: {
-      width: width * 0.15,
-      height: width * 0.15,
-      borderRadius: width * 0.075,
+      width: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
+      height: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
+      borderRadius: isNexusS ? width * 0.05 : width * 0.06,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 2,
+      borderWidth: isNexusS ? 1 : 2, // Thinner border on Nexus S
       borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     scoreButtonText: {
-      fontSize: width * 0.065,
+      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
     },
     swapButton: {
-      width: width * 0.13,
-      height: width * 0.13,
-      borderRadius: width * 0.065,
+      width: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
+      height: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
+      borderRadius: isNexusS ? width * 0.055 : width * 0.065,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
-      borderWidth: 1,
+      borderWidth: isNexusS ? 0.5 : 1, // Thinner border on Nexus S
       borderColor: '#FFFFFF',
     },
     swapIcon: {
-      fontSize: width * 0.065,
+      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
       color: 'white',
     },
 
@@ -1408,17 +1459,17 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: height * 0.005, // Reduced from 0.015 to 0.005
-      gap: width * 0.05,
+      marginBottom: 0,
+      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
     },
     decorativeCards: {
       flexDirection: 'row',
       gap: width * 0.03,
     },
     decorativeCard: {
-      width: width * 0.08,
-      height: width * 0.12,
-      borderRadius: width * 0.015,
+      width: isNexusS ? width * 0.06 : width * 0.08, // Smaller cards on Nexus S
+      height: isNexusS ? width * 0.09 : width * 0.12, // Smaller height on Nexus S
+      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
     },
     cardRed: {
       backgroundColor: Colors.red.accent,
@@ -1436,42 +1487,42 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     yellowCard: {
-      width: width * 0.06,
-      height: width * 0.06,
+      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
       backgroundColor: Colors.yellow.accent,
-      borderRadius: width * 0.015,
+      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: height * 0.003 },
       shadowOpacity: 0.3,
-      shadowRadius: 4,
+      shadowRadius: width * 0.01,
       elevation: 5,
     },
     yellowCardText: {
-      fontSize: width * 0.035,
+      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
       color: 'white',
       fontWeight: '700',
     },
     redCardText: {
-      fontSize: width * 0.035,
+      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
       color: 'white',
       fontWeight: '700',
     },
     assignPriorityButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: width * 0.02,
+      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
       backgroundColor: Colors.purple.primary,
-      paddingHorizontal: width * 0.03,
-      paddingVertical: height * 0.012,
-      borderRadius: width * 0.03,
+      paddingHorizontal: isNexusS ? width * 0.02 : width * 0.03, // Smaller padding on Nexus S
+      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
     },
     assignPriorityIcon: {
-      fontSize: width * 0.05,
+      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     assignPriorityText: {
-      fontSize: width * 0.04,
+      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -1481,39 +1532,39 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: height * 0.005,
-      gap: width * 0.04,
+      marginBottom: 0,
+      gap: isNexusS ? width * 0.025 : width * 0.04, // Smaller gap on Nexus S
       width: '100%',
     },
     playButton: {
       flex: 1,
-      marginRight: width * 0.04,
+      marginRight: isNexusS ? width * 0.025 : width * 0.04, // Smaller margin on Nexus S
       backgroundColor: Colors.green.accent,
-      paddingVertical: height * 0.012,
-      borderRadius: width * 0.03,
+      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
-      gap: width * 0.02,
+      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
     },
     playIcon: {
-      fontSize: width * 0.05,
+      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     playText: {
-      fontSize: width * 0.04,
+      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
     resetButton: {
-      width: width * 0.06,
-      height: width * 0.06,
-      borderRadius: width * 0.03,
+      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
+      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
+      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
     },
     resetIcon: {
-      fontSize: width * 0.05,
+      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
 
 
@@ -1605,20 +1656,20 @@ export default function RemoteScreen() {
     addTimeControls: {
       flexDirection: 'row',
       justifyContent: 'space-around',
-      marginTop: height * 0.005,
-      marginBottom: height * 0.01,
+      marginTop: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
+      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
       width: '100%',
     },
     addTimeButton: {
       backgroundColor: Colors.purple.primary,
-      borderRadius: width * 0.03,
-      paddingHorizontal: width * 0.04,
-      paddingVertical: height * 0.008,
-      minWidth: width * 0.18,
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
+      paddingVertical: isNexusS ? height * 0.005 : height * 0.008, // Smaller padding on Nexus S
+      minWidth: isNexusS ? width * 0.15 : width * 0.18, // Smaller width on Nexus S
       alignItems: 'center',
     },
     addTimeButtonText: {
-      fontSize: width * 0.04,
+      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -1629,7 +1680,7 @@ export default function RemoteScreen() {
       color: Colors.yellow.accent,
       fontWeight: '600',
       textAlign: 'center',
-      marginTop: height * 0.003, // Reduced from 0.005 to 0.003 for tighter spacing
+      marginTop: height * 0.001, // Increased from 0.003 to 0.008 for better separation from period card
     },
 
     // Match Status Display
@@ -1678,9 +1729,9 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: height * 0.003 },
       shadowOpacity: 0.2,
-      shadowRadius: 4,
+      shadowRadius: width * 0.01,
       elevation: 5,
       zIndex: 3,
       position: 'absolute',
@@ -1715,7 +1766,7 @@ export default function RemoteScreen() {
       width: width * 0.05,
       height: width * 0.05,
       borderRadius: width * 0.025,
-      borderWidth: 2,
+      borderWidth: width * 0.005,
       borderColor: Colors.yellow.accent,
       position: 'absolute',
       top: width * 0.005,
@@ -1725,7 +1776,7 @@ export default function RemoteScreen() {
       width: width * 0.05,
       height: width * 0.05,
       borderRadius: width * 0.025,
-      borderWidth: 2,
+      borderWidth: width * 0.005,
       borderColor: Colors.yellow.accent,
       position: 'absolute',
       top: width * 0.005,
@@ -1744,16 +1795,16 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     redCard: {
-      width: width * 0.06,
-      height: width * 0.06,
+      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
       backgroundColor: Colors.red.accent,
-      borderRadius: width * 0.015,
+      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: height * 0.003 },
       shadowOpacity: 0.3,
-      shadowRadius: 4,
+      shadowRadius: width * 0.01,
       elevation: 5,
     },
     cardCountContainer: {
@@ -1811,9 +1862,9 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: height * 0.003 },
       shadowOpacity: 0.2,
-      shadowRadius: 4,
+      shadowRadius: width * 0.01,
       elevation: 5,
       zIndex: 3,
       position: 'absolute',
@@ -1830,19 +1881,19 @@ export default function RemoteScreen() {
     completeMatchButton: {
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: height * 0.005,
-      gap: width * 0.05,
+      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
+      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
     },
     completeButton: {
-      width: width * 0.35,
-      height: width * 0.06,
-      borderRadius: width * 0.03,
+      width: isNexusS ? width * 0.4 : width * 0.35, // Slightly wider on Nexus S for better fit
+      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller height on Nexus S
+      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
       backgroundColor: Colors.green.accent,
       alignItems: 'center',
       justifyContent: 'center',
     },
     completeButtonText: {
-      fontSize: width * 0.04,
+      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -1868,6 +1919,11 @@ export default function RemoteScreen() {
     setAliceCards({ yellow: 0, red: 0 });
     setAliceYellowCards([]);
     setAliceRedCards([]);
+    
+    // Log the card resets
+    logMatchEvent('card', 'alice', 'yellow'); // Log yellow card reset
+    logMatchEvent('card', 'alice', 'red'); // Log red card reset
+    
     console.log('  All cards cleared for Alice');
   };
 
@@ -1876,6 +1932,11 @@ export default function RemoteScreen() {
     setBobCards({ yellow: 0, red: 0 });
     setBobYellowCards([]);
     setBobRedCards([]);
+    
+    // Log the card resets
+    logMatchEvent('card', 'bob', 'yellow'); // Log yellow card reset
+    logMatchEvent('card', 'bob', 'red'); // Log red card reset
+    
     console.log('  All cards cleared for Bob');
   };
 
@@ -1890,6 +1951,12 @@ export default function RemoteScreen() {
     setBobCards({ yellow: 0, red: 0 });
     setBobYellowCards([]);
     setBobRedCards([]);
+    
+    // Log the card resets
+    logMatchEvent('card', 'alice', 'yellow'); // Log yellow card reset
+    logMatchEvent('card', 'alice', 'red'); // Log red card reset
+    logMatchEvent('card', 'bob', 'yellow'); // Log yellow card reset
+    logMatchEvent('card', 'bob', 'red'); // Log red card reset
     
     console.log('  All cards cleared for both Alice and Bob');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1922,12 +1989,14 @@ export default function RemoteScreen() {
         if (newState.red > prev.red) {
           setBobScore(prevScore => prevScore + 1);
           console.log('🔴 Alice yellow converted to red → Bob gets +1 point');
+          logMatchEvent('card', 'alice', 'red'); // Log the red card conversion
         }
       }
       
       return newState;
     });
     
+    logMatchEvent('card', 'alice', 'yellow'); // Log the yellow card
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -1958,12 +2027,14 @@ export default function RemoteScreen() {
         if (newState.red > prev.red) {
           setAliceScore(prevScore => prevScore + 1);
           console.log('🔴 Bob yellow converted to red → Alice gets +1 point');
+          logMatchEvent('card', 'bob', 'red'); // Log the red card conversion
         }
       }
       
       return newState;
     });
     
+    logMatchEvent('card', 'bob', 'yellow'); // Log the yellow card
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -2003,6 +2074,7 @@ export default function RemoteScreen() {
               // Give opponent (Bob) 1 point for Alice's red card
               setBobScore(prev => prev + 1);
               console.log('🔴 Alice red card issued → Bob gets +1 point');
+              logMatchEvent('card', 'alice', 'red'); // Log the red card
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -2031,6 +2103,7 @@ export default function RemoteScreen() {
       // Give opponent (Bob) 1 point for Alice's red card
       setBobScore(prev => prev + 1);
       console.log('🔴 Alice red card issued → Bob gets +1 point');
+      logMatchEvent('card', 'alice', 'red'); // Log the red card
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -2070,6 +2143,7 @@ export default function RemoteScreen() {
               // Give opponent (Alice) 1 point for Bob's red card
               setAliceScore(prev => prev + 1);
               console.log('🔴 Bob red card issued → Alice gets +1 point');
+              logMatchEvent('card', 'bob', 'red'); // Log the red card
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -2098,24 +2172,29 @@ export default function RemoteScreen() {
       // Give opponent (Alice) 1 point for Bob's red card
       setAliceScore(prev => prev + 1);
       console.log('🔴 Bob red card issued → Alice gets +1 point');
+      logMatchEvent('card', 'bob', 'red'); // Log the red card
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
-        <View style={[styles.container, { paddingBottom: insets.bottom + 5 }]}>
-      {/* Match Timer Section */}
+      <SafeAreaView style={[styles.container, { 
+        paddingTop: insets.top * 0.1, 
+        paddingBottom: insets.bottom,
+        backgroundColor: Colors.dark.background 
+      }]}>
+        <View style={styles.container}>
+          {/* Match Timer Section */}
       <LinearGradient
         colors={Colors.timerBackground.colors}
         style={[
           styles.matchTimerCard,
           // Make match timer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-            padding: width * 0.004, // Reduce padding even more
-            marginTop: height * 0.003, // Reduce top margin even more
-            marginBottom: height * 0.0005, // Reduce bottom margin even more
+            padding: isNexusS ? width * 0.002 : width * 0.004, // Reduce padding even more
+            marginTop: isNexusS ? height * 0.0005 : height * 0.001, // Reduce top margin even more
+            marginBottom: isNexusS ? height * 0.0002 : height * 0.0005, // Reduce bottom margin even more
           } : {}
         ]}
         start={Colors.timerBackground.start}
@@ -2155,9 +2234,9 @@ export default function RemoteScreen() {
           {!isBreakTime && isInjuryTimer && (
             <View style={[styles.countdownDisplay, { 
               backgroundColor: hasMatchStarted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)',
-              borderWidth: 2,
+              borderWidth: width * 0.005,
               borderColor: hasMatchStarted ? '#EF4444' : '#6B7280',
-              borderRadius: 12,
+              borderRadius: width * 0.03,
               paddingVertical: height * 0.02,
               paddingHorizontal: width * 0.04,
               minHeight: height * 0.12,
@@ -2209,7 +2288,7 @@ export default function RemoteScreen() {
                   
                   {/* Countdown warning */}
                   {timeRemaining <= 30 && timeRemaining > 0 && (
-                    <Text style={styles.countdownWarningText}>
+                    <Text style={[styles.countdownWarningText, { marginTop: height * -0.005 }]}>
                       ⚠️ Time is running out!
                     </Text>
                   )}
@@ -2321,7 +2400,7 @@ export default function RemoteScreen() {
         </Text>
         {isBreakTime && (
           <Text style={styles.matchStatusSubtext}>
-            Break time: {formatTime(breakTimeRemaining)} - Next: Period {Math.min(currentPeriod + 1, 3)}
+            Break in progress
           </Text>
         )}
       </View>
@@ -2451,7 +2530,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={decrementAliceScore}>
-              <Ionicons name="remove" size={36} color="black" />
+              <Ionicons name="remove" size={28} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -2463,7 +2542,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={incrementAliceScore}>
-              <Ionicons name="add" size={36} color="black" />
+              <Ionicons name="add" size={28} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2591,7 +2670,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={decrementBobScore}>
-              <Ionicons name="remove" size={36} color="black" />
+              <Ionicons name="remove" size={28} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -2603,7 +2682,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={incrementBobScore}>
-              <Ionicons name="add" size={36} color="black" />
+              <Ionicons name="add" size={28} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2733,135 +2812,130 @@ export default function RemoteScreen() {
         </View>
       </View>
 
-      {/* Play and Reset Controls - REBUILT */}
+              {/* Play, Reset, and Complete Match Controls - REBUILT */}
       <View style={[
         {
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginVertical: isNexusS ? height * 0.008 : height * 0.012,
+          marginTop: isNexusS ? height * 0.004 : height * 0.006,
+          paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
+          backgroundColor: 'transparent',
+          borderRadius: isNexusS ? width * 0.015 : width * 0.02,
+          gap: isNexusS ? height * 0.008 : height * 0.012, // Reduced gap between elements
+          marginBottom: isNexusS ? height * 0.015 : height * 0.02 // Bottom margin from tab bar
+        }
+      ]}>
+        
+        {/* Play and Reset Row */}
+        <View style={{
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginVertical: 10,
-          marginTop: 5,
-          paddingHorizontal: 15,
-          backgroundColor: 'transparent',
-          borderRadius: 8,
-          minHeight: 60
-        },
-        // Add bottom margin when timer is ready AND cards are present to make room for swipe container
-        (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-          marginBottom: height * 0.10, // Add moderate space below controls when cards present
-        } : {}
-      ]}>
-        
-        {/* Play Button / Skip Button */}
-        <TouchableOpacity 
-          style={{
-            flex: 1,
-            backgroundColor: '#2A2A2A',
-            paddingVertical: 10,
-            paddingHorizontal: 15,
-            borderRadius: 8,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'row',
-            marginRight: 8,
-            borderWidth: 2,
-            borderColor: 'white',
-            minHeight: 45,
-            opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
-          }} 
-          onPress={() => {
-            // Skip button during injury time
-            if (isInjuryTimer) {
-              skipInjuryTimer();
-              return;
-            }
-            
-            // Skip button during break time
-            if (isBreakTime) {
-              skipBreak();
-              return;
-            }
-            
-            // Prevent action when timer is at 0:00
-            if (timeRemaining === 0) {
-              return;
-            }
-            
-            console.log('Play button pressed - isPlaying:', isPlaying, 'timeRemaining:', timeRemaining, 'matchTime:', matchTime);
-            if (isPlaying) {
-              console.log('Calling pauseTimer');
-              pauseTimer();
-            } else if (timeRemaining < matchTime && timeRemaining > 0) {
-              console.log('Calling resumeTimer');
-              resumeTimer();
-            } else {
-              console.log('Calling togglePlay');
-              togglePlay();
-            }
-          }}
-        >
-          <Ionicons 
-            name={
-              isInjuryTimer ? 'play-forward' : 
-              isBreakTime ? 'play-forward' : 
-              isPlaying ? 'pause' : 
-              'play'
-            }
-            size={18} 
-            color="white" 
-            style={{marginRight: 6}}
-          />
-          <Text style={{fontSize: 14, fontWeight: '600', color: 'white'}}>
-            {isInjuryTimer ? 'Skip Injury' : 
-             isBreakTime ? 'Skip Break' : 
-             isPlaying ? 'Pause' : 
-             (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? 'Resume' : 'Play'}
-          </Text>
-        </TouchableOpacity>
-        
-        {/* Reset Button */}
-        <TouchableOpacity 
-          style={{
-            width: 60,
-            backgroundColor: '#FB5D5C',
-            paddingVertical: 10,
-            borderRadius: 20,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: 2,
-            borderColor: 'transparent',
-            minHeight: 45,
-            shadowColor: '#6C5CE7',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.25,
-            shadowRadius: 14,
-            elevation: 8
-          }} 
-          onPress={resetTimer}
-        >
-          <Ionicons name="refresh" size={24} color="white" />
-        </TouchableOpacity>
-      </View>
+          width: '100%'
+        }}>
+          {/* Play Button / Skip Button */}
+          <TouchableOpacity 
+            style={{
+              flex: 1,
+              backgroundColor: '#2A2A2A',
+              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
+              paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
+              borderRadius: isNexusS ? width * 0.015 : width * 0.02,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              marginRight: isNexusS ? width * 0.015 : width * 0.02,
+              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              borderColor: 'white',
+              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
+            }} 
+            onPress={() => {
+              // Skip button during injury time
+              if (isInjuryTimer) {
+                skipInjuryTimer();
+                return;
+              }
+              
+              // Skip button during break time
+              if (isBreakTime) {
+                skipBreak();
+                return;
+              }
+              
+              // Prevent action when timer is at 0:00
+              if (timeRemaining === 0) {
+                return;
+              }
+              
+              console.log('Play button pressed - isPlaying:', isPlaying, 'timeRemaining:', timeRemaining, 'matchTime:', matchTime);
+              if (isPlaying) {
+                console.log('Calling pauseTimer');
+                pauseTimer();
+              } else if (timeRemaining < matchTime && timeRemaining > 0) {
+                console.log('Calling resumeTimer');
+                resumeTimer();
+              } else {
+                console.log('Calling togglePlay');
+                togglePlay();
+              }
+            }}
+          >
+            <Ionicons 
+              name={
+                isInjuryTimer ? 'play-forward' : 
+                isBreakTime ? 'play-forward' : 
+                isPlaying ? 'pause' : 
+                'play'
+              }
+              size={isNexusS ? Math.max(width * 0.04, 16) : width * 0.045} 
+              color="white" 
+              style={{marginRight: isNexusS ? width * 0.01 : width * 0.015}}
+            />
+            <Text style={{fontSize: isNexusS ? Math.max(width * 0.03, 12) : width * 0.035, fontWeight: '600', color: 'white'}}>
+              {isInjuryTimer ? 'Skip Injury' : 
+               isBreakTime ? 'Skip Break' : 
+               isPlaying ? 'Pause' : 
+               (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? 'Resume' : 'Play'}
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Reset Button */}
+          <TouchableOpacity 
+            style={{
+              width: isNexusS ? width * 0.13 : width * 0.15,
+              backgroundColor: '#FB5D5C',
+              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
+              borderRadius: isNexusS ? width * 0.04 : width * 0.05,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              borderColor: 'transparent',
+              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              shadowColor: '#6C5CE7',
+              shadowOffset: { width: 0, height: height * 0.005 },
+              shadowOpacity: 0.25,
+              shadowRadius: width * 0.035,
+              elevation: 8
+            }} 
+            onPress={resetTimer}
+          >
+            <Ionicons name="refresh" size={isNexusS ? 20 : 24} color="white" />
+          </TouchableOpacity>
+        </View>
 
-      {/* Complete Match Button */}
-      <View style={styles.completeMatchButton}>
+        {/* Complete Match Slider */}
         <SwipeToCompleteButton
           title="Complete The Match"
-          customStyle={
-            // Only move closer to bottom tab bar when timer is ready AND cards are present
-            (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-              position: 'absolute',
-              bottom: height * 0.05, // Position from bottom when conditions met
-              left: 0,
-              right: 0,
-              marginLeft: 2, // Move right only when cards are issued
-            } : {
-              position: 'relative', // Normal positioning when no cards or match in progress
-              // No fixed marginTop - maintains natural distance from play button
-              marginBottom: height * 0.01,
-              // No marginLeft when no cards - stays in normal position
-            }
-          }
+          customStyle={{
+            position: 'relative',
+            width: '100%',
+            alignSelf: 'stretch', // Makes it stretch to fill the container width
+            flex: 1, // Takes up available space
+            minWidth: '100%' // Ensures minimum width matches container
+          }}
           onSwipeSuccess={() => {
             router.push('/match-summary');
           }}

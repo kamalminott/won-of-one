@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -9,6 +10,7 @@ import { Colors } from '@/constants/Colors';
 
 export default function TabLayout() {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -32,7 +34,12 @@ export default function TabLayout() {
           default: {
             backgroundColor: 'rgba(31, 41, 55, 0.9)',
             borderTopWidth: 0,
-            height: height * 0.085,
+            position: 'absolute',
+            bottom: insets.bottom,
+            left: 0,
+            right: 0,
+            height: height * 0.09,
+            paddingBottom: height * 0.015,
           },
         }),
       }}>
@@ -56,7 +63,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
               size={height * 0.035} 
-              name="gamecontroller.fill" 
+              name="logo-game-controller-a" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -96,6 +103,19 @@ export default function TabLayout() {
             <IconSymbol 
               size={height * 0.035} 
               name="book.fill" 
+              color={focused ? Colors.red.accent : color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={height * 0.035} 
+              name="person.fill" 
               color={focused ? Colors.red.accent : color} 
             />
           ),

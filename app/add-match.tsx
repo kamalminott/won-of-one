@@ -1,3 +1,4 @@
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -24,6 +25,7 @@ export default function AddMatchScreen() {
   const [showEventDropdown, setShowEventDropdown] = useState(false);
   const [weaponType, setWeaponType] = useState('Foil');
   const [showWeaponDropdown, setShowWeaponDropdown] = useState(false);
+  const [notes, setNotes] = useState('');
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [editingScore, setEditingScore] = useState<'your' | 'opponent' | null>(null);
   const [tempScore, setTempScore] = useState('');
@@ -93,7 +95,15 @@ export default function AddMatchScreen() {
 
   const handleSaveMatch = () => {
     // TODO: Implement save match logic
-    console.log('Saving match...');
+    console.log('Saving match...', {
+      matchDate,
+      opponentName,
+      event,
+      weaponType,
+      notes,
+      yourScore,
+      opponentScore
+    });
   };
 
   const handleBack = () => {
@@ -163,29 +173,29 @@ export default function AddMatchScreen() {
     section: {
       backgroundColor: 'rgba(255, 255, 255, 0.05)',
       borderRadius: getDimension(0.03, width),
-      padding: getDimension(0.03, width),
-      marginBottom: getDimension(0.015, height),
+      padding: getDimension(0.025, width),
+      marginBottom: getDimension(0.012, height),
     },
     sectionTitle: {
       fontSize: getDimension(0.045, width),
       fontWeight: '700',
       color: 'white',
-      marginBottom: getDimension(0.015, height),
+      marginBottom: getDimension(0.012, height),
     },
     inputGroup: {
-      marginBottom: getDimension(0.015, height),
+      marginBottom: getDimension(0.012, height),
     },
     inputLabel: {
       fontSize: getDimension(0.035, width),
       fontWeight: '500',
       color: 'rgba(255, 255, 255, 0.7)',
-      marginBottom: getDimension(0.006, height),
+      marginBottom: getDimension(0.004, height),
     },
     inputField: {
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       borderRadius: getDimension(0.02, width),
-      paddingHorizontal: getDimension(0.03, width),
-      paddingVertical: getDimension(0.01, height),
+      paddingHorizontal: getDimension(0.025, width),
+      paddingVertical: getDimension(0.008, height),
       fontSize: getDimension(0.04, width),
       color: 'white',
       borderWidth: 1,
@@ -669,9 +679,7 @@ export default function AddMatchScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={20} color="white" />
-        </TouchableOpacity>
+        <BackButton onPress={handleBack} />
         <Text style={styles.headerTitle}>Add New Match</Text>
       </View>
 
@@ -826,6 +834,19 @@ export default function AddMatchScreen() {
                 </>
               )}
             </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Notes</Text>
+            <TextInput
+              style={styles.inputField}
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Add match notes..."
+              placeholderTextColor="rgba(255, 255, 255, 0.5)"
+              multiline
+              numberOfLines={3}
+            />
           </View>
         </View>
 

@@ -29,6 +29,8 @@ export default function RootLayout() {
           <Stack.Screen name="add-match" options={{ headerShown: false }} />
           <Stack.Screen name="recent-matches" options={{ headerShown: false }} />
           <Stack.Screen name="match-summary" options={{ headerShown: false }} />
+          <Stack.Screen name="settings" options={{ headerShown: false }} />
+          <Stack.Screen name="profile" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </Stack>
         <StatusBar style="auto" />

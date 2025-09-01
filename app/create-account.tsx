@@ -1,20 +1,26 @@
+import { BackButton } from '@/components/BackButton';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [firstName, setFirstName] = useState('John');
   const [lastName, setLastName] = useState('Doe');
   const [email, setEmail] = useState('jondoe@gmail.com');
@@ -24,9 +30,7 @@ export default function CreateAccountScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
 
-  const handleBack = () => {
-    router.back();
-  };
+  // handleBack function removed - BackButton component handles navigation automatically
 
   const handleSignIn = () => {
     router.push('/login');
@@ -37,25 +41,66 @@ export default function CreateAccountScreen() {
       <StatusBar barStyle="light-content" />
       
       {/* Header Background */}
-      <View style={styles.headerBackground}>
+      <View style={[styles.headerBackground, { 
+        height: Platform.OS === 'ios' ? height * 0.0 + insets.top : height * 0.08 + insets.top,
+        paddingHorizontal: width * 0.04,
+        paddingTop: Platform.OS === 'ios' ? insets.top * 0.0 : insets.top,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }]}>
         {/* Back Button */}
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BackButton 
+          style={{
+            zIndex: 10
+          }}
+        />
         
         {/* Title */}
-        <Text style={styles.headerTitle}>Create an Account</Text>
+        <Text style={[styles.headerTitle, { 
+          fontSize: width * 0.045,
+          fontWeight: '600',
+          color: '#FFFFFF',
+          flex: 1,
+          textAlign: 'center',
+          marginRight: width * 0.08 // Compensate for back button width
+        }]}>Create an Account</Text>
+        
+        {/* Spacer to balance the layout */}
+        <View style={{ width: width * 0.08 }} />
       </View>
 
-      {/* Main Form Card */}
-      <View style={styles.formCard}>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView 
+          style={{ flex: 1 }} 
+          contentContainerStyle={{ 
+            paddingBottom: height * 0.15 + insets.bottom
+          }}
+          showsVerticalScrollIndicator={true}
+          bounces={true}
+        >
+          {/* Main Form Card */}
+          <View style={[styles.formCard, { 
+            marginTop: height * 0.02, 
+            padding: width * 0.04, 
+            marginHorizontal: width * 0.04,
+            borderRadius: width * 0.05
+          }]}>
         {/* First Name and Last Name Row */}
-        <View style={styles.nameRow}>
+        <View style={[styles.nameRow, { marginBottom: height * 0.03 }]}>
           <View style={styles.nameInputContainer}>
             <Text style={styles.inputLabel}>First Name*</Text>
-            <View style={styles.nameInputField}>
+            <View style={[styles.nameInputField, { 
+              height: height * 0.06,
+              borderRadius: width * 0.04,
+              paddingHorizontal: width * 0.04
+            }]}>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, { fontSize: width * 0.04 }]}
                 value={firstName}
                 onChangeText={setFirstName}
                 placeholder="Enter first name"
@@ -67,9 +112,13 @@ export default function CreateAccountScreen() {
           
           <View style={styles.nameInputContainer}>
             <Text style={styles.inputLabel}>Last Name*</Text>
-            <View style={styles.nameInputField}>
+            <View style={[styles.nameInputField, { 
+              height: height * 0.06,
+              borderRadius: width * 0.04,
+              paddingHorizontal: width * 0.04
+            }]}>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, { fontSize: width * 0.04 }]}
                 value={lastName}
                 onChangeText={setLastName}
                 placeholder="Enter last name"
@@ -81,11 +130,15 @@ export default function CreateAccountScreen() {
         </View>
 
         {/* Email Input */}
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, { marginBottom: height * 0.03 }]}>
           <Text style={styles.inputLabel}>Email Address*</Text>
-          <View style={styles.inputField}>
+          <View style={[styles.inputField, { 
+            height: height * 0.06,
+            borderRadius: width * 0.04,
+            paddingHorizontal: width * 0.04
+          }]}>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { fontSize: width * 0.04 }]}
               value={email}
               onChangeText={setEmail}
               placeholder="Enter email"
@@ -93,18 +146,22 @@ export default function CreateAccountScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-            <View style={styles.checkIcon}>
+            <View style={[styles.checkIcon, { marginLeft: width * 0.02 }]}>
               <Ionicons name="checkmark-circle" size={20} color="#00B894" />
             </View>
           </View>
         </View>
 
         {/* Password Input */}
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, { marginBottom: height * 0.03 }]}>
           <Text style={styles.inputLabel}>Password*</Text>
-          <View style={styles.inputField}>
+          <View style={[styles.inputField, { 
+            height: height * 0.06,
+            borderRadius: width * 0.04,
+            paddingHorizontal: width * 0.04
+          }]}>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { fontSize: width * 0.04 }]}
               value={password}
               onChangeText={setPassword}
               placeholder="Enter password"
@@ -112,7 +169,7 @@ export default function CreateAccountScreen() {
               secureTextEntry={!showPassword}
             />
             <TouchableOpacity
-              style={styles.eyeIcon}
+              style={[styles.eyeIcon, { marginLeft: width * 0.02 }]}
               onPress={() => setShowPassword(!showPassword)}
             >
               <Ionicons 
@@ -125,11 +182,15 @@ export default function CreateAccountScreen() {
         </View>
 
         {/* Confirm Password Input */}
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, { marginBottom: height * 0.03 }]}>
           <Text style={styles.inputLabel}>Confirm Password*</Text>
-          <View style={styles.inputField}>
+          <View style={[styles.inputField, { 
+            height: height * 0.06,
+            borderRadius: width * 0.04,
+            paddingHorizontal: width * 0.04
+          }]}>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { fontSize: width * 0.04 }]}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               placeholder="Enter password"
@@ -137,7 +198,7 @@ export default function CreateAccountScreen() {
               secureTextEntry={!showConfirmPassword}
             />
             <TouchableOpacity
-              style={styles.eyeIcon}
+              style={[styles.eyeIcon, { marginLeft: width * 0.02 }]}
               onPress={() => setShowConfirmPassword(!showConfirmPassword)}
             >
               <Ionicons 
@@ -150,15 +211,20 @@ export default function CreateAccountScreen() {
         </View>
 
         {/* Terms and Conditions */}
-        <View style={styles.termsContainer}>
+        <View style={[styles.termsContainer, { marginTop: height * 0.02, marginBottom: height * 0.02 }]}>
           <TouchableOpacity
             style={styles.checkboxContainer}
             onPress={() => setAgreeToTerms(!agreeToTerms)}
           >
-            <View style={[styles.checkbox, agreeToTerms && styles.checkboxChecked]}>
-              {agreeToTerms && <Ionicons name="checkmark" size={16} color="white" />}
-            </View>
-            <Text style={styles.termsText}>
+                    <View style={[styles.checkbox, agreeToTerms && styles.checkboxChecked, { 
+          width: width * 0.06, 
+          height: width * 0.06, 
+          borderRadius: width * 0.015,
+          marginRight: width * 0.02
+        }]}>
+          {agreeToTerms && <Ionicons name="checkmark" size={width * 0.04} color="white" />}
+        </View>
+            <Text style={[styles.termsText, { fontSize: width * 0.035 }]}>
               I agree to the <Text style={styles.termsLink}>Terms and Conditions</Text>
             </Text>
           </TouchableOpacity>
@@ -166,44 +232,78 @@ export default function CreateAccountScreen() {
       </View>
 
       {/* Create Account Button */}
-      <TouchableOpacity style={styles.createAccountButtonContainer}>
+      <TouchableOpacity style={[styles.createAccountButtonContainer, { marginTop: height * 0.015 }]}>
         <LinearGradient
           colors={['#6C5CE7', '#5741FF']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={styles.createAccountButton}
+          style={[styles.createAccountButton, { 
+            height: height * 0.06,
+            borderRadius: width * 0.04,
+            width: width * 0.92,
+            alignSelf: 'center'
+          }]}
         >
-          <Text style={styles.createAccountButtonText}>Create Account</Text>
+          <Text style={[styles.createAccountButtonText, { fontSize: width * 0.04 }]}>Create Account</Text>
         </LinearGradient>
       </TouchableOpacity>
 
       {/* Social Login Section */}
-      <View style={styles.socialSection}>
-        <View style={styles.separator}>
+      <View style={[styles.socialSection, { marginTop: height * 0.015 }]}>
+        <View style={[styles.separator, { marginBottom: height * 0.02 }]}>
           <View style={styles.separatorLine} />
-          <Text style={styles.separatorText}>or sign up with</Text>
+          <Text style={[styles.separatorText, { 
+            fontSize: 16,
+            fontWeight: '400',
+            textAlign: 'center',
+            lineHeight: 16,
+            paddingHorizontal: width * 0.03,
+            paddingVertical: height * 0.005
+          }]}>or sign up with</Text>
           <View style={styles.separatorLine} />
         </View>
         
-        <View style={styles.socialButtons}>
-          <TouchableOpacity style={styles.socialButton}>
-            <View style={styles.googleIcon}>
-              <Text style={styles.googleG}>G</Text>
+        <View style={[styles.socialButtons, { gap: width * 0.05 }]}>
+          <TouchableOpacity style={[styles.socialButton, { 
+            width: width * 0.12, 
+            height: width * 0.12, 
+            borderRadius: width * 0.06 
+          }]}>
+            <View style={[styles.googleIcon, { 
+              width: width * 0.045, 
+              height: width * 0.045, 
+              borderRadius: width * 0.01 
+            }]}>
+              <Text style={[styles.googleG, { fontSize: width * 0.03 }]}>G</Text>
             </View>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.socialButton}>
-            <Ionicons name="logo-apple" size={24} color="white" />
+          <TouchableOpacity style={[styles.socialButton, { 
+            width: width * 0.12, 
+            height: width * 0.12, 
+            borderRadius: width * 0.06 
+          }]}>
+            <Ionicons name="logo-apple" size={width * 0.06} color="white" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Sign In Link */}
-      <TouchableOpacity style={styles.signInContainer} onPress={handleSignIn}>
-        <Text style={styles.signInText}>
-          Already have an account? <Text style={styles.signInLink}>Sign In</Text>
-        </Text>
-      </TouchableOpacity>
+        </ScrollView>
+        
+        {/* Sign In Link - Outside ScrollView to ensure visibility */}
+        <TouchableOpacity style={[styles.signInContainer, { 
+          marginTop: height * 0.02, 
+          marginBottom: height * 0.02,
+          paddingVertical: height * 0.0015,
+          alignSelf: 'center',
+          borderWidth: 0,
+          backgroundColor: 'transparent'
+        }]} onPress={handleSignIn}>
+          <Text style={[styles.signInText, { fontSize: width * 0.04 }]}>
+            Already have an account? <Text style={styles.signInLink}>Sign In</Text>
+          </Text>
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -215,35 +315,17 @@ const styles = StyleSheet.create({
   },
   headerBackground: {
     backgroundColor: '#212121',
-    height: 60,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    position: 'relative',
   },
   backButton: {
-    width: 48,
-    height: 48,
     backgroundColor: '#343434',
-    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
   },
   headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    flex: 1,
-    textAlign: 'center',
-    marginRight: 64,
+    // Styles moved to inline for responsive design
   },
   formCard: {
     backgroundColor: '#2A2A2A',
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 20,
-    padding: 12,
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
@@ -253,19 +335,14 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
   },
   nameInputContainer: {
     width: '48%',
   },
   inputContainer: {
-    marginBottom: 24,
   },
   inputLabel: {
-    fontSize: 14,
     color: '#FFFFFF',
-    marginBottom: 8,
-    marginLeft: 8,
   },
   nameInputField: {
     flexDirection: 'row',
@@ -273,9 +350,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2B2B2B',
     borderWidth: 1,
     borderColor: '#464646',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    height: 50,
   },
   inputField: {
     flexDirection: 'row',
@@ -283,37 +357,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#2B2B2B',
     borderWidth: 1,
     borderColor: '#464646',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    height: 50,
   },
   textInput: {
     flex: 1,
-    fontSize: 16,
     color: '#FFFFFF',
     fontWeight: '500',
   },
   checkIcon: {
-    marginLeft: 8,
   },
   eyeIcon: {
-    marginLeft: 8,
   },
   termsContainer: {
-    marginTop: 16,
   },
   checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   checkbox: {
-    width: 24,
-    height: 24,
     backgroundColor: '#2B2B2B',
     borderWidth: 1,
     borderColor: '#464646',
-    borderRadius: 6,
-    marginRight: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -322,7 +385,6 @@ const styles = StyleSheet.create({
     borderColor: '#6C5CE7',
   },
   termsText: {
-    fontSize: 14,
     color: '#9D9D9D',
     fontWeight: '500',
     flex: 1,
@@ -332,12 +394,8 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   createAccountButtonContainer: {
-    marginHorizontal: 16,
-    marginTop: 20,
   },
   createAccountButton: {
-    height: 50,
-    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#6C5CE7',
@@ -347,38 +405,29 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   createAccountButtonText: {
-    fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
   },
   socialSection: {
-    marginTop: 20,
     alignItems: 'center',
   },
   separator: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
   },
   separatorLine: {
-    width: 67,
-    height: 1,
     backgroundColor: '#464646',
+    height: 1,
+    flex: 0.3,
   },
   separatorText: {
-    fontSize: 16,
     color: '#9D9D9D',
-    marginHorizontal: 12,
   },
   socialButtons: {
     flexDirection: 'row',
-    gap: 20,
   },
   socialButton: {
-    width: 44,
-    height: 44,
     backgroundColor: '#2A2A2A',
-    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#6C5CE7',
@@ -388,27 +437,19 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   googleIcon: {
-    width: 18,
-    height: 18,
     backgroundColor: '#4285F4',
-    borderRadius: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   googleG: {
     color: 'white',
-    fontSize: 12,
     fontWeight: 'bold',
   },
   signInContainer: {
-    position: 'absolute',
-    bottom: 40,
-    left: 0,
-    right: 0,
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   signInText: {
-    fontSize: 16,
     color: '#FFFFFF',
     textAlign: 'center',
   },

@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { router } from 'expo-router';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
@@ -16,6 +17,10 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
   onSettingsPress,
 }) => {
   const { width, height } = useWindowDimensions();
+
+  const handleProfilePress = () => {
+    router.push('/profile');
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -90,7 +95,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.userInfo}>
+      <TouchableOpacity style={styles.userInfo} onPress={handleProfilePress} activeOpacity={0.7}>
         <View style={styles.avatar}>
           {avatarUrl ? (
             <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
@@ -106,7 +111,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
             <Text style={styles.streakText}>{streak} day streak</Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
       
       <TouchableOpacity style={styles.settingsButton} onPress={onSettingsPress}>
         <Text style={styles.settingsIcon}>⚙️</Text>

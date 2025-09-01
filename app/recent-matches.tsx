@@ -1,4 +1,5 @@
 import { RecentMatchCard } from '@/components';
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,6 +15,7 @@ import {
     useWindowDimensions,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Match {
   id: string;
@@ -28,6 +30,7 @@ interface Match {
 
 export default function RecentMatchesScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
 
@@ -173,7 +176,7 @@ export default function RecentMatchesScreen() {
       zIndex: 1000,
       borderWidth: 1,
       borderColor: Colors.gray.light,
-      marginTop: 2,
+      marginTop: height * 0.002,
       shadowColor: '#000',
       shadowOffset: {
         width: 0,
@@ -238,22 +241,23 @@ export default function RecentMatchesScreen() {
   });
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { 
+      paddingTop: insets.top, 
+      paddingBottom: insets.bottom 
+    }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} />
         <Text style={styles.title}>Recent Matches</Text>
         <TouchableOpacity style={styles.headerFilterButton}>
-          <Ionicons name="filter" size={24} color="white" />
+          <Ionicons name="filter" size={width * 0.06} color="white" />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInput}>
-          <Ionicons name="search" size={20} color="white" style={styles.searchIcon} />
+          <Ionicons name="search" size={width * 0.05} color="white" style={styles.searchIcon} />
           <TextInput
             style={styles.searchText}
             placeholder="Search by opponent..."

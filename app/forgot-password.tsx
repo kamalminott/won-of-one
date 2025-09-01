@@ -3,18 +3,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ForgotPasswordScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('jondoe@gmail.com');
 
   const handleBack = () => {
@@ -26,48 +28,87 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { 
+      paddingTop: insets.top, 
+      paddingBottom: insets.bottom 
+    }]}>
       <StatusBar barStyle="light-content" />
       
       {/* Header Background */}
-      <View style={styles.headerBackground}>
+      <View style={[styles.headerBackground, {
+        height: height * 0.07,
+        paddingHorizontal: width * 0.04
+      }]}>
         {/* Back Button */}
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+        <TouchableOpacity style={[styles.backButton, {
+          width: width * 0.12,
+          height: width * 0.12,
+          borderRadius: width * 0.06,
+          marginRight: width * 0.04
+        }]} onPress={handleBack}>
+          <Ionicons name="arrow-back" size={width * 0.06} color="#FFFFFF" />
         </TouchableOpacity>
         
         {/* Title */}
-        <Text style={styles.headerTitle}>Forgot Password</Text>
+        <Text style={[styles.headerTitle, { fontSize: width * 0.05 }]}>Forgot Password</Text>
       </View>
 
       {/* Main Content Card */}
-      <View style={styles.contentCard}>
+      <View style={[styles.contentCard, {
+        marginHorizontal: width * 0.04,
+        marginTop: height * 0.06,
+        padding: width * 0.04,
+        borderRadius: width * 0.05
+      }]}>
         {/* Email Illustration Circle */}
-        <View style={styles.emailIllustration}>
+        <View style={[styles.emailIllustration, {
+          width: width * 0.32,
+          height: width * 0.32,
+          borderRadius: width * 0.16,
+          marginBottom: height * 0.04
+        }]}>
           <LinearGradient
             colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
-            style={styles.illustrationGradient}
+            style={[styles.illustrationGradient, {
+              borderRadius: width * 0.16
+            }]}
           >
-            <Ionicons name="mail-outline" size={50} color="#FFFFFF" />
+            <Ionicons name="mail-outline" size={width * 0.125} color="#FFFFFF" />
           </LinearGradient>
         </View>
 
         {/* Main Heading */}
-        <Text style={styles.mainHeading}>Enter Your Email</Text>
+        <Text style={[styles.mainHeading, { 
+          fontSize: width * 0.05,
+          marginBottom: height * 0.02
+        }]}>Enter Your Email</Text>
         
         {/* Description */}
-        <Text style={styles.description}>
+        <Text style={[styles.description, { 
+          fontSize: width * 0.035,
+          lineHeight: width * 0.06,
+          marginBottom: height * 0.06,
+          maxWidth: width * 0.785
+        }]}>
           We will send an OTP on the registered email to reset your password.
         </Text>
 
         {/* Email Input */}
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Email Address*</Text>
-          <View style={styles.inputField}>
+        <View style={[styles.inputContainer, { marginBottom: height * 0.06 }]}>
+          <Text style={[styles.inputLabel, { 
+            fontSize: width * 0.035,
+            marginBottom: height * 0.01,
+            marginLeft: width * 0.02
+          }]}>Email Address*</Text>
+          <View style={[styles.inputField, {
+            borderRadius: width * 0.04,
+            paddingHorizontal: width * 0.04,
+            height: height * 0.06
+          }]}>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { fontSize: width * 0.04 }]}
               value={email}
               onChangeText={setEmail}
               placeholder="Enter email"
@@ -75,27 +116,30 @@ export default function ForgotPasswordScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-            <View style={styles.checkIcon}>
-              <Ionicons name="checkmark-circle" size={20} color="#00B894" />
+            <View style={[styles.checkIcon, { marginLeft: width * 0.02 }]}>
+              <Ionicons name="checkmark-circle" size={width * 0.05} color="#00B894" />
             </View>
           </View>
         </View>
 
         {/* Send Reset Link Button */}
-        <TouchableOpacity style={styles.sendButtonContainer}>
+        <TouchableOpacity style={[styles.sendButtonContainer, { marginBottom: height * 0.04 }]}>
           <LinearGradient
             colors={['#6C5CE7', '#5741FF']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={styles.sendButton}
+            style={[styles.sendButton, {
+              height: height * 0.06,
+              borderRadius: width * 0.04
+            }]}
           >
-            <Text style={styles.sendButtonText}>Send Reset Link</Text>
+            <Text style={[styles.sendButtonText, { fontSize: width * 0.04 }]}>Send Reset Link</Text>
           </LinearGradient>
         </TouchableOpacity>
 
         {/* Back to Login Link */}
         <TouchableOpacity style={styles.backToLoginContainer} onPress={handleBackToLogin}>
-          <Text style={styles.backToLoginText}>Back to Login</Text>
+          <Text style={[styles.backToLoginText, { fontSize: width * 0.04 }]}>Back to Login</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -109,23 +153,16 @@ const styles = StyleSheet.create({
   },
   headerBackground: {
     backgroundColor: '#212121',
-    height: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
     position: 'relative',
   },
   backButton: {
-    width: 48,
-    height: 48,
     backgroundColor: '#343434',
-    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
   },
   headerTitle: {
-    fontSize: 20,
     fontWeight: '600',
     color: '#FFFFFF',
     flex: 1,
@@ -134,10 +171,6 @@ const styles = StyleSheet.create({
   },
   contentCard: {
     backgroundColor: '#2A2A2A',
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 20,
-    padding: 16,
     alignItems: 'center',
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
@@ -146,10 +179,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   emailIllustration: {
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    marginBottom: 32,
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
@@ -159,34 +188,23 @@ const styles = StyleSheet.create({
   illustrationGradient: {
     width: '100%',
     height: '100%',
-    borderRadius: 64,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mainHeading: {
-    fontSize: 20,
     fontWeight: '600',
     color: '#FFFFFF',
-    marginBottom: 16,
     textAlign: 'center',
   },
   description: {
-    fontSize: 14,
     color: '#9D9D9D',
     textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 48,
-    maxWidth: 314,
   },
   inputContainer: {
     width: '100%',
-    marginBottom: 48,
   },
   inputLabel: {
-    fontSize: 14,
     color: '#FFFFFF',
-    marginBottom: 8,
-    marginLeft: 8,
   },
   inputField: {
     flexDirection: 'row',
@@ -194,26 +212,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#2B2B2B',
     borderWidth: 1,
     borderColor: '#464646',
-    borderRadius: 16,
     paddingHorizontal: 16,
-    height: 50,
   },
   textInput: {
     flex: 1,
-    fontSize: 16,
     color: '#FFFFFF',
     fontWeight: '500',
   },
   checkIcon: {
-    marginLeft: 8,
   },
   sendButtonContainer: {
     width: '100%',
-    marginBottom: 32,
   },
   sendButton: {
-    height: 50,
-    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#6C5CE7',
@@ -223,7 +234,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   sendButtonText: {
-    fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
   },
@@ -231,7 +241,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   backToLoginText: {
-    fontSize: 16,
     fontWeight: '700',
     color: '#FF7675',
     textDecorationLine: 'underline',
