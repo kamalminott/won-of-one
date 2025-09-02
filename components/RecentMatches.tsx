@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { router } from 'expo-router';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
@@ -21,9 +22,16 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
 }) => {
   const { width, height } = useWindowDimensions();
 
+  const handleMatchPress = (match: Match) => {
+    router.push('/match-details');
+  };
+
   const styles = StyleSheet.create({
     container: {
       marginBottom: height * 0.01,
+      width: '100%',
+      overflow: 'hidden', // Prevent content from overflowing
+      position: 'relative', // Ensure proper positioning context
     },
     header: {
       flexDirection: 'row',
@@ -53,6 +61,15 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: height * 0.012,
+      // Add subtle shadow for better touch feedback
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+      // Add border for better definition
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.05)',
     },
     playerSection: {
       alignItems: 'center',
@@ -104,7 +121,8 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
     pagination: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginTop: height * 0.02,
+      marginTop: height * 0.015,
+      marginBottom: height * 0.02, // Add bottom margin to ensure dots stay above tab bar
       gap: width * 0.02,
     },
     dot: {
@@ -129,7 +147,12 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       
       <View style={styles.matchesContainer}>
         {matches.map((match) => (
-          <View key={match.id} style={styles.matchCard}>
+          <TouchableOpacity 
+            key={match.id} 
+            style={styles.matchCard}
+            onPress={() => handleMatchPress(match)}
+            activeOpacity={0.7}
+          >
             <View style={styles.playerSection}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>You</Text>
@@ -158,7 +181,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
               </View>
               <Text style={styles.playerLabel}>{match.opponentName}</Text>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </View>
       

@@ -19,6 +19,7 @@ export { SwipeToCompleteButton } from './SwipeToCompleteButton';
 export { ThemedText } from './ThemedText';
 export { ThemedView } from './ThemedView';
 export { TouchesByPeriodChart } from './TouchesByPeriodChart';
+export { TouchTimelineChart } from './TouchTimelineChart';
 export { UserHeader } from './UserHeader';
 export { VictoryPill } from './VictoryPill';
 
