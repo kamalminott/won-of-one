@@ -1,10 +1,11 @@
 import { BackButton } from '@/components/BackButton';
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  KeyboardAvoidingView,
+  Alert, KeyboardAvoidingView,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -14,26 +15,76 @@ import {
   TextInput,
   TouchableOpacity,
   useWindowDimensions,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [firstName, setFirstName] = useState('John');
-  const [lastName, setLastName] = useState('Doe');
-  const [email, setEmail] = useState('jondoe@gmail.com');
+  const { signUp } = useAuth();
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   // handleBack function removed - BackButton component handles navigation automatically
 
   const handleSignIn = () => {
     router.push('/login');
+  };
+
+  const handleCreateAccount = async () => {
+    // Validation
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters long');
+      return;
+    }
+
+    if (!agreeToTerms) {
+      Alert.alert('Error', 'Please agree to the Terms and Conditions');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { error } = await signUp(email, password);
+      
+      if (error) {
+        Alert.alert('Error', error.message);
+      } else {
+        Alert.alert(
+          'Success', 
+          'Account created successfully! You can now log in.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.push('/login')
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -232,7 +283,11 @@ export default function CreateAccountScreen() {
       </View>
 
       {/* Create Account Button */}
-      <TouchableOpacity style={[styles.createAccountButtonContainer, { marginTop: height * 0.015 }]}>
+      <TouchableOpacity 
+        style={[styles.createAccountButtonContainer, { marginTop: height * 0.015 }]}
+        onPress={handleCreateAccount}
+        disabled={loading}
+      >
         <LinearGradient
           colors={['#6C5CE7', '#5741FF']}
           start={{ x: 0, y: 0 }}
@@ -241,10 +296,13 @@ export default function CreateAccountScreen() {
             height: height * 0.06,
             borderRadius: width * 0.04,
             width: width * 0.92,
-            alignSelf: 'center'
+            alignSelf: 'center',
+            opacity: loading ? 0.7 : 1
           }]}
         >
-          <Text style={[styles.createAccountButtonText, { fontSize: width * 0.04 }]}>Create Account</Text>
+          <Text style={[styles.createAccountButtonText, { fontSize: width * 0.04 }]}>
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </Text>
         </LinearGradient>
       </TouchableOpacity>
 

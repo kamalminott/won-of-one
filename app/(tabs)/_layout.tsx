@@ -2,9 +2,12 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Entypo from 'react-native-vector-icons/Entypo';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 import { HapticTab } from '@/components/HapticTab';
-import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 
@@ -48,9 +51,9 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <Entypo 
+              name="home" 
               size={height * 0.035} 
-              name="house.fill" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -61,9 +64,9 @@ export default function TabLayout() {
         options={{
           title: 'Remote',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <MaterialIcons 
+              name="settings-remote" 
               size={height * 0.035} 
-              name="logo-game-controller-a" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -74,9 +77,9 @@ export default function TabLayout() {
         options={{
           title: 'Training',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <MaterialCommunityIcons 
+              name="shield-sword" 
               size={height * 0.035} 
-              name="figure.run" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -87,9 +90,9 @@ export default function TabLayout() {
         options={{
           title: 'Mindset',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <MaterialCommunityIcons 
+              name="brain" 
               size={height * 0.035} 
-              name="brain.head.profile" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -100,9 +103,9 @@ export default function TabLayout() {
         options={{
           title: 'Diary',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <Ionicons 
+              name="book" 
               size={height * 0.035} 
-              name="book.fill" 
               color={focused ? Colors.red.accent : color} 
             />
           ),
@@ -113,9 +116,9 @@ export default function TabLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
+            <Ionicons 
+              name="person" 
               size={height * 0.035} 
-              name="person.fill" 
               color={focused ? Colors.red.accent : color} 
             />
           ),

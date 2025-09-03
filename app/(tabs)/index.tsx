@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,34 +10,78 @@ import { RecentMatches } from '@/components/RecentMatches';
 import { SummaryCard } from '@/components/SummaryCard';
 import { UserHeader } from '@/components/UserHeader';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { goalService, matchService, userService } from '@/lib/database';
+import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
+  const { user, loading, signOut } = useAuth();
   
-  // Mock data - in real app this would come from state/API
-  const mockMatches = [
-    {
-      id: '1',
-      youScore: 5,
-      opponentScore: 2,
-      date: '11/6/2025',
-      opponentName: 'Alex',
-    },
-    {
-      id: '2',
-      youScore: 3,
-      opponentScore: 5,
-      date: '11/5/2025',
-      opponentName: 'Sarah',
-    },
-  ];
+  // State for real data
+  const [matches, setMatches] = useState<SimpleMatch[]>([]);
+  const [goals, setGoals] = useState<SimpleGoal[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  // Fetch data when user is available
+  useEffect(() => {
+    if (user && !loading) {
+      fetchUserData();
+    }
+  }, [user, loading]);
+
+  // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
+  useFocusEffect(
+    useCallback(() => {
+      if (user && !loading) {
+        fetchUserData();
+      }
+    }, [user, loading])
+  );
+
+  const fetchUserData = async () => {
+    if (!user) {
+      console.log('No user found, skipping data fetch');
+      return;
+    }
+    
+    console.log('Fetching data for user:', user.id);
+    setDataLoading(true);
+    try {
+      // First, ensure user exists in app_user table
+      const existingUser = await userService.getUserById(user.id);
+      if (!existingUser) {
+        console.log('User not found in app_user table, creating...');
+        await userService.createUser(user.id, user.email || '');
+      }
+      
+      // Fetch matches and goals in parallel
+      const [matchesData, goalsData] = await Promise.all([
+        matchService.getRecentMatches(user.id, 5),
+        goalService.getActiveGoals(user.id)
+      ]);
+      
+      console.log('Fetched matches:', matchesData);
+      console.log('Fetched goals:', goalsData);
+      console.log('Goals count:', goalsData.length);
+      
+      setMatches(matchesData);
+      setGoals(goalsData);
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      Alert.alert('Error', 'Failed to load data');
+    } finally {
+      setDataLoading(false);
+    }
+  };
 
   const handleSettings = () => {
     router.push('/settings');
   };
 
   const handleSetNewGoal = () => {
-    Alert.alert('Set New Goal', 'New goal creation started!');
+    // This will be handled by the GoalCard modal
+    console.log('Set new goal clicked');
   };
 
   const handleUpdateGoal = () => {
@@ -48,8 +92,29 @@ export default function HomeScreen() {
     router.push('/recent-matches');
   };
 
+  const calculateDaysLeft = (deadline: string): number => {
+    const today = new Date();
+    const goalDeadline = new Date(deadline);
+    const timeDiff = goalDeadline.getTime() - today.getTime();
+    const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    return Math.max(0, daysLeft); // Don't show negative days
+  };
+
   const handleAddNewMatch = () => {
     router.push('/add-match');
+  };
+
+  const handleSwipeRight = () => {
+    router.push('/recent-matches');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.push('/login');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to sign out');
+    }
   };
 
   const styles = StyleSheet.create({
@@ -90,24 +155,7 @@ export default function HomeScreen() {
     icon: {
       fontSize: width * 0.06,
     },
-    addMatchLink: {
-      marginBottom: height * 0.015,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      paddingRight: '5%',
-      gap: width * 0.02,
-    },
-    addMatchText: {
-      color: '#9CA3AF',
-      fontSize: width * 0.04,
-      fontWeight: '500',
-    },
-    addMatchIcon: {
-      color: Colors.purple.light || '#A78BFA',
-      fontSize: width * 0.04,
-      fontWeight: '600',
-    },
+
     loginButton: {
       backgroundColor: Colors.purple.primary,
       paddingHorizontal: width * 0.04,
@@ -121,6 +169,15 @@ export default function HomeScreen() {
     },
   });
 
+  // Show loading screen while checking authentication or loading data
+  if (loading || dataLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: 'white', fontSize: 18 }}>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <>
       <ExpoStatusBar style="light" />
@@ -129,15 +186,15 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
           <View style={styles.stickyHeader}>
             <UserHeader
-              userName="Sophia"
+              userName={user?.email?.split('@')[0] || 'Guest'}
               streak={7}
               onSettingsPress={handleSettings}
             />
             <TouchableOpacity 
               style={styles.loginButton} 
-              onPress={() => router.push('/login')}
+              onPress={handleLogout}
             >
-              <Text style={styles.loginButtonText}>Login</Text>
+              <Text style={styles.loginButtonText}>Logout</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -167,24 +224,72 @@ export default function HomeScreen() {
               />
             </View>
             
-            <GoalCard
-              daysLeft={2}
-              title="Goal"
-              description="3 Sparing Sessions"
-              progress={75}
-              onSetNewGoal={handleSetNewGoal}
-              onUpdateGoal={handleUpdateGoal}
-            />
-            
-            <TouchableOpacity style={styles.addMatchLink} onPress={handleAddNewMatch}>
-              <Text style={styles.addMatchText}>Add new match</Text>
-              <Text style={styles.addMatchIcon}>+</Text>
-            </TouchableOpacity>
+            {goals.length > 0 ? (
+              <GoalCard
+                daysLeft={calculateDaysLeft(goals[0].deadline)}
+                title={goals[0].title}
+                description={goals[0].description}
+                progress={goals[0].progress}
+                onSetNewGoal={handleSetNewGoal}
+                onUpdateGoal={handleUpdateGoal}
+                onGoalSaved={async (goalData) => {
+                  console.log('Goal saved callback triggered with data:', goalData);
+                  if (user) {
+                    try {
+                      console.log('Saving goal to database...');
+                      const newGoal = await goalService.createGoal(goalData, user.id);
+                      console.log('Goal saved result:', newGoal);
+                      if (newGoal) {
+                        Alert.alert('Success', 'Goal created successfully!');
+                        fetchUserData(); // Refresh data after saving
+                      } else {
+                        Alert.alert('Error', 'Failed to create goal');
+                      }
+                    } catch (error) {
+                      console.error('Error saving goal:', error);
+                      Alert.alert('Error', 'Failed to create goal');
+                    }
+                  }
+                }} // Save goal to database and refresh data
+                useModal={true}
+              />
+            ) : (
+              <GoalCard
+                daysLeft={0}
+                title="No Active Goals"
+                description="Set a new goal to track your progress"
+                progress={0}
+                onSetNewGoal={handleSetNewGoal}
+                onUpdateGoal={handleUpdateGoal}
+                onGoalSaved={async (goalData) => {
+                  console.log('Goal saved callback triggered with data:', goalData);
+                  if (user) {
+                    try {
+                      console.log('Saving goal to database...');
+                      const newGoal = await goalService.createGoal(goalData, user.id);
+                      console.log('Goal saved result:', newGoal);
+                      if (newGoal) {
+                        Alert.alert('Success', 'Goal created successfully!');
+                        fetchUserData(); // Refresh data after saving
+                      } else {
+                        Alert.alert('Error', 'Failed to create goal');
+                      }
+                    } catch (error) {
+                      console.error('Error saving goal:', error);
+                      Alert.alert('Error', 'Failed to create goal');
+                    }
+                  }
+                }} // Save goal to database and refresh data
+                useModal={true}
+              />
+            )}
             
             <View style={styles.recentMatchesWrapper}>
               <RecentMatches
-                matches={mockMatches}
+                matches={matches}
                 onViewAll={handleViewAllMatches}
+                onAddNewMatch={handleAddNewMatch}
+                onSwipeRight={handleSwipeRight}
               />
             </View>
           </View>

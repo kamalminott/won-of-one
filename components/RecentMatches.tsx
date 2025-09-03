@@ -1,30 +1,45 @@
 import { Colors } from '@/constants/Colors';
+import { SimpleMatch } from '@/types/database';
 import { router } from 'expo-router';
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-
-interface Match {
-  id: string;
-  youScore: number;
-  opponentScore: number;
-  date: string;
-  opponentName: string;
-}
+import React, { useState } from 'react';
+import { PanResponder, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
 interface RecentMatchesProps {
-  matches: Match[];
+  matches: SimpleMatch[];
   onViewAll: () => void;
+  onAddNewMatch?: () => void;
+  onSwipeRight?: () => void;
 }
 
 export const RecentMatches: React.FC<RecentMatchesProps> = ({
   matches,
   onViewAll,
+  onAddNewMatch,
+  onSwipeRight,
 }) => {
   const { width, height } = useWindowDimensions();
+  const [currentPage, setCurrentPage] = useState(0);
 
-  const handleMatchPress = (match: Match) => {
+  const handleMatchPress = (match: SimpleMatch) => {
     router.push('/match-details');
   };
+
+  const panResponder = PanResponder.create({
+    onMoveShouldSetPanResponder: (evt, gestureState) => {
+      return Math.abs(gestureState.dx) > 10;
+    },
+    onPanResponderRelease: (evt, gestureState) => {
+      // Swipe right (positive dx) - go to next page
+      if (gestureState.dx > 50) {
+        if (onSwipeRight) {
+          onSwipeRight();
+        } else {
+          // Default behavior - navigate to recent matches page
+          router.push('/recent-matches');
+        }
+      }
+    },
+  });
 
   const styles = StyleSheet.create({
     container: {
@@ -134,62 +149,87 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
     dotActive: {
       backgroundColor: Colors.red.accent,
     },
+    addMatchButton: {
+      width: '100%',
+      height: height * 0.06,
+      backgroundColor: Colors.purple.primary,
+      borderRadius: width * 0.02, // Less rounded corners
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: height * 0.001,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    addMatchButtonText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.045,
+      fontWeight: '700',
+    },
   });
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Recent Matches</Text>
-        <TouchableOpacity onPress={onViewAll}>
-          <Text style={styles.viewAll}>View All</Text>
-        </TouchableOpacity>
-      </View>
-      
-      <View style={styles.matchesContainer}>
-        {matches.map((match) => (
-          <TouchableOpacity 
-            key={match.id} 
-            style={styles.matchCard}
-            onPress={() => handleMatchPress(match)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.playerSection}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>You</Text>
-              </View>
-              <Text style={styles.playerLabel}>You</Text>
-            </View>
-            
-            <View style={styles.scoreSection}>
-              <View style={styles.scoreContainer}>
-                <View style={[
-                  styles.scoreDot, 
-                  { backgroundColor: match.youScore > match.opponentScore ? Colors.green.accent : Colors.red.accent }
-                ]} />
-                <Text style={styles.score}>{`${match.youScore} - ${match.opponentScore}`}</Text>
-                <View style={[
-                  styles.scoreDot, 
-                  { backgroundColor: match.youScore > match.opponentScore ? Colors.red.accent : Colors.green.accent }
-                ]} />
-              </View>
-              <Text style={styles.date}>{match.date}</Text>
-            </View>
-            
-            <View style={styles.playerSection}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{match.opponentName.charAt(0)}</Text>
-              </View>
-              <Text style={styles.playerLabel}>{match.opponentName}</Text>
-            </View>
+    <View style={styles.container} {...panResponder.panHandlers}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Recent Matches</Text>
+          <TouchableOpacity onPress={onViewAll}>
+            <Text style={styles.viewAll}>View All</Text>
           </TouchableOpacity>
-        ))}
-      </View>
-      
-      <View style={styles.pagination}>
-        <View style={[styles.dot, styles.dotActive]} />
-        <View style={styles.dot} />
-        <View style={styles.dot} />
-      </View>
+        </View>
+        
+        <View style={styles.matchesContainer}>
+          {matches.map((match) => (
+            <TouchableOpacity 
+              key={match.id} 
+              style={styles.matchCard}
+              onPress={() => handleMatchPress(match)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.playerSection}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>You</Text>
+                </View>
+                <Text style={styles.playerLabel}>You</Text>
+              </View>
+              
+              <View style={styles.scoreSection}>
+                <View style={styles.scoreContainer}>
+                  <View style={[
+                    styles.scoreDot, 
+                    { backgroundColor: match.youScore > match.opponentScore ? Colors.green.accent : Colors.red.accent }
+                  ]} />
+                  <Text style={styles.score}>{`${match.youScore} - ${match.opponentScore}`}</Text>
+                  <View style={[
+                    styles.scoreDot, 
+                    { backgroundColor: match.youScore > match.opponentScore ? Colors.red.accent : Colors.green.accent }
+                  ]} />
+                </View>
+                <Text style={styles.date}>{match.date}</Text>
+              </View>
+              
+              <View style={styles.playerSection}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{match.opponentName.charAt(0)}</Text>
+                </View>
+                <Text style={styles.playerLabel}>{match.opponentName}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <View style={styles.pagination}>
+          <View style={[styles.dot, styles.dotActive]} />
+          <View style={styles.dot} />
+          <View style={styles.dot} />
+        </View>
+        
+        {onAddNewMatch && (
+          <TouchableOpacity style={styles.addMatchButton} onPress={onAddNewMatch}>
+            <Text style={styles.addMatchButtonText}>Add new match</Text>
+          </TouchableOpacity>
+        )}
     </View>
   );
 };

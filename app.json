@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.wonofone.app"
+      "bundleIdentifier": "com.wonofone.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -34,10 +37,41 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/react-native-vector-icons/Fonts/AntDesign.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Entypo.ttf",
+            "node_modules/react-native-vector-icons/Fonts/EvilIcons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Feather.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome5_Brands.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome5_Regular.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome5_Solid.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome6_Brands.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome6_Regular.ttf",
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome6_Solid.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Foundation.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Ionicons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/SimpleLineIcons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Octicons.ttf",
+            "node_modules/react-native-vector-icons/Fonts/Zocial.ttf"
+          ]
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "84996da9-0bc1-44fe-82af-0623bc04e613"
+      }
     }
   }
 }

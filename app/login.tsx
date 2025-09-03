@@ -1,29 +1,56 @@
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    Alert, KeyboardAvoidingView,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('jondoe@gmail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [loading, setLoading] = useState(false);
   
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { signIn } = useAuth();
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { error } = await signIn(email, password);
+      
+      if (error) {
+        Alert.alert('Error', error.message);
+      } else {
+        // Success - user will be automatically redirected by auth context
+        router.push('/(tabs)');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
@@ -149,7 +176,8 @@ export default function LoginScreen() {
               marginTop: height * 0.04,
               marginHorizontal: width * 0.04
             }]}
-            onPress={() => router.push('/(tabs)')}
+            onPress={handleLogin}
+            disabled={loading}
           >
             <LinearGradient
               colors={['#6C5CE7', '#5741FF']}
@@ -157,10 +185,13 @@ export default function LoginScreen() {
               end={{ x: 1, y: 0 }}
               style={[styles.loginButton, { 
                 height: height * 0.06,
-                borderRadius: width * 0.04
+                borderRadius: width * 0.04,
+                opacity: loading ? 0.7 : 1
               }]}
             >
-              <Text style={[styles.loginButtonText, { fontSize: width * 0.04 }]}>Log In</Text>
+              <Text style={[styles.loginButtonText, { fontSize: width * 0.04 }]}>
+                {loading ? 'Signing In...' : 'Log In'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
 

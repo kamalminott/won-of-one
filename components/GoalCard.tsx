@@ -12,6 +12,8 @@ interface GoalCardProps {
   progress: number;
   onSetNewGoal: () => void;
   onUpdateGoal: () => void;
+  onGoalSaved?: (goalData: any) => void;
+  useModal?: boolean; // If true, use internal modal; if false, use onSetNewGoal callback
 }
 
 export const GoalCard: React.FC<GoalCardProps> = ({
@@ -21,6 +23,8 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   progress,
   onSetNewGoal,
   onUpdateGoal,
+  onGoalSaved,
+  useModal = false,
 }) => {
   const { width, height } = useWindowDimensions();
   const [showGoalModal, setShowGoalModal] = useState(false);
@@ -51,24 +55,70 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   const timeframes = ['Week', 'Month', 'Year'];
   const timeframeNumbers = Array.from({ length: 12 }, (_, i) => (i + 1).toString());
 
-  const handleSetNewGoal = () => {
-    setShowGoalModal(true);
+  const truncateDescription = (text: string, maxLength: number = 60): string => {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return text.substring(0, maxLength).trim() + '...';
   };
 
+  const handleSetNewGoalClick = () => {
+    if (useModal) {
+      setShowGoalModal(true);
+    } else {
+      onSetNewGoal();
+    }
+  };
+
+
+
   const handleSaveGoal = () => {
-    // TODO: Implement save goal logic
-    console.log('Saving goal:', { 
-      goalType, 
-      targetValue, 
-      timeframe, 
-      timeframeNumber,
-      notes,
-      matchesForWinRate,
-      matchesForPoints,
-      matchesForDifferential,
-      matchesInARow
-    });
+    // Prepare goal data for database
+    const goalData = {
+      category: goalType,
+      description: notes,
+      target_value: parseInt(targetValue),
+      unit: timeframe,
+      deadline: calculateDeadline(timeframe, timeframeNumber),
+      tracking_mode: 'manual', // Default tracking mode
+    };
+
+    console.log('Saving goal:', goalData);
+    console.log('onGoalSaved callback exists:', !!onGoalSaved);
+    
+    // Call the callback to save to database
+    if (onGoalSaved) {
+      console.log('Calling onGoalSaved callback...');
+      onGoalSaved(goalData);
+    } else {
+      console.log('No onGoalSaved callback provided!');
+    }
+    
     setShowGoalModal(false);
+  };
+
+  const calculateDeadline = (timeframe: string, timeframeNumber: string): string => {
+    const now = new Date();
+    const number = parseInt(timeframeNumber);
+    
+    switch (timeframe) {
+      case 'Day':
+        now.setDate(now.getDate() + number);
+        break;
+      case 'Week':
+        now.setDate(now.getDate() + (number * 7));
+        break;
+      case 'Month':
+        now.setMonth(now.getMonth() + number);
+        break;
+      case 'Year':
+        now.setFullYear(now.getFullYear() + number);
+        break;
+      default:
+        now.setMonth(now.getMonth() + 1); // Default to 1 month
+    }
+    
+    return now.toISOString().split('T')[0]; // Return date in YYYY-MM-DD format
   };
 
   const handleCancel = () => {
@@ -331,6 +381,7 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     description: {
       fontSize: width * 0.033,
       color: Colors.gray.light,
+      marginTop: height * 0.010, // Added space between heading and text
       marginBottom: height * 0.0005,
     },
     contentRow: {
@@ -340,8 +391,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       marginBottom: height * 0.012,
     },
     textSection: {
-      flex: 1,
-      marginRight: width * 0.04,
+      width: width * 0.55, // Increased from 0.45 to 0.55
+      maxWidth: width * 0.55, // Same as width to enforce limit
+      marginRight: width * 0.04, // Further reduced margin
     },
     progressSection: {
       alignItems: 'center',
@@ -629,12 +681,11 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       </View>
       
       <Text style={styles.title}>{title}</Text>
-      <Text style={styles.description}>{description}</Text>
       
       <View style={styles.contentRow}>
         <View style={styles.textSection}>
           <Text style={styles.description}>
-            Track your progress and stay motivated
+            {description ? truncateDescription(description) : 'Track your progress and stay motivated'}
           </Text>
         </View>
         
@@ -652,7 +703,7 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       </View>
       
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleSetNewGoal}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={handleSetNewGoalClick}>
           <Text style={styles.secondaryButtonText}>Set New Goal</Text>
         </TouchableOpacity>
         
