@@ -1,5 +1,8 @@
 import { SwipeToCompleteButton } from '@/components/SwipeToCompleteButton';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,6 +16,7 @@ export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   
   // Responsive breakpoints for small screens
   const isSmallScreen = width < 400;
@@ -20,8 +24,8 @@ export default function RemoteScreen() {
   const isNexusS = width <= 360; // Nexus S specific optimization
   
   const [currentPeriod, setCurrentPeriod] = useState(1);
-  const [aliceScore, setAliceScore] = useState(3);
-  const [bobScore, setBobScore] = useState(2);
+  const [aliceScore, setAliceScore] = useState(0);
+  const [bobScore, setBobScore] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [matchTime, setMatchTime] = useState(180); // 3 minutes in seconds
   const [period1Time, setPeriod1Time] = useState(0); // in seconds
@@ -32,8 +36,310 @@ export default function RemoteScreen() {
   const [showResetPopup, setShowResetPopup] = useState(false);
   const [fencerPositions, setFencerPositions] = useState({ alice: 'left', bob: 'right' });
   const [isSwapping, setIsSwapping] = useState(false);
-  const [showUserProfile, setShowUserProfile] = useState(false);
-  const [fencerNames, setFencerNames] = useState({ alice: 'Alice', bob: 'Bob' });
+  const [showUserProfile, setShowUserProfile] = useState(true); // Automatically enabled
+  const [fencerNames, setFencerNames] = useState({ 
+    alice: 'Alice', 
+    bob: 'Bob' 
+  });
+
+  // Get user display name
+  const userDisplayName = user?.email?.split('@')[0] || 'You';
+  
+  // Remote session state
+  const [remoteSession, setRemoteSession] = useState<any>(null);
+  
+  // Match period state
+  const [currentMatchPeriod, setCurrentMatchPeriod] = useState<any>(null);
+  
+  // Event tracking state
+  const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
+  
+  // We'll use null for opponent scoring and store opponent name in meta field
+
+  // Helper function to create match events with all required fields
+  const createMatchEvent = async (scorer: 'user' | 'opponent', cardGiven?: string, newAliceScore?: number, newBobScore?: number) => {
+    if (!remoteSession) {
+      console.log('❌ No remote session - cannot create match event');
+      return;
+    }
+    
+    // Verify the remote session still exists in the database
+    const { data: sessionCheck, error: sessionError } = await supabase
+      .from('fencing_remote')
+      .select('remote_id')
+      .eq('remote_id', remoteSession.remote_id)
+      .single();
+    
+    if (sessionError || !sessionCheck) {
+      console.error('❌ Remote session no longer exists in database:', sessionError);
+      return;
+    }
+
+    const now = new Date();
+    const secondsSinceLastEvent = lastEventTime 
+      ? Math.floor((now.getTime() - lastEventTime.getTime()) / 1000)
+      : 0;
+    
+    console.log('🔍 Time calculation:', {
+      now: now.toISOString(),
+      lastEventTime: lastEventTime?.toISOString(),
+      secondsSinceLastEvent
+    });
+
+    // Calculate score_diff based on user toggle and position
+    let scoreDiff: number | null = null;
+    if (showUserProfile && user) {
+      // Use new scores if provided, otherwise use current state scores
+      const currentAliceScore = newAliceScore !== undefined ? newAliceScore : aliceScore;
+      const currentBobScore = newBobScore !== undefined ? newBobScore : bobScore;
+      
+      // User toggle is on - calculate from user's perspective
+      const userScore = toggleCardPosition === 'left' ? currentAliceScore : currentBobScore;
+      const opponentScore = toggleCardPosition === 'left' ? currentBobScore : currentAliceScore;
+      scoreDiff = userScore - opponentScore;
+      
+      console.log('🔍 Score diff calculation:', {
+        showUserProfile,
+        toggleCardPosition,
+        aliceScore: currentAliceScore,
+        bobScore: currentBobScore,
+        userScore,
+        opponentScore,
+        scoreDiff,
+        usingNewScores: newAliceScore !== undefined || newBobScore !== undefined
+      });
+    }
+    // If user toggle is off, score_diff remains null
+
+    const eventData = {
+      fencing_remote_id: remoteSession.remote_id,
+      match_period_id: currentMatchPeriod?.match_period_id || null,
+      event_time: now.toISOString(),
+      event_type: "touch",
+      scoring_user_id: scorer === 'user' ? user?.id : null,
+      scoring_user_name: scorer === 'user' 
+        ? userDisplayName  // User always scores as themselves when user toggle is on
+        : (showUserProfile && toggleCardPosition === 'left' ? fencerNames.bob : fencerNames.alice), // Opponent is the other fencer
+      fencer_1_name: showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice,
+      fencer_2_name: showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob,
+      card_given: cardGiven || null, // Only tracks actual cards: 'yellow', 'red', or null
+      score_diff: scoreDiff,
+      seconds_since_last_event: secondsSinceLastEvent
+    };
+
+    await matchEventService.createMatchEvent(eventData);
+    setLastEventTime(now);
+  };
+
+  // Create remote session if it doesn't exist
+  const ensureRemoteSession = async () => {
+    if (remoteSession || !user) return remoteSession;
+
+    try {
+      console.log('Creating remote session...');
+      const session = await fencingRemoteService.createRemoteSession({
+        referee_id: user.id,
+        fencer_1_id: user.id,
+        fencer_1_name: userDisplayName,
+        fencer_2_name: fencerNames.bob, // Use current opponent name
+        scoring_mode: "15-point",
+        device_serial: "REMOTE_001"
+      });
+      
+      console.log('Remote session created:', session);
+      setRemoteSession(session);
+      return session;
+    } catch (error) {
+      console.error('Error creating remote session:', error);
+      return null;
+    }
+  };
+
+  // Create a new match period
+  const createMatchPeriod = async () => {
+    if (!remoteSession) {
+      console.log('❌ No remote session - cannot create match period');
+      return null;
+    }
+
+    try {
+      console.log('🔄 Creating match period...', { currentPeriod, aliceScore, bobScore });
+      
+      // First, create a match record from the remote session
+      // Only pass user.id if showUserProfile is true (user toggle is on)
+      const userId = showUserProfile && user ? user.id : null;
+      const match = await matchService.createMatchFromRemote(remoteSession, userId);
+      if (!match) {
+        console.error('❌ Failed to create match record');
+        return null;
+      }
+      
+      console.log('✅ Match created:', match.match_id);
+      
+      // Now create the match period with the proper match_id
+      const periodData = {
+        match_id: match.match_id, // Use the actual match_id from the match table
+        period_number: currentPeriod, // Use currentPeriod instead of periodNumber
+        start_time: new Date().toISOString(),
+        fencer_1_score: aliceScore,
+        fencer_2_score: bobScore,
+        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+        fencer_2_cards: bobCards.yellow + bobCards.red,
+        priority_assigned: priorityFencer || undefined,
+        priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+      };
+      
+      console.log('🔄 Creating match period with data:', periodData);
+      const period = await matchPeriodService.createMatchPeriod(periodData);
+      
+      if (period) {
+        console.log('✅ Match period created successfully:', period);
+        setCurrentMatchPeriod(period);
+        return period;
+      } else {
+        console.error('❌ Failed to create match period');
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Error creating match period:', error);
+      return null;
+    }
+  };
+
+  // Update current match period with latest scores and cards
+  const updateCurrentPeriod = async () => {
+    if (!currentMatchPeriod) return;
+
+    try {
+      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+        fencer_1_score: aliceScore,
+        fencer_2_score: bobScore,
+        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+        fencer_2_cards: bobCards.yellow + bobCards.red,
+        priority_assigned: priorityFencer || undefined,
+        priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+      });
+    } catch (error) {
+      console.error('Error updating match period:', error);
+    }
+  };
+
+  // Complete the current match
+  const completeMatch = async () => {
+    if (!currentMatchPeriod || !remoteSession) {
+      console.error('Cannot complete match: missing period or session');
+      return;
+    }
+
+    try {
+      console.log('Completing match...');
+      
+      // Calculate match duration (if timer was used)
+      const matchDuration = matchTime - timeRemaining;
+      
+      // Determine result based on user_id presence
+      let result: string | null = null;
+      let finalScore: number;
+      let touchesAgainst: number;
+      let scoreDiff: number | null;
+
+      if (user?.id) {
+        // User is registered - determine their position and result
+        const userScore = showUserProfile && toggleCardPosition === 'left' ? aliceScore : 
+                         showUserProfile && toggleCardPosition === 'right' ? bobScore : 
+                         aliceScore; // Default to Alice if user profile not shown
+        
+        const opponentScore = showUserProfile && toggleCardPosition === 'left' ? bobScore : 
+                             showUserProfile && toggleCardPosition === 'right' ? aliceScore : 
+                             bobScore; // Default to Bob if user profile not shown
+
+        finalScore = userScore;
+        touchesAgainst = opponentScore;
+        scoreDiff = userScore - opponentScore;
+        result = userScore > opponentScore ? 'win' : 'loss';
+      } else {
+        // No registered user - just record the scores without win/loss
+        finalScore = aliceScore;
+        touchesAgainst = bobScore;
+        scoreDiff = null; // No score_diff when no user is present
+        result = null; // No win/loss determination
+      }
+
+      // 1. Update match with final scores and completion status
+      const updatedMatch = await matchService.updateMatch(currentMatchPeriod.match_id, {
+        final_score: finalScore,
+        // touches_against is a generated column - don't set it explicitly
+        result: result, // Will be 'win'/'loss' if user exists, null if no user
+        score_diff: scoreDiff,
+        bout_length_s: matchDuration > 0 ? matchDuration : undefined,
+        yellow_cards: aliceCards.yellow + bobCards.yellow,
+        red_cards: aliceCards.red + bobCards.red,
+        is_complete: true, // Mark as complete
+      });
+
+      if (updatedMatch) {
+        console.log('Match completed successfully:', updatedMatch);
+      }
+
+      // 2. End the current period
+      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+        end_time: new Date().toISOString(),
+        fencer_1_score: aliceScore,
+        fencer_2_score: bobScore,
+        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+        fencer_2_cards: bobCards.yellow + bobCards.red,
+      });
+
+      // 3. Match completion is tracked by is_complete in match table
+
+      console.log('Match completion process finished');
+      
+      // 4. Navigate to match summary with match data
+      router.push({
+        pathname: '/match-summary',
+        params: {
+          matchId: currentMatchPeriod.match_id,
+          remoteId: remoteSession.remote_id,
+          // Pass current match state for display
+          aliceScore: aliceScore.toString(),
+          bobScore: bobScore.toString(),
+          aliceCards: JSON.stringify(aliceCards),
+          bobCards: JSON.stringify(bobCards),
+          matchDuration: matchDuration.toString(),
+          result: result || '',
+          fencer1Name: fencerNames.alice,
+          fencer2Name: fencerNames.bob,
+        }
+      });
+
+      // 5. Reset the remote to clean state after completion
+      // The match data is now saved in the database and accessible elsewhere
+      setCurrentMatchPeriod(null);
+      setRemoteSession(null);
+      setAliceScore(0);
+      setBobScore(0);
+      setAliceCards({ yellow: 0, red: 0 });
+      setBobCards({ yellow: 0, red: 0 });
+      setCurrentPeriod(1);
+      setTimeRemaining(matchTime);
+      setIsPlaying(false);
+      setPriorityFencer(null);
+      setPriorityLightPosition(null);
+      setIsAssigningPriority(false);
+      setIsInjuryTimer(false);
+      setIsBreakTime(false);
+      setScoreChangeCount(0);
+      setShowScoreWarning(false);
+      setPendingScoreAction(null);
+      setPreviousMatchState(null);
+      setIsManualReset(false);
+      setLastEventTime(null); // Reset event timing
+      
+    } catch (error) {
+      console.error('Error completing match:', error);
+    }
+  };
+
   const [showEditNamesPopup, setShowEditNamesPopup] = useState(false);
     const [editAliceName, setEditAliceName] = useState('');
   const [editBobName, setEditBobName] = useState('');
@@ -157,6 +463,10 @@ export default function RemoteScreen() {
     };
   }, [isPlaying]);
 
+  // Note: No need to restore match data when returning to remote
+  // Completed matches are saved in database and accessible elsewhere
+  // Remote should always start fresh for new matches
+
   // Add a function to handle app state changes
   const handleAppStateChange = useCallback((nextAppState: string) => {
     if (nextAppState === 'background' || nextAppState === 'inactive') {
@@ -197,7 +507,10 @@ export default function RemoteScreen() {
     }
   };
 
-  const incrementAliceScore = () => {
+  const incrementAliceScore = async () => {
+    // Ensure remote session exists (create if first score)
+    const session = await ensureRemoteSession();
+    
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
@@ -206,9 +519,13 @@ export default function RemoteScreen() {
       
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
-        setPendingScoreAction(() => () => {
+        setPendingScoreAction(() => async () => {
           setAliceScore(aliceScore + 1);
           setScoreChangeCount(0); // Reset counter
+          
+          // Create match event for the score - determine if Alice is user or opponent
+          const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
+          await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -223,6 +540,10 @@ export default function RemoteScreen() {
       setAliceScore(aliceScore + 1);
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
       
+      // Create match event for the score - determine if Alice is user or opponent
+      const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
+      
       // Pause timer if it's currently running
       if (isPlaying) {
         pauseTimer();
@@ -234,6 +555,11 @@ export default function RemoteScreen() {
       setAliceScore(aliceScore + 1);
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
+      
+      // Create match event for the score - determine if Alice is user or opponent
+      const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
+      
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -279,7 +605,10 @@ export default function RemoteScreen() {
     }
   };
   
-  const incrementBobScore = () => {
+  const incrementBobScore = async () => {
+    // Ensure remote session exists (create if first score)
+    const session = await ensureRemoteSession();
+    
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
@@ -288,9 +617,13 @@ export default function RemoteScreen() {
       
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
-        setPendingScoreAction(() => () => {
+        setPendingScoreAction(() => async () => {
           setBobScore(bobScore + 1);
           setScoreChangeCount(0); // Reset counter
+          
+          // Create match event for the score - determine if Bob is user or opponent
+          const bobIsUser = showUserProfile && toggleCardPosition === 'right';
+          await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -301,9 +634,13 @@ export default function RemoteScreen() {
         return;
       }
       
-      // First score change during active match - proceed normally
+            // First score change during active match - proceed normally
       setBobScore(bobScore + 1);
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
+      
+      // Create match event for the score - determine if Bob is user or opponent
+      const bobIsUser = showUserProfile && toggleCardPosition === 'right';
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -312,10 +649,15 @@ export default function RemoteScreen() {
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      // Not an active match - no warning needed, just update score
+            // Not an active match - no warning needed, just update score
       setBobScore(bobScore + 1);
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
+      
+      // Create match event for the score - determine if Bob is user or opponent
+      const bobIsUser = showUserProfile && toggleCardPosition === 'right';
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
+      
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -361,14 +703,23 @@ export default function RemoteScreen() {
     }
   };
 
-  const togglePlay = useCallback(() => {
+  const togglePlay = useCallback(async () => {
     if (isPlaying) {
       pauseTimer();
     } else {
+      // Create remote session when starting timer
+      await ensureRemoteSession();
+      // Create match period only if one doesn't already exist (first time starting match)
+      if (!currentMatchPeriod) {
+        console.log('🆕 Creating new match period (first time starting match)');
+        await createMatchPeriod();
+      } else {
+        console.log('⏯️ Match period already exists, resuming match');
+      }
       startTimer();
       setScoreChangeCount(0); // Reset score change counter when starting timer
     }
-  }, [isPlaying, timeRemaining, matchTime]);
+  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -457,55 +808,242 @@ export default function RemoteScreen() {
     setIsManualReset(true); // Set flag to prevent auto-sync
   }, []);
 
-  const resetAll = useCallback(() => {
-    // Stop timer if running
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (breakTimerRef) {
-      clearInterval(breakTimerRef);
-    }
-    setIsPlaying(false);
-    setHasMatchStarted(false); // Reset match started state
-    setCurrentPeriod(1); // Reset to period 1
-    currentPeriodRef.current = 1; // Reset ref
-    setMatchTime(180); // 3 minutes in seconds
-    setTimeRemaining(180); // Same as matchTime = no paused state
-    setAliceScore(0); // Reset scores
-    setBobScore(0);
-    logMatchEvent('score', 'alice', 'decrease'); // Log score reset
-    logMatchEvent('score', 'bob', 'decrease'); // Log score reset
-    setIsBreakTime(false); // Reset break state
-    setBreakTimeRemaining(60); // Reset break timer
-    setScoreChangeCount(0); // Reset score change counter
-    setShowScoreWarning(false); // Reset warning popup
-    setPendingScoreAction(null); // Reset pending action
-    setPreviousMatchState(null); // Reset previous match state
+  const resetAll = useCallback(async () => {
+    try {
+      console.log('🔄 Starting Reset All - cleaning up database records...');
+      console.log('🔍 Current state:', { 
+        currentMatchPeriod: currentMatchPeriod ? 'exists' : 'null',
+        remoteSession: remoteSession ? 'exists' : 'null',
+        matchId: currentMatchPeriod?.match_id,
+        remoteId: remoteSession?.remote_id
+      });
+      
+      // 1. Clean up database records first
+      if (currentMatchPeriod && remoteSession) {
+        console.log('🗑️ Deleting match and related records...');
+        
+        // Delete the match and all related records
+        const matchDeleted = await matchService.deleteMatch(currentMatchPeriod.match_id, remoteSession.remote_id);
+        if (matchDeleted) {
+          console.log('✅ Match and related records deleted successfully');
+        } else {
+          console.error('❌ Failed to delete match records');
+        }
+        
+        // Delete the remote session
+        const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id);
+        if (sessionDeleted) {
+          console.log('✅ Remote session deleted successfully');
+        } else {
+          console.error('❌ Failed to delete remote session');
+        }
+        
+        // Clear the current match period and remote session state
+        setCurrentMatchPeriod(null);
+        setRemoteSession(null);
+      } else {
+        console.log('⚠️ No active match to clean up - currentMatchPeriod or remoteSession is null');
+        console.log('🔍 Debug info:', {
+          currentMatchPeriod: currentMatchPeriod,
+          remoteSession: remoteSession
+        });
+        
+        // Even if no active session, try to clean up any incomplete records
+        console.log('🧹 Attempting to clean up any incomplete records...');
+        try {
+          // Find incomplete matches (no timestamp filter since created_at doesn't exist)
+          const { data: incompleteMatches, error: recentError } = await supabase
+            .from('match')
+            .select('match_id, is_complete')
+            .eq('is_complete', false);
+          
+          if (recentError) {
+            console.error('❌ Error finding incomplete matches:', recentError);
+          } else if (incompleteMatches && incompleteMatches.length > 0) {
+            console.log('🗑️ Found incomplete matches:', incompleteMatches.length);
+            // Delete these incomplete matches and their related records
+            for (const match of incompleteMatches) {
+              await matchService.deleteMatch(match.match_id);
+            }
+            console.log('✅ Cleaned up incomplete matches');
+          } else {
+            console.log('✅ No incomplete matches found');
+          }
+        } catch (error) {
+          console.error('❌ Error during incomplete records cleanup:', error);
+        }
+      }
+      
+      // 3. Clean up any orphaned records (match_period, match_event, fencing_remote)
+      console.log('🧹 Running comprehensive orphaned records cleanup...');
+      try {
+        // Clean up orphaned match_period records
+        const { data: allPeriods, error: periodsError } = await supabase
+          .from('match_period')
+          .select('match_period_id, match_id');
+        
+        if (periodsError) {
+          console.error('❌ Error fetching match periods:', periodsError);
+        } else if (allPeriods && allPeriods.length > 0) {
+          const { data: existingMatches, error: matchesError } = await supabase
+            .from('match')
+            .select('match_id');
+          
+          if (matchesError) {
+            console.error('❌ Error fetching existing matches:', matchesError);
+          } else {
+            const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
+            const orphanedPeriods = allPeriods.filter(period => !existingMatchIds.has(period.match_id));
+            
+            if (orphanedPeriods.length > 0) {
+              console.log('🗑️ Found orphaned match_period records:', orphanedPeriods.length);
+              const { error: deleteError } = await supabase
+                .from('match_period')
+                .delete()
+                .in('match_period_id', orphanedPeriods.map(p => p.match_period_id));
+              
+              if (deleteError) {
+                console.error('❌ Error deleting orphaned periods:', deleteError);
+              } else {
+                console.log('✅ Cleaned up orphaned match_period records');
+              }
+            } else {
+              console.log('✅ No orphaned match_period records found');
+            }
+          }
+        }
 
-    setPriorityLightPosition(null); // Reset priority light
-    setPriorityFencer(null); // Reset priority fencer
-    setShowPriorityPopup(false); // Reset priority popup
-    setAliceYellowCards([]); // Reset Alice's yellow cards
-    setBobYellowCards([]); // Reset Bob's yellow cards
-    setAliceRedCards([]); // Reset Alice's red cards
-    setBobRedCards([]); // Reset Bob's red cards
-    
-    // Reset the new card state structure
-    setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
-    setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
-    
-    // Reset injury timer state
-    setIsInjuryTimer(false);
-    setInjuryTimeRemaining(300);
-    if (injuryTimerRef) {
-      clearInterval(injuryTimerRef);
-      setInjuryTimerRef(null);
+        // Clean up orphaned match_event records (those without valid match_id or fencing_remote_id)
+        const { data: allEvents, error: eventsError } = await supabase
+          .from('match_event')
+          .select('match_event_id, match_id, fencing_remote_id');
+        
+        if (eventsError) {
+          console.error('❌ Error fetching match events:', eventsError);
+        } else if (allEvents && allEvents.length > 0) {
+          // Get all existing match_ids and fencing_remote_ids
+          const { data: existingMatches } = await supabase.from('match').select('match_id');
+          const { data: existingRemotes } = await supabase.from('fencing_remote').select('remote_id');
+          
+          const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
+          const existingRemoteIds = new Set(existingRemotes?.map(r => r.remote_id) || []);
+          
+          // Find orphaned events (events with match_id or fencing_remote_id not in their respective tables)
+          const orphanedEvents = allEvents.filter(event => 
+            (event.match_id && !existingMatchIds.has(event.match_id)) ||
+            (event.fencing_remote_id && !existingRemoteIds.has(event.fencing_remote_id))
+          );
+          
+          if (orphanedEvents.length > 0) {
+            console.log('🗑️ Found orphaned match_event records:', orphanedEvents.length);
+            const { error: deleteError } = await supabase
+              .from('match_event')
+              .delete()
+              .in('match_event_id', orphanedEvents.map(e => e.match_event_id));
+            
+            if (deleteError) {
+              console.error('❌ Error deleting orphaned events:', deleteError);
+            } else {
+              console.log('✅ Cleaned up orphaned match_event records');
+            }
+          } else {
+            console.log('✅ No orphaned match_event records found');
+          }
+        }
+
+        // Clean up orphaned fencing_remote records (those without linked matches)
+        const { data: allRemotes, error: remotesError } = await supabase
+          .from('fencing_remote')
+          .select('remote_id, linked_match_id');
+        
+        if (remotesError) {
+          console.error('❌ Error fetching fencing_remote records:', remotesError);
+        } else if (allRemotes && allRemotes.length > 0) {
+          const { data: existingMatches } = await supabase.from('match').select('match_id');
+          const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
+          
+          // Find orphaned remotes (remotes with linked_match_id not in match table)
+          const orphanedRemotes = allRemotes.filter(remote => 
+            remote.linked_match_id && !existingMatchIds.has(remote.linked_match_id)
+          );
+          
+          if (orphanedRemotes.length > 0) {
+            console.log('🗑️ Found orphaned fencing_remote records:', orphanedRemotes.length);
+            const { error: deleteError } = await supabase
+              .from('fencing_remote')
+              .delete()
+              .in('remote_id', orphanedRemotes.map(r => r.remote_id));
+            
+            if (deleteError) {
+              console.error('❌ Error deleting orphaned remotes:', deleteError);
+            } else {
+              console.log('✅ Cleaned up orphaned fencing_remote records');
+            }
+          } else {
+            console.log('✅ No orphaned fencing_remote records found');
+          }
+        }
+        
+      } catch (error) {
+        console.error('❌ Error during comprehensive cleanup:', error);
+      }
+      
+      // 2. Stop all timers
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (breakTimerRef) {
+        clearInterval(breakTimerRef);
+      }
+      if (injuryTimerRef) {
+        clearInterval(injuryTimerRef);
+        setInjuryTimerRef(null);
+      }
+      
+      // 3. Reset all UI state
+      setIsPlaying(false);
+      setHasMatchStarted(false); // Reset match started state
+      setCurrentPeriod(1); // Reset to period 1
+      currentPeriodRef.current = 1; // Reset ref
+      setMatchTime(180); // 3 minutes in seconds
+      setTimeRemaining(180); // Same as matchTime = no paused state
+      setAliceScore(0); // Reset scores
+      setBobScore(0);
+      setIsBreakTime(false); // Reset break state
+      setBreakTimeRemaining(60); // Reset break timer
+      setScoreChangeCount(0); // Reset score change counter
+      setShowScoreWarning(false); // Reset warning popup
+      setLastEventTime(null); // Reset event timing
+      setPendingScoreAction(null); // Reset pending action
+      setPreviousMatchState(null); // Reset previous match state
+
+      setPriorityLightPosition(null); // Reset priority light
+      setPriorityFencer(null); // Reset priority fencer
+      setShowPriorityPopup(false); // Reset priority popup
+      setAliceYellowCards([]); // Reset Alice's yellow cards
+      setBobYellowCards([]); // Reset Bob's yellow cards
+      setAliceRedCards([]); // Reset Alice's red cards
+      setBobRedCards([]); // Reset Bob's red cards
+      
+      // Reset the new card state structure
+      setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
+      setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
+      
+      // Reset injury timer state
+      setIsInjuryTimer(false);
+      setInjuryTimeRemaining(300);
+      
+      console.log('✅ Reset All completed successfully');
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setIsManualReset(true); // Set flag to prevent auto-sync
+      
+    } catch (error) {
+      console.error('❌ Error during Reset All:', error);
+      // Still reset UI state even if database cleanup fails
+      // ... (fallback UI reset logic could go here)
     }
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsManualReset(true); // Set flag to prevent auto-sync
-  }, [breakTimerRef]);
+  }, [breakTimerRef, currentMatchPeriod, remoteSession]);
 
   const swapFencers = useCallback(() => {
     if (isSwapping) return; // Prevent multiple swaps during animation
@@ -575,24 +1113,50 @@ export default function RemoteScreen() {
   }, []);
 
   const openEditNamesPopup = useCallback(() => {
-    setEditAliceName(fencerNames.alice);
-    setEditBobName(fencerNames.bob);
+    // Auto-fill user's name when toggle is on, based on card position
+    if (showUserProfile) {
+      if (toggleCardPosition === 'left') {
+        setEditAliceName(userDisplayName); // User is on the left (Alice)
+        setEditBobName(fencerNames.bob);
+      } else {
+        setEditAliceName(fencerNames.alice);
+        setEditBobName(userDisplayName); // User is on the right (Bob)
+      }
+    } else {
+      setEditAliceName(fencerNames.alice);
+      setEditBobName(fencerNames.bob);
+    }
     setShowEditNamesPopup(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [fencerNames]);
+  }, [fencerNames, showUserProfile, userDisplayName, toggleCardPosition]);
 
   const saveFencerName = useCallback(() => {
     if (editAliceName.trim() && editBobName.trim()) {
-      setFencerNames({
-        alice: editAliceName.trim(),
-        bob: editBobName.trim()
-      });
+      // Preserve user's name when toggle is on, based on card position
+      if (showUserProfile) {
+        if (toggleCardPosition === 'left') {
+          setFencerNames({
+            alice: userDisplayName, // Keep user's name on left
+            bob: editBobName.trim() // Save opponent's name on right
+          });
+        } else {
+          setFencerNames({
+            alice: editAliceName.trim(), // Save opponent's name on left
+            bob: userDisplayName // Keep user's name on right
+          });
+        }
+      } else {
+        setFencerNames({
+          alice: editAliceName.trim(),
+          bob: editBobName.trim()
+        });
+      }
       setShowEditNamesPopup(false);
       setEditAliceName('');
       setEditBobName('');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [editAliceName, editBobName]);
+  }, [editAliceName, editBobName, showUserProfile, userDisplayName, toggleCardPosition]);
 
   const cancelEditName = useCallback(() => {
     setShowEditNamesPopup(false);
@@ -1962,7 +2526,7 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
-  const addYellowCardToAlice = () => {
+  const addYellowCardToAlice = async () => {
     // Pause timer when card is issued
     if (isPlaying) {
       pauseTimer();
@@ -1996,11 +2560,12 @@ export default function RemoteScreen() {
       return newState;
     });
     
-    logMatchEvent('card', 'alice', 'yellow'); // Log the yellow card
+    // Create match event for the yellow card
+    await createMatchEvent('user', 'yellow');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const addYellowCardToBob = () => {
+  const addYellowCardToBob = async () => {
     // Pause timer when card is issued
     if (isPlaying) {
       pauseTimer();
@@ -2034,12 +2599,13 @@ export default function RemoteScreen() {
       return newState;
     });
     
-    logMatchEvent('card', 'bob', 'yellow'); // Log the yellow card
+    // Create match event for the yellow card
+    await createMatchEvent('opponent', 'yellow');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   // Red card management functions
-  const addRedCardToAlice = () => {
+  const addRedCardToAlice = async () => {
     if (aliceRedCards.length > 0) {
       // Show popup asking if user wants to remove or add
       Alert.alert(
@@ -2063,7 +2629,7 @@ export default function RemoteScreen() {
           },
           {
             text: 'Add Another',
-            onPress: () => {
+            onPress: async () => {
               // Pause timer when card is issued
               if (isPlaying) {
                 pauseTimer();
@@ -2074,7 +2640,8 @@ export default function RemoteScreen() {
               // Give opponent (Bob) 1 point for Alice's red card
               setBobScore(prev => prev + 1);
               console.log('🔴 Alice red card issued → Bob gets +1 point');
-              logMatchEvent('card', 'alice', 'red'); // Log the red card
+              // Create match event for the red card
+              await createMatchEvent('user', 'red');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -2103,12 +2670,13 @@ export default function RemoteScreen() {
       // Give opponent (Bob) 1 point for Alice's red card
       setBobScore(prev => prev + 1);
       console.log('🔴 Alice red card issued → Bob gets +1 point');
-      logMatchEvent('card', 'alice', 'red'); // Log the red card
+      // Create match event for the red card
+      await createMatchEvent('user', 'red');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
-  const addRedCardToBob = () => {
+  const addRedCardToBob = async () => {
     if (bobRedCards.length > 0) {
       // Show popup asking if user wants to remove or add
       Alert.alert(
@@ -2132,7 +2700,7 @@ export default function RemoteScreen() {
           },
           {
             text: 'Add Another',
-            onPress: () => {
+            onPress: async () => {
               // Pause timer when card is issued
               if (isPlaying) {
                 pauseTimer();
@@ -2143,7 +2711,8 @@ export default function RemoteScreen() {
               // Give opponent (Alice) 1 point for Bob's red card
               setAliceScore(prev => prev + 1);
               console.log('🔴 Bob red card issued → Alice gets +1 point');
-              logMatchEvent('card', 'bob', 'red'); // Log the red card
+              // Create match event for the red card
+              await createMatchEvent('opponent', 'red');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -2172,7 +2741,8 @@ export default function RemoteScreen() {
       // Give opponent (Alice) 1 point for Bob's red card
       setAliceScore(prev => prev + 1);
       console.log('🔴 Bob red card issued → Alice gets +1 point');
-      logMatchEvent('card', 'bob', 'red'); // Log the red card
+      // Create match event for the red card
+      await createMatchEvent('opponent', 'red');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -2515,7 +3085,7 @@ export default function RemoteScreen() {
           )}
           
           <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'left' && showUserProfile ? 'You' : fencerNames.alice}
+            {toggleCardPosition === 'left' && showUserProfile ? userDisplayName : fencerNames.alice}
           </Text>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{aliceScore.toString().padStart(2, '0')}</Text>
           
@@ -2655,7 +3225,7 @@ export default function RemoteScreen() {
           )}
           
           <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'right' && showUserProfile ? 'You' : fencerNames.bob}
+            {toggleCardPosition === 'right' && showUserProfile ? userDisplayName : fencerNames.bob}
           </Text>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{bobScore.toString().padStart(2, '0')}</Text>
           
@@ -2852,34 +3422,37 @@ export default function RemoteScreen() {
               minHeight: isNexusS ? height * 0.045 : height * 0.055,
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
-            onPress={() => {
+            onPress={async () => {
+              console.log('Play button onPress started - isInjuryTimer:', isInjuryTimer, 'isBreakTime:', isBreakTime, 'timeRemaining:', timeRemaining);
+              
               // Skip button during injury time
               if (isInjuryTimer) {
+                console.log('Skipping - injury timer active');
                 skipInjuryTimer();
                 return;
               }
               
               // Skip button during break time
               if (isBreakTime) {
+                console.log('Skipping - break time active');
                 skipBreak();
                 return;
               }
               
               // Prevent action when timer is at 0:00
               if (timeRemaining === 0) {
+                console.log('Skipping - timer at 0:00');
                 return;
               }
               
               console.log('Play button pressed - isPlaying:', isPlaying, 'timeRemaining:', timeRemaining, 'matchTime:', matchTime);
-              if (isPlaying) {
-                console.log('Calling pauseTimer');
-                pauseTimer();
-              } else if (timeRemaining < matchTime && timeRemaining > 0) {
-                console.log('Calling resumeTimer');
-                resumeTimer();
-              } else {
-                console.log('Calling togglePlay');
-                togglePlay();
+              // Use the togglePlay function which handles all cases correctly
+              console.log('About to call togglePlay...');
+              try {
+                await togglePlay();
+                console.log('togglePlay completed successfully');
+              } catch (error) {
+                console.error('Error in togglePlay:', error);
               }
             }}
           >
@@ -2936,9 +3509,7 @@ export default function RemoteScreen() {
             flex: 1, // Takes up available space
             minWidth: '100%' // Ensures minimum width matches container
           }}
-          onSwipeSuccess={() => {
-            router.push('/match-summary');
-          }}
+          onSwipeSuccess={completeMatch}
         />
       </View>
 
@@ -3004,8 +3575,8 @@ export default function RemoteScreen() {
               }}>
                 <Text style={styles.saveButtonText}>Reset Cards</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={() => {
-                resetAll();
+              <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
+                await resetAll();
                 setShowResetPopup(false);
               }}>
                 <Text style={styles.saveButtonText}>Reset All</Text>
@@ -3031,30 +3602,49 @@ export default function RemoteScreen() {
               <Text style={styles.inputHint}>Enter new names for both fencers:</Text>
               
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>Left Fencer:</Text>
+                <Text style={styles.nameInputLabel}>
+                  Left Fencer {showUserProfile && toggleCardPosition === 'left' ? '(You)' : ''}:
+                </Text>
                 <TextInput
-                  style={styles.nameInput}
+                  style={[
+                    styles.nameInput,
+                    showUserProfile && toggleCardPosition === 'left' && { 
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      color: 'rgba(255, 255, 255, 0.5)'
+                    }
+                  ]}
                   value={editAliceName}
-                  onChangeText={setEditAliceName}
-                  placeholder="Enter name"
+                  onChangeText={showUserProfile && toggleCardPosition === 'left' ? undefined : setEditAliceName}
+                  placeholder={showUserProfile && toggleCardPosition === 'left' ? "Your name (auto-filled)" : "Enter name"}
                   placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                  autoFocus
+                  autoFocus={!(showUserProfile && toggleCardPosition === 'left')}
                   maxLength={20}
                   returnKeyType="next"
+                  editable={!(showUserProfile && toggleCardPosition === 'left')}
                 />
               </View>
               
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>Right Fencer:</Text>
+                <Text style={styles.nameInputLabel}>
+                  Right Fencer {showUserProfile && toggleCardPosition === 'right' ? '(You)' : ''}:
+                </Text>
                 <TextInput
-                  style={styles.nameInput}
+                  style={[
+                    styles.nameInput,
+                    showUserProfile && toggleCardPosition === 'right' && { 
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      color: 'rgba(255, 255, 255, 0.5)'
+                    }
+                  ]}
                   value={editBobName}
-                  onChangeText={setEditBobName}
-                  placeholder="Enter name"
+                  onChangeText={showUserProfile && toggleCardPosition === 'right' ? undefined : setEditBobName}
+                  placeholder={showUserProfile && toggleCardPosition === 'right' ? "Your name (auto-filled)" : "Enter name"}
                   placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                  autoFocus={showUserProfile && toggleCardPosition === 'right'}
                   maxLength={20}
                   returnKeyType="done"
                   onSubmitEditing={saveFencerName}
+                  editable={!(showUserProfile && toggleCardPosition === 'right')}
                 />
               </View>
               

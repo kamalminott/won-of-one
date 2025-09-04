@@ -7,6 +7,7 @@ import { Colors } from '@/constants/Colors';
 interface TouchTimelineChartProps {
   userData?: Array<{ value: number; label: string }>;
   opponentData?: Array<{ value: number; label: string }>;
+  scoreProgression?: Array<{ x: string; y: number }>;
 }
 
 export const TouchTimelineChart: React.FC<TouchTimelineChartProps> = ({
@@ -29,11 +30,17 @@ export const TouchTimelineChart: React.FC<TouchTimelineChartProps> = ({
     { value: 3, label: '2:30' },
     { value: 4, label: '3:00' },
     { value: 5, label: '3:50' },
-  ]
+  ],
+  scoreProgression
 }) => {
   const { width, height } = useWindowDimensions();
 
-  const userChartData = userData.map((item, index) => ({
+  // Use real score progression data if available, otherwise fall back to mock data
+  const actualUserData = scoreProgression && scoreProgression.length > 0 
+    ? scoreProgression.map(item => ({ value: item.y, label: item.x }))
+    : userData;
+
+  const userChartData = actualUserData.map((item, index) => ({
     value: item.value,
     label: item.label,
     dataPointText: item.value.toString(),

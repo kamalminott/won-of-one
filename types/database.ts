@@ -19,7 +19,7 @@ export interface Match {
   fencer_2_name?: string;
   opponent_id?: string;
   result?: string;
-  score_diff?: number;
+  score_diff?: number | null;
   score_spp?: number;
   has_event_data?: boolean;
   score_by_period?: any; // jsonb
@@ -35,6 +35,7 @@ export interface Match {
   data_version?: number;
   touches_against?: number;
   is_win?: boolean;
+  is_complete?: boolean; // NEW: Track completion status
 }
 
 export interface FencingRemote {
@@ -123,8 +124,29 @@ export interface MatchEvent {
   match_id?: string;
   event_time?: string;
   event_type?: string;
-  scoring_user_id?: string;
-  card_given?: string;
+  scoring_user_id?: string | null;
+  scoring_user_name?: string; // Name of who scored
+  card_given?: string | null;
+  score_diff?: number | null; // Score difference at time of event (null if no user)
+  seconds_since_last_event?: number; // Time since previous event
+  fencer_1_name?: string; // User's name
+  fencer_2_name?: string; // Opponent's name
+}
+
+export interface MatchPeriod {
+  match_period_id: string;
+  match_id: string;
+  period_number?: number;
+  start_time?: string;
+  end_time?: string;
+  fencer_1_score?: number;
+  fencer_2_score?: number;
+  fencer_1_cards?: number;
+  fencer_2_cards?: number;
+  priority_assigned?: string;
+  priority_to?: string;
+  timestamp?: string;
+  notes?: string;
 }
 
 // Simplified types for UI components

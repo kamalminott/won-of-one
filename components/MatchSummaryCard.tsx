@@ -10,6 +10,12 @@ interface MatchSummaryCardProps {
   onCancelMatch?: () => void;
   onSaveMatch?: () => void;
   customStyle?: object;
+  scoreProgression?: {
+    userData: Array<{ x: string; y: number }>;
+    opponentData: Array<{ x: string; y: number }>;
+  };
+  userScore?: number;
+  opponentScore?: number;
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -17,7 +23,10 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   onSeeFullSummary,
   onCancelMatch,
   onSaveMatch,
-  customStyle = {}
+  customStyle = {},
+  scoreProgression,
+  userScore = 0,
+  opponentScore = 0
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -104,7 +113,11 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       {/* Top card with win pill has been removed */}
       
       {/* Score Progression Chart */}
-      <ScoreProgressionChart />
+      <ScoreProgressionChart 
+        scoreProgression={scoreProgression} 
+        userScore={userScore}
+        opponentScore={opponentScore}
+      />
       
       {/* Touches by Period Chart and Key Stats Card - Side by Side */}
       <View style={styles.rowContainer}>

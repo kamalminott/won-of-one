@@ -1,4 +1,5 @@
 import { BackButton } from '@/components/BackButton';
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -9,6 +10,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function ProfileScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
@@ -67,7 +69,9 @@ export default function ProfileScreen() {
             <Ionicons name="person" size={width * 0.06} color="white" />
           </View>
                   <View style={[styles.profileInfo, { marginLeft: width * 0.04 }]}>
-          <Text style={[styles.userName, { fontSize: width * 0.04 }]}>Jane Smith</Text>
+          <Text style={[styles.userName, { fontSize: width * 0.04 }]}>
+            {user?.email?.split('@')[0] || 'Guest User'}
+          </Text>
           <Text style={[styles.userHandedness, { fontSize: width * 0.035 }]}>Right-handed</Text>
         </View>
           <View style={[styles.weaponTag, {
@@ -220,7 +224,9 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.infoContent}>
             <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Email Address</Text>
-            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>janesmith123@gmail.com</Text>
+            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>
+              {user?.email || 'Not logged in'}
+            </Text>
           </View>
         </View>
         
@@ -237,7 +243,9 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.infoContent}>
             <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>User ID</Text>
-            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>#12345678</Text>
+            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>
+              {user?.id ? `#${user.id.slice(0, 8)}` : 'Not logged in'}
+            </Text>
           </View>
         </View>
       </View>
