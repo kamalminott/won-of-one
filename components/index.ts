@@ -1,4 +1,3 @@
-export { CircularProgress } from './CircularProgress';
 export { Collapsible } from './Collapsible';
 export { DefeatPill } from './DefeatPill';
 export { ExternalLink } from './ExternalLink';

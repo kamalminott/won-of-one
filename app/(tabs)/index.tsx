@@ -22,6 +22,8 @@ export default function HomeScreen() {
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
   const [goals, setGoals] = useState<SimpleGoal[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const [winRate, setWinRate] = useState<number>(0);
+  const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
 
   // Fetch data when user is available
   useEffect(() => {
@@ -55,18 +57,32 @@ export default function HomeScreen() {
         await userService.createUser(user.id, user.email || '');
       }
       
-      // Fetch matches and goals in parallel
-      const [matchesData, goalsData] = await Promise.all([
+      // Fetch matches, goals, and training time data in parallel
+      const [matchesData, goalsData, trainingTimeData] = await Promise.all([
         matchService.getRecentMatches(user.id, 5),
-        goalService.getActiveGoals(user.id)
+        goalService.getActiveGoals(user.id),
+        matchService.getAllMatchesForTrainingTime(user.id)
       ]);
       
       console.log('Fetched matches:', matchesData);
       console.log('Fetched goals:', goalsData);
       console.log('Goals count:', goalsData.length);
+      console.log('Fetched training time data:', trainingTimeData);
+      
+      // Calculate win rate from matches
+      const calculatedWinRate = calculateWinRate(matchesData);
+      console.log('Calculated win rate:', calculatedWinRate + '%');
+      
+      // Calculate total training time
+      const totalSeconds = trainingTimeData.reduce((sum, match) => sum + (match.bout_length_s || 0), 0);
+      const formattedTrainingTime = formatTrainingTime(totalSeconds);
+      console.log('Total training time (seconds):', totalSeconds);
+      console.log('Formatted training time:', formattedTrainingTime);
       
       setMatches(matchesData);
       setGoals(goalsData);
+      setWinRate(calculatedWinRate);
+      setTrainingTime(formattedTrainingTime);
     } catch (error) {
       console.error('Error fetching user data:', error);
       Alert.alert('Error', 'Failed to load data');
@@ -98,6 +114,37 @@ export default function HomeScreen() {
     const timeDiff = goalDeadline.getTime() - today.getTime();
     const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
     return Math.max(0, daysLeft); // Don't show negative days
+  };
+
+  const calculateWinRate = (matches: SimpleMatch[]): number => {
+    if (matches.length === 0) return 0;
+    
+    const wins = matches.filter(match => match.isWin).length;
+    const winPercentage = (wins / matches.length) * 100;
+    return Math.round(winPercentage); // Round to nearest whole number
+  };
+
+  const formatTrainingTime = (totalSeconds: number): { value: string; label: string } => {
+    if (totalSeconds < 60) { // Less than 1 minute
+      return { value: `${totalSeconds}s`, label: 'Seconds Trained' };
+    } else if (totalSeconds < 3600) { // Less than 1 hour
+      const minutes = Math.floor(totalSeconds / 60);
+      return { value: `${minutes}m`, label: 'Minutes Trained' };
+    } else if (totalSeconds < 86400) { // Less than 24 hours
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      return { 
+        value: minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`, 
+        label: 'Hours Trained' 
+      };
+    } else { // 24+ hours
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      return { 
+        value: hours > 0 ? `${days}d ${hours}h` : `${days}d`, 
+        label: 'Days Trained' 
+      };
+    }
   };
 
   const handleAddNewMatch = () => {
@@ -212,13 +259,13 @@ export default function HomeScreen() {
             <View style={styles.summaryRow}>
               <SummaryCard
                 icon={<Text style={styles.icon}>🕐</Text>}
-                value="12h 30m"
-                label="Hours Trained"
+                value={trainingTime.value}
+                label={trainingTime.label}
                 backgroundColor={Colors.pink.light}
               />
               <SummaryCard
                 icon={<Text style={styles.icon}>🏆</Text>}
-                value="91%"
+                value={`${winRate}%`}
                 label="Win Rate"
                 backgroundColor={Colors.blue.light}
               />

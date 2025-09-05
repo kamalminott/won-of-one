@@ -2,8 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-
-import { CircularProgress } from './CircularProgress';
+import CircularProgress from 'react-native-circular-progress-indicator';
 
 interface GoalCardProps {
   daysLeft: number;
@@ -411,6 +410,11 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       fontWeight: '700',
       color: 'white',
     },
+    progressValueText: {
+      fontSize: width * 0.032,
+      fontWeight: '700',
+      color: 'white',
+    },
     buttonContainer: {
       flexDirection: 'row',
       gap: width * 0.02,
@@ -692,12 +696,19 @@ export const GoalCard: React.FC<GoalCardProps> = ({
         <View style={styles.progressSection}>
           <View style={styles.progressCircle}>
             <CircularProgress
-              size={width * 0.15}
-              strokeWidth={width * 0.01}
-              progress={progress}
-              progressColor={Colors.purple.primary}
+              value={progress}
+              radius={width * 0.075}
+              activeStrokeColor={Colors.purple.primary}
+              inActiveStrokeColor="rgba(255,255,255,0.3)"
+              activeStrokeWidth={width * 0.01}
+              inActiveStrokeWidth={width * 0.01}
+              progressValueColor="white"
+              progressValueStyle={styles.progressValueText}
+              valueSuffix="%"
+              showProgressValue={true}
+              duration={1000}
+              clockwise={true}
             />
-            <Text style={styles.progressText}>{progress}%</Text>
           </View>
         </View>
       </View>

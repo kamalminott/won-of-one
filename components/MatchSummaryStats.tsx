@@ -125,8 +125,10 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
         <View style={styles.verticalDivider} />
         
         <View style={styles.statColumn}>
-          <Text style={styles.statNumber}>{match.bestRun}</Text>
-          <Text style={styles.statLabel}>Best Run</Text>
+          <Text style={styles.statNumber}>
+            {match.userScore - match.opponentScore > 0 ? '+' : ''}{match.userScore - match.opponentScore}
+          </Text>
+          <Text style={styles.statLabel}>Score Difference</Text>
         </View>
       </View>
     </View>

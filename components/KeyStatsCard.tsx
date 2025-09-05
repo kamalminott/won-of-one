@@ -11,17 +11,37 @@ interface StatItem {
 
 interface KeyStatsCardProps {
   stats?: StatItem[];
+  bestRun?: number;
+  yellowCards?: number;
+  redCards?: number;
+  matchDurationSeconds?: number;
   customStyle?: object;
 }
 
 export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
-  stats = [
-    { icon: 'flame', text: '4 Streak' },
-    { icon: 'card', text: '1Y or 0B Cards' },
-    { icon: 'time', text: '6:45 Time' },
-  ],
+  stats,
+  bestRun = 0,
+  yellowCards = 0,
+  redCards = 0,
+  matchDurationSeconds = 0,
   customStyle = {}
 }) => {
+  // Format match duration from seconds to MM:SS
+  const formatMatchTime = (seconds: number): string => {
+    if (seconds <= 0) return '0:00';
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Create default stats with real data
+  const defaultStats: StatItem[] = [
+    { icon: 'flame', text: `${bestRun} Streak` },
+    { icon: 'card', text: `${yellowCards}Y or ${redCards}R Cards` },
+    { icon: 'time', text: `${formatMatchTime(matchDurationSeconds)} Time` },
+  ];
+
+  const displayStats = stats || defaultStats;
   const { width, height } = useWindowDimensions();
 
   const styles = StyleSheet.create({
@@ -68,21 +88,21 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
       start={Colors.glassyGradient.start}
       end={Colors.glassyGradient.end}
     >
-      {stats.map((stat, index) => {
-        // Split the text to keep "1Y or 0B" together
+      {displayStats.map((stat, index) => {
+        // Split the text to keep "1Y or 0R" together
         const words = stat.text.split(' ');
         const isSpecialCase = stat.text.includes(' or ') || stat.text.includes('Cards') || stat.text.includes('Time');
         
         let numberText, labelText;
         
         if (isSpecialCase) {
-          // For "1Y or 0B Cards" -> number: "1Y or 0B", label: "Cards"
+          // For "1Y or 0R Cards" -> number: "1Y or 0R", label: "Cards"
           // For "6:45 Time" -> number: "6:45", label: "Time"
           if (stat.text.includes('Cards')) {
-            numberText = '1Y or 0B';
+            numberText = `${yellowCards}Y or ${redCards}R`;
             labelText = 'Cards';
           } else if (stat.text.includes('Time')) {
-            numberText = '6:45';
+            numberText = formatMatchTime(matchDurationSeconds);
             labelText = 'Time';
           } else {
             numberText = words.slice(0, -1).join(' ');

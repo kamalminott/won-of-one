@@ -16,6 +16,15 @@ interface MatchSummaryCardProps {
   };
   userScore?: number;
   opponentScore?: number;
+  bestRun?: number;
+  yellowCards?: number;
+  redCards?: number;
+  matchDurationSeconds?: number;
+  touchesByPeriod?: {
+    period1: { user: number; opponent: number };
+    period2: { user: number; opponent: number };
+    period3: { user: number; opponent: number };
+  };
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -26,7 +35,12 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   customStyle = {},
   scoreProgression,
   userScore = 0,
-  opponentScore = 0
+  opponentScore = 0,
+  bestRun = 0,
+  yellowCards = 0,
+  redCards = 0,
+  matchDurationSeconds = 0,
+  touchesByPeriod
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -121,8 +135,13 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       
       {/* Touches by Period Chart and Key Stats Card - Side by Side */}
       <View style={styles.rowContainer}>
-        <TouchesByPeriodChart />
-        <KeyStatsCard />
+        <TouchesByPeriodChart touchesByPeriod={touchesByPeriod} />
+        <KeyStatsCard 
+          bestRun={bestRun} 
+          yellowCards={yellowCards}
+          redCards={redCards}
+          matchDurationSeconds={matchDurationSeconds}
+        />
       </View>
       
       {/* Action Buttons */}

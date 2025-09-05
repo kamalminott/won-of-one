@@ -19,6 +19,15 @@ export default function MatchSummaryScreen() {
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }>({ userData: [], opponentData: [] });
+  const [touchesByPeriod, setTouchesByPeriod] = useState<{
+    period1: { user: number; opponent: number };
+    period2: { user: number; opponent: number };
+    period3: { user: number; opponent: number };
+  }>({
+    period1: { user: 0, opponent: 0 },
+    period2: { user: 0, opponent: 0 },
+    period3: { user: 0, opponent: 0 }
+  });
   const [loading, setLoading] = useState(true);
 
   // Fetch match data from database
@@ -47,6 +56,14 @@ export default function MatchSummaryScreen() {
             );
             console.log('📈 Calculated score progression:', calculatedScoreProgression);
             setScoreProgression(calculatedScoreProgression);
+
+            const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
+              params.matchId as string,
+              matchData.fencer_1_name,
+              params.remoteId as string
+            );
+            console.log('📊 Calculated touches by period:', calculatedTouchesByPeriod);
+            setTouchesByPeriod(calculatedTouchesByPeriod);
           }
         } catch (error) {
           console.error('Error fetching match data:', error);
@@ -192,6 +209,11 @@ export default function MatchSummaryScreen() {
           scoreProgression={scoreProgression}
           userScore={match?.final_score || 0}
           opponentScore={match?.touches_against || 0}
+          bestRun={bestRun}
+          yellowCards={match?.yellow_cards || 0}
+          redCards={match?.red_cards || 0}
+          matchDurationSeconds={match?.bout_length_s || 0}
+          touchesByPeriod={touchesByPeriod}
         />
       </ScrollView>
     </SafeAreaView>

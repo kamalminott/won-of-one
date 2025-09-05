@@ -168,29 +168,27 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     
     // Fallback to legacy data format
     if (scoreProgression && scoreProgression.userData && scoreProgression.userData.length > 0) {
-      // Convert legacy format to new format
-      const userEvents: ScoringEvent[] = [];
-      const oppEvents: ScoringEvent[] = [];
+      // Convert legacy format to new format - process all events together
+      const allEvents: ScoringEvent[] = [];
       
+      // Process user events
       scoreProgression.userData.forEach((point, index) => {
-        if (index > 0) { // Skip initial point
-          const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
-          const [minutes, seconds] = timeStr.split(':').map(Number);
-          const tMin = minutes + (seconds / 60);
-          userEvents.push({ tMin, scorer: 'user' });
-        }
+        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
+        const [minutes, seconds] = timeStr.split(':').map(Number);
+        const tMin = minutes + (seconds / 60);
+        allEvents.push({ tMin, scorer: 'user' });
       });
       
+      // Process opponent events
       scoreProgression.opponentData.forEach((point, index) => {
-        if (index > 0) { // Skip initial point
-          const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
-          const [minutes, seconds] = timeStr.split(':').map(Number);
-          const tMin = minutes + (seconds / 60);
-          oppEvents.push({ tMin, scorer: 'opponent' });
-        }
+        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
+        const [minutes, seconds] = timeStr.split(':').map(Number);
+        const tMin = minutes + (seconds / 60);
+        allEvents.push({ tMin, scorer: 'opponent' });
       });
       
-      const allEvents = [...userEvents, ...oppEvents].sort((a, b) => a.tMin - b.tMin);
+      // Sort all events by time
+      allEvents.sort((a, b) => a.tMin - b.tMin);
       return buildScoreSeries(allEvents);
     }
     

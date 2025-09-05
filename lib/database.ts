@@ -32,6 +32,22 @@ export const matchService = {
     })) || [];
   },
 
+  // Get all matches for training time calculation
+  async getAllMatchesForTrainingTime(userId: string): Promise<{ bout_length_s: number }[]> {
+    const { data, error } = await supabase
+      .from('match')
+      .select('bout_length_s')
+      .eq('user_id', userId)
+      .not('bout_length_s', 'is', null); // Only get matches with duration data
+
+    if (error) {
+      console.error('Error fetching matches for training time:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
   // Create a new match from fencing remote data
   async createMatchFromRemote(remoteData: FencingRemote, userId: string | null): Promise<Match | null> {
     const matchData = {
@@ -272,8 +288,17 @@ export const matchService = {
         console.log('No match periods found, using first event as match start');
         matchStartTime = new Date(matchEvents[0].timestamp);
       } else {
-        matchStartTime = new Date(matchPeriods[0].start_time);
+        // Use the first event as match start to include pre-period scores
+        const firstEventTime = new Date(matchEvents[0].timestamp);
+        const firstPeriodTime = new Date(matchPeriods[0].start_time);
+        
+        // Use whichever is earlier (first event or first period start)
+        matchStartTime = firstEventTime < firstPeriodTime ? firstEventTime : firstPeriodTime;
+        console.log('📈 Using match start time:', matchStartTime.toISOString(), '(first event vs first period)');
       }
+
+      console.log('📈 Match start time:', matchStartTime.toISOString());
+      console.log('📈 Processing', matchEvents.length, 'events for score progression');
 
       // 3. Calculate score progression for both user and opponent
       const userScoreProgression: {x: string, y: number}[] = [];
@@ -291,6 +316,8 @@ export const matchService = {
         const minutes = Math.floor(elapsedSeconds / 60);
         const seconds = elapsedSeconds % 60;
         const timeString = `(${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')})`;
+
+        console.log(`📈 Processing event: ${event.scoring_user_name} at ${timeString} (${event.timestamp})`);
 
         if (event.scoring_user_name === userName) {
           userScore++;
@@ -315,6 +342,147 @@ export const matchService = {
     } catch (error) {
       console.error('Error calculating score progression:', error);
       return { userData: [], opponentData: [] };
+    }
+  },
+
+  // Calculate touches by period
+  async calculateTouchesByPeriod(matchId: string, userName: string, remoteId?: string): Promise<{
+    period1: { user: number; opponent: number };
+    period2: { user: number; opponent: number };
+    period3: { user: number; opponent: number };
+  }> {
+    try {
+      console.log('📊 Calculating touches by period for match:', matchId, 'user:', userName);
+      
+      // 1. Get all match events ordered by timestamp
+      let matchEvents = null;
+      
+      // First try to get events by match_id
+      const { data: eventsByMatchId, error: matchIdError } = await supabase
+        .from('match_event')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('timestamp', { ascending: true });
+      
+      if (matchIdError) {
+        console.error('Error fetching match events by match_id for touches by period:', matchIdError);
+      } else if (eventsByMatchId && eventsByMatchId.length > 0) {
+        matchEvents = eventsByMatchId;
+        console.log('Found', matchEvents.length, 'match events by match_id for touches by period');
+      } else {
+        // If no events found by match_id, try to find events by fencing_remote_id
+        if (remoteId) {
+          console.log('Trying to find events by fencing_remote_id for touches by period:', remoteId);
+          const { data: eventsByRemoteId, error: remoteIdError } = await supabase
+            .from('match_event')
+            .select('*')
+            .eq('fencing_remote_id', remoteId)
+            .order('timestamp', { ascending: true });
+          
+          if (remoteIdError) {
+            console.error('Error fetching match events by fencing_remote_id for touches by period:', remoteIdError);
+          } else if (eventsByRemoteId && eventsByRemoteId.length > 0) {
+            matchEvents = eventsByRemoteId;
+            console.log('Found', matchEvents.length, 'match events by fencing_remote_id for touches by period');
+          }
+        }
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        console.log('No match events found for touches by period calculation');
+        return {
+          period1: { user: 0, opponent: 0 },
+          period2: { user: 0, opponent: 0 },
+          period3: { user: 0, opponent: 0 }
+        };
+      }
+
+      // 2. Get match periods to determine period boundaries
+      const { data: matchPeriods, error: periodsError } = await supabase
+        .from('match_period')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('period_number', { ascending: true });
+
+      if (periodsError || !matchPeriods || matchPeriods.length === 0) {
+        console.log('No match periods found, assuming all events are in period 1');
+        // Count all events as period 1
+        let userTouches = 0;
+        let opponentTouches = 0;
+        
+        for (const event of matchEvents) {
+          if (event.scoring_user_name === userName) {
+            userTouches++;
+          } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
+            opponentTouches++;
+          }
+        }
+        
+        return {
+          period1: { user: userTouches, opponent: opponentTouches },
+          period2: { user: 0, opponent: 0 },
+          period3: { user: 0, opponent: 0 }
+        };
+      }
+
+      // 3. Calculate touches for each period
+      const touchesByPeriod = {
+        period1: { user: 0, opponent: 0 },
+        period2: { user: 0, opponent: 0 },
+        period3: { user: 0, opponent: 0 }
+      };
+
+      for (const event of matchEvents) {
+        // Determine which period this event belongs to
+        let eventPeriod = 1; // Default to period 1
+        
+        if (matchPeriods.length > 0) {
+          const firstPeriodStart = new Date(matchPeriods[0].start_time);
+          const eventTime = new Date(event.timestamp);
+          
+          console.log(`📊 Event: ${event.scoring_user_name} at ${event.timestamp}, First period start: ${firstPeriodStart.toISOString()}`);
+          
+          // If event happens before first period starts, count it as period 1
+          if (eventTime < firstPeriodStart) {
+            eventPeriod = 1;
+            console.log(`📊 Event before first period start -> Period 1`);
+          } else {
+            // Check which period the event falls into
+            for (let i = 0; i < matchPeriods.length; i++) {
+              const period = matchPeriods[i];
+              const periodStart = new Date(period.start_time);
+              const periodEnd = period.end_time ? new Date(period.end_time) : new Date();
+              
+              if (eventTime >= periodStart && eventTime <= periodEnd) {
+                eventPeriod = period.period_number;
+                console.log(`📊 Event falls in period ${eventPeriod} (${periodStart.toISOString()} - ${periodEnd.toISOString()})`);
+                break;
+              }
+            }
+          }
+        }
+
+        // Count the touch
+        if (event.scoring_user_name === userName) {
+          if (eventPeriod === 1) touchesByPeriod.period1.user++;
+          else if (eventPeriod === 2) touchesByPeriod.period2.user++;
+          else if (eventPeriod === 3) touchesByPeriod.period3.user++;
+        } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
+          if (eventPeriod === 1) touchesByPeriod.period1.opponent++;
+          else if (eventPeriod === 2) touchesByPeriod.period2.opponent++;
+          else if (eventPeriod === 3) touchesByPeriod.period3.opponent++;
+        }
+      }
+
+      console.log('📊 Touches by period calculated:', touchesByPeriod);
+      return touchesByPeriod;
+    } catch (error) {
+      console.error('Error calculating touches by period:', error);
+      return {
+        period1: { user: 0, opponent: 0 },
+        period2: { user: 0, opponent: 0 },
+        period3: { user: 0, opponent: 0 }
+      };
     }
   },
 

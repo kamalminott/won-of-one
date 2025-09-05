@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -234,8 +235,19 @@ export default function RemoteScreen() {
     try {
       console.log('Completing match...');
       
-      // Calculate match duration (if timer was used)
-      const matchDuration = matchTime - timeRemaining;
+      // Calculate total match duration: (completed periods * full period time) + current period elapsed
+      const completedPeriods = currentPeriod - 1;
+      const currentPeriodElapsed = matchTime - timeRemaining;
+      const matchDuration = (completedPeriods * matchTime) + currentPeriodElapsed;
+      
+      console.log('🕐 Match duration calculation:', {
+        completedPeriods,
+        currentPeriod,
+        timeRemaining,
+        matchTime,
+        currentPeriodElapsed,
+        calculatedDuration: matchDuration
+      });
       
       // Determine result based on user_id presence
       let result: string | null = null;
@@ -321,10 +333,10 @@ export default function RemoteScreen() {
       setAliceCards({ yellow: 0, red: 0 });
       setBobCards({ yellow: 0, red: 0 });
       setCurrentPeriod(1);
-      setTimeRemaining(matchTime);
-      setIsPlaying(false);
-      setPriorityFencer(null);
-      setPriorityLightPosition(null);
+          setTimeRemaining(matchTime);
+    setIsPlaying(false);
+    setPriorityFencer(null);
+    setPriorityLightPosition(null);
       setIsAssigningPriority(false);
       setIsInjuryTimer(false);
       setIsBreakTime(false);
@@ -491,6 +503,14 @@ export default function RemoteScreen() {
     }
   }, [timeRemaining]);
 
+  // Reset remote when navigating back from match summary
+  useFocusEffect(
+    useCallback(() => {
+      // Reset all state when returning to remote screen
+      resetAll();
+    }, [])
+  );
+
   const incrementPeriod = () => {
     if (currentPeriod < 3) {
       const newPeriod = currentPeriod + 1;
@@ -634,7 +654,7 @@ export default function RemoteScreen() {
         return;
       }
       
-            // First score change during active match - proceed normally
+      // First score change during active match - proceed normally
       setBobScore(bobScore + 1);
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       
@@ -649,7 +669,7 @@ export default function RemoteScreen() {
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-            // Not an active match - no warning needed, just update score
+      // Not an active match - no warning needed, just update score
       setBobScore(bobScore + 1);
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
@@ -989,54 +1009,54 @@ export default function RemoteScreen() {
       }
       
       // 2. Stop all timers
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      if (breakTimerRef) {
-        clearInterval(breakTimerRef);
-      }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (breakTimerRef) {
+      clearInterval(breakTimerRef);
+    }
       if (injuryTimerRef) {
         clearInterval(injuryTimerRef);
         setInjuryTimerRef(null);
       }
       
       // 3. Reset all UI state
-      setIsPlaying(false);
-      setHasMatchStarted(false); // Reset match started state
-      setCurrentPeriod(1); // Reset to period 1
-      currentPeriodRef.current = 1; // Reset ref
-      setMatchTime(180); // 3 minutes in seconds
-      setTimeRemaining(180); // Same as matchTime = no paused state
+    setIsPlaying(false);
+    setHasMatchStarted(false); // Reset match started state
+    setCurrentPeriod(1); // Reset to period 1
+    currentPeriodRef.current = 1; // Reset ref
+    setMatchTime(180); // 3 minutes in seconds
+          setTimeRemaining(180); // Same as matchTime = no paused state
       setAliceScore(0); // Reset scores
       setBobScore(0);
-      setIsBreakTime(false); // Reset break state
-      setBreakTimeRemaining(60); // Reset break timer
-      setScoreChangeCount(0); // Reset score change counter
-      setShowScoreWarning(false); // Reset warning popup
+    setIsBreakTime(false); // Reset break state
+    setBreakTimeRemaining(60); // Reset break timer
+    setScoreChangeCount(0); // Reset score change counter
+    setShowScoreWarning(false); // Reset warning popup
       setLastEventTime(null); // Reset event timing
-      setPendingScoreAction(null); // Reset pending action
-      setPreviousMatchState(null); // Reset previous match state
+    setPendingScoreAction(null); // Reset pending action
+    setPreviousMatchState(null); // Reset previous match state
 
-      setPriorityLightPosition(null); // Reset priority light
-      setPriorityFencer(null); // Reset priority fencer
-      setShowPriorityPopup(false); // Reset priority popup
-      setAliceYellowCards([]); // Reset Alice's yellow cards
-      setBobYellowCards([]); // Reset Bob's yellow cards
-      setAliceRedCards([]); // Reset Alice's red cards
-      setBobRedCards([]); // Reset Bob's red cards
-      
-      // Reset the new card state structure
-      setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
-      setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
-      
-      // Reset injury timer state
-      setIsInjuryTimer(false);
-      setInjuryTimeRemaining(300);
-      
+    setPriorityLightPosition(null); // Reset priority light
+    setPriorityFencer(null); // Reset priority fencer
+    setShowPriorityPopup(false); // Reset priority popup
+    setAliceYellowCards([]); // Reset Alice's yellow cards
+    setBobYellowCards([]); // Reset Bob's yellow cards
+    setAliceRedCards([]); // Reset Alice's red cards
+    setBobRedCards([]); // Reset Bob's red cards
+    
+    // Reset the new card state structure
+    setAliceCards({ yellow: 0, red: 0 }); // Reset Alice's new card state
+    setBobCards({ yellow: 0, red: 0 }); // Reset Bob's new card state
+    
+    // Reset injury timer state
+    setIsInjuryTimer(false);
+    setInjuryTimeRemaining(300);
+    
       console.log('✅ Reset All completed successfully');
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      setIsManualReset(true); // Set flag to prevent auto-sync
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsManualReset(true); // Set flag to prevent auto-sync
       
     } catch (error) {
       console.error('❌ Error during Reset All:', error);
@@ -1123,8 +1143,8 @@ export default function RemoteScreen() {
         setEditBobName(userDisplayName); // User is on the right (Bob)
       }
     } else {
-      setEditAliceName(fencerNames.alice);
-      setEditBobName(fencerNames.bob);
+    setEditAliceName(fencerNames.alice);
+    setEditBobName(fencerNames.bob);
     }
     setShowEditNamesPopup(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1146,10 +1166,10 @@ export default function RemoteScreen() {
           });
         }
       } else {
-        setFencerNames({
-          alice: editAliceName.trim(),
-          bob: editBobName.trim()
-        });
+      setFencerNames({
+        alice: editAliceName.trim(),
+        bob: editBobName.trim()
+      });
       }
       setShowEditNamesPopup(false);
       setEditAliceName('');
@@ -1204,6 +1224,8 @@ export default function RemoteScreen() {
       
       setTimeRemaining(newTimeRemaining);
       
+      // No need to track total match time during timer - we'll calculate it at the end
+      
       // Haptic feedback for low time
       if (newTimeRemaining === 30 || newTimeRemaining === 10) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -1239,6 +1261,7 @@ export default function RemoteScreen() {
                   currentPeriodRef.current = nextPeriod; // Update ref
                   setTimeRemaining(matchTime);
                   setIsPlaying(false);
+                  
                   
                   // Show next period ready message
                   setTimeout(() => {
@@ -1329,6 +1352,7 @@ export default function RemoteScreen() {
                     currentPeriodRef.current = nextPeriod; // Update ref
                     setTimeRemaining(matchTime);
                     setIsPlaying(false);
+                    
                     
                     // Show next period ready message
                     setTimeout(() => {
@@ -1426,6 +1450,7 @@ export default function RemoteScreen() {
             return newPeriod;
           });
           
+          
           // Restart main timer from where it was paused
           setIsManualReset(true); // Prevent auto-sync
           setTimeRemaining(matchTime);
@@ -1461,6 +1486,7 @@ export default function RemoteScreen() {
     const nextPeriod = Math.min(currentPeriod + 1, 3);
     setCurrentPeriod(nextPeriod);
     currentPeriodRef.current = nextPeriod; // Update ref
+    
     
     // Reset timer for next period
     setTimeRemaining(matchTime);
@@ -2749,7 +2775,7 @@ export default function RemoteScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={[styles.container, { 
+            <SafeAreaView style={[styles.container, { 
         paddingTop: insets.top * 0.1, 
         paddingBottom: insets.bottom,
         backgroundColor: Colors.dark.background 
@@ -3383,20 +3409,20 @@ export default function RemoteScreen() {
       </View>
 
               {/* Play, Reset, and Complete Match Controls - REBUILT */}
-      <View style={[
-        {
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
+              <View style={[
+          {
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
           marginVertical: isNexusS ? height * 0.008 : height * 0.012,
           marginTop: isNexusS ? height * 0.004 : height * 0.006,
           paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
-          backgroundColor: 'transparent',
+            backgroundColor: 'transparent',
           borderRadius: isNexusS ? width * 0.015 : width * 0.02,
           gap: isNexusS ? height * 0.008 : height * 0.012, // Reduced gap between elements
           marginBottom: isNexusS ? height * 0.015 : height * 0.02 // Bottom margin from tab bar
-        }
-      ]}>
+          }
+        ]}>
         
         {/* Play and Reset Row */}
         <View style={{
@@ -3476,16 +3502,16 @@ export default function RemoteScreen() {
           </TouchableOpacity>
           
           {/* Reset Button */}
-          <TouchableOpacity 
-            style={{
+                      <TouchableOpacity 
+              style={{
               width: isNexusS ? width * 0.13 : width * 0.15,
-              backgroundColor: '#FB5D5C',
+                backgroundColor: '#FB5D5C',
               paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
               borderRadius: isNexusS ? width * 0.04 : width * 0.05,
-              alignItems: 'center',
-              justifyContent: 'center',
+                alignItems: 'center',
+                justifyContent: 'center',
               borderWidth: isNexusS ? width * 0.003 : width * 0.005,
-              borderColor: 'transparent',
+                borderColor: 'transparent',
               minHeight: isNexusS ? height * 0.045 : height * 0.055,
               shadowColor: '#6C5CE7',
               shadowOffset: { width: 0, height: height * 0.005 },
@@ -3714,7 +3740,7 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
-      </View>
+        </View>
     </SafeAreaView>
   </GestureHandlerRootView>
   );
