@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LineChart as RNChartKit } from 'react-native-chart-kit';
 import { LineChart } from 'react-native-gifted-charts';
 
@@ -250,7 +250,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: screenHeight * 0.01,
+      marginTop: screenHeight * 0,
       gap: width * 0.03,
       paddingHorizontal: width * 0.02,
       flexWrap: 'wrap',
@@ -332,7 +332,18 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           return `${minutes}:${seconds.toString().padStart(2, '0')}`;
         });
         
+        // Scrollable for > 9 data points, static for ≤ 9 data points
+        const isScrollable = timeLabels.length > 9;
+        const pointWidth = 60; // Width per data point for scrollable chart
+        const scrollableChartWidth = Math.max(width * 0.9, timeLabels.length * pointWidth);
+        
+        // Always use all labels - no filtering
+        const displayLabels = timeLabels;
+        
         console.log('📊 Time labels:', timeLabels);
+        console.log('📊 Display labels:', displayLabels);
+        console.log('📊 Is scrollable:', isScrollable);
+        console.log('📊 Chart width:', isScrollable ? scrollableChartWidth : width * 0.9);
         
         // Create user data array aligned with time points - ensure no duplicate Y values
         const userData = sortedTimePoints.map(time => {
@@ -371,7 +382,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)]);
         
         const chartData_kit = {
-          labels: paddedLabels,
+          labels: displayLabels,
           datasets: [
             {
               data: paddedUserData,
@@ -383,8 +394,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`, // Red for opponent
               strokeWidth: 3,
             }
-          ],
-          legend: [`You (${userScore})`, `Opponent (${opponentScore})`]
+          ]
         };
 
         
@@ -426,35 +436,49 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           1
         );
 
+        const chartComponent = (
+          <TouchableOpacity
+            onPress={() => {
+              console.log('📊 Chart tapped - tooltip functionality can be added here');
+            }}
+            activeOpacity={0.8}
+          >
+            <RNChartKit
+              data={chartData_kit}
+              width={isScrollable ? scrollableChartWidth : width * 0.9}
+              height={chartHeight - 40}
+              chartConfig={chartConfig}
+              bezier={false}
+              style={{
+                marginVertical: 0,
+                borderRadius: 16
+              }}
+              withDots={true}
+              withShadow={false}
+              withScrollableDot={false}
+              withInnerLines={true}
+              withOuterLines={true}
+              withVerticalLines={true}
+              withHorizontalLines={true}
+              fromZero={true}
+              segments={Math.min(maxValue, 5)}
+            />
+          </TouchableOpacity>
+        );
+
         return (
           <View style={{ height: chartHeight, width: width * 1, overflow: 'hidden', marginLeft: -width * 0.05 }}>
-            <TouchableOpacity
-              onPress={() => {
-                console.log('📊 Chart tapped - tooltip functionality can be added here');
-              }}
-              activeOpacity={0.8}
-            >
-              <RNChartKit
-                data={chartData_kit}
-                width={width * 0.9}
-                height={chartHeight - 40}
-                chartConfig={chartConfig}
-                bezier={false}
-                style={{
-                  marginVertical: 0,
-                  borderRadius: 16
-                }}
-                withDots={true}
-                withShadow={false}
-                withScrollableDot={false}
-                withInnerLines={true}
-                withOuterLines={true}
-                withVerticalLines={true}
-                withHorizontalLines={true}
-                fromZero={true}
-                segments={Math.min(maxValue, 5)}
-              />
-            </TouchableOpacity>
+            {isScrollable ? (
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingRight: width * 0.1 }}
+              >
+                {chartComponent}
+              </ScrollView>
+            ) : (
+              chartComponent
+            )}
           </View>
         );
         
@@ -544,10 +568,28 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
 
   // Render legend based on variant
   const renderLegend = () => {
+    // Determine if chart is scrollable for dualAxis variant - use same logic as chart rendering
+    let isScrollable = false;
+    if (variant === 'dualAxis' && events) {
+      // Calculate timeLabels the same way as in chart rendering
+      const allTimePoints = new Set([
+        ...chartData.userSeries.map(p => p.x),
+        ...chartData.oppSeries.map(p => p.x)
+      ]);
+      const sortedTimePoints = Array.from(allTimePoints).sort((a, b) => a - b);
+      isScrollable = sortedTimePoints.length > 9;
+    }
+    
+    // Apply different styles based on scrollability
+    console.log('📊 Legend scrollable check:', { isScrollable, variant, eventsLength: events?.length });
+    const legendStyle = isScrollable 
+      ? [styles.legend, { marginTop: -(screenHeight * 0.070) }]
+      : [styles.legend, { marginTop: -(screenHeight * 0.025) }];
+    
     switch (variant) {
       case 'dualAxis':
         return (
-          <View style={styles.legend}>
+          <View style={legendStyle}>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
               <Text style={styles.legendText}>You ({userScore})</Text>
@@ -595,7 +637,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         {renderChart()}
       </View>
       
-      {variant !== 'dualAxis' && renderLegend()}
+      {renderLegend()}
     </View>
   );
 };
