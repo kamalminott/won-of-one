@@ -29,6 +29,9 @@ export default function HomeScreen() {
   useEffect(() => {
     if (user && !loading) {
       fetchUserData();
+    } else if (!user && !loading) {
+      // No user logged in, stop data loading
+      setDataLoading(false);
     }
   }, [user, loading]);
 
@@ -37,6 +40,9 @@ export default function HomeScreen() {
     useCallback(() => {
       if (user && !loading) {
         fetchUserData();
+      } else if (!user && !loading) {
+        // No user logged in, stop data loading
+        setDataLoading(false);
       }
     }, [user, loading])
   );
@@ -44,6 +50,7 @@ export default function HomeScreen() {
   const fetchUserData = async () => {
     if (!user) {
       console.log('No user found, skipping data fetch');
+      setDataLoading(false);
       return;
     }
     
@@ -221,8 +228,23 @@ export default function HomeScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: 'white', fontSize: 18 }}>Loading...</Text>
+        <Text style={{ color: 'white', fontSize: 14, marginTop: 10 }}>
+          Auth Loading: {loading ? 'Yes' : 'No'}
+        </Text>
+        <Text style={{ color: 'white', fontSize: 14 }}>
+          Data Loading: {dataLoading ? 'Yes' : 'No'}
+        </Text>
+        <Text style={{ color: 'white', fontSize: 14 }}>
+          User: {user ? 'Logged In' : 'Not Logged In'}
+        </Text>
       </View>
     );
+  }
+
+  // Redirect to login if no user is logged in
+  if (!user) {
+    router.replace('/login');
+    return null;
   }
 
   return (
@@ -249,28 +271,6 @@ export default function HomeScreen() {
         {/* Content with bottom safe area */}
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
-            <ProgressCard
-              title="Sessions this Week"
-              current={3}
-              total={5}
-              daysRemaining={3}
-            />
-            
-            <View style={styles.summaryRow}>
-              <SummaryCard
-                icon={<Text style={styles.icon}>🕐</Text>}
-                value={trainingTime.value}
-                label={trainingTime.label}
-                backgroundColor={Colors.pink.light}
-              />
-              <SummaryCard
-                icon={<Text style={styles.icon}>🏆</Text>}
-                value={`${winRate}%`}
-                label="Win Rate"
-                backgroundColor={Colors.blue.light}
-              />
-            </View>
-            
             {goals.length > 0 ? (
               <GoalCard
                 daysLeft={calculateDaysLeft(goals[0].deadline)}
@@ -330,6 +330,28 @@ export default function HomeScreen() {
                 useModal={true}
               />
             )}
+            
+            <View style={styles.summaryRow}>
+              <SummaryCard
+                icon={<Text style={styles.icon}>🕐</Text>}
+                value={trainingTime.value}
+                label={trainingTime.label}
+                backgroundColor={Colors.pink.light}
+              />
+              <SummaryCard
+                icon={<Text style={styles.icon}>🏆</Text>}
+                value={`${winRate}%`}
+                label="Win Rate"
+                backgroundColor={Colors.blue.light}
+              />
+            </View>
+            
+            <ProgressCard
+              title="Sessions this Week"
+              current={3}
+              total={5}
+              daysRemaining={3}
+            />
             
             <View style={styles.recentMatchesWrapper}>
               <RecentMatches

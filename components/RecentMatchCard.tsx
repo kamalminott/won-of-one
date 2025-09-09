@@ -1,9 +1,9 @@
 import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { DefeatPill } from './DefeatPill';
+import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
-import { VictoryPill } from './VictoryPill';
+import { WinPill } from './WinPill';
 
 interface Match {
   id: string;
@@ -122,9 +122,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
         </View>
         <View style={styles.outcomeBadgeContainer}>
           {match.outcome === 'Victory' ? (
-            <VictoryPill />
+            <WinPill />
           ) : (
-            <DefeatPill />
+            <LossPill />
           )}
         </View>
       </View>

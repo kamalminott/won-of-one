@@ -101,14 +101,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="diary"
         options={{
-          title: 'Diary',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons 
-              name="book" 
-              size={height * 0.035} 
-              color={focused ? Colors.red.accent : color} 
-            />
-          ),
+          href: null, // This hides the tab from the tab bar
         }}
       />
       <Tabs.Screen

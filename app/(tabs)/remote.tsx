@@ -4,12 +4,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,9 +44,144 @@ export default function RemoteScreen() {
     alice: 'Alice', 
     bob: 'Bob' 
   });
+  
+  // Image states
+  const [opponentImages, setOpponentImages] = useState({
+    alice: null as string | null,
+    bob: null as string | null,
+  });
+  const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [selectedFencer, setSelectedFencer] = useState<'alice' | 'bob' | null>(null);
+  const [isCompletingMatch, setIsCompletingMatch] = useState(false);
 
   // Get user display name
   const userDisplayName = user?.email?.split('@')[0] || 'You';
+  
+  // Debug logging removed
+  
+  // Test function to manually check stored images
+  const testImageLoading = async () => {
+    try {
+      const aliceImage = await AsyncStorage.getItem('opponent_image_alice');
+      const bobImage = await AsyncStorage.getItem('opponent_image_bob');
+      console.log('Direct AsyncStorage check - Alice:', aliceImage, 'Bob:', bobImage);
+    } catch (error) {
+      console.error('Error checking AsyncStorage:', error);
+    }
+  };
+  
+  // Load stored images on component mount
+  useEffect(() => {
+    loadStoredImages();
+    testImageLoading(); // Test function to verify AsyncStorage
+  }, []);
+
+  const loadStoredImages = async () => {
+    try {
+      const aliceImage = await AsyncStorage.getItem('opponent_image_alice');
+      const bobImage = await AsyncStorage.getItem('opponent_image_bob');
+      const userImage = await AsyncStorage.getItem('user_profile_image');
+      
+      console.log('Loaded images - Alice:', aliceImage, 'Bob:', bobImage, 'User:', userImage);
+      
+      setOpponentImages({
+        alice: aliceImage,
+        bob: bobImage,
+      });
+      setUserProfileImage(userImage);
+    } catch (error) {
+      console.error('Error loading stored images:', error);
+    }
+  };
+
+  // Load user profile image from profile page
+  useEffect(() => {
+    const loadUserProfileImage = async () => {
+      try {
+        const userImage = await AsyncStorage.getItem('user_profile_image');
+        if (userImage) {
+          setUserProfileImage(userImage);
+        }
+      } catch (error) {
+        console.error('Error loading user profile image:', error);
+      }
+    };
+    
+    loadUserProfileImage();
+  }, []);
+
+  const saveImage = async (key: string, imageUri: string) => {
+    try {
+      await AsyncStorage.setItem(key, imageUri);
+    } catch (error) {
+      console.error('Error saving image:', error);
+    }
+  };
+
+  const handleImageSelection = (fencer: 'alice' | 'bob') => {
+    setSelectedFencer(fencer);
+    setShowImagePicker(true);
+  };
+
+  const pickImage = async (source: 'camera' | 'library') => {
+    if (!selectedFencer) return;
+
+    try {
+      let result;
+      
+      if (source === 'camera') {
+        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission required', 'Camera permission is required to take photos.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission required', 'Photo library permission is required to select photos.');
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        const storageKey = `opponent_image_${selectedFencer}`;
+        
+        console.log('Selected image URI:', imageUri);
+        console.log('Storage key:', storageKey);
+        
+        await saveImage(storageKey, imageUri);
+        
+        setOpponentImages(prev => {
+          const newImages = {
+            ...prev,
+            [selectedFencer]: imageUri,
+          };
+          console.log('Updated opponent images:', newImages);
+          return newImages;
+        });
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    } finally {
+      setShowImagePicker(false);
+      setSelectedFencer(null);
+    }
+  };
   
   // Remote session state
   const [remoteSession, setRemoteSession] = useState<any>(null);
@@ -54,8 +191,28 @@ export default function RemoteScreen() {
   
   // Event tracking state
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
+  const [matchStartTime, setMatchStartTime] = useState<Date | null>(null);
+  const [totalPausedTime, setTotalPausedTime] = useState<number>(0); // in milliseconds
+  const [pauseStartTime, setPauseStartTime] = useState<Date | null>(null);
   
   // We'll use null for opponent scoring and store opponent name in meta field
+
+  // Helper function to calculate actual match time (excluding pauses)
+  const getActualMatchTime = useCallback(() => {
+    if (!matchStartTime) return 0;
+    
+    const now = new Date();
+    const totalElapsed = now.getTime() - matchStartTime.getTime();
+    const actualMatchTime = totalElapsed - totalPausedTime;
+    
+    console.log('⏱️ Match time calculation:', {
+      totalElapsed: totalElapsed,
+      totalPausedTime: totalPausedTime,
+      actualMatchTime: actualMatchTime
+    });
+    
+    return Math.max(0, actualMatchTime);
+  }, [matchStartTime, totalPausedTime]);
 
   // Helper function to create match events with all required fields
   const createMatchEvent = async (scorer: 'user' | 'opponent', cardGiven?: string, newAliceScore?: number, newBobScore?: number) => {
@@ -77,6 +234,7 @@ export default function RemoteScreen() {
     }
 
     const now = new Date();
+    const actualMatchTime = getActualMatchTime();
     const secondsSinceLastEvent = lastEventTime 
       ? Math.floor((now.getTime() - lastEventTime.getTime()) / 1000)
       : 0;
@@ -84,7 +242,9 @@ export default function RemoteScreen() {
     console.log('🔍 Time calculation:', {
       now: now.toISOString(),
       lastEventTime: lastEventTime?.toISOString(),
-      secondsSinceLastEvent
+      secondsSinceLastEvent,
+      actualMatchTime: actualMatchTime,
+      totalPausedTime: totalPausedTime
     });
 
     // Calculate score_diff based on user toggle and position
@@ -112,7 +272,20 @@ export default function RemoteScreen() {
     }
     // If user toggle is off, score_diff remains null
 
+    // Calculate actual match timer time using the match timer's elapsed time
+    // matchTime is the total match duration (180s), timeRemaining is what's left
+    const matchTimeElapsed = matchTime - timeRemaining;
+    
+    console.log('⏱️ Capturing match time for event:', {
+      matchTime,
+      timeRemaining,
+      matchTimeElapsed,
+      matchStartTime: matchStartTime?.toISOString(),
+      totalPausedTime
+    });
+    
     const eventData = {
+      match_id: currentMatchPeriod?.match_id || null, // Add match_id to link event to match
       fencing_remote_id: remoteSession.remote_id,
       match_period_id: currentMatchPeriod?.match_period_id || null,
       event_time: now.toISOString(),
@@ -125,7 +298,8 @@ export default function RemoteScreen() {
       fencer_2_name: showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob,
       card_given: cardGiven || null, // Only tracks actual cards: 'yellow', 'red', or null
       score_diff: scoreDiff,
-      seconds_since_last_event: secondsSinceLastEvent
+      seconds_since_last_event: secondsSinceLastEvent,
+      match_time_elapsed: matchTimeElapsed // Store actual match timer time
     };
 
     await matchEventService.createMatchEvent(eventData);
@@ -134,7 +308,12 @@ export default function RemoteScreen() {
 
   // Create remote session if it doesn't exist
   const ensureRemoteSession = async () => {
-    if (remoteSession || !user) return remoteSession;
+    if (remoteSession) return remoteSession;
+    
+    if (!user) {
+      console.log('❌ No user - cannot create remote session');
+      return null;
+    }
 
     try {
       console.log('Creating remote session...');
@@ -157,8 +336,9 @@ export default function RemoteScreen() {
   };
 
   // Create a new match period
-  const createMatchPeriod = async () => {
-    if (!remoteSession) {
+  const createMatchPeriod = async (session?: any, playClickTime?: string) => {
+    const activeSession = session || remoteSession;
+    if (!activeSession) {
       console.log('❌ No remote session - cannot create match period');
       return null;
     }
@@ -169,7 +349,7 @@ export default function RemoteScreen() {
       // First, create a match record from the remote session
       // Only pass user.id if showUserProfile is true (user toggle is on)
       const userId = showUserProfile && user ? user.id : null;
-      const match = await matchService.createMatchFromRemote(remoteSession, userId);
+      const match = await matchService.createMatchFromRemote(activeSession, userId);
       if (!match) {
         console.error('❌ Failed to create match record');
         return null;
@@ -177,11 +357,15 @@ export default function RemoteScreen() {
       
       console.log('✅ Match created:', match.match_id);
       
+      // Use the exact time when Play was clicked as match start time
+      const matchStartTime = playClickTime || new Date().toISOString();
+      console.log('🕐 Setting match period start time to Play click time:', matchStartTime);
+      
       // Now create the match period with the proper match_id
       const periodData = {
         match_id: match.match_id, // Use the actual match_id from the match table
         period_number: currentPeriod, // Use currentPeriod instead of periodNumber
-        start_time: new Date().toISOString(),
+        start_time: matchStartTime, // Use current time when Play is clicked
         fencer_1_score: aliceScore,
         fencer_2_score: bobScore,
         fencer_1_cards: aliceCards.yellow + aliceCards.red,
@@ -219,6 +403,7 @@ export default function RemoteScreen() {
         fencer_2_cards: bobCards.yellow + bobCards.red,
         priority_assigned: priorityFencer || undefined,
         priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+        timestamp: new Date().toISOString(), // Update timestamp when period is updated
       });
     } catch (error) {
       console.error('Error updating match period:', error);
@@ -234,6 +419,7 @@ export default function RemoteScreen() {
 
     try {
       console.log('Completing match...');
+      setIsCompletingMatch(true); // Prevent further score changes
       
       // Calculate total match duration: (completed periods * full period time) + current period elapsed
       const completedPeriods = currentPeriod - 1;
@@ -277,6 +463,30 @@ export default function RemoteScreen() {
         result = null; // No win/loss determination
       }
 
+      // Calculate period-based data
+      const touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, userDisplayName, undefined, finalScore, touchesAgainst);
+      
+      // Calculate period number (count non-zero periods)
+      const periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
+        .filter(period => period.user > 0 || period.opponent > 0).length;
+      
+      // Calculate score per period (user only)
+      const scoreSpp = periodNumber > 0 ? finalScore / periodNumber : 0;
+      
+      // Structure score by period data
+      const scoreByPeriod = {
+        period1: { user: touchesByPeriod.period1.user, opponent: touchesByPeriod.period1.opponent },
+        period2: { user: touchesByPeriod.period2.user, opponent: touchesByPeriod.period2.opponent },
+        period3: { user: touchesByPeriod.period3.user, opponent: touchesByPeriod.period3.opponent }
+      };
+
+      console.log('📊 Period calculations:', {
+        periodNumber,
+        scoreSpp,
+        scoreByPeriod,
+        touchesByPeriod
+      });
+
       // 1. Update match with final scores and completion status
       const updatedMatch = await matchService.updateMatch(currentMatchPeriod.match_id, {
         final_score: finalScore,
@@ -287,6 +497,9 @@ export default function RemoteScreen() {
         yellow_cards: aliceCards.yellow + bobCards.yellow,
         red_cards: aliceCards.red + bobCards.red,
         is_complete: true, // Mark as complete
+        period_number: periodNumber,
+        score_spp: scoreSpp,
+        score_by_period: scoreByPeriod,
       });
 
       if (updatedMatch) {
@@ -300,6 +513,7 @@ export default function RemoteScreen() {
         fencer_2_score: bobScore,
         fencer_1_cards: aliceCards.yellow + aliceCards.red,
         fencer_2_cards: bobCards.yellow + bobCards.red,
+        timestamp: new Date().toISOString(), // Update timestamp when period is completed
       });
 
       // 3. Match completion is tracked by is_complete in match table
@@ -528,6 +742,12 @@ export default function RemoteScreen() {
   };
 
   const incrementAliceScore = async () => {
+    // Prevent score changes if match is being completed
+    if (isCompletingMatch) {
+      console.log('🚫 Score change blocked - match is being completed');
+      return;
+    }
+    
     // Ensure remote session exists (create if first score)
     const session = await ensureRemoteSession();
     
@@ -540,12 +760,19 @@ export default function RemoteScreen() {
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => async () => {
-          setAliceScore(aliceScore + 1);
+          const newAliceScore = aliceScore + 1;
+          setAliceScore(newAliceScore);
           setScoreChangeCount(0); // Reset counter
+          
+          // Check if Alice reached 15 points (match should end)
+          if (newAliceScore >= 15) {
+            console.log('🏁 Alice reached 15 points - match should end');
+            setIsCompletingMatch(true);
+          }
           
           // Create match event for the score - determine if Alice is user or opponent
           const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-          await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
+          await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -557,12 +784,25 @@ export default function RemoteScreen() {
       }
       
       // First score change during active match - proceed normally
-      setAliceScore(aliceScore + 1);
+      const newAliceScore = aliceScore + 1;
+      setAliceScore(newAliceScore);
+      
+      // Update remote session scores
+      if (remoteSession) {
+        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
+      }
+      
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
+      
+      // Check if Alice reached 15 points (match should end)
+      if (newAliceScore >= 15) {
+        console.log('🏁 Alice reached 15 points - match should end');
+        setIsCompletingMatch(true);
+      }
       
       // Create match event for the score - determine if Alice is user or opponent
       const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -572,13 +812,26 @@ export default function RemoteScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
       // Not an active match - no warning needed, just update score
-      setAliceScore(aliceScore + 1);
+      const newAliceScore = aliceScore + 1;
+      setAliceScore(newAliceScore);
+      
+      // Update remote session scores
+      if (remoteSession) {
+        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
+      }
+      
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
       
+      // Check if Alice reached 15 points (match should end)
+      if (newAliceScore >= 15) {
+        console.log('🏁 Alice reached 15 points - match should end');
+        setIsCompletingMatch(true);
+      }
+      
       // Create match event for the score - determine if Alice is user or opponent
       const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, aliceScore + 1, bobScore);
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -626,6 +879,12 @@ export default function RemoteScreen() {
   };
   
   const incrementBobScore = async () => {
+    // Prevent score changes if match is being completed
+    if (isCompletingMatch) {
+      console.log('🚫 Score change blocked - match is being completed');
+      return;
+    }
+    
     // Ensure remote session exists (create if first score)
     const session = await ensureRemoteSession();
     
@@ -638,12 +897,19 @@ export default function RemoteScreen() {
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
         setPendingScoreAction(() => async () => {
-          setBobScore(bobScore + 1);
+          const newBobScore = bobScore + 1;
+          setBobScore(newBobScore);
           setScoreChangeCount(0); // Reset counter
+          
+          // Check if Bob reached 15 points (match should end)
+          if (newBobScore >= 15) {
+            console.log('🏁 Bob reached 15 points - match should end');
+            setIsCompletingMatch(true);
+          }
           
           // Create match event for the score - determine if Bob is user or opponent
           const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-          await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
+          await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -655,12 +921,25 @@ export default function RemoteScreen() {
       }
       
       // First score change during active match - proceed normally
-      setBobScore(bobScore + 1);
+      const newBobScore = bobScore + 1;
+      setBobScore(newBobScore);
+      
+      // Update remote session scores
+      if (remoteSession) {
+        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
+      }
+      
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
+      
+      // Check if Bob reached 15 points (match should end)
+      if (newBobScore >= 15) {
+        console.log('🏁 Bob reached 15 points - match should end');
+        setIsCompletingMatch(true);
+      }
       
       // Create match event for the score - determine if Bob is user or opponent
       const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -670,13 +949,26 @@ export default function RemoteScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
       // Not an active match - no warning needed, just update score
-      setBobScore(bobScore + 1);
+      const newBobScore = bobScore + 1;
+      setBobScore(newBobScore);
+      
+      // Update remote session scores
+      if (remoteSession) {
+        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
+      }
+      
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
       
+      // Check if Bob reached 15 points (match should end)
+      if (newBobScore >= 15) {
+        console.log('🏁 Bob reached 15 points - match should end');
+        setIsCompletingMatch(true);
+      }
+      
       // Create match event for the score - determine if Bob is user or opponent
       const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, bobScore + 1);
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -727,19 +1019,34 @@ export default function RemoteScreen() {
     if (isPlaying) {
       pauseTimer();
     } else {
+      // Record the exact time when Play is clicked
+      const playClickTime = new Date().toISOString();
+      console.log('🎮 Play button clicked at:', playClickTime);
+      
+      // Set match start time if this is the first time starting
+      if (!matchStartTime) {
+        setMatchStartTime(new Date());
+        console.log('🕐 Match start time set to:', new Date().toISOString());
+      }
+      
       // Create remote session when starting timer
-      await ensureRemoteSession();
+      const session = await ensureRemoteSession();
+      if (!session) {
+        console.log('❌ Failed to create remote session - cannot start match');
+        return;
+      }
+      
       // Create match period only if one doesn't already exist (first time starting match)
       if (!currentMatchPeriod) {
         console.log('🆕 Creating new match period (first time starting match)');
-        await createMatchPeriod();
+        await createMatchPeriod(session, playClickTime);
       } else {
         console.log('⏯️ Match period already exists, resuming match');
       }
       startTimer();
       setScoreChangeCount(0); // Reset score change counter when starting timer
     }
-  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod]);
+  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -831,6 +1138,7 @@ export default function RemoteScreen() {
   const resetAll = useCallback(async () => {
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
+      setIsCompletingMatch(false); // Reset the completion flag
       console.log('🔍 Current state:', { 
         currentMatchPeriod: currentMatchPeriod ? 'exists' : 'null',
         remoteSession: remoteSession ? 'exists' : 'null',
@@ -1027,9 +1335,9 @@ export default function RemoteScreen() {
     setCurrentPeriod(1); // Reset to period 1
     currentPeriodRef.current = 1; // Reset ref
     setMatchTime(180); // 3 minutes in seconds
-          setTimeRemaining(180); // Same as matchTime = no paused state
-      setAliceScore(0); // Reset scores
-      setBobScore(0);
+    setTimeRemaining(180); // Same as matchTime = no paused state
+    setAliceScore(0); // Reset scores
+    setBobScore(0);
     setIsBreakTime(false); // Reset break state
     setBreakTimeRemaining(60); // Reset break timer
     setScoreChangeCount(0); // Reset score change counter
@@ -1205,6 +1513,10 @@ export default function RemoteScreen() {
       clearInterval(timerRef.current);
       timerRef.current = null;
       setIsPlaying(false);
+      
+      // Track pause start time
+      setPauseStartTime(new Date());
+      
       // Don't reset score change counter when pausing - keep tracking for the current match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
@@ -1214,6 +1526,15 @@ export default function RemoteScreen() {
     setIsPlaying(true);
     setHasMatchStarted(true); // Mark that match has been started
     setScoreChangeCount(0); // Reset score change counter when starting
+    
+    // If resuming from pause, add the paused time to total
+    if (pauseStartTime) {
+      const pausedDuration = Date.now() - pauseStartTime.getTime();
+      setTotalPausedTime(prev => prev + pausedDuration);
+      setPauseStartTime(null);
+      console.log('⏸️ Resuming from pause, added', pausedDuration, 'ms to total paused time');
+    }
+    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const startTime = Date.now();
     const initialTime = timeRemaining;
@@ -1973,6 +2294,14 @@ export default function RemoteScreen() {
       fontWeight: '700',
       color: 'white',
     },
+    profileImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderColor: 'red', // Temporary border to see if image is rendering
+    },
     cameraIcon: {
       position: 'absolute',
       bottom: -width * 0.008,
@@ -2426,7 +2755,7 @@ export default function RemoteScreen() {
       justifyContent: 'center',
       position: 'relative',
     },
-    profileImage: {
+    profileImageText: {
       fontSize: width * 0.075,
       fontWeight: '700',
       color: 'white',
@@ -2773,6 +3102,34 @@ export default function RemoteScreen() {
     }
   };
 
+  // Add missing popup button styles
+  const popupButtonStyles = StyleSheet.create({
+    popupButton: {
+      paddingHorizontal: width * 0.06,
+      paddingVertical: height * 0.015,
+      borderRadius: width * 0.02,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: width * 0.3,
+    },
+    popupButtonPrimary: {
+      backgroundColor: Colors.purple.primary,
+    },
+    popupButtonSecondary: {
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    popupButtonPrimaryText: {
+      color: 'white',
+      fontSize: width * 0.04,
+      fontWeight: '600',
+    },
+    popupButtonSecondaryText: {
+      color: 'white',
+      fontSize: width * 0.04,
+      fontWeight: '600',
+    },
+  });
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={[styles.container, { 
@@ -3067,14 +3424,51 @@ export default function RemoteScreen() {
           )}
           
           <View style={styles.profileContainer}>
-            <View style={styles.profilePicture}>
-              <Text style={styles.profileInitial}>
-                {toggleCardPosition === 'left' && showUserProfile ? '👤' : aliceProfileEmoji}
-              </Text>
+            <TouchableOpacity 
+              style={styles.profilePicture}
+              onPress={() => {
+                if (toggleCardPosition === 'left' && showUserProfile) {
+                  // User profile - no image selection, just show profile image
+                  return;
+                } else {
+                  // Opponent profile - allow image selection
+                  handleImageSelection('alice');
+                }
+              }}
+            >
+              {toggleCardPosition === 'left' && showUserProfile ? (
+                // User profile - show user image or initials
+                userProfileImage ? (
+                  <Image 
+                    source={{ uri: userProfileImage }} 
+                    style={styles.profileImage}
+                    resizeMode="cover"
+                    onError={(error) => console.log('User image error:', error)}
+                    onLoad={() => console.log('User image loaded successfully')}
+                  />
+                ) : (
+                  <Text style={styles.profileInitial}>👤</Text>
+                )
+              ) : (
+                // Opponent profile - show opponent image or emoji
+                opponentImages.alice ? (
+                  <Image 
+                    source={{ uri: opponentImages.alice }} 
+                    style={styles.profileImage}
+                    resizeMode="cover"
+                    onError={(error) => console.log('Alice image error:', error)}
+                    onLoad={() => console.log('Alice image loaded successfully')}
+                  />
+                ) : (
+                  <Text style={styles.profileInitial}>{aliceProfileEmoji}</Text>
+                )
+              )}
+              {!(toggleCardPosition === 'left' && showUserProfile) && (
               <View style={styles.cameraIcon}>
                 <Text style={styles.cameraIconText}>📷</Text>
               </View>
-            </View>
+              )}
+            </TouchableOpacity>
           </View>
           
           {/* Yellow Cards Display */}
@@ -3207,14 +3601,51 @@ export default function RemoteScreen() {
           )}
           
           <View style={styles.profileContainer}>
-            <View style={styles.profilePicture}>
-              <Text style={styles.profileInitial}>
-                {toggleCardPosition === 'right' && showUserProfile ? '👤' : bobProfileEmoji}
-              </Text>
+            <TouchableOpacity 
+              style={styles.profilePicture}
+              onPress={() => {
+                if (toggleCardPosition === 'right' && showUserProfile) {
+                  // User profile - no image selection, just show profile image
+                  return;
+                } else {
+                  // Opponent profile - allow image selection
+                  handleImageSelection('bob');
+                }
+              }}
+            >
+              {toggleCardPosition === 'right' && showUserProfile ? (
+                // User profile - show user image or initials
+                userProfileImage ? (
+                  <Image 
+                    source={{ uri: userProfileImage }} 
+                    style={styles.profileImage}
+                    resizeMode="cover"
+                    onError={(error) => console.log('User image error:', error)}
+                    onLoad={() => console.log('User image loaded successfully')}
+                  />
+                ) : (
+                  <Text style={styles.profileInitial}>👤</Text>
+                )
+              ) : (
+                // Opponent profile - show opponent image or emoji
+                opponentImages.bob ? (
+                  <Image 
+                    source={{ uri: opponentImages.bob }} 
+                    style={styles.profileImage}
+                    resizeMode="cover"
+                    onError={(error) => console.log('Bob image error:', error)}
+                    onLoad={() => console.log('Bob image loaded successfully')}
+                  />
+                ) : (
+                  <Text style={styles.profileInitial}>{bobProfileEmoji}</Text>
+                )
+              )}
+              {!(toggleCardPosition === 'right' && showUserProfile) && (
               <View style={styles.cameraIcon}>
                 <Text style={styles.cameraIconText}>📷</Text>
               </View>
-            </View>
+              )}
+            </TouchableOpacity>
           </View>
           
           {/* Yellow Cards Display */}
@@ -3527,7 +3958,7 @@ export default function RemoteScreen() {
 
         {/* Complete Match Slider */}
         <SwipeToCompleteButton
-          title="Complete The Match"
+          title="Swipe To Complete The Match"
           customStyle={{
             position: 'relative',
             width: '100%',
@@ -3735,6 +4166,38 @@ export default function RemoteScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={autoAssignPriority}>
                 <Text style={styles.saveButtonText}>Yes, Assign Priority</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Image Picker Modal */}
+      {showImagePicker && (
+        <View style={styles.popupOverlay}>
+          <View style={styles.popupContainer}>
+            <Text style={styles.popupTitle}>Select Image</Text>
+            <Text style={styles.popupMessage}>
+              Choose how you want to add a photo for {selectedFencer === 'alice' ? fencerNames.alice : fencerNames.bob}
+            </Text>
+            <View style={styles.popupButtons}>
+              <TouchableOpacity 
+                style={[popupButtonStyles.popupButton, popupButtonStyles.popupButtonSecondary]} 
+                onPress={() => setShowImagePicker(false)}
+              >
+                <Text style={popupButtonStyles.popupButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[popupButtonStyles.popupButton, popupButtonStyles.popupButtonPrimary]} 
+                onPress={() => pickImage('camera')}
+              >
+                <Text style={popupButtonStyles.popupButtonPrimaryText}>📷 Camera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[popupButtonStyles.popupButton, popupButtonStyles.popupButtonPrimary]} 
+                onPress={() => pickImage('library')}
+              >
+                <Text style={popupButtonStyles.popupButtonPrimaryText}>🖼️ Photo Library</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { LineChart as RNChartKit } from 'react-native-chart-kit';
 import { LineChart } from 'react-native-gifted-charts';
-import { Shadow } from 'react-native-shadow-2';
 
 // Types
 type ScoringEvent = { tMin: number; scorer: 'user' | 'opponent' };
@@ -140,25 +140,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
   const { width, height: screenHeight } = useWindowDimensions();
 
   // Tooltip state
-  const [tooltip, setTooltip] = useState<TooltipData | null>(null);
-  const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Auto-hide tooltip after 3 seconds
-  useEffect(() => {
-    if (tooltip) {
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setTooltip(null);
-      }, 3000);
-    }
-    return () => {
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-    };
-  }, [tooltip]);
+  // Victory Native handles tooltips natively, no need for state management
 
   // Memoized data transformation
   const chartData = useMemo(() => {
@@ -168,28 +150,72 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     
     // Fallback to legacy data format
     if (scoreProgression && scoreProgression.userData && scoreProgression.userData.length > 0) {
-      // Convert legacy format to new format - process all events together
-      const allEvents: ScoringEvent[] = [];
+      // Debug logging for original data
+      console.log('📊 Original Score Progression Data:');
+      console.log('📊 User data:', scoreProgression.userData);
+      console.log('📊 Opponent data:', scoreProgression.opponentData);
+      console.log('📊 User data length:', scoreProgression.userData.length);
+      console.log('📊 Opponent data length:', scoreProgression.opponentData.length);
+      console.log('📊 First user point:', scoreProgression.userData[0]);
+      console.log('📊 First opponent point:', scoreProgression.opponentData[0]);
       
-      // Process user events
-      scoreProgression.userData.forEach((point, index) => {
+      // Check for duplicate Y values
+      const userYValues = scoreProgression.userData.map(p => p.y);
+      const opponentYValues = scoreProgression.opponentData.map(p => p.y);
+      console.log('📊 User Y values:', userYValues);
+      console.log('📊 Opponent Y values:', opponentYValues);
+      console.log('📊 Duplicate user Y values:', userYValues.filter((value, index) => userYValues.indexOf(value) !== index));
+      console.log('📊 Duplicate opponent Y values:', opponentYValues.filter((value, index) => opponentYValues.indexOf(value) !== index));
+      
+      // Convert legacy format directly to chart data, preserving actual Y values
+      const userSeries: ScoreSeries = scoreProgression.userData.map(point => {
         const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
         const [minutes, seconds] = timeStr.split(':').map(Number);
-        const tMin = minutes + (seconds / 60);
-        allEvents.push({ tMin, scorer: 'user' });
+        const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
+        console.log(`📊 Converting user point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
+        return { x: totalSeconds, y: point.y }; // Use seconds instead of decimal minutes
       });
       
-      // Process opponent events
-      scoreProgression.opponentData.forEach((point, index) => {
+      const oppSeries: ScoreSeries = scoreProgression.opponentData.map(point => {
         const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
         const [minutes, seconds] = timeStr.split(':').map(Number);
-        const tMin = minutes + (seconds / 60);
-        allEvents.push({ tMin, scorer: 'opponent' });
+        const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
+        console.log(`📊 Converting opponent point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
+        return { x: totalSeconds, y: point.y }; // Use seconds instead of decimal minutes
       });
       
-      // Sort all events by time
-      allEvents.sort((a, b) => a.tMin - b.tMin);
-      return buildScoreSeries(allEvents);
+      // Calculate gap series
+      const gapSeries: ScoreSeries = [];
+      const allTimes = new Set([...userSeries.map(p => p.x), ...oppSeries.map(p => p.x)]);
+      const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+      
+      for (const time of sortedTimes) {
+        const userPoint = userSeries.find(p => p.x === time);
+        const oppPoint = oppSeries.find(p => p.x === time);
+        const userScore = userPoint ? userPoint.y : (userSeries.find(p => p.x < time)?.y || 0);
+        const oppScore = oppPoint ? oppPoint.y : (oppSeries.find(p => p.x < time)?.y || 0);
+        gapSeries.push({ x: time, y: userScore - oppScore });
+      }
+      
+      // Calculate domains
+      const xDomain: [number, number] = sortedTimes.length > 0 ? [sortedTimes[0], sortedTimes[sortedTimes.length - 1]] : [0, 1];
+      const userMax = Math.max(...userSeries.map(p => p.y));
+      const oppMax = Math.max(...oppSeries.map(p => p.y));
+      const gapMax = Math.max(...gapSeries.map(p => Math.abs(p.y)));
+      
+      const yDomains = {
+        user: [0, Math.max(userMax, 1)] as [number, number],
+        opponent: [0, Math.max(oppMax, 1)] as [number, number],
+        gap: [-Math.max(gapMax, 1), Math.max(gapMax, 1)] as [number, number]
+      };
+      
+      return {
+        userSeries,
+        oppSeries,
+        gapSeries,
+        xDomain,
+        yDomains
+      };
     }
     
     return buildScoreSeries([]);
@@ -204,6 +230,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       marginHorizontal: width * 0.04,
       left: 0,
       right: 0,
+      overflow: 'hidden',
     },
     title: {
       fontSize: Math.round(width * 0.035),
@@ -221,66 +248,30 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     },
     legend: {
       flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'center',
-      marginTop: screenHeight * 0.015,
-      gap: width * 0.04,
+      marginTop: screenHeight * 0.01,
+      gap: width * 0.03,
+      paddingHorizontal: width * 0.02,
+      flexWrap: 'wrap',
     },
     legendItem: {
       flexDirection: 'row',
       alignItems: 'center',
+      flexShrink: 1,
     },
     legendDot: {
-      width: width * 0.03,
-      height: width * 0.03,
-      borderRadius: width * 0.015,
-      marginRight: width * 0.02,
+      width: width * 0.025,
+      height: width * 0.025,
+      borderRadius: width * 0.0125,
+      marginRight: width * 0.015,
     },
     legendText: {
       color: 'rgba(255, 255, 255, 0.7)',
-      fontSize: Math.round(width * 0.035),
-    },
-    tooltip: {
-      position: 'absolute',
-      backgroundColor: '#1A1A1A',
-      borderRadius: width * 0.02,
-      padding: width * 0.03,
-      minWidth: width * 0.25,
-      maxWidth: width * 0.4,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      elevation: 5,
-      zIndex: 1000,
-    },
-    tooltipText: {
-      color: 'white',
       fontSize: Math.round(width * 0.03),
-      fontWeight: '500',
-      marginBottom: width * 0.01,
+      flexShrink: 1,
     },
-    tooltipTime: {
-      color: '#10B981',
-      fontSize: Math.round(width * 0.032),
-      fontWeight: '600',
-      marginBottom: width * 0.015,
-    },
-    tooltipScores: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: width * 0.01,
-    },
-    tooltipScore: {
-      color: 'rgba(255, 255, 255, 0.8)',
-      fontSize: Math.round(width * 0.028),
-    },
-    tooltipGap: {
-      color: '#10B981',
-      fontSize: Math.round(width * 0.03),
-      fontWeight: '600',
-      textAlign: 'center',
-      marginTop: width * 0.01,
-    },
+    // Victory Native handles tooltips natively, no custom styles needed
   });
 
   // Convert chart data to LineChart format
@@ -296,6 +287,13 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     label: `(${Math.floor(item.x)}:${Math.round((item.x % 1) * 60).toString().padStart(2, '0')})`
   }));
 
+  // Debug logging
+  console.log('📊 Chart Data Debug:');
+  console.log('📊 User series:', chartData.userSeries);
+  console.log('📊 Opponent series:', chartData.oppSeries);
+  console.log('📊 User chart data:', userChartData);
+  console.log('📊 Opponent chart data:', opponentChartData);
+
   const gapChartData = chartData.gapSeries.map(item => ({
     value: item.y,
     dataPointText: item.y.toString(),
@@ -303,92 +301,161 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
   }));
 
   // Determine chart height
-  const chartHeight = height || screenHeight * 0.15;
+  const chartHeight = height || screenHeight * 0.25; // Increased from 0.15 to 0.25 for larger chart
 
-  // Handle tooltip data point press
-  const handleDataPointPress = (data: any, index: number, seriesType: 'user' | 'opponent' | 'gap' = 'user') => {
-    if (!chartData.userSeries.length) return;
+  // Victory Native handles tooltips natively, so we don't need these functions anymore
 
-    // Find the corresponding data point in our series
-    let pointData: { x: number; y: number } | null = null;
-    let scorer: 'user' | 'opponent' = 'user';
-
-    if (seriesType === 'user') {
-      pointData = chartData.userSeries[index];
-      scorer = 'user';
-    } else if (seriesType === 'opponent') {
-      pointData = chartData.oppSeries[index];
-      scorer = 'opponent';
-    } else if (seriesType === 'gap') {
-      pointData = chartData.gapSeries[index];
-      // For gap, we need to determine who scored at this point
-      const userPoint = chartData.userSeries[index];
-      const oppPoint = chartData.oppSeries[index];
-      if (userPoint && oppPoint) {
-        // Find the most recent scoring event at this time
-        const time = userPoint.x;
-        const scoringEvents = events || [];
-        const eventAtTime = scoringEvents.find((e: ScoringEvent) => Math.abs(e.tMin - time) < 0.1);
-        scorer = eventAtTime?.scorer || 'user';
-      }
-    }
-
-    if (!pointData) return;
-
-    // Calculate time string
-    const minutes = Math.floor(pointData.x);
-    const seconds = Math.round((pointData.x % 1) * 60);
-    const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-    // Get scores at this point
-    const userScoreAtTime = chartData.userSeries[index]?.y || 0;
-    const opponentScoreAtTime = chartData.oppSeries[index]?.y || 0;
-    const gapAtTime = userScoreAtTime - opponentScoreAtTime;
-
-    // Calculate approximate position (this is a rough estimate)
-    const chartWidth = width * 0.8;
-    const xPosition = (index / Math.max(chartData.userSeries.length - 1, 1)) * chartWidth;
-    const yPosition = chartHeight * 0.3; // Rough estimate for tooltip position
-
-    setTooltip({
-      time: timeString,
-      scorer,
-      userScore: userScoreAtTime,
-      opponentScore: opponentScoreAtTime,
-      gap: gapAtTime,
-      x: xPosition,
-      y: yPosition,
-    });
-  };
+  // Victory Native handles tooltips natively with VictoryVoronoiContainer
 
   // Render different variants
   const renderChart = () => {
     switch (variant) {
       case 'dualAxis':
+        // Create combined time points for both series
+        const allTimePoints = new Set([
+          ...chartData.userSeries.map(p => p.x),
+          ...chartData.oppSeries.map(p => p.x)
+        ]);
+        
+        const sortedTimePoints = Array.from(allTimePoints).sort((a, b) => a - b);
+        
+        console.log('📊 Chart data debug:');
+        console.log('📊 User series:', chartData.userSeries);
+        console.log('📊 Opponent series:', chartData.oppSeries);
+        console.log('📊 All time points:', Array.from(allTimePoints));
+        console.log('📊 Sorted time points:', sortedTimePoints);
+        
+        // Create data for React Native Chart Kit with proper alignment
+        const timeLabels = sortedTimePoints.map(time => {
+          const minutes = Math.floor(time / 60);
+          const seconds = Math.round(time % 60);
+          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        });
+        
+        console.log('📊 Time labels:', timeLabels);
+        
+        // Create user data array aligned with time points - ensure no duplicate Y values
+        const userData = sortedTimePoints.map(time => {
+          // Find the last user score at or before this time point
+          const lastUserPoint = chartData.userSeries
+            .filter(p => p.x <= time)
+            .sort((a, b) => b.x - a.x)[0];
+          return lastUserPoint ? lastUserPoint.y : 0;
+        });
+        
+        // Create opponent data array aligned with time points - ensure no duplicate Y values
+        const opponentData = sortedTimePoints.map(time => {
+          // Find the last opponent score at or before this time point
+          const lastOppPoint = chartData.oppSeries
+            .filter(p => p.x <= time)
+            .sort((a, b) => b.x - a.x)[0];
+          return lastOppPoint ? lastOppPoint.y : 0;
+        });
+        
+        // Use the original data without padding to prevent extending beyond X-axis
+        const maxUserScore = Math.max(...userData, 0);
+        const maxOpponentScore = Math.max(...opponentData, 0);
+        const maxScore = Math.max(maxUserScore, maxOpponentScore, 5); // Minimum range of 0-5
+        
+        // Use original data without padding
+        const paddedUserData = [...userData];
+        const paddedOpponentData = [...opponentData];
+        const paddedLabels = [...timeLabels];
+        
+        console.log('📊 Chart Kit Labels:', timeLabels);
+        console.log('📊 User Data:', userData);
+        console.log('📊 Opponent Data:', opponentData);
+        console.log('📊 User Data length:', userData.length);
+        console.log('📊 Opponent Data length:', opponentData.length);
+        console.log('📊 Unique User Y values:', [...new Set(userData)]);
+        console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)]);
+        
+        const chartData_kit = {
+          labels: paddedLabels,
+          datasets: [
+            {
+              data: paddedUserData,
+              color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, // Green for user
+              strokeWidth: 3,
+            },
+            {
+              data: paddedOpponentData,
+              color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`, // Red for opponent
+              strokeWidth: 3,
+            }
+          ],
+          legend: [`You (${userScore})`, `Opponent (${opponentScore})`]
+        };
+
+        
+        const chartConfig = {
+          backgroundColor: "#2B2B2B", // Match the card background color
+          backgroundGradientFrom: "#2B2B2B",
+          backgroundGradientTo: "#2B2B2B",
+          decimalPlaces: 0,
+          color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+          labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+          style: {
+            borderRadius: 16,
+            paddingLeft: 10 // Reduced padding to move chart closer to left
+          },
+          propsForDots: {
+            r: "4",
+            strokeWidth: "2",
+            stroke: "#fff"
+          },
+          propsForBackgroundLines: {
+            strokeDasharray: "",
+            stroke: "rgba(255, 255, 255, 0.3)",
+            strokeWidth: 1
+          },
+          propsForLabels: {
+            fontSize: 10,
+            fill: "rgba(255, 255, 255, 0.7)"
+          },
+          propsForVerticalLabels: {
+            fontSize: 10,
+            fill: "rgba(255, 255, 255, 0.7)",
+            rotation: 0
+          }
+        };
+
+        const maxValue = Math.max(
+          ...chartData.userSeries.map(p => p.y),
+          ...chartData.oppSeries.map(p => p.y),
+          1
+        );
+
         return (
-          <LineChart
-            data={userChartData}
-            secondaryData={opponentChartData}
-            height={chartHeight}
-            width={width * 0.8}
-            color="#10B981"
-            secondaryLineConfig={{
-              color: '#EF4444',
-              thickness: 3,
-              dataPointsColor: '#EF4444',
-            }}
-            thickness={3}
-            dataPointsColor="#10B981"
-            dataPointsRadius={4}
-            curved
-            showVerticalLines
-            verticalLinesColor="rgba(255, 255, 255, 0.1)"
-            yAxisColor="rgba(255, 255, 255, 0.3)"
-            xAxisColor="rgba(255, 255, 255, 0.3)"
-            yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)' }}
-            xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025) }}
-            onPress={(data: any, index: number) => handleDataPointPress(data, index, 'user')}
-          />
+          <View style={{ height: chartHeight, width: width * 1, overflow: 'hidden', marginLeft: -width * 0.05 }}>
+            <TouchableOpacity
+              onPress={() => {
+                console.log('📊 Chart tapped - tooltip functionality can be added here');
+              }}
+              activeOpacity={0.8}
+            >
+              <RNChartKit
+                data={chartData_kit}
+                width={width * 0.9}
+                height={chartHeight - 40}
+                chartConfig={chartConfig}
+                bezier={false}
+                style={{
+                  marginVertical: 0,
+                  borderRadius: 16
+                }}
+                withDots={true}
+                withShadow={false}
+                withScrollableDot={false}
+                withInnerLines={true}
+                withOuterLines={true}
+                withVerticalLines={true}
+                withHorizontalLines={true}
+                fromZero={true}
+                segments={Math.min(maxValue, 5)}
+              />
+            </TouchableOpacity>
+          </View>
         );
         
       case 'stacked':
@@ -410,7 +477,6 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               xAxisColor="rgba(255, 255, 255, 0.3)"
               yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)' }}
               xAxisLabelTextStyle={{ color: 'transparent', fontSize: Math.round(width * 0.025) }}
-              onPress={(data: any, index: number) => handleDataPointPress(data, index, 'user')}
             />
             {/* Bottom chart - Opponent */}
             <LineChart
@@ -428,7 +494,6 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               xAxisColor="rgba(255, 255, 255, 0.3)"
               yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)' }}
               xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025) }}
-              onPress={(data: any, index: number) => handleDataPointPress(data, index, 'opponent')}
             />
           </View>
         );
@@ -452,18 +517,48 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025) }}
             rulesColor="rgba(255, 255, 255, 0.3)"
             rulesType="solid"
-            onPress={(data: any, index: number) => handleDataPointPress(data, index, 'gap')}
           />
         );
         
       default:
-        return null;
+        return (
+          <LineChart
+            data={userChartData}
+            height={chartHeight}
+            width={width * 0.8}
+            color="#10B981"
+            thickness={3}
+            dataPointsColor="#10B981"
+            dataPointsRadius={4}
+            curved
+            showVerticalLines
+            verticalLinesColor="rgba(255, 255, 255, 0.1)"
+            yAxisColor="rgba(255, 255, 255, 0.3)"
+            xAxisColor="rgba(255, 255, 255, 0.3)"
+            yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)' }}
+            xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025) }}
+          />
+        );
     }
   };
 
   // Render legend based on variant
   const renderLegend = () => {
     switch (variant) {
+      case 'dualAxis':
+        return (
+          <View style={styles.legend}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <Text style={styles.legendText}>You ({userScore})</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+              <Text style={styles.legendText}>Opponent ({opponentScore})</Text>
+            </View>
+          </View>
+        );
+        
       case 'gap':
         return (
           <View style={styles.legend}>
@@ -490,56 +585,18 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     }
   };
 
-  // Render tooltip component
-  const renderTooltip = () => {
-    if (!tooltip) return null;
-
-    return (
-      <View
-        style={[
-          styles.tooltip,
-          {
-            left: Math.max(10, Math.min(tooltip.x - width * 0.125, width * 0.6)),
-            top: Math.max(10, tooltip.y - 60),
-          },
-        ]}
-      >
-        <Text style={styles.tooltipTime}>{tooltip.time}</Text>
-        <Text style={styles.tooltipText}>
-          {tooltip.scorer === 'user' ? 'You scored' : 'Opponent scored'}
-        </Text>
-        
-        {variant === 'gap' ? (
-          <Text style={styles.tooltipGap}>
-            Gap: {tooltip.gap && tooltip.gap > 0 ? '+' : ''}{tooltip.gap}
-          </Text>
-        ) : (
-          <View style={styles.tooltipScores}>
-            <Text style={[styles.tooltipScore, { color: '#10B981' }]}>
-              You: {tooltip.userScore}
-            </Text>
-            <Text style={[styles.tooltipScore, { color: '#EF4444' }]}>
-              Opponent: {tooltip.opponentScore}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
+  // Victory Native handles tooltips natively, no need for custom tooltip rendering
 
   return (
-    <Shadow distance={8} startColor="rgba(0, 0, 0, 0.1)">
-      <View style={[styles.container, styleOverrides?.container]}>
-        <Text style={[styles.title, styleOverrides?.title]}>{title}</Text>
-        
-        <View style={[styles.chartWrapper, styleOverrides?.chartWrapper]}>
-          {renderChart()}
-          {renderTooltip()}
-        </View>
-        
-        {renderLegend()}
+    <View style={[styles.container, styleOverrides?.container]}>
+      <Text style={[styles.title, styleOverrides?.title]}>{title}</Text>
+      
+      <View style={[styles.chartWrapper, styleOverrides?.chartWrapper]}>
+        {renderChart()}
       </View>
-    </Shadow>
+      
+      {variant !== 'dualAxis' && renderLegend()}
+    </View>
   );
 };
 

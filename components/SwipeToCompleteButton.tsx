@@ -1,7 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import React from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, StyleSheet, View, useWindowDimensions } from 'react-native';
 import SwipeButton from 'rn-swipe-button';
 
 interface SwipeToCompleteButtonProps {
@@ -11,7 +11,7 @@ interface SwipeToCompleteButtonProps {
 }
 
 export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
-  title = 'Complete The Match',
+  title = 'Swipe To Complete The Match',
   onSwipeSuccess,
   customStyle
 }) => {
@@ -21,6 +21,32 @@ export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
   const isSmallScreen = width < 400;
   const isTinyScreen = width < 360;
   const isNexusS = width <= 360; // Nexus S specific optimization
+
+  // Animation for highlight effect
+  const highlightAnimation = useRef(new Animated.Value(0)).current;
+  const containerWidth = isNexusS ? width * 0.98 : width * 0.94;
+
+  useEffect(() => {
+    const startAnimation = () => {
+      Animated.sequence([
+        Animated.timing(highlightAnimation, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(highlightAnimation, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Restart animation after a delay
+        setTimeout(startAnimation, 2000);
+      });
+    };
+
+    startAnimation();
+  }, [highlightAnimation]);
 
   const styles = StyleSheet.create({
     container: {
@@ -39,6 +65,24 @@ export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
       fontSize: isNexusS ? 14 : 16, // Smaller font on Nexus S
       fontWeight: '600',
       textAlign: 'center',
+    },
+    highlightOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(255, 255, 255, 0.3)',
+      borderRadius: isNexusS ? 8 : 12,
+      zIndex: 1,
+    },
+    highlightBar: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      width: 60,
+      backgroundColor: 'rgba(255, 255, 255, 0.6)',
+      borderRadius: isNexusS ? 8 : 12,
     },
   });
 
@@ -62,12 +106,41 @@ export const SwipeToCompleteButton: React.FC<SwipeToCompleteButtonProps> = ({
         thumbIconBorderColor='transparent'
         thumbIconBackgroundColor="white"
         thumbIconWidth={isNexusS ? 24 : 30} // Smaller thumb on Nexus S
-        thumbIconComponent={() => <Ionicons name="chevron-forward" size={isNexusS ? 16 : 20} color="#6C5CE7" />}
+        thumbIconComponent={() => <MaterialCommunityIcons name="chevron-double-right" size={isNexusS ? 16 : 20} color="#6C5CE7" />}
         thumbIconStyles={{ borderRadius: isNexusS ? 8 : 10, transform: [{ translateX: isNexusS ? 3 : 5 }] }}
         onSwipeSuccess={handleSuccess}
         swipeSuccessThreshold={isNexusS ? 40 : 50} // Smaller threshold on Nexus S
         disabled={false}
       />
+      
+      {/* Animated highlight overlay */}
+      <Animated.View
+        style={[
+          styles.highlightOverlay,
+          {
+            opacity: highlightAnimation.interpolate({
+              inputRange: [0, 0.5, 1],
+              outputRange: [0, 0.8, 0],
+            }),
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.highlightBar,
+            {
+              transform: [
+                {
+                  translateX: highlightAnimation.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-60, containerWidth + 60],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      </Animated.View>
     </View>
   );
 };

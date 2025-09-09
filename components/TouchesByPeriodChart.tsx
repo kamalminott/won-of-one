@@ -101,6 +101,7 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       flex: 1,
       height: height * 0.22,
       marginBottom: height * 0.01,
+      overflow: 'hidden',
     },
     title: {
       fontSize: Math.round(width * 0.04),
@@ -121,22 +122,26 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
     legend: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginTop: height * 0.01,
-      gap: width * 0.04,
+      marginTop: -(height * 0.010),
+      gap: width * 0.02,
+      paddingHorizontal: width * 0.01,
+      flexWrap: 'wrap',
     },
     legendItem: {
       flexDirection: 'row',
       alignItems: 'center',
+      flexShrink: 1,
     },
     legendDot: {
-      width: width * 0.02,
-      height: width * 0.02,
-      borderRadius: width * 0.01,
-      marginRight: width * 0.015,
+      width: width * 0.018,
+      height: width * 0.018,
+      borderRadius: width * 0.009,
+      marginRight: width * 0.01,
     },
     legendText: {
       color: 'rgba(255, 255, 255, 0.7)',
-      fontSize: Math.round(width * 0.025),
+      fontSize: Math.round(width * 0.022),
+      flexShrink: 1,
     },
     tooltip: {
       position: 'absolute',
@@ -194,6 +199,19 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
     );
   }
 
+  // Calculate the maximum value for Y-axis scaling
+  const maxValue = Math.max(
+    data.period1.user,
+    data.period1.opponent,
+    data.period2.user,
+    data.period2.opponent,
+    data.period3.user,
+    data.period3.opponent
+  );
+  
+  // Set Y-axis maximum to the highest score, with a minimum of 1 for visibility
+  const yAxisMaxValue = Math.max(maxValue, 1);
+
   // Render tooltip
   const renderTooltip = () => {
     if (!tooltip.visible) return null;
@@ -230,6 +248,9 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
           yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.02), marginRight: Math.round(width * 0.015) }}
           xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.02) }}
           barBorderRadius={Math.round(width * 0.008)}
+          maxValue={yAxisMaxValue}
+          yAxisSuffix=""
+          noOfSections={Math.min(yAxisMaxValue, 5)}
           onPress={(data: any, index: number) => handleBarPress(data, index)}
         />
       </View>

@@ -150,7 +150,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
           <Text style={styles.saveButtonText}>Save Match</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.shareButton} onPress={onSeeFullSummary}>
-          <Text style={styles.shareButtonText}>See Full Summary</Text>
+          <Text style={styles.shareButtonText}>Add Match Notes</Text>
         </TouchableOpacity>
       </View>
       

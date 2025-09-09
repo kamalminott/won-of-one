@@ -1,8 +1,8 @@
 import {
-    AppUser, DiaryEntry, Drill, Equipment,
-    FencingRemote, Goal, Match,
-    MatchApproval, MatchEvent,
-    SimpleGoal, SimpleMatch
+  AppUser, DiaryEntry, Drill, Equipment,
+  FencingRemote, Goal, Match,
+  MatchApproval, MatchEvent,
+  SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -288,56 +288,112 @@ export const matchService = {
         console.log('No match periods found, using first event as match start');
         matchStartTime = new Date(matchEvents[0].timestamp);
       } else {
-        // Use the first event as match start to include pre-period scores
-        const firstEventTime = new Date(matchEvents[0].timestamp);
-        const firstPeriodTime = new Date(matchPeriods[0].start_time);
-        
-        // Use whichever is earlier (first event or first period start)
-        matchStartTime = firstEventTime < firstPeriodTime ? firstEventTime : firstPeriodTime;
-        console.log('📈 Using match start time:', matchStartTime.toISOString(), '(first event vs first period)');
+        // Use the match period start time as the official match start
+        // This is when the user clicked "Play" and the match timer started
+        matchStartTime = new Date(matchPeriods[0].start_time);
+        console.log('📈 Using match period start time as match start:', matchStartTime.toISOString());
       }
 
       console.log('📈 Match start time:', matchStartTime.toISOString());
       console.log('📈 Processing', matchEvents.length, 'events for score progression');
 
-      // 3. Calculate score progression for both user and opponent
+      // 3. Get final match scores to ensure accuracy
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('final_score, touches_against, is_complete, bout_length_s')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError) {
+        console.error('Error fetching match data:', matchError);
+      }
+
+      // 4. Calculate score progression for both user and opponent
       const userScoreProgression: {x: string, y: number}[] = [];
       const opponentScoreProgression: {x: string, y: number}[] = [];
       let userScore = 0;
       let opponentScore = 0;
 
-      for (const event of matchEvents) {
-        // Calculate elapsed time from match start
-        const eventTime = new Date(event.timestamp);
-        const elapsedMs = eventTime.getTime() - matchStartTime.getTime();
-        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+      // Get the authoritative final scores
+      const finalUserScore = matchData?.final_score || 0;
+      const finalOpponentScore = matchData?.touches_against || 0;
+      
+      console.log('📈 Using authoritative final scores:', finalUserScore, '-', finalOpponentScore);
+
+      // Calculate actual match duration from the match data
+      const actualMatchDuration = matchData?.bout_length_s || 0;
+      console.log('📈 Actual match duration from database:', actualMatchDuration, 'seconds');
+      
+      // Use actual event timestamps relative to match start (not proportional distribution)
+      console.log('📈 CHART TIME CALCULATION - Using actual timestamps:');
+      console.log('📈 Match start time (period):', matchStartTime.toISOString());
+      console.log('📈 Actual match duration:', actualMatchDuration, 'seconds');
+      
+      // Use stored match_time_elapsed for accurate X-axis labels
+      console.log('📈 CHART TIME CALCULATION - Using stored match_time_elapsed:');
+      console.log('📈 Match events with stored times:', matchEvents.map(e => ({ 
+        scorer: e.scoring_user_name, 
+        match_time_elapsed: e.match_time_elapsed 
+      })));
+      
+      for (let i = 0; i < matchEvents.length; i++) {
+        const event = matchEvents[i];
+        
+        // Use the stored match_time_elapsed for accurate timing
+        let displaySeconds = event.match_time_elapsed || 0;
+        
+        // Handle pre-match scores (negative or zero times)
+        if (displaySeconds < 0) {
+          displaySeconds = 0; // Show as 0:00 on the chart
+        }
+        
+        // Cap the time at the actual match duration to avoid showing events beyond match end
+        const matchDurationSeconds = actualMatchDuration || 180;
+        if (displaySeconds > matchDurationSeconds) {
+          displaySeconds = matchDurationSeconds;
+        }
         
         // Convert to MM:SS format
-        const minutes = Math.floor(elapsedSeconds / 60);
-        const seconds = elapsedSeconds % 60;
+        const minutes = Math.floor(displaySeconds / 60);
+        const seconds = displaySeconds % 60;
         const timeString = `(${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')})`;
 
-        console.log(`📈 Processing event: ${event.scoring_user_name} at ${timeString} (${event.timestamp})`);
+        console.log(`📈 Processing event ${i + 1}/${matchEvents.length}: ${event.scoring_user_name} at ${timeString} (stored match_time_elapsed: ${event.match_time_elapsed}s, display: ${displaySeconds}s)`);
 
         if (event.scoring_user_name === userName) {
-          userScore++;
-          userScoreProgression.push({
-            x: timeString,
-            y: userScore
-          });
-          console.log(`📈 User score progression: ${timeString} -> Score ${userScore}`);
+          // Only increment if we haven't reached the final user score
+          if (userScore < finalUserScore) {
+            userScore++;
+            userScoreProgression.push({
+              x: timeString,
+              y: userScore
+            });
+            console.log(`📈 User score progression: ${timeString} -> Score ${userScore}`);
+          } else {
+            console.log(`📈 User score reached final (${finalUserScore}), skipping event at ${timeString}`);
+          }
         } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
-          opponentScore++;
-          opponentScoreProgression.push({
-            x: timeString,
-            y: opponentScore
-          });
-          console.log(`📈 Opponent score progression: ${timeString} -> Score ${opponentScore}`);
+          // Only increment if we haven't reached the final opponent score
+          if (opponentScore < finalOpponentScore) {
+            opponentScore++;
+            opponentScoreProgression.push({
+              x: timeString,
+              y: opponentScore
+            });
+            console.log(`📈 Opponent score progression: ${timeString} -> Score ${opponentScore}`);
+          } else {
+            console.log(`📈 Opponent score reached final (${finalOpponentScore}), skipping event at ${timeString}`);
+          }
         }
       }
+      
 
       console.log('📈 User score progression calculated:', userScoreProgression);
       console.log('📈 Opponent score progression calculated:', opponentScoreProgression);
+      console.log('📈 Final calculated scores:', userScore, '-', opponentScore);
+      console.log('📈 CHART FINAL TIMES - User events:', userScoreProgression.map(p => p.x));
+      console.log('📈 CHART FINAL TIMES - Opponent events:', opponentScoreProgression.map(p => p.x));
+      
       return { userData: userScoreProgression, opponentData: opponentScoreProgression };
     } catch (error) {
       console.error('Error calculating score progression:', error);
@@ -346,7 +402,7 @@ export const matchService = {
   },
 
   // Calculate touches by period
-  async calculateTouchesByPeriod(matchId: string, userName: string, remoteId?: string): Promise<{
+  async calculateTouchesByPeriod(matchId: string, userName: string, remoteId?: string, finalUserScore?: number, finalOpponentScore?: number): Promise<{
     period1: { user: number; opponent: number };
     period2: { user: number; opponent: number };
     period3: { user: number; opponent: number };
@@ -397,7 +453,29 @@ export const matchService = {
         };
       }
 
-      // 2. Get match periods to determine period boundaries
+      // 2. Get final match scores to ensure accuracy
+      let authoritativeUserScore = finalUserScore;
+      let authoritativeOpponentScore = finalOpponentScore;
+      
+      // If final scores weren't passed, fetch them from the database
+      if (authoritativeUserScore === undefined || authoritativeOpponentScore === undefined) {
+        const { data: matchData, error: matchError } = await supabase
+          .from('match')
+          .select('final_score, touches_against, is_complete')
+          .eq('match_id', matchId)
+          .single();
+
+        if (matchError) {
+          console.error('Error fetching match data for touches by period:', matchError);
+        }
+
+        authoritativeUserScore = matchData?.final_score || 0;
+        authoritativeOpponentScore = matchData?.touches_against || 0;
+      }
+      
+      console.log('📊 Using authoritative final scores for touches by period:', authoritativeUserScore, '-', authoritativeOpponentScore);
+
+      // 3. Get match periods to determine period boundaries
       const { data: matchPeriods, error: periodsError } = await supabase
         .from('match_period')
         .select('*')
@@ -406,15 +484,19 @@ export const matchService = {
 
       if (periodsError || !matchPeriods || matchPeriods.length === 0) {
         console.log('No match periods found, assuming all events are in period 1');
-        // Count all events as period 1
+        // Count all events as period 1, but cap at final scores
         let userTouches = 0;
         let opponentTouches = 0;
         
         for (const event of matchEvents) {
-          if (event.scoring_user_name === userName) {
+          if (event.scoring_user_name === userName && userTouches < authoritativeUserScore) {
             userTouches++;
-          } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
+            console.log(`📊 User touch counted in period 1, total: ${userTouches}/${authoritativeUserScore}`);
+          } else if (event.scoring_user_name && event.scoring_user_name !== userName && opponentTouches < authoritativeOpponentScore) {
             opponentTouches++;
+            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}/${authoritativeOpponentScore}`);
+          } else {
+            console.log(`📊 Touch skipped - final scores reached (User: ${userTouches}/${authoritativeUserScore}, Opponent: ${opponentTouches}/${authoritativeOpponentScore})`);
           }
         }
         
@@ -425,12 +507,16 @@ export const matchService = {
         };
       }
 
-      // 3. Calculate touches for each period
+      // 4. Calculate touches for each period
       const touchesByPeriod = {
         period1: { user: 0, opponent: 0 },
         period2: { user: 0, opponent: 0 },
         period3: { user: 0, opponent: 0 }
       };
+
+      // Track total touches to cap at final scores
+      let totalUserTouches = 0;
+      let totalOpponentTouches = 0;
 
       for (const event of matchEvents) {
         // Determine which period this event belongs to
@@ -462,15 +548,21 @@ export const matchService = {
           }
         }
 
-        // Count the touch
-        if (event.scoring_user_name === userName) {
+        // Count the touch, but only if we haven't reached the final scores
+        if (event.scoring_user_name === userName && totalUserTouches < authoritativeUserScore) {
+          totalUserTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.user++;
           else if (eventPeriod === 2) touchesByPeriod.period2.user++;
           else if (eventPeriod === 3) touchesByPeriod.period3.user++;
-        } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
+          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}/${authoritativeUserScore}`);
+        } else if (event.scoring_user_name && event.scoring_user_name !== userName && totalOpponentTouches < authoritativeOpponentScore) {
+          totalOpponentTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.opponent++;
           else if (eventPeriod === 2) touchesByPeriod.period2.opponent++;
           else if (eventPeriod === 3) touchesByPeriod.period3.opponent++;
+          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}/${authoritativeOpponentScore}`);
+        } else {
+          console.log(`📊 Touch skipped - final scores reached (User: ${totalUserTouches}/${authoritativeUserScore}, Opponent: ${totalOpponentTouches}/${authoritativeOpponentScore})`);
         }
       }
 
@@ -499,6 +591,9 @@ export const matchService = {
     bout_length_s?: number;
     is_complete?: boolean;
     notes?: string;
+    period_number?: number;
+    score_spp?: number;
+    score_by_period?: any; // JSONB field for period-by-period scores
   }): Promise<Match | null> {
     const { data, error } = await supabase
       .from('match')
@@ -1185,6 +1280,7 @@ export const matchPeriodService = {
     priority_assigned?: string;
     priority_to?: string;
     notes?: string;
+    timestamp?: string; // Add timestamp to updates
   }) => {
     const { data, error } = await supabase
       .from('match_period')

@@ -1,10 +1,11 @@
 import { BackButton } from '@/components/BackButton';
+import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
@@ -276,47 +277,21 @@ export default function ProfileScreen() {
         
         <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
         
-        <View style={styles.infoItem}>
-          <View style={[styles.infoIcon, {
-            width: width * 0.14,
-            height: width * 0.14,
-            borderRadius: width * 0.07,
-            marginRight: width * 0.04
-          }]}>
-            <Ionicons name="notifications" size={width * 0.06} color="white" />
-          </View>
-          <View style={styles.infoContent}>
-            <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Notifications</Text>
-          </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ false: '#181818', true: '#6250F2' }}
-            thumbColor={notificationsEnabled ? '#FFFFFF' : '#3D3D3D'}
-          />
-        </View>
+        <ToggleSwitch
+          value={notificationsEnabled}
+          onValueChange={setNotificationsEnabled}
+          label="Notifications"
+          icon="notifications"
+        />
         
         <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
         
-        <View style={styles.infoItem}>
-          <View style={[styles.infoIcon, {
-            width: width * 0.14,
-            height: width * 0.14,
-            borderRadius: width * 0.07,
-            marginRight: width * 0.04
-          }]}>
-            <Ionicons name="moon" size={width * 0.06} color="white" />
-          </View>
-          <View style={styles.infoContent}>
-            <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Dark Mode</Text>
-          </View>
-          <Switch
-            value={darkModeEnabled}
-            onValueChange={setDarkModeEnabled}
-            trackColor={{ false: '#181818', true: '#6250F2' }}
-            thumbColor={darkModeEnabled ? '#FFFFFF' : '#3D3D3D'}
-          />
-        </View>
+        <ToggleSwitch
+          value={darkModeEnabled}
+          onValueChange={setDarkModeEnabled}
+          label="Dark Mode"
+          icon="moon"
+        />
       </View>
 
       {/* Log Out Button */}

@@ -37,6 +37,8 @@ export default function MatchSummaryScreen() {
         try {
           const matchData = await matchService.getMatchById(params.matchId as string);
           console.log('📊 Fetched match data for summary:', matchData);
+          console.log('⏱️ ACTUAL MATCH DURATION (bout_length_s):', matchData?.bout_length_s, 'seconds');
+          console.log('⏱️ MATCH DURATION FORMATTED:', matchData?.bout_length_s ? `${Math.floor(matchData.bout_length_s / 60)}:${(matchData.bout_length_s % 60).toString().padStart(2, '0')}` : 'N/A');
           setMatch(matchData);
           
           // Calculate best run and score progression if we have match data and user info

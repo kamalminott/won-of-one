@@ -1,5 +1,6 @@
 import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
@@ -45,7 +46,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     // Get initial session
     const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('🔍 Checking for existing session...');
+      
+      // Check AsyncStorage directly
+      try {
+        const storedSession = await AsyncStorage.getItem('sb-dxgvjghcpnseglukvqao-auth-token');
+        console.log('🔍 AsyncStorage session:', storedSession ? 'Found' : 'Not found');
+      } catch (error) {
+        console.log('🔍 AsyncStorage error:', error);
+      }
+      
+      const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('🔍 Session check result:', { session: !!session, error, userId: session?.user?.id });
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);

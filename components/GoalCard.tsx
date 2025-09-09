@@ -714,13 +714,15 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       </View>
       
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleSetNewGoalClick}>
-          <Text style={styles.secondaryButtonText}>Set New Goal</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.primaryButton} onPress={onUpdateGoal}>
-          <Text style={styles.primaryButtonText}>Update Goal</Text>
-        </TouchableOpacity>
+        {title === "No Active Goals" ? (
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleSetNewGoalClick}>
+            <Text style={styles.secondaryButtonText}>Set New Goal</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.primaryButton} onPress={onUpdateGoal}>
+            <Text style={styles.primaryButtonText}>Update Goal</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Set New Goal Modal */}
