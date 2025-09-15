@@ -5,14 +5,16 @@ import { MatchCarousel } from './MatchCarousel';
 interface RecentMatchesProps {
   matches: SimpleMatch[];
   onViewAll: () => void;
-  onAddNewMatch?: () => void;
   onSwipeRight?: () => void;
+  userName?: string;
+  userProfileImage?: string | null;
 }
 
 export const RecentMatches: React.FC<RecentMatchesProps> = ({
   matches,
   onViewAll,
-  onAddNewMatch,
+  userName,
+  userProfileImage,
 }) => {
   // Convert SimpleMatch to CarouselItem format
   const carouselItems = matches.map(match => ({
@@ -28,7 +30,8 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
     <MatchCarousel
       items={carouselItems}
       onViewAll={onViewAll}
-      onAddNewMatch={onAddNewMatch || (() => {})}
+      userName={userName}
+      userProfileImage={userProfileImage}
     />
   );
 };

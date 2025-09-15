@@ -2,17 +2,21 @@ import { BackButton } from '@/components/BackButton';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
+  const { userName, profileImage } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [bestRun, setBestRun] = useState<number>(0);
   const [scoreProgression, setScoreProgression] = useState<{
@@ -29,6 +33,30 @@ export default function MatchSummaryScreen() {
     period3: { user: 0, opponent: 0 }
   });
   const [loading, setLoading] = useState(true);
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+
+  // Load user profile data
+  useEffect(() => {
+    loadUserProfileData();
+  }, []);
+
+  const loadUserProfileData = async () => {
+    await loadUserProfileImage();
+  };
+
+  const loadUserProfileImage = async () => {
+    try {
+      const savedImage = await AsyncStorage.getItem('user_profile_image');
+      if (savedImage) {
+        setUserProfileImage(savedImage);
+      }
+    } catch (error) {
+      console.error('Error loading user profile image:', error);
+    }
+  };
+
 
   // Fetch match data from database
   useEffect(() => {
@@ -104,11 +132,32 @@ export default function MatchSummaryScreen() {
     console.log('Save match');
   };
 
+  const handleNotesPress = () => {
+    setShowNotesModal(true);
+  };
+
+  const handleNotesChange = (text: string) => {
+    setNotes(text);
+  };
+
+  const handleSaveNotes = () => {
+    setShowNotesModal(false);
+    // Notes are already saved in state via handleNotesChange
+    // TODO: Save notes to database
+    console.log('Saving notes:', notes);
+  };
+
+  const handleCancelNotes = () => {
+    setShowNotesModal(false);
+  };
+
   // Prepare match data for MatchSummaryStats
   const matchData = match ? {
     id: match.match_id,
     opponent: match.fencer_2_name || 'Opponent',
     opponentImage: 'https://example.com/opponent.jpg', // TODO: Add opponent image
+    userImage: userProfileImage || undefined, // Use loaded profile image
+    userName: userName || match.fencer_1_name || 'User',
     outcome: match.result === 'win' ? 'victory' as const : 'defeat' as const,
     score: `${match.final_score || 0}-${match.touches_against || 0}`,
     matchType: 'competition' as const, // TODO: Use actual match type
@@ -161,6 +210,97 @@ export default function MatchSummaryScreen() {
     scrollContent: {
       paddingBottom: height * 0.05,
     },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.95)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalContainer: {
+      width: '90%',
+      maxHeight: '80%',
+    },
+    modalContent: {
+      borderRadius: width * 0.04,
+      padding: width * 0.05,
+      borderWidth: 1,
+      borderColor: Colors.glassyGradient.borderColor,
+      overflow: 'hidden',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: height * 0.02,
+    },
+    modalTitle: {
+      fontSize: Math.round(width * 0.06),
+      fontWeight: '700',
+      color: 'white',
+    },
+    closeButton: {
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      backgroundColor: '#404040',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    inputContainer: {
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.2)',
+      minHeight: height * 0.15,
+      marginBottom: height * 0.02,
+    },
+    textInput: {
+      color: 'white',
+      fontSize: Math.round(width * 0.04),
+      padding: width * 0.03,
+      textAlignVertical: 'top',
+      minHeight: height * 0.15,
+    },
+    modalFooter: {
+      alignItems: 'center',
+    },
+    characterCount: {
+      color: 'rgba(255, 255, 255, 0.5)',
+      fontSize: Math.round(width * 0.03),
+      marginBottom: height * 0.015,
+    },
+    buttonContainer: {
+      flexDirection: 'row',
+      gap: width * 0.03,
+    },
+    cancelButton: {
+      flex: 1,
+      paddingHorizontal: width * 0.06,
+      paddingVertical: height * 0.015,
+      borderRadius: width * 0.02,
+      backgroundColor: '#404040',
+      borderWidth: 1,
+      borderColor: '#E0E0E0',
+      alignItems: 'center',
+    },
+    cancelButtonText: {
+      color: 'white',
+      fontSize: Math.round(width * 0.04),
+      fontWeight: '600',
+    },
+    saveButton: {
+      flex: 1,
+      paddingHorizontal: width * 0.06,
+      paddingVertical: height * 0.015,
+      borderRadius: width * 0.02,
+      backgroundColor: '#6C5CE7',
+      alignItems: 'center',
+    },
+    saveButtonText: {
+      color: 'white',
+      fontSize: Math.round(width * 0.04),
+      fontWeight: '600',
+    },
   });
 
   if (loading) {
@@ -193,14 +333,19 @@ export default function MatchSummaryScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <KeyboardAvoidingView 
         style={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        contentInsetAdjustmentBehavior="never"
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* Recent Match Card - Full Width */}
-        <MatchSummaryStats match={matchData} />
+        <ScrollView 
+          style={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          contentInsetAdjustmentBehavior="never"
+        >
+          {/* Recent Match Card - Full Width */}
+          <MatchSummaryStats match={matchData} />
 
         {/* Match Summary Card */}
         <MatchSummaryCard
@@ -216,8 +361,68 @@ export default function MatchSummaryScreen() {
           redCards={match?.red_cards || 0}
           matchDurationSeconds={match?.bout_length_s || 0}
           touchesByPeriod={touchesByPeriod}
+          notes={notes}
+          onNotesChange={handleNotesChange}
+          onNotesPress={handleNotesPress}
         />
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Notes Modal */}
+      <Modal
+        visible={showNotesModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCancelNotes}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalContainer}
+          >
+            <LinearGradient
+              colors={Colors.glassyGradient.colors}
+              style={styles.modalContent}
+              start={Colors.glassyGradient.start}
+              end={Colors.glassyGradient.end}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Match Notes</Text>
+                <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
+                  <Ionicons name="close" size={24} color="white" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.textInput}
+                  value={notes}
+                  onChangeText={handleNotesChange}
+                  placeholder="Add your thoughts about this match..."
+                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                  multiline
+                  maxLength={500}
+                  autoFocus
+                />
+              </View>
+              
+              <View style={styles.modalFooter}>
+                <Text style={styles.characterCount}>
+                  {notes.length}/500
+                </Text>
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity onPress={handleCancelNotes} style={styles.cancelButton}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
+                    <Text style={styles.saveButtonText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </LinearGradient>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

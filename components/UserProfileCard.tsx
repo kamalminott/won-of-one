@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 interface UserProfileCardProps {
   userName: string;
@@ -11,6 +11,8 @@ interface UserProfileCardProps {
   winRate: number;
   pointsScored: number;
   currentStreak: number;
+  profileImage?: string | null;
+  onImagePress?: () => void;
 }
 
 export const UserProfileCard: React.FC<UserProfileCardProps> = ({
@@ -22,6 +24,8 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
   winRate,
   pointsScored,
   currentStreak,
+  profileImage,
+  onImagePress,
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -129,9 +133,24 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
   return (
     <View style={styles.profileCard}>
       <View style={styles.profileHeader}>
-        <View style={styles.profileImage}>
-          <Ionicons name="person" size={width * 0.06} color="white" />
-        </View>
+        <TouchableOpacity 
+          style={styles.profileImage}
+          onPress={onImagePress}
+        >
+          {profileImage ? (
+            <Image
+              source={{ uri: profileImage }}
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: width * 0.065,
+              }}
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="person" size={width * 0.06} color="white" />
+          )}
+        </TouchableOpacity>
         <View style={styles.profileInfo}>
           <Text style={styles.userName}>{userName}</Text>
           <Text style={styles.userHandedness}>{handedness}</Text>

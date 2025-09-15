@@ -44,6 +44,46 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
   const displayStats = stats || defaultStats;
   const { width, height } = useWindowDimensions();
 
+  // Custom overlapping cards icon component
+  const OverlappingCardsIcon = () => {
+    const cardSize = Math.round(width * 0.035);
+    const cardWidth = cardSize * 1.2;
+    const cardHeight = cardSize * 1.4;
+    
+    return (
+      <View style={[styles.cardsContainer, { width: cardWidth + 8, height: cardHeight + 8 }]}>
+        {/* Back card */}
+        <View style={[
+          styles.card,
+          {
+            width: cardWidth,
+            height: cardHeight,
+            backgroundColor: '#FFD700', // Gold color
+            transform: [{ rotate: '-15deg' }],
+            zIndex: 1,
+            position: 'absolute',
+            top: 0,
+            left: 0,
+          }
+        ]} />
+        {/* Front card */}
+        <View style={[
+          styles.card,
+          {
+            width: cardWidth,
+            height: cardHeight,
+            backgroundColor: '#FF6B6B', // Red color
+            transform: [{ rotate: '5deg' }],
+            zIndex: 2,
+            position: 'absolute',
+            top: 3,
+            left: 6,
+          }
+        ]} />
+      </View>
+    );
+  };
+
   const styles = StyleSheet.create({
     container: {
       borderRadius: width * 0.02,
@@ -54,30 +94,48 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
       marginBottom: height * 0.01,
       borderWidth: 1,
       borderColor: Colors.glassyGradient.borderColor,
+      overflow: 'hidden',
       ...customStyle,
     },
     statRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: height * 0.015,
+      marginBottom: height * 0.012,
+      flex: 1,
+      minHeight: 0,
     },
     statIcon: {
-      marginRight: width * 0.03,
+      marginRight: width * 0.025,
+      flexShrink: 0,
     },
     statContent: {
       flex: 1,
       alignItems: 'flex-start',
+      minWidth: 0,
     },
     statNumber: {
       color: 'white',
-      fontSize: Math.round(width * 0.05),
+      fontSize: Math.round(width * 0.045),
       fontWeight: '700',
-      marginBottom: height * 0.003,
+      marginBottom: height * 0.002,
+      flexShrink: 1,
     },
     statText: {
       color: 'white',
-      fontSize: Math.round(width * 0.035),
+      fontSize: Math.round(width * 0.03),
       fontWeight: '300',
+      flexShrink: 1,
+    },
+    cardsContainer: {
+      position: 'relative',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    card: {
+      borderRadius: 3,
+      position: 'absolute',
+      top: 0,
+      left: 0,
     },
   });
 
@@ -116,15 +174,21 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
         
         return (
           <View key={index} style={styles.statRow}>
-            <Ionicons 
-              name={stat.icon} 
-              size={Math.round(width * 0.06)} 
-              color="white" 
-              style={styles.statIcon}
-            />
+            {stat.icon === 'card' ? (
+              <View style={styles.statIcon}>
+                <OverlappingCardsIcon />
+              </View>
+            ) : (
+              <Ionicons 
+                name={stat.icon} 
+                size={Math.round(width * 0.05)} 
+                color="white" 
+                style={styles.statIcon}
+              />
+            )}
             <View style={styles.statContent}>
-              <Text style={styles.statNumber}>{numberText}</Text>
-              <Text style={styles.statText}>{labelText}</Text>
+              <Text style={styles.statNumber} numberOfLines={1} ellipsizeMode="tail">{numberText}</Text>
+              <Text style={styles.statText} numberOfLines={1} ellipsizeMode="tail">{labelText}</Text>
             </View>
           </View>
         );

@@ -19,7 +19,7 @@ export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, userName } = useAuth();
   
   // Responsive breakpoints for small screens
   const isSmallScreen = width < 400;
@@ -55,8 +55,8 @@ export default function RemoteScreen() {
   const [selectedFencer, setSelectedFencer] = useState<'alice' | 'bob' | null>(null);
   const [isCompletingMatch, setIsCompletingMatch] = useState(false);
 
-  // Get user display name
-  const userDisplayName = user?.email?.split('@')[0] || 'You';
+  // Get user display name from context
+  const userDisplayName = userName || 'You';
   
   // Debug logging removed
   
@@ -2299,8 +2299,6 @@ export default function RemoteScreen() {
       height: '100%',
       borderRadius: isNexusS ? width * 0.07 : width * 0.08,
       backgroundColor: 'transparent',
-      borderWidth: 2,
-      borderColor: 'red', // Temporary border to see if image is rendering
     },
     cameraIcon: {
       position: 'absolute',
@@ -3856,12 +3854,18 @@ export default function RemoteScreen() {
         ]}>
         
         {/* Play and Reset Row */}
-        <View style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          width: '100%'
-        }}>
+        <View style={[
+          {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%'
+          },
+          // Move buttons down when match hasn't started (no swipe to complete button)
+          !hasMatchStarted && {
+            marginTop: height * 0.03, // Add extra margin to move buttons down
+          }
+        ]}>
           {/* Play Button / Skip Button */}
           <TouchableOpacity 
             style={{
@@ -3956,18 +3960,20 @@ export default function RemoteScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Complete Match Slider */}
-        <SwipeToCompleteButton
-          title="Swipe To Complete The Match"
-          customStyle={{
-            position: 'relative',
-            width: '100%',
-            alignSelf: 'stretch', // Makes it stretch to fill the container width
-            flex: 1, // Takes up available space
-            minWidth: '100%' // Ensures minimum width matches container
-          }}
-          onSwipeSuccess={completeMatch}
-        />
+        {/* Complete Match Slider - Only show when match has started */}
+        {hasMatchStarted && (
+          <SwipeToCompleteButton
+            title="Swipe To Complete The Match"
+            customStyle={{
+              position: 'relative',
+              width: '100%',
+              alignSelf: 'stretch', // Makes it stretch to fill the container width
+              flex: 1, // Takes up available space
+              minWidth: '100%' // Ensures minimum width matches container
+            }}
+            onSwipeSuccess={completeMatch}
+          />
+        )}
       </View>
 
       {/* Edit Time Popup */}

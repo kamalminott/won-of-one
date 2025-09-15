@@ -1,10 +1,12 @@
 import { BackButton } from '@/components/BackButton';
 import { UserProfileCard } from '@/components/UserProfileCard';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
@@ -18,6 +20,9 @@ export default function ProfileScreen() {
   
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(true);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>('');
+  const [isEditingName, setIsEditingName] = useState(false);
 
   const handleBack = () => {
     router.back();
@@ -27,6 +32,149 @@ export default function ProfileScreen() {
     // TODO: Implement logout logic
     console.log('Logging out...');
     router.push('/login');
+  };
+
+  // Load profile data on component mount
+  useEffect(() => {
+    loadProfileData();
+  }, []);
+
+  const loadProfileData = async () => {
+    await Promise.all([
+      loadProfileImage(),
+      loadUserName()
+    ]);
+  };
+
+  const loadProfileImage = async () => {
+    try {
+      const savedImage = await AsyncStorage.getItem('user_profile_image');
+      if (savedImage) {
+        setProfileImage(savedImage);
+      }
+    } catch (error) {
+      console.error('Error loading profile image:', error);
+    }
+  };
+
+  const handleImagePicker = () => {
+    Alert.alert(
+      'Select Profile Picture',
+      'Choose how you want to set your profile picture',
+      [
+        {
+          text: 'Camera',
+          onPress: () => pickImage('camera'),
+        },
+        {
+          text: 'Photo Library',
+          onPress: () => pickImage('library'),
+        },
+        {
+          text: 'Remove Picture',
+          onPress: () => removeProfileImage(),
+          style: 'destructive',
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
+
+  const pickImage = async (source: 'camera' | 'library') => {
+    try {
+      let result;
+      
+      if (source === 'camera') {
+        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission Required', 'Photo library permission is required to select images.');
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        setProfileImage(imageUri);
+        await AsyncStorage.setItem('user_profile_image', imageUri);
+        console.log('✅ Profile image saved to AsyncStorage');
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  const removeProfileImage = async () => {
+    try {
+      setProfileImage(null);
+      await AsyncStorage.removeItem('user_profile_image');
+      console.log('✅ Profile image removed from AsyncStorage');
+    } catch (error) {
+      console.error('Error removing profile image:', error);
+    }
+  };
+
+  const loadUserName = async () => {
+    try {
+      const savedName = await AsyncStorage.getItem('user_name');
+      if (savedName) {
+        setUserName(savedName);
+      } else {
+        // Default to a generic name if no saved name
+        setUserName('Jane Smith');
+      }
+    } catch (error) {
+      console.error('Error loading user name:', error);
+      setUserName('Jane Smith');
+    }
+  };
+
+  const saveUserName = async (newName: string) => {
+    try {
+      setUserName(newName);
+      await AsyncStorage.setItem('user_name', newName);
+      console.log('✅ User name saved to AsyncStorage');
+    } catch (error) {
+      console.error('Error saving user name:', error);
+    }
+  };
+
+  const handleNameEdit = () => {
+    setIsEditingName(true);
+  };
+
+  const handleNameSave = () => {
+    if (userName.trim()) {
+      saveUserName(userName.trim());
+      setIsEditingName(false);
+    }
+  };
+
+  const handleNameCancel = () => {
+    // Reset to saved name
+    loadUserName();
+    setIsEditingName(false);
   };
 
   return (
@@ -50,7 +198,7 @@ export default function ProfileScreen() {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* User Profile Card */}
         <UserProfileCard
-          userName="Jane Smith"
+          userName={userName}
           handedness="Right-handed"
           weapon="Sword"
           matchesPlayed={24}
@@ -58,6 +206,8 @@ export default function ProfileScreen() {
           winRate={60}
           pointsScored={186}
           currentStreak={6}
+          profileImage={profileImage}
+          onImagePress={handleImagePicker}
         />
 
         
@@ -202,13 +352,32 @@ export default function ProfileScreen() {
         
         <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
         
-        <View style={styles.infoItem}>
+        <TouchableOpacity style={styles.infoItem} onPress={handleNameEdit}>
           <View style={[styles.infoIcon, {
             width: width * 0.14,
             height: width * 0.14,
             borderRadius: width * 0.07
           }]}>
             <Ionicons name="person" size={width * 0.06} color="white" />
+          </View>
+          <View style={styles.infoContent}>
+            <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Name</Text>
+            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>
+              {userName}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#9D9D9D" />
+        </TouchableOpacity>
+        
+        <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
+        
+        <View style={styles.infoItem}>
+          <View style={[styles.infoIcon, {
+            width: width * 0.14,
+            height: width * 0.14,
+            borderRadius: width * 0.07
+          }]}>
+            <Ionicons name="key" size={width * 0.06} color="white" />
           </View>
           <View style={styles.infoContent}>
             <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>User ID</Text>

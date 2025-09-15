@@ -1,19 +1,18 @@
 import { Colors } from '@/constants/Colors';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    PanResponder,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View
+  Animated,
+  Dimensions,
+  Image,
+  PanResponder,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
 } from 'react-native';
-import { LossPill } from './LossPill';
-import { WinPill } from './WinPill';
 
 interface CarouselItem {
   id: string;
@@ -29,8 +28,6 @@ interface MatchCarouselProps {
   items: CarouselItem[];
   /** Callback when "View All" button is pressed */
   onViewAll: () => void;
-  /** Callback when "Add New Match" button is pressed */
-  onAddNewMatch: () => void;
   /** Custom callback when an item is pressed (overrides default navigation) */
   onItemPress?: (item: CarouselItem) => void;
   /** Maximum number of items to display (default: 3) */
@@ -47,12 +44,15 @@ interface MatchCarouselProps {
   emptyStateIcon?: keyof typeof Ionicons.glyphMap;
   /** Custom renderer for individual items */
   customItemRenderer?: (item: CarouselItem, index: number) => React.ReactNode;
+  /** User's display name */
+  userName?: string;
+  /** User's profile image */
+  userProfileImage?: string | null;
 }
 
 export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   items,
   onViewAll,
-  onAddNewMatch,
   onItemPress,
   maxItems = 3,
   showDots = true,
@@ -61,6 +61,8 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   emptyStateDescription = "Start your fencing journey by adding your first match!",
   emptyStateIcon = "trophy-outline",
   customItemRenderer,
+  userName,
+  userProfileImage,
 }) => {
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -155,7 +157,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     } else {
       // Default behavior for matches
       router.push({
-        pathname: '/match-summary',
+        pathname: '/match-history-details',
         params: { matchId: item.id }
       });
     }
@@ -163,11 +165,10 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      day: 'numeric',
-      month: 'short', 
-      year: 'numeric'
-    });
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const styles = StyleSheet.create({
@@ -196,20 +197,23 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     },
     matchCard: {
       width: '100%',
+      height: height * 0.12,
       backgroundColor: '#2A2A2A',
-      borderRadius: width * 0.03,
-      padding: width * 0.025,
+      borderRadius: width * 0.05,
+      padding: 0,
+      position: 'relative',
+      alignSelf: 'center',
+      shadowColor: 'rgba(108, 92, 231, 0.04)',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 1,
+      shadowRadius: 30,
+      elevation: 8,
     },
     matchHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
       marginBottom: height * 0.01,
-    },
-    matchDate: {
-      color: 'rgba(255, 255, 255, 0.7)',
-      fontSize: width * 0.04,
-      fontWeight: '600',
     },
     matchResult: {
       flexDirection: 'row',
@@ -225,16 +229,43 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       alignItems: 'center',
       marginBottom: height * 0.01,
     },
-    scoreContainer: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      flex: 1,
-    },
     playerInfo: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: width * 0.06,
       justifyContent: 'center',
+    },
+    playerInfoLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.06,
+      justifyContent: 'center',
+      marginRight: width * 0.05,
+    },
+    playerInfoRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.06,
+      justifyContent: 'center',
+      marginLeft: width * 0.05,
+    },
+    profileSection: {
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: height * 0.005,
+      marginTop: height * 0.0,
+    },
+    profileContainerLeft: {
+      position: 'absolute',
+      left: '8%',
+      top: height * 0.02,
+      alignItems: 'center',
+    },
+    profileContainerRight: {
+      position: 'absolute',
+      right: '8%',
+      top: height * 0.02,
+      alignItems: 'center',
     },
     profileCircle: {
       width: width * 0.1,
@@ -244,7 +275,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.2)',
+      borderColor: '#FFFFFF',
     },
     profileInitial: {
       color: 'white',
@@ -255,26 +286,106 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
       paddingTop: height * 0.025,
+      position: 'relative',
     },
-    score: {
-      color: 'white',
-      fontSize: width * 0.05,
-      fontWeight: '700',
-    },
-    playerName: {
-      color: 'rgba(255, 255, 255, 0.7)',
-      fontSize: width * 0.03,
-      marginTop: height * 0.005,
-    },
-    centerSection: {
+    scoreInfoLeft: {
+      position: 'absolute',
+      left: '40%',
+      top: height * 0.025,
+      width: width * 0.09,
+      height: height * 0.035,
       alignItems: 'center',
       justifyContent: 'center',
-      flex: 0.6,
+    },
+    scoreInfoRight: {
+      position: 'absolute',
+      right: '40%',
+      top: height * 0.025,
+      width: width * 0.09,
+      height: height * 0.035,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    score: {
+      color: '#FFFFFF',
+      fontSize: width * 0.05,
+      fontWeight: '600',
+      lineHeight: height * 0.035,
+      textAlign: 'center',
+      zIndex: 3,
+    },
+    scoreDot: {
+      position: 'absolute',
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      zIndex: 1,
+      top: '50%',
+      left: '50%',
+      transform: [{ translateX: -width * 0.04 }, { translateY: -width * 0.04 }],
+    },
+    scoreDotLeft: {
+      width: width * 0.02,
+      height: width * 0.02,
+      borderRadius: width * 0.01,
+      backgroundColor: '#00B894',
+    },
+    scoreDotRight: {
+      width: width * 0.02,
+      height: width * 0.02,
+      borderRadius: width * 0.01,
+      backgroundColor: '#FF7675',
+    },
+    playerName: {
+      color: '#FFFFFF',
+      fontSize: width * 0.035,
+      fontWeight: '500',
+      textAlign: 'center',
+      marginTop: height * 0.01,
+      maxWidth: width * 0.15,
+      lineHeight: width * 0.04,
+    },
+    matchDate: {
+      color: '#9D9D9D',
+      fontSize: width * 0.03,
+      fontWeight: '500',
+      lineHeight: height * 0.02,
+      textAlign: 'center',
+      position: 'absolute',
+      left: '50%',
+      top: height * 0.06,
+      width: width * 0.25,
+      transform: [{ translateX: -width * 0.125 }],
+    },
+    scoreGroup: {
+      position: 'absolute',
+      left: '50%',
+      top: height * 0.025,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: width * 0.02,
+      transform: [{ translateX: -width * 0.1 }],
+    },
+    scoreContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: width * 0.01,
+    },
+    dash: {
+      color: '#FFFFFF',
+      fontSize: width * 0.05,
+      fontWeight: '600',
+      lineHeight: height * 0.035,
+      textAlign: 'center',
     },
     vsText: {
-      color: 'rgba(255, 255, 255, 0.5)',
-      fontSize: width * 0.035,
+      color: '#FFFFFF',
+      fontSize: width * 0.05,
       fontWeight: '600',
+      lineHeight: height * 0.035,
+      textAlign: 'center',
     },
     dotsContainer: {
       flexDirection: 'row',
@@ -379,11 +490,6 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
           <Text style={styles.emptyDescription}>
             {emptyStateDescription}
           </Text>
-          {showAddButton && (
-            <TouchableOpacity style={styles.emptyAddButton} onPress={onAddNewMatch}>
-              <Text style={styles.emptyAddText}>Add Your First Match</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     );
@@ -416,48 +522,59 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
               style={styles.matchCard}
               onPress={() => handleItemPress(displayItems[currentIndex])}
             >
-              <View style={styles.matchHeader}>
-                <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
-                <View style={styles.rightPill}>
-                  {displayItems[currentIndex]?.isWin ? (
-                    <WinPill />
+              {/* Left Profile Container */}
+              <View style={styles.profileContainerLeft}>
+                <View style={styles.profileCircle}>
+                  {userProfileImage ? (
+                    <Image
+                      source={{ uri: userProfileImage }}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: width * 0.05,
+                      }}
+                      resizeMode="cover"
+                    />
                   ) : (
-                    <LossPill />
+                    <Text style={styles.profileInitial}>
+                      {userName?.charAt(0)?.toUpperCase() || 'Y'}
+                    </Text>
                   )}
+                </View>
+                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                  {userName || 'You'}
+                </Text>
+              </View>
+              
+              {/* Right Profile Container */}
+              <View style={styles.profileContainerRight}>
+                <View style={styles.profileCircle}>
+                  <Text style={styles.profileInitial}>
+                    {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
+                  </Text>
+                </View>
+                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                  {displayItems[currentIndex]?.opponentName}
+                </Text>
+              </View>
+              
+              {/* Score Group with Equal Spacing */}
+              <View style={styles.scoreGroup}>
+                <View style={styles.scoreContainer}>
+                  <View style={styles.scoreDotLeft} />
+                  <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                </View>
+                
+                <Text style={styles.dash}>-</Text>
+                
+                <View style={styles.scoreContainer}>
+                  <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
+                  <View style={styles.scoreDotRight} />
                 </View>
               </View>
               
-              <View style={styles.matchScores}>
-                <View style={styles.scoreContainer}>
-                  <View style={styles.playerInfo}>
-                    <View style={styles.profileCircle}>
-                      <Text style={styles.profileInitial}>Y</Text>
-                    </View>
-                    <View style={styles.scoreInfo}>
-                      <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
-                      <Text style={styles.playerName}>You</Text>
-                    </View>
-                  </View>
-                </View>
-                
-                <View style={styles.centerSection}>
-                  <Text style={styles.vsText}>VS</Text>
-                </View>
-                
-                <View style={styles.scoreContainer}>
-                  <View style={styles.playerInfo}>
-                    <View style={styles.scoreInfo}>
-                      <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
-                      <Text style={styles.playerName}>{displayItems[currentIndex]?.opponentName}</Text>
-                    </View>
-                    <View style={styles.profileCircle}>
-                      <Text style={styles.profileInitial}>
-                        {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
+              {/* Date */}
+              <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
             </TouchableOpacity>
           )}
         </Animated.View>
@@ -478,13 +595,6 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
         </View>
       )}
 
-      {/* Add New Match Button */}
-      {showAddButton && (
-        <TouchableOpacity style={styles.addMatchButton} onPress={onAddNewMatch}>
-          <Feather name="plus-square" color="#FFFFFF" size={width * 0.05} />
-          <Text style={styles.addMatchText}>Add New Match</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 };

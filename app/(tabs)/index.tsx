@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AddNewMatchButton } from '@/components/AddNewMatchButton';
 import { GoalCard } from '@/components/GoalCard';
 import { ProgressCard } from '@/components/ProgressCard';
 import { RecentMatches } from '@/components/RecentMatches';
@@ -16,7 +17,7 @@ import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, userName, profileImage } = useAuth();
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
@@ -24,6 +25,7 @@ export default function HomeScreen() {
   const [dataLoading, setDataLoading] = useState(true);
   const [winRate, setWinRate] = useState<number>(0);
   const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
+  const [weeklySessions, setWeeklySessions] = useState<{ current: number; total: number; daysRemaining: number }>({ current: 0, total: 5, daysRemaining: 0 });
 
   // Fetch data when user is available
   useEffect(() => {
@@ -86,10 +88,15 @@ export default function HomeScreen() {
       console.log('Total training time (seconds):', totalSeconds);
       console.log('Formatted training time:', formattedTrainingTime);
       
+      // Calculate weekly sessions
+      const calculatedWeeklySessions = calculateWeeklySessions(matchesData);
+      console.log('Weekly sessions:', calculatedWeeklySessions);
+      
       setMatches(matchesData);
       setGoals(goalsData);
       setWinRate(calculatedWinRate);
       setTrainingTime(formattedTrainingTime);
+      setWeeklySessions(calculatedWeeklySessions);
     } catch (error) {
       console.error('Error fetching user data:', error);
       Alert.alert('Error', 'Failed to load data');
@@ -112,7 +119,7 @@ export default function HomeScreen() {
   };
 
   const handleViewAllMatches = () => {
-    router.push('/recent-matches');
+    router.push('/match-history');
   };
 
   const calculateDaysLeft = (deadline: string): number => {
@@ -129,6 +136,40 @@ export default function HomeScreen() {
     const wins = matches.filter(match => match.isWin).length;
     const winPercentage = (wins / matches.length) * 100;
     return Math.round(winPercentage); // Round to nearest whole number
+  };
+
+  const calculateWeeklySessions = (matches: SimpleMatch[]): { current: number; total: number; daysRemaining: number } => {
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday = 0
+    startOfWeek.setHours(0, 0, 0, 0);
+    
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+    
+    // Filter matches for current week
+    const weeklyMatches = matches.filter(match => {
+      const matchDate = new Date(match.date);
+      return matchDate >= startOfWeek && matchDate <= endOfWeek;
+    });
+    
+    // Get unique days (sessions) from matches
+    const uniqueDays = new Set(
+      weeklyMatches.map(match => {
+        const matchDate = new Date(match.date);
+        return matchDate.toDateString(); // "Mon Jan 15 2024"
+      })
+    );
+    
+    const current = uniqueDays.size; // Number of unique days with fencing
+    const total = 5; // Target sessions (days) per week
+    const daysRemaining = Math.max(0, 6 - now.getDay()); // Days left in week (Sunday=0, Saturday=6)
+    
+    console.log('Current day of week:', now.getDay(), 'Days remaining:', daysRemaining);
+    console.log('Current sessions:', current, 'Target sessions:', total);
+    
+    return { current, total, daysRemaining };
   };
 
   const formatTrainingTime = (totalSeconds: number): { value: string; label: string } => {
@@ -159,7 +200,7 @@ export default function HomeScreen() {
   };
 
   const handleSwipeRight = () => {
-    router.push('/recent-matches');
+    router.push('/match-history');
   };
 
   const handleLogout = async () => {
@@ -197,6 +238,10 @@ export default function HomeScreen() {
       paddingTop: 0,
       paddingBottom: height * 0.25, // Increased padding to ensure RecentMatches dots stay above tab bar
       width: '100%',
+    },
+    addButtonContainer: {
+      alignItems: 'flex-end',
+      marginBottom: height * 0.005,
     },
     recentMatchesWrapper: {
       width: '100%',
@@ -255,8 +300,9 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
           <View style={styles.stickyHeader}>
             <UserHeader
-              userName={user?.email?.split('@')[0] || 'Guest'}
+              userName={userName}
               streak={7}
+              avatarUrl={profileImage || undefined}
               onSettingsPress={handleSettings}
             />
             <TouchableOpacity 
@@ -348,17 +394,22 @@ export default function HomeScreen() {
             
             <ProgressCard
               title="Sessions this Week"
-              current={3}
-              total={5}
-              daysRemaining={3}
+              current={weeklySessions.current}
+              total={weeklySessions.total}
+              daysRemaining={weeklySessions.daysRemaining}
             />
+            
+            <View style={styles.addButtonContainer}>
+              <AddNewMatchButton onPress={handleAddNewMatch} />
+            </View>
             
             <View style={styles.recentMatchesWrapper}>
               <RecentMatches
                 matches={matches}
                 onViewAll={handleViewAllMatches}
-                onAddNewMatch={handleAddNewMatch}
                 onSwipeRight={handleSwipeRight}
+                userName={userName}
+                userProfileImage={profileImage}
               />
             </View>
           </View>

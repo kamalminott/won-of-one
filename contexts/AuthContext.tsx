@@ -9,6 +9,12 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  userName: string;
+  setUserName: (name: string) => Promise<void>;
+  loadUserName: () => Promise<void>;
+  profileImage: string | null;
+  setProfileImage: (imageUri: string | null) => Promise<void>;
+  loadProfileImage: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -19,6 +25,12 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   loading: true,
+  userName: '',
+  setUserName: async () => {},
+  loadUserName: async () => {},
+  profileImage: null,
+  setProfileImage: async () => {},
+  loadProfileImage: async () => {},
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
   signOut: async () => {},
@@ -42,6 +54,68 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userName, setUserNameState] = useState<string>('');
+  const [profileImage, setProfileImageState] = useState<string | null>(null);
+
+  // Load user name from AsyncStorage
+  const loadUserName = async () => {
+    try {
+      const savedName = await AsyncStorage.getItem('user_name');
+      if (savedName) {
+        setUserNameState(savedName);
+      } else if (user?.email) {
+        // Default to email username if no saved name
+        setUserNameState(user.email.split('@')[0]);
+      } else {
+        setUserNameState('Guest User');
+      }
+    } catch (error) {
+      console.error('Error loading user name:', error);
+      setUserNameState(user?.email?.split('@')[0] || 'Guest User');
+    }
+  };
+
+  // Save user name to AsyncStorage
+  const setUserName = async (name: string) => {
+    try {
+      setUserNameState(name);
+      await AsyncStorage.setItem('user_name', name);
+      console.log('✅ User name saved to AsyncStorage');
+    } catch (error) {
+      console.error('Error saving user name:', error);
+    }
+  };
+
+  // Load profile image from AsyncStorage
+  const loadProfileImage = async () => {
+    try {
+      const savedImage = await AsyncStorage.getItem('user_profile_image');
+      if (savedImage) {
+        setProfileImageState(savedImage);
+      } else {
+        setProfileImageState(null);
+      }
+    } catch (error) {
+      console.error('Error loading profile image:', error);
+      setProfileImageState(null);
+    }
+  };
+
+  // Save profile image to AsyncStorage
+  const setProfileImage = async (imageUri: string | null) => {
+    try {
+      setProfileImageState(imageUri);
+      if (imageUri) {
+        await AsyncStorage.setItem('user_profile_image', imageUri);
+        console.log('✅ Profile image saved to AsyncStorage');
+      } else {
+        await AsyncStorage.removeItem('user_profile_image');
+        console.log('✅ Profile image removed from AsyncStorage');
+      }
+    } catch (error) {
+      console.error('Error saving profile image:', error);
+    }
+  };
 
   useEffect(() => {
     // Get initial session
@@ -76,6 +150,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load user name and profile image when user changes
+  useEffect(() => {
+    if (user) {
+      loadUserName();
+      loadProfileImage();
+    } else {
+      setUserNameState('Guest User');
+      setProfileImageState(null);
+    }
+  }, [user]);
 
   // Sign in function
   const signIn = async (email: string, password: string) => {
@@ -122,6 +207,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     session,
     loading,
+    userName,
+    setUserName,
+    loadUserName,
+    profileImage,
+    setProfileImage,
+    loadProfileImage,
     signIn,
     signUp,
     signOut,

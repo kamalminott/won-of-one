@@ -1,12 +1,12 @@
 import { Colors } from '@/constants/Colors';
 import { router } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
 interface UserHeaderProps {
   userName: string;
   streak: number;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
   onSettingsPress: () => void;
 }
 
@@ -98,7 +98,15 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
       <TouchableOpacity style={styles.userInfo} onPress={handleProfilePress} activeOpacity={0.7}>
         <View style={styles.avatar}>
           {avatarUrl ? (
-            <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
+            <Image
+              source={{ uri: avatarUrl }}
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: width * 0.04,
+              }}
+              resizeMode="cover"
+            />
           ) : (
             <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
           )}

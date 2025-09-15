@@ -2,16 +2,17 @@ import { BackButton } from '@/components/BackButton';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, userName, setUserName, loadUserName, profileImage, setProfileImage } = useAuth();
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
@@ -20,6 +21,8 @@ export default function ProfileScreen() {
   
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(true);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingName, setEditingName] = useState<string>('');
 
   const handleBack = () => {
     router.back();
@@ -29,6 +32,99 @@ export default function ProfileScreen() {
     // TODO: Implement logout logic
     console.log('Logging out...');
     router.push('/login');
+  };
+
+  // No need to load profile data since it's handled by context
+
+  const handleImagePicker = () => {
+    Alert.alert(
+      'Select Profile Picture',
+      'Choose how you want to set your profile picture',
+      [
+        {
+          text: 'Camera',
+          onPress: () => pickImage('camera'),
+        },
+        {
+          text: 'Photo Library',
+          onPress: () => pickImage('library'),
+        },
+        {
+          text: 'Remove Picture',
+          onPress: () => removeProfileImage(),
+          style: 'destructive',
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
+
+  const pickImage = async (source: 'camera' | 'library') => {
+    try {
+      let result;
+      
+      if (source === 'camera') {
+        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert('Permission Required', 'Photo library permission is required to select images.');
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        await setProfileImage(imageUri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  const removeProfileImage = async () => {
+    try {
+      await setProfileImage(null);
+    } catch (error) {
+      console.error('Error removing profile image:', error);
+    }
+  };
+
+  const handleNameEdit = () => {
+    setEditingName(userName);
+    setIsEditingName(true);
+  };
+
+  const handleNameSave = async () => {
+    if (editingName.trim()) {
+      await setUserName(editingName.trim());
+      setIsEditingName(false);
+    }
+  };
+
+  const handleNameCancel = () => {
+    setEditingName(userName);
+    setIsEditingName(false);
   };
 
   return (
@@ -62,17 +158,44 @@ export default function ProfileScreen() {
           borderRadius: width * 0.05
         }]}>
         <View style={styles.profileHeader}>
-          <View style={[styles.profileImage, {
-            width: width * 0.13,
-            height: width * 0.13,
-            borderRadius: width * 0.065
-          }]}>
-            <Ionicons name="person" size={width * 0.06} color="white" />
-          </View>
+          <TouchableOpacity 
+            style={[styles.profileImage, {
+              width: width * 0.13,
+              height: width * 0.13,
+              borderRadius: width * 0.065
+            }]}
+            onPress={handleImagePicker}
+          >
+            {profileImage ? (
+              <Image
+                source={{ uri: profileImage }}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: width * 0.065,
+                }}
+                resizeMode="cover"
+              />
+            ) : (
+              <Ionicons name="person" size={width * 0.06} color="white" />
+            )}
+          </TouchableOpacity>
                   <View style={[styles.profileInfo, { marginLeft: width * 0.04 }]}>
-          <Text style={[styles.userName, { fontSize: width * 0.04 }]}>
-            {user?.email?.split('@')[0] || 'Guest User'}
-          </Text>
+          {isEditingName ? (
+            <TextInput
+              style={[styles.userNameInput, { fontSize: width * 0.04 }]}
+              value={editingName}
+              onChangeText={setEditingName}
+              onBlur={handleNameSave}
+              onSubmitEditing={handleNameSave}
+              autoFocus
+              maxLength={30}
+            />
+          ) : (
+            <Text style={[styles.userName, { fontSize: width * 0.04 }]}>
+              {userName}
+            </Text>
+          )}
           <Text style={[styles.userHandedness, { fontSize: width * 0.035 }]}>Right-handed</Text>
         </View>
           <View style={[styles.weaponTag, {
@@ -233,7 +356,7 @@ export default function ProfileScreen() {
         
         <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
         
-        <View style={styles.infoItem}>
+        <TouchableOpacity style={styles.infoItem} onPress={handleNameEdit}>
           <View style={[styles.infoIcon, {
             width: width * 0.14,
             height: width * 0.14,
@@ -241,6 +364,26 @@ export default function ProfileScreen() {
             marginRight: width * 0.04
           }]}>
             <Ionicons name="person" size={width * 0.06} color="white" />
+          </View>
+          <View style={styles.infoContent}>
+            <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Name</Text>
+            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>
+              {userName}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#9D9D9D" />
+        </TouchableOpacity>
+        
+        <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
+        
+        <View style={styles.infoItem}>
+          <View style={[styles.infoIcon, {
+            width: width * 0.14,
+            height: width * 0.14,
+            borderRadius: width * 0.07,
+            marginRight: width * 0.04
+          }]}>
+            <Ionicons name="key" size={width * 0.06} color="white" />
           </View>
           <View style={styles.infoContent}>
             <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>User ID</Text>
@@ -379,6 +522,16 @@ const styles = StyleSheet.create({
   userName: {
     fontWeight: '600',
     color: 'white',
+  },
+  userNameInput: {
+    fontWeight: '600',
+    color: 'white',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   userHandedness: {
     color: '#9D9D9D',

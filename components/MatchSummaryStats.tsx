@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 interface Match {
   id: string;
   opponent: string;
   opponentImage: string;
+  userImage?: string;
+  userName?: string;
   outcome: 'victory' | 'defeat';
   score: string;
   matchType: 'competition' | 'training';
@@ -39,10 +41,39 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       justifyContent: 'space-between',
       marginBottom: height * 0.02,
     },
+    scoreSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.03,
+    },
     outcomeText: {
       fontSize: Math.round(width * 0.05),
       fontWeight: '700',
       color: '#FFFFFF',
+    },
+    userImageContainer: {
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      overflow: 'hidden',
+      borderWidth: 2,
+      borderColor: '#324F42',
+    },
+    userImage: {
+      width: '100%',
+      height: '100%',
+    },
+    userImagePlaceholder: {
+      width: '100%',
+      height: '100%',
+      backgroundColor: '#324F42',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    userInitials: {
+      color: '#DDFFF8',
+      fontWeight: '700',
+      fontSize: Math.round(width * 0.04),
     },
     winPill: {
       backgroundColor: '#324F42',
@@ -94,9 +125,26 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     <View style={styles.container}>
       {/* Top Section - Match Outcome */}
       <View style={styles.topSection}>
-        <Text style={styles.outcomeText}>
-          {match.outcome === 'victory' ? 'Win' : 'Loss'} {match.userScore} - {match.opponentScore}
-        </Text>
+        <View style={styles.scoreSection}>
+          <View style={styles.userImageContainer}>
+            {match.userImage ? (
+              <Image 
+                source={{ uri: match.userImage }} 
+                style={styles.userImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.userImagePlaceholder}>
+                <Text style={styles.userInitials}>
+                  {match.userName ? match.userName.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.outcomeText}>
+            {match.userScore} - {match.opponentScore}
+          </Text>
+        </View>
         <View style={styles.winPill}>
           <Ionicons name="checkmark" size={16} color="white" />
           <Text style={styles.winText}>

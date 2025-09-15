@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
 import { WinPill } from './WinPill';
@@ -26,6 +27,23 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   customStyle = {} 
 }) => {
   const { width, height } = useWindowDimensions();
+
+  const handleCardPress = () => {
+    router.push({
+      pathname: '/match-history-details',
+      params: { 
+        matchId: match.id,
+        opponentName: match.opponentName,
+        opponentImage: match.opponentImage,
+        youScore: match.playerScore.toString(),
+        opponentScore: match.opponentScore.toString(),
+        matchType: match.matchType,
+        date: match.date,
+        duration: '02:30', // This would come from match data in real app
+        location: 'Metro Field House' // This would come from match data in real app
+      }
+    });
+  };
 
   const styles = StyleSheet.create({
     matchCard: {
@@ -54,6 +72,7 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       fontWeight: '700',
       color: 'white',
       marginBottom: height * 0.01,
+      lineHeight: width * 0.045,
     },
     matchDate: {
       fontSize: width * 0.03,
@@ -108,7 +127,11 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   };
 
   return (
-    <View style={styles.matchCard}>
+    <TouchableOpacity 
+      style={styles.matchCard}
+      onPress={handleCardPress}
+      activeOpacity={0.7}
+    >
       {/* Opponent Info */}
       <View style={styles.matchHeader}>
         <Image
@@ -117,7 +140,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
           contentFit="cover"
         />
         <View style={styles.opponentInfo}>
-          <Text style={styles.opponentName}>{match.opponentName}</Text>
+          <Text style={styles.opponentName} numberOfLines={2} ellipsizeMode="tail">
+            {match.opponentName}
+          </Text>
           <Text style={styles.matchDate}>{match.date}</Text>
         </View>
         <View style={styles.outcomeBadgeContainer}>
@@ -154,6 +179,6 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
           />
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };

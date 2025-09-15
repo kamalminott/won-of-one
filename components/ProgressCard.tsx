@@ -100,7 +100,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             </View>
           </View>
           
-          {daysRemaining && (
+          {daysRemaining !== undefined && (
             <Text style={styles.daysRemaining}>{`Days remaining: ${daysRemaining}`}</Text>
           )}
           

@@ -404,6 +404,16 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
     },
+    simpleProgressCircle: {
+      width: width * 0.15,
+      height: width * 0.15,
+      borderRadius: width * 0.075,
+      backgroundColor: Colors.purple.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.3)',
+    },
     progressText: {
       position: 'absolute',
       fontSize: width * 0.032,

@@ -182,7 +182,7 @@ export default function MatchDetailsScreen() {
             <TouchableOpacity onPress={handleBack} style={styles.backButton}>
               <Text style={styles.backButtonText}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>Recent Match Details</Text>
+            <Text style={styles.title}>Match History Details</Text>
             <TouchableOpacity onPress={handleEdit} style={styles.editButton}>
               <Text style={styles.editButtonText}>✏️</Text>
             </TouchableOpacity>
