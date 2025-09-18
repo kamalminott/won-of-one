@@ -3,15 +3,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View
+    Animated,
+    Dimensions,
+    Image,
+    PanResponder,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 
 interface CarouselItem {
@@ -155,10 +155,21 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     if (onItemPress) {
       onItemPress(item);
     } else {
-      // Default behavior for matches
+      // Default behavior for matches - pass all match data
       router.push({
         pathname: '/match-history-details',
-        params: { matchId: item.id }
+        params: { 
+          matchId: item.id,
+          opponentName: item.opponentName,
+          opponentImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face', // Default opponent image
+          youScore: item.youScore.toString(),
+          opponentScore: item.opponentScore.toString(),
+          matchType: 'Competition', // Default match type for carousel items
+          date: item.date,
+          duration: '02:30', // Default duration
+          location: 'Metro Field House', // Default location
+          isWin: item.isWin.toString() // Pass the win status from carousel data
+        }
       });
     }
   };

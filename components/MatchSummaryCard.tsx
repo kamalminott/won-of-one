@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { KeyStatsCard } from './KeyStatsCard';
+import { MatchNotesCard } from './MatchNotesCard';
 import { ScoreProgressionChart } from './ScoreProgressionChart';
 import { TouchesByPeriodChart } from './TouchesByPeriodChart';
 
@@ -25,6 +26,9 @@ interface MatchSummaryCardProps {
     period2: { user: number; opponent: number };
     period3: { user: number; opponent: number };
   };
+  notes?: string;
+  onNotesChange?: (notes: string) => void;
+  onNotesPress?: () => void;
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -40,7 +44,10 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   yellowCards = 0,
   redCards = 0,
   matchDurationSeconds = 0,
-  touchesByPeriod
+  touchesByPeriod,
+  notes = '',
+  onNotesChange,
+  onNotesPress
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -143,6 +150,14 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
           matchDurationSeconds={matchDurationSeconds}
         />
       </View>
+      
+      {/* Match Notes Card */}
+      <MatchNotesCard 
+        notes={notes}
+        onNotesChange={onNotesChange}
+        isPreview={true}
+        customStyle={{ marginHorizontal: 0 }}
+      />
       
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>

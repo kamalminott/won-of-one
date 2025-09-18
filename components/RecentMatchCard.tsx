@@ -40,7 +40,8 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
         matchType: match.matchType,
         date: match.date,
         duration: '02:30', // This would come from match data in real app
-        location: 'Metro Field House' // This would come from match data in real app
+        location: 'Metro Field House', // This would come from match data in real app
+        isWin: (match.outcome === 'Victory').toString() // Pass win status based on outcome
       }
     });
   };

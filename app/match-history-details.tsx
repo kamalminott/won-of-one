@@ -1,12 +1,14 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import MatchSummaryCardWithBorder from '@/components/MatchSummaryCardWithBorder';
-import { TouchTimelineChart } from '@/components/TouchTimelineChart';
+import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { useAuth } from '@/contexts/AuthContext';
+import { matchService } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 
 import { Colors } from '@/constants/Colors';
 
@@ -26,6 +28,20 @@ export default function MatchDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const { userName, profileImage } = useAuth();
   const params = useLocalSearchParams();
+  const [matchInsights, setMatchInsights] = useState({
+    avgTimeBetweenTouches: '22s',
+    longestScoringDrought: '45s',
+    touchStreaks: '3 in a row'
+  });
+  
+  const [scoreProgression, setScoreProgression] = useState<{
+    userData: Array<{ x: string; y: number }>;
+    opponentData: Array<{ x: string; y: number }>;
+  }>({
+    userData: [],
+    opponentData: []
+  });
+  
   
   // Get match data from route params
   const matchData: MatchDetailsProps = {
@@ -39,6 +55,131 @@ export default function MatchDetailsScreen() {
     matchType: params.matchType as string || 'Training',
     location: params.location as string || 'Metro Field House'
   };
+
+  // Calculate match insights from real data
+  const calculateMatchInsights = async () => {
+    try {
+      // Get match events for this match
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('*')
+        .eq('match_id', matchData.matchId)
+        .order('timestamp', { ascending: true });
+
+      if (error || !matchEvents || matchEvents.length === 0) {
+        console.log('No match events found for insights calculation');
+        return;
+      }
+
+      // Calculate average time between touches
+      let totalTimeBetweenTouches = 0;
+      let touchCount = 0;
+
+      for (let i = 1; i < matchEvents.length; i++) {
+        const currentEvent = new Date(matchEvents[i].timestamp);
+        const previousEvent = new Date(matchEvents[i - 1].timestamp);
+        const timeDiff = (currentEvent.getTime() - previousEvent.getTime()) / 1000; // Convert to seconds
+        
+        totalTimeBetweenTouches += timeDiff;
+        touchCount++;
+      }
+
+      const avgTime = touchCount > 0 ? Math.round(totalTimeBetweenTouches / touchCount) : 0;
+
+      // Debug: Log all events to see what we're working with
+      console.log('🔍 Match Events Debug:', {
+        totalEvents: matchEvents.length,
+        userName: userName,
+        eventScorers: matchEvents.map(e => e.scoring_user_name),
+        uniqueScorers: [...new Set(matchEvents.map(e => e.scoring_user_name))]
+      });
+
+      // Calculate longest scoring drought (longest time between ANY scoring events)
+      let longestDrought = 0;
+      
+      if (matchEvents.length > 1) {
+        for (let i = 1; i < matchEvents.length; i++) {
+          const currentEvent = new Date(matchEvents[i].timestamp);
+          const previousEvent = new Date(matchEvents[i - 1].timestamp);
+          const timeDiff = (currentEvent.getTime() - previousEvent.getTime()) / 1000;
+          
+          if (timeDiff > longestDrought) {
+            longestDrought = timeDiff;
+          }
+        }
+      }
+
+      // Calculate touch streaks (consecutive scoring events by user)
+      let currentStreak = 0;
+      let maxStreak = 0;
+      let lastScorerWasUser = false;
+
+      // Try different variations of userName matching
+      const userNameVariations = [
+        userName,
+        userName?.toLowerCase(),
+        userName?.toUpperCase(),
+        'You',
+        'you'
+      ].filter(Boolean);
+
+      console.log('🔍 Checking userName variations:', userNameVariations);
+
+      for (const event of matchEvents) {
+        const isUserScoring = userNameVariations.some(variation => 
+          event.scoring_user_name === variation
+        );
+        
+        if (isUserScoring) {
+          if (lastScorerWasUser) {
+            currentStreak++;
+          } else {
+            currentStreak = 1;
+          }
+          maxStreak = Math.max(maxStreak, currentStreak);
+          lastScorerWasUser = true;
+        } else {
+          lastScorerWasUser = false;
+          currentStreak = 0;
+        }
+      }
+
+      console.log('🔍 Calculated insights:', {
+        avgTime,
+        longestDrought: Math.round(longestDrought),
+        maxStreak
+      });
+      
+      setMatchInsights({
+        avgTimeBetweenTouches: `${avgTime}s`,
+        longestScoringDrought: longestDrought > 0 ? `${Math.round(longestDrought)}s` : 'No data',
+        touchStreaks: maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data'
+      });
+
+    } catch (error) {
+      console.error('Error calculating match insights:', error);
+    }
+  };
+
+  // Fetch score progression data
+  const fetchScoreProgression = async () => {
+    try {
+      const progression = await matchService.calculateScoreProgression(
+        matchData.matchId, 
+        userName || 'You'
+      );
+      setScoreProgression(progression);
+    } catch (error) {
+      console.error('Error fetching score progression:', error);
+    }
+  };
+
+
+  // Load match insights and score progression when component mounts
+  useEffect(() => {
+    calculateMatchInsights();
+    fetchScoreProgression();
+  }, [matchData.matchId]);
 
   const handleBack = () => {
     router.back();
@@ -156,12 +297,6 @@ export default function MatchDetailsScreen() {
       fontWeight: '600',
       textTransform: 'capitalize',
     },
-    notesText: {
-      fontSize: width * 0.035,
-      color: '#9D9D9D',
-      lineHeight: height * 0.027,
-      letterSpacing: 0.02,
-    },
   });
 
   return (
@@ -205,36 +340,33 @@ export default function MatchDetailsScreen() {
             opponentScore={matchData.opponentScore}
             duration={matchData.duration}
             matchType={matchData.matchType}
-            isWin={matchData.youScore > matchData.opponentScore}
+            isWin={params.isWin === 'true' || matchData.youScore > matchData.opponentScore}
           />
 
-          {/* Touch Timeline */}
-          <TouchTimelineChart />
+          {/* Score Progression Timeline */}
+          <ScoreProgressionChart 
+            scoreProgression={scoreProgression}
+            userScore={matchData.youScore}
+            opponentScore={matchData.opponentScore}
+          />
 
           {/* Match Insights */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Match Insights</Text>
             <View style={styles.insightRow}>
               <Text style={styles.insightLabel}>Avg. Time Between Touches</Text>
-              <Text style={styles.insightValue}>22s</Text>
+              <Text style={styles.insightValue}>{matchInsights.avgTimeBetweenTouches}</Text>
             </View>
             <View style={styles.insightRow}>
               <Text style={styles.insightLabel}>Longest Scoring Drought</Text>
-              <Text style={styles.insightValue}>45s</Text>
+              <Text style={styles.insightValue}>{matchInsights.longestScoringDrought}</Text>
             </View>
             <View style={[styles.insightRow, styles.insightRowLast]}>
               <Text style={styles.insightLabel}>Touch Streaks</Text>
-              <Text style={styles.insightValue}>3 in a row</Text>
+              <Text style={styles.insightValue}>{matchInsights.touchStreaks}</Text>
             </View>
           </View>
 
-          {/* Match Notes */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Match Notes</Text>
-            <Text style={styles.notesText}>
-              One disadvantage of Lorem Ipsum is that in Latin certain letters appear more frequently than others - which creates a distinct visual impression.
-            </Text>
-          </View>
         </ScrollView>
       </SafeAreaView>
     </>

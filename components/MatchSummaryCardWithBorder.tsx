@@ -87,6 +87,35 @@ export default function MatchSummaryCardWithBorder({
       fontSize: width * 0.04, // Dynamic font size
       fontWeight: '600',
     },
+    lossBadge: {
+      position: 'absolute',
+      width: width * 0.19, // Same width as win badge
+      height: height * 0.042, // Same height as win badge
+      left: '50%', // Center horizontally
+      marginLeft: -(width * 0.19) / 2, // Half of width to center properly
+      top: -(height * 0.014), // Same position as win badge
+      backgroundColor: '#4D4159', // Same background as win badge
+      borderWidth: 2,
+      borderColor: '#D1A3F0', // Same border as win badge
+      borderRadius: width * 0.04, // Same border radius as win badge
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: width * 0.03, // Same padding as win badge
+      paddingVertical: height * 0.006, // Same padding as win badge
+      zIndex: 10, // Same z-index as win badge
+    },
+    lossIcon: {
+      color: 'white',
+      fontSize: width * 0.035, // Same size as win icon
+      fontWeight: '600',
+      marginRight: width * 0.018, // Same margin as win icon
+    },
+    lossText: {
+      color: 'white',
+      fontSize: width * 0.04, // Same size as win text
+      fontWeight: '600',
+    },
     leftPlayerContainer: {
       position: 'absolute',
       width: width * 0.15, // Dynamic width
@@ -194,11 +223,16 @@ export default function MatchSummaryCardWithBorder({
 
   return (
     <View style={[styles.container, style]}>
-      {/* Win Badge - Positioned outside card */}
-      {isWin && (
+      {/* Win/Loss Badge - Positioned outside card */}
+      {isWin ? (
         <View style={styles.winBadge}>
           <Text style={styles.winIcon}>✓</Text>
           <Text style={styles.winText}>Win</Text>
+        </View>
+      ) : (
+        <View style={styles.lossBadge}>
+          <Text style={styles.lossIcon}>✗</Text>
+          <Text style={styles.lossText}>Loss</Text>
         </View>
       )}
 
