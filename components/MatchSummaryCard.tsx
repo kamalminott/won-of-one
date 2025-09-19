@@ -71,38 +71,20 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       ...customStyle,
     },
     buttonContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
       marginTop: height * 0.02,
-      gap: width * 0.03,
     },
     saveButton: {
-      flex: 1,
       backgroundColor: '#6C5CE7',
       paddingVertical: height * 0.015,
       paddingHorizontal: width * 0.04,
       borderRadius: width * 0.02,
       alignItems: 'center',
+      width: '100%',
     },
     saveButtonText: {
       color: 'white',
       fontSize: Math.round(width * 0.04),
       fontWeight: '600',
-    },
-    shareButton: {
-      flex: 1,
-      backgroundColor: '#2B2B2B',
-      paddingVertical: height * 0.015,
-      paddingHorizontal: width * 0.04,
-      borderRadius: width * 0.02,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: '#464646',
-    },
-    shareButtonText: {
-      color: 'white',
-      fontSize: Math.round(width * 0.04),
-      fontWeight: '500',
     },
     cancelButton: {
       backgroundColor: '#2B2B2B',
@@ -155,6 +137,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       <MatchNotesCard 
         notes={notes}
         onNotesChange={onNotesChange}
+        onPress={onNotesPress}
         isPreview={true}
         customStyle={{ marginHorizontal: 0 }}
       />
@@ -163,9 +146,6 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.saveButton} onPress={onSaveMatch}>
           <Text style={styles.saveButtonText}>Save Match</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.shareButton} onPress={onSeeFullSummary}>
-          <Text style={styles.shareButtonText}>Add Match Notes</Text>
         </TouchableOpacity>
       </View>
       

@@ -2513,6 +2513,13 @@ export default function RemoteScreen() {
       marginBottom: height * 0.025,
       textAlign: 'center',
     },
+    popupMessage: {
+      fontSize: width * 0.04,
+      color: 'rgba(255, 255, 255, 0.8)',
+      marginBottom: height * 0.025,
+      textAlign: 'center',
+      lineHeight: height * 0.025,
+    },
     timeInput: {
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       borderRadius: width * 0.02,

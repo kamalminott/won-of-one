@@ -2,20 +2,22 @@ import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 interface MatchNotesCardProps {
   notes?: string;
   onNotesChange?: (notes: string) => void;
   customStyle?: object;
   isPreview?: boolean;
+  onPress?: () => void;
 }
 
 export const MatchNotesCard: React.FC<MatchNotesCardProps> = ({
   notes = '',
   onNotesChange,
   customStyle = {},
-  isPreview = false
+  isPreview = false,
+  onPress
 }) => {
   const { width, height } = useWindowDimensions();
   const [localNotes, setLocalNotes] = useState(notes);
@@ -113,11 +115,15 @@ export const MatchNotesCard: React.FC<MatchNotesCardProps> = ({
       </View>
       
       {isPreview ? (
-        <View style={styles.previewContainer}>
+        <TouchableOpacity 
+          style={styles.previewContainer} 
+          onPress={onPress}
+          activeOpacity={0.7}
+        >
           <Text style={styles.previewText}>
             {localNotes || 'Tap to add match notes...'}
           </Text>
-        </View>
+        </TouchableOpacity>
       ) : (
         <>
           <View style={styles.inputContainer}>

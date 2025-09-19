@@ -64,6 +64,31 @@ export const matchService = {
       source: 'remote', // User is using the fencing remote
     };
 
+    // If userId is null, we need to use an RPC function to bypass RLS for anonymous matches
+    if (userId === null) {
+      // Try RPC function for anonymous matches first
+      console.log('🔄 Attempting RPC call for anonymous match with data:', matchData);
+      
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('create_anonymous_match', {
+          match_data: matchData
+        });
+
+      console.log('📡 RPC call result:', { rpcData, rpcError });
+
+      if (!rpcError && rpcData) {
+        console.log('✅ RPC function succeeded, returning data:', rpcData);
+        return rpcData;
+      }
+
+      // If RPC fails, log the specific error and try direct insert
+      if (rpcError) {
+        console.error('❌ RPC function failed with error:', rpcError);
+      }
+      console.warn('⚠️ RPC function failed, trying direct insert for anonymous match');
+    }
+
+    // Regular match creation (both authenticated and fallback for anonymous)
     const { data, error } = await supabase
       .from('match')
       .insert(matchData)
@@ -72,6 +97,36 @@ export const matchService = {
 
     if (error) {
       console.error('Error creating match:', error);
+      
+      // If this is an anonymous match and we get RLS error, provide helpful message
+      if (userId === null && error.code === '42501') {
+        console.error('❌ Anonymous matches not allowed. Please create the RPC function or modify RLS policy.');
+        console.error('📝 Run this SQL in your Supabase SQL editor:');
+        console.error(`
+CREATE OR REPLACE FUNCTION create_anonymous_match(match_data jsonb)
+RETURNS TABLE(match_id text, user_id text, fencer_1_name text, fencer_2_name text, final_score integer, event_date date, result text, score_diff integer, match_type text, source text)
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO match (user_id, fencer_1_name, fencer_2_name, final_score, event_date, result, score_diff, match_type, source)
+  VALUES (
+    (match_data->>'user_id')::text,
+    (match_data->>'fencer_1_name')::text,
+    (match_data->>'fencer_2_name')::text,
+    (match_data->>'final_score')::integer,
+    (match_data->>'event_date')::date,
+    (match_data->>'result')::text,
+    (match_data->>'score_diff')::integer,
+    (match_data->>'match_type')::text,
+    (match_data->>'source')::text
+  )
+  RETURNING match.match_id, match.user_id, match.fencer_1_name, match.fencer_2_name, match.final_score, match.event_date, match.result, match.score_diff, match.match_type, match.source;
+END;
+$$;
+        `);
+      }
+      
       return null;
     }
 
