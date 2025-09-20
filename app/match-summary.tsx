@@ -158,13 +158,17 @@ export default function MatchSummaryScreen() {
     opponentImage: 'https://example.com/opponent.jpg', // TODO: Add opponent image
     userImage: userProfileImage || undefined, // Use loaded profile image
     userName: userName || match.fencer_1_name || 'User',
-    outcome: match.result === 'win' ? 'victory' as const : 'defeat' as const,
+    outcome: (match.user_id && match.result === 'win') ? 'victory' as const : 
+             (match.user_id && match.result === 'loss') ? 'defeat' as const : 
+             null, // No outcome for anonymous matches (user_id is null)
     score: `${match.final_score || 0}-${match.touches_against || 0}`,
     matchType: 'competition' as const, // TODO: Use actual match type
     date: new Date().toLocaleDateString(),
     userScore: match.final_score || 0,
     opponentScore: match.touches_against || 0,
     bestRun: bestRun, // Now using calculated best run from database
+    fencer1Name: match.fencer_1_name,
+    fencer2Name: match.fencer_2_name
   } : null;
 
   const styles = StyleSheet.create({
@@ -364,6 +368,8 @@ export default function MatchSummaryScreen() {
           notes={notes}
           onNotesChange={handleNotesChange}
           onNotesPress={handleNotesPress}
+          userLabel={match?.user_id ? 'You' : match?.fencer_1_name || 'Fencer 1'}
+          opponentLabel={match?.user_id ? 'Opponent' : match?.fencer_2_name || 'Fencer 2'}
         />
         </ScrollView>
       </KeyboardAvoidingView>

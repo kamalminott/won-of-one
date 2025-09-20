@@ -319,9 +319,9 @@ export default function RemoteScreen() {
       console.log('Creating remote session...');
       const session = await fencingRemoteService.createRemoteSession({
         referee_id: user.id,
-        fencer_1_id: user.id,
-        fencer_1_name: userDisplayName,
-        fencer_2_name: fencerNames.bob, // Use current opponent name
+        fencer_1_id: showUserProfile ? user.id : undefined, // Only set fencer_1_id if user toggle is on
+        fencer_1_name: showUserProfile ? userDisplayName : fencerNames.alice, // Use Alice when user toggle is off
+        fencer_2_name: fencerNames.bob, // Always Bob for fencer 2
         scoring_mode: "15-point",
         device_serial: "REMOTE_001"
       });
@@ -441,22 +441,17 @@ export default function RemoteScreen() {
       let touchesAgainst: number;
       let scoreDiff: number | null;
 
-      if (user?.id) {
-        // User is registered - determine their position and result
-        const userScore = showUserProfile && toggleCardPosition === 'left' ? aliceScore : 
-                         showUserProfile && toggleCardPosition === 'right' ? bobScore : 
-                         aliceScore; // Default to Alice if user profile not shown
-        
-        const opponentScore = showUserProfile && toggleCardPosition === 'left' ? bobScore : 
-                             showUserProfile && toggleCardPosition === 'right' ? aliceScore : 
-                             bobScore; // Default to Bob if user profile not shown
+      if (user?.id && showUserProfile) {
+        // User is registered AND toggle is on - determine their position and result
+        const userScore = toggleCardPosition === 'left' ? aliceScore : bobScore;
+        const opponentScore = toggleCardPosition === 'left' ? bobScore : aliceScore;
 
         finalScore = userScore;
         touchesAgainst = opponentScore;
         scoreDiff = userScore - opponentScore;
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
-        // No registered user - just record the scores without win/loss
+        // User toggle is off OR no registered user - record as anonymous match
         finalScore = aliceScore;
         touchesAgainst = bobScore;
         scoreDiff = null; // No score_diff when no user is present
@@ -464,7 +459,9 @@ export default function RemoteScreen() {
       }
 
       // Calculate period-based data
-      const touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, userDisplayName, undefined, finalScore, touchesAgainst);
+      // When user toggle is off, use Alice as the "user" for data structure consistency
+      const effectiveUserName = showUserProfile ? userDisplayName : fencerNames.alice;
+      const touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, effectiveUserName, undefined, finalScore, touchesAgainst);
       
       // Calculate period number (count non-zero periods)
       const periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]

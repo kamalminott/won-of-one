@@ -29,6 +29,8 @@ interface MatchSummaryCardProps {
   notes?: string;
   onNotesChange?: (notes: string) => void;
   onNotesPress?: () => void;
+  userLabel?: string;
+  opponentLabel?: string;
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -47,7 +49,9 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   touchesByPeriod,
   notes = '',
   onNotesChange,
-  onNotesPress
+  onNotesPress,
+  userLabel = 'You',
+  opponentLabel = 'Opponent'
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -120,11 +124,17 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
         scoreProgression={scoreProgression} 
         userScore={userScore}
         opponentScore={opponentScore}
+        userLabel={userLabel}
+        opponentLabel={opponentLabel}
       />
       
       {/* Touches by Period Chart and Key Stats Card - Side by Side */}
       <View style={styles.rowContainer}>
-        <TouchesByPeriodChart touchesByPeriod={touchesByPeriod} />
+        <TouchesByPeriodChart 
+          touchesByPeriod={touchesByPeriod}
+          userLabel={userLabel}
+          opponentLabel={opponentLabel}
+        />
         <KeyStatsCard 
           bestRun={bestRun} 
           yellowCards={yellowCards}

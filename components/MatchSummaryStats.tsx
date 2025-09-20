@@ -8,13 +8,15 @@ interface Match {
   opponentImage: string;
   userImage?: string;
   userName?: string;
-  outcome: 'victory' | 'defeat';
+  outcome?: 'victory' | 'defeat' | null;
   score: string;
   matchType: 'competition' | 'training';
   date: string;
   userScore: number;
   opponentScore: number;
   bestRun: number;
+  fencer1Name?: string;
+  fencer2Name?: string;
 }
 
 interface MatchSummaryStatsProps {
@@ -145,12 +147,18 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
             {match.userScore} - {match.opponentScore}
           </Text>
         </View>
-        <View style={styles.winPill}>
-          <Ionicons name="checkmark" size={16} color="white" />
-          <Text style={styles.winText}>
-            {match.outcome === 'victory' ? 'Win' : 'Loss'}
-          </Text>
-        </View>
+        {match.outcome && (
+          <View style={styles.winPill}>
+            <Ionicons 
+              name={match.outcome === 'victory' ? "checkmark" : "close"} 
+              size={16} 
+              color="white" 
+            />
+            <Text style={styles.winText}>
+              {match.outcome === 'victory' ? 'Win' : 'Loss'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Divider Line */}
@@ -158,26 +166,55 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
 
       {/* Bottom Section - Key Statistics */}
       <View style={styles.statsSection}>
-        <View style={styles.statColumn}>
-          <Text style={styles.statNumber}>{match.userScore}</Text>
-          <Text style={styles.statLabel}>Touches For</Text>
-        </View>
-        
-        <View style={styles.verticalDivider} />
-        
-        <View style={styles.statColumn}>
-          <Text style={styles.statNumber}>{match.opponentScore}</Text>
-          <Text style={styles.statLabel}>Touches Against</Text>
-        </View>
-        
-        <View style={styles.verticalDivider} />
-        
-        <View style={styles.statColumn}>
-          <Text style={styles.statNumber}>
-            {match.userScore - match.opponentScore > 0 ? '+' : ''}{match.userScore - match.opponentScore}
-          </Text>
-          <Text style={styles.statLabel}>Score Difference</Text>
-        </View>
+        {match.outcome ? (
+          <>
+            {/* User-focused view when there's an outcome */}
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>{match.userScore}</Text>
+              <Text style={styles.statLabel}>Touches For</Text>
+            </View>
+            
+            <View style={styles.verticalDivider} />
+            
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>{match.opponentScore}</Text>
+              <Text style={styles.statLabel}>Touches Against</Text>
+            </View>
+            
+            <View style={styles.verticalDivider} />
+            
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>
+                {match.userScore - match.opponentScore > 0 ? '+' : ''}{match.userScore - match.opponentScore}
+              </Text>
+              <Text style={styles.statLabel}>Score Difference</Text>
+            </View>
+          </>
+        ) : (
+          <>
+            {/* Neutral view when no user outcome (anonymous match) */}
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>{match.userScore}</Text>
+              <Text style={styles.statLabel}>{match.fencer1Name || 'Fencer 1'}</Text>
+            </View>
+            
+            <View style={styles.verticalDivider} />
+            
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>{match.opponentScore}</Text>
+              <Text style={styles.statLabel}>{match.fencer2Name || 'Fencer 2'}</Text>
+            </View>
+            
+            <View style={styles.verticalDivider} />
+            
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>
+                {Math.abs(match.userScore - match.opponentScore)}
+              </Text>
+              <Text style={styles.statLabel}>Point Margin</Text>
+            </View>
+          </>
+        )}
       </View>
     </View>
   );

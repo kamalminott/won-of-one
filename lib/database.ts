@@ -650,6 +650,38 @@ $$;
     score_spp?: number;
     score_by_period?: any; // JSONB field for period-by-period scores
   }): Promise<Match | null> {
+    // First, try to get the match to check if it's anonymous (user_id is null)
+    const { data: existingMatch } = await supabase
+      .from('match')
+      .select('user_id')
+      .eq('match_id', matchId)
+      .single();
+
+    // If this is an anonymous match (user_id is null), use RPC function
+    if (existingMatch && existingMatch.user_id === null) {
+      console.log('🔄 Updating anonymous match via RPC function');
+      
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('update_anonymous_match', {
+          match_id_param: matchId,
+          updates: updates
+        });
+
+      console.log('📡 RPC update result:', { rpcData, rpcError });
+
+      if (!rpcError && rpcData) {
+        console.log('✅ RPC update succeeded:', rpcData);
+        return rpcData;
+      }
+
+      // If RPC fails, log the specific error and try direct update as fallback
+      if (rpcError) {
+        console.error('❌ RPC update failed with error:', rpcError);
+      }
+      console.warn('⚠️ RPC update failed, trying direct update for anonymous match');
+    }
+
+    // Regular match update (or fallback for anonymous)
     const { data, error } = await supabase
       .from('match')
       .update(updates)
@@ -659,6 +691,43 @@ $$;
 
     if (error) {
       console.error('Error updating match:', error);
+      
+      // If this is an anonymous match and we get RLS error, provide helpful message
+      if (existingMatch && existingMatch.user_id === null && error.code === '42501') {
+        console.error('❌ Anonymous match updates not allowed. Please create the RPC function.');
+        console.error('📝 Run this SQL in your Supabase SQL editor:');
+        console.error(`
+CREATE OR REPLACE FUNCTION update_anonymous_match(match_id_param text, updates jsonb)
+RETURNS json
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    result_record record;
+BEGIN
+    UPDATE match
+    SET 
+        final_score = COALESCE((updates->>'final_score')::integer, final_score),
+        result = COALESCE((updates->>'result')::text, result),
+        score_diff = COALESCE((updates->>'score_diff')::integer, score_diff),
+        final_period = COALESCE((updates->>'final_period')::integer, final_period),
+        yellow_cards = COALESCE((updates->>'yellow_cards')::integer, yellow_cards),
+        red_cards = COALESCE((updates->>'red_cards')::integer, red_cards),
+        priority_assigned = COALESCE((updates->>'priority_assigned')::text, priority_assigned),
+        bout_length_s = COALESCE((updates->>'bout_length_s')::integer, bout_length_s),
+        is_complete = COALESCE((updates->>'is_complete')::boolean, is_complete),
+        notes = COALESCE((updates->>'notes')::text, notes),
+        period_number = COALESCE((updates->>'period_number')::integer, period_number),
+        score_spp = COALESCE((updates->>'score_spp')::integer, score_spp),
+        score_by_period = COALESCE((updates->'score_by_period')::jsonb, score_by_period)
+    WHERE match_id = match_id_param::uuid
+    RETURNING * INTO result_record;
+    
+    RETURN row_to_json(result_record);
+END;
+$$;
+        `);
+      }
+      
       return null;
     }
 

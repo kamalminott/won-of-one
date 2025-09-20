@@ -10,6 +10,8 @@ interface TouchesByPeriodChartProps {
     period2: { user: number; opponent: number };
     period3: { user: number; opponent: number };
   };
+  userLabel?: string;
+  opponentLabel?: string;
 }
 
 interface TooltipData {
@@ -24,7 +26,9 @@ interface TooltipData {
 export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   title = 'Touches by Period',
   customStyle = {},
-  touchesByPeriod
+  touchesByPeriod,
+  userLabel = 'You',
+  opponentLabel = 'Opponent'
 }) => {
   const { width, height } = useWindowDimensions();
   const [tooltip, setTooltip] = useState<TooltipData>({
@@ -216,7 +220,7 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   const renderTooltip = () => {
     if (!tooltip.visible) return null;
 
-    const playerName = tooltip.player === 'user' ? 'You' : 'Opponent';
+    const playerName = tooltip.player === 'user' ? userLabel : opponentLabel;
     
     return (
       <View style={[styles.tooltip, { left: tooltip.x, top: tooltip.y }]}>
@@ -259,11 +263,11 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       <View style={styles.legend}>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
-          <Text style={styles.legendText}>You</Text>
+          <Text style={styles.legendText}>{userLabel}</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
-          <Text style={styles.legendText}>Opponent</Text>
+          <Text style={styles.legendText}>{opponentLabel}</Text>
         </View>
       </View>
       

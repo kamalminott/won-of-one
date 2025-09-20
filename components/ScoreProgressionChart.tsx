@@ -120,6 +120,8 @@ interface ScoreProgressionChartProps {
   };
   userScore?: number;
   opponentScore?: number;
+  userLabel?: string;
+  opponentLabel?: string;
 }
 
 export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
@@ -135,7 +137,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
   customStyle = {},
   scoreProgression,
   userScore = 0,
-  opponentScore = 0
+  opponentScore = 0,
+  userLabel = 'You',
+  opponentLabel = 'Opponent'
 }) => {
   const { width, height: screenHeight } = useWindowDimensions();
 
@@ -592,11 +596,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           <View style={legendStyle}>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
-              <Text style={styles.legendText}>You ({userScore})</Text>
+              <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
-              <Text style={styles.legendText}>Opponent ({opponentScore})</Text>
+              <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>
         );
@@ -606,7 +610,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           <View style={styles.legend}>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
-              <Text style={styles.legendText}>Score Gap (You − Opponent)</Text>
+              <Text style={styles.legendText}>Score Gap ({userLabel} − {opponentLabel})</Text>
             </View>
           </View>
         );
@@ -616,11 +620,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           <View style={styles.legend}>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
-              <Text style={styles.legendText}>You ({userScore})</Text>
+              <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
-              <Text style={styles.legendText}>Opponent ({opponentScore})</Text>
+              <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>
         );

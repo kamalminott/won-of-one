@@ -317,6 +317,28 @@ export default function HomeScreen() {
         {/* Content with bottom safe area */}
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
+            <ProgressCard
+              title="Sessions this Week"
+              current={weeklySessions.current}
+              total={weeklySessions.total}
+              daysRemaining={weeklySessions.daysRemaining}
+            />
+            
+            <View style={styles.summaryRow}>
+              <SummaryCard
+                icon={<Text style={styles.icon}>🕐</Text>}
+                value={trainingTime.value}
+                label={trainingTime.label}
+                backgroundColor={Colors.pink.light}
+              />
+              <SummaryCard
+                icon={<Text style={styles.icon}>🏆</Text>}
+                value={`${winRate}%`}
+                label="Win Rate"
+                backgroundColor={Colors.blue.light}
+              />
+            </View>
+            
             {goals.length > 0 ? (
               <GoalCard
                 daysLeft={calculateDaysLeft(goals[0].deadline)}
@@ -376,28 +398,6 @@ export default function HomeScreen() {
                 useModal={true}
               />
             )}
-            
-            <View style={styles.summaryRow}>
-              <SummaryCard
-                icon={<Text style={styles.icon}>🕐</Text>}
-                value={trainingTime.value}
-                label={trainingTime.label}
-                backgroundColor={Colors.pink.light}
-              />
-              <SummaryCard
-                icon={<Text style={styles.icon}>🏆</Text>}
-                value={`${winRate}%`}
-                label="Win Rate"
-                backgroundColor={Colors.blue.light}
-              />
-            </View>
-            
-            <ProgressCard
-              title="Sessions this Week"
-              current={weeklySessions.current}
-              total={weeklySessions.total}
-              daysRemaining={weeklySessions.daysRemaining}
-            />
             
             <View style={styles.addButtonContainer}>
               <AddNewMatchButton onPress={handleAddNewMatch} />

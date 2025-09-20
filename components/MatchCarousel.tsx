@@ -448,18 +448,18 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     emptyState: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: height * 0.08,
+      paddingVertical: height * 0.04,
       paddingHorizontal: width * 0.08,
     },
     emptyIcon: {
-      marginBottom: height * 0.02,
+      marginBottom: height * 0.015,
     },
     emptyTitle: {
       color: 'white',
-      fontSize: width * 0.05,
+      fontSize: width * 0.045,
       fontWeight: '600',
       textAlign: 'center',
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.008,
     },
     emptyDescription: {
       color: 'rgba(255, 255, 255, 0.7)',
@@ -495,7 +495,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
 
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
-            <Ionicons name={emptyStateIcon} size={width * 0.15} color="rgba(255, 255, 255, 0.3)" />
+            <Ionicons name={emptyStateIcon} size={width * 0.1} color="rgba(255, 255, 255, 0.3)" />
           </View>
           <Text style={styles.emptyTitle}>{emptyStateTitle}</Text>
           <Text style={styles.emptyDescription}>
