@@ -1,11 +1,12 @@
 import { BackButton } from '@/components/BackButton';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
+import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,6 +24,15 @@ export default function ProfileScreen() {
   const [darkModeEnabled, setDarkModeEnabled] = useState(true);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingName, setEditingName] = useState<string>('');
+  
+  // Match statistics state
+  const [matchStats, setMatchStats] = useState({
+    totalMatches: 0,
+    wins: 0,
+    winRate: 0,
+    totalPoints: 0,
+    currentStreak: 0
+  });
 
   const handleBack = () => {
     router.back();
@@ -33,6 +43,79 @@ export default function ProfileScreen() {
     console.log('Logging out...');
     router.push('/login');
   };
+
+  // Fetch user match statistics
+  const fetchMatchStatistics = async () => {
+    if (!user?.id) return;
+
+    try {
+      // Get all user matches (using high limit to get all matches)
+      const matches = await matchService.getRecentMatches(user.id, 1000);
+      
+      console.log('📊 Profile statistics debug:', {
+        userId: user.id,
+        matchesFound: matches?.length || 0,
+        matches: matches
+      });
+      
+      if (matches) {
+        const totalMatches = matches.length;
+        
+        // Debug each match's result field
+        console.log('🔍 Match results debug:');
+        matches.forEach((match, index) => {
+          console.log(`Match ${index + 1}:`, {
+            matchId: match.id,
+            isWin: match.isWin,
+            youScore: match.youScore,
+            opponentScore: match.opponentScore,
+            opponentName: match.opponentName
+          });
+        });
+        
+        // Use SimpleMatch structure: isWin instead of result === 'win'
+        const wins = matches.filter(match => match.isWin === true).length;
+        const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+        
+        console.log('📊 Calculated statistics:', {
+          totalMatches,
+          wins,
+          winRate,
+          winsFilter: matches.filter(match => match.isWin === true)
+        });
+        
+        // Calculate total points scored across all matches (use youScore instead of final_score)
+        const totalPoints = matches.reduce((sum, match) => sum + (match.youScore || 0), 0);
+        
+        // Calculate current streak (consecutive wins from most recent matches)
+        let currentStreak = 0;
+        for (let i = matches.length - 1; i >= 0; i--) {
+          if (matches[i].isWin === true) {
+            currentStreak++;
+          } else {
+            break;
+          }
+        }
+
+        setMatchStats({
+          totalMatches,
+          wins,
+          winRate,
+          totalPoints,
+          currentStreak
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching match statistics:', error);
+    }
+  };
+
+  // Load match statistics when component mounts or user changes
+  useEffect(() => {
+    if (user?.id) {
+      fetchMatchStatistics();
+    }
+  }, [user?.id]);
 
   // No need to load profile data since it's handled by context
 
@@ -212,25 +295,25 @@ export default function ProfileScreen() {
         
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>24</Text>
+            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.totalMatches}</Text>
             <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Matches Played</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <View style={styles.statRow}>
-              <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>15</Text>
-              <Text style={[styles.statPercentage, { fontSize: width * 0.035 }]}>(60%)</Text>
+              <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.wins}</Text>
+              <Text style={[styles.statPercentage, { fontSize: width * 0.035 }]}>({matchStats.winRate}%)</Text>
             </View>
             <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Win & Win Rate%</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>186</Text>
+            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.totalPoints}</Text>
             <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Points Scored</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>6</Text>
+            <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.currentStreak}</Text>
             <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Current Streak</Text>
           </View>
         </View>

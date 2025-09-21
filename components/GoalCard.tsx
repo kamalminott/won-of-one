@@ -9,6 +9,8 @@ interface GoalCardProps {
   title: string;
   description: string;
   progress: number;
+  targetValue?: number;
+  currentValue?: number;
   onSetNewGoal: () => void;
   onUpdateGoal: () => void;
   onGoalSaved?: (goalData: any) => void;
@@ -20,6 +22,8 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   title,
   description,
   progress,
+  targetValue,
+  currentValue,
   onSetNewGoal,
   onUpdateGoal,
   onGoalSaved,
@@ -27,8 +31,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 }) => {
   const { width, height } = useWindowDimensions();
   const [showGoalModal, setShowGoalModal] = useState(false);
+  const [isUpdatingGoal, setIsUpdatingGoal] = useState(false);
   const [goalType, setGoalType] = useState('Total Matches Played');
-  const [targetValue, setTargetValue] = useState('10');
+  const [targetValueInput, setTargetValueInput] = useState('10');
   const [timeframe, setTimeframe] = useState('Month');
   const [timeframeNumber, setTimeframeNumber] = useState('1');
   const [notes, setNotes] = useState('Focus on consistency this month.');
@@ -63,6 +68,24 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const handleSetNewGoalClick = () => {
     if (useModal) {
+      // Check if this is an update or new goal
+      const isUpdate = title !== "No Active Goals";
+      setIsUpdatingGoal(isUpdate);
+      
+      if (isUpdate) {
+        // This is an update - pre-fill the form with current goal data
+        setGoalType(title);
+        setNotes(description);
+        if (targetValue) {
+          setTargetValueInput(targetValue.toString());
+        }
+      } else {
+        // This is a new goal - reset form to defaults
+        setGoalType('Total Matches Played');
+        setTargetValueInput('10');
+        setNotes('Focus on consistency this month.');
+      }
+      
       setShowGoalModal(true);
     } else {
       onSetNewGoal();
@@ -76,7 +99,7 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     const goalData = {
       category: goalType,
       description: notes,
-      target_value: parseInt(targetValue),
+      target_value: parseInt(targetValueInput),
       unit: timeframe,
       deadline: calculateDeadline(timeframe, timeframeNumber),
       tracking_mode: 'manual', // Default tracking mode
@@ -148,7 +171,7 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       if (!isNaN(numValue) && numValue > 0) {
         switch (editingField) {
           case 'targetValue':
-            setTargetValue(tempValue);
+            setTargetValueInput(tempValue);
             break;
           case 'matchesForWinRate':
             setMatchesForWinRate(tempValue);
@@ -176,14 +199,14 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   };
 
   const incrementTarget = () => {
-    const current = parseInt(targetValue);
-    setTargetValue((current + 1).toString());
+    const current = parseInt(targetValueInput);
+    setTargetValueInput((current + 1).toString());
   };
 
   const decrementTarget = () => {
-    const current = parseInt(targetValue);
+    const current = parseInt(targetValueInput);
     if (current > 1) {
-      setTargetValue((current - 1).toString());
+      setTargetValueInput((current - 1).toString());
     }
   };
 
@@ -328,17 +351,17 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     
     switch (goalType) {
       case 'Total Matches Played':
-        return `Play ${targetValue} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
+        return `Play ${targetValueInput} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
       case 'Wins':
-        return `Win ${targetValue} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
+        return `Win ${targetValueInput} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
       case 'Win Rate %':
-        return `Achieve ${targetValue}% win rate over next ${matchesForWinRate} matches`;
+        return `Achieve ${targetValueInput}% win rate over next ${matchesForWinRate} matches`;
       case 'Points Scored':
-        return `Score ${targetValue} touches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
+        return `Score ${targetValueInput} touches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
       case 'Point Differential':
-        return `End +${targetValue} in point differential over ${matchesForDifferential} matches`;
+        return `End +${targetValueInput} in point differential over ${matchesForDifferential} matches`;
       case 'Streaks':
-        return `Win ${targetValue} matches in a row`;
+        return `Win ${targetValueInput} matches in a row`;
       default:
         return `Set a goal for ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
     }
@@ -403,6 +426,8 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       position: 'relative',
       alignItems: 'center',
       justifyContent: 'center',
+      width: width * 0.16,
+      height: width * 0.16,
     },
     simpleProgressCircle: {
       width: width * 0.15,
@@ -416,12 +441,17 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     },
     progressText: {
       position: 'absolute',
-      fontSize: width * 0.032,
+      fontSize: width * 0.045,
       fontWeight: '700',
       color: 'white',
+      textAlign: 'center',
+      width: '100%',
+      height: '100%',
+      textAlignVertical: 'center',
+      lineHeight: width * 0.16, // Match the circle diameter for vertical centering
     },
     progressValueText: {
-      fontSize: width * 0.032,
+      fontSize: width * 0.045,
       fontWeight: '700',
       color: 'white',
     },
@@ -707,18 +737,20 @@ export const GoalCard: React.FC<GoalCardProps> = ({
           <View style={styles.progressCircle}>
             <CircularProgress
               value={progress}
-              radius={width * 0.075}
+              radius={width * 0.08}
               activeStrokeColor={Colors.purple.primary}
               inActiveStrokeColor="rgba(255,255,255,0.3)"
-              activeStrokeWidth={width * 0.01}
-              inActiveStrokeWidth={width * 0.01}
-              progressValueColor="white"
-              progressValueStyle={styles.progressValueText}
-              valueSuffix="%"
-              showProgressValue={true}
+              activeStrokeWidth={width * 0.012}
+              inActiveStrokeWidth={width * 0.012}
+              progressValueColor="transparent"
+              showProgressValue={false}
               duration={1000}
               clockwise={true}
             />
+            {/* Custom progress text overlay */}
+            <Text style={styles.progressText}>
+              {progress}%
+            </Text>
           </View>
         </View>
       </View>
@@ -729,13 +761,13 @@ export const GoalCard: React.FC<GoalCardProps> = ({
             <Text style={styles.secondaryButtonText}>Set New Goal</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity style={styles.primaryButton} onPress={onUpdateGoal}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleSetNewGoalClick}>
             <Text style={styles.primaryButtonText}>Update Goal</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Set New Goal Modal */}
+      {/* Goal Modal (Create/Update) */}
       <Modal
         visible={showGoalModal}
         transparent={true}
@@ -757,7 +789,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
               <TouchableOpacity onPress={handleCancel} style={styles.backButton}>
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Set a New Goal</Text>
+              <Text style={styles.modalTitle}>
+                {isUpdatingGoal ? 'Update Goal' : 'Set a New Goal'}
+              </Text>
             </View>
 
             {/* Goal Form */}
@@ -818,9 +852,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
                   ) : (
                     <TouchableOpacity 
                       style={styles.targetValueTouchable}
-                      onPress={() => startEditing('targetValue', targetValue)}
+                      onPress={() => startEditing('targetValue', targetValueInput)}
                     >
-                      <Text style={styles.targetValue}>{targetValue}</Text>
+                      <Text style={styles.targetValue}>{targetValueInput}</Text>
                     </TouchableOpacity>
                   )}
                   
@@ -1001,7 +1035,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={handleSaveGoal}>
-                <Text style={styles.saveButtonText}>Save Goal</Text>
+                <Text style={styles.saveButtonText}>
+                  {isUpdatingGoal ? 'Update Goal' : 'Save Goal'}
+                </Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

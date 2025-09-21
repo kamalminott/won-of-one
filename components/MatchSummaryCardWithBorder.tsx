@@ -201,9 +201,9 @@ export default function MatchSummaryCardWithBorder({
     },
     matchTypeBadge: {
       position: 'absolute',
-      width: width * 0.2, // Dynamic width
+      width: width * 0.25, // Increased width to accommodate longer text
       height: height * 0.03, // Dynamic height
-      left: width * 0.02, // Dynamic left position
+      left: width * 0.015, // Adjusted left position to center better
       top: height * 0.08, // Dynamic top position
       backgroundColor: '#625971',
       borderRadius: width * 0.15, // Dynamic border radius

@@ -892,16 +892,30 @@ export const goalService = {
       return [];
     }
 
-    const mappedGoals = data?.map(goal => ({
-      id: goal.goal_id,
-      title: goal.category,
-      description: goal.description || '',
-      targetValue: goal.target_value,
-      currentValue: goal.current_value || 0,
-      deadline: goal.deadline,
-      isCompleted: goal.is_completed || false,
-      progress: goal.target_value > 0 ? Math.round(((goal.current_value || 0) / goal.target_value) * 100) : 0,
-    })) || [];
+    const mappedGoals = data?.map(goal => {
+      const currentValue = goal.current_value || 0;
+      const targetValue = goal.target_value || 1;
+      const calculatedProgress = targetValue > 0 ? Math.round((currentValue / targetValue) * 100) : 0;
+      
+      console.log('🎯 Goal progress calculation:', {
+        title: goal.category,
+        currentValue,
+        targetValue,
+        calculatedProgress,
+        rawProgress: (currentValue / targetValue) * 100
+      });
+      
+      return {
+        id: goal.goal_id,
+        title: goal.category,
+        description: goal.description || '',
+        targetValue: targetValue,
+        currentValue: currentValue,
+        deadline: goal.deadline,
+        isCompleted: goal.is_completed || false,
+        progress: calculatedProgress,
+      };
+    }) || [];
     
     console.log('Mapped goals:', mappedGoals);
     return mappedGoals;
@@ -939,12 +953,26 @@ export const goalService = {
 
   // Update goal progress
   async updateGoalProgress(goalId: string, currentValue: number): Promise<boolean> {
+    // First get the goal to check target value
+    const { data: goal, error: fetchError } = await supabase
+      .from('goal')
+      .select('target_value')
+      .eq('goal_id', goalId)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching goal for progress update:', fetchError);
+      return false;
+    }
+
+    const isCompleted = currentValue >= (goal?.target_value || 0);
+
     const { error } = await supabase
       .from('goal')
       .update({ 
         current_value: currentValue,
         updated_at: new Date().toISOString(),
-        is_completed: currentValue >= (await this.getGoalTarget(goalId))
+        is_completed: isCompleted
       })
       .eq('goal_id', goalId);
 
@@ -953,6 +981,7 @@ export const goalService = {
       return false;
     }
 
+    console.log('✅ Goal progress updated:', { goalId, currentValue, targetValue: goal?.target_value, isCompleted });
     return true;
   },
 
@@ -970,6 +999,138 @@ export const goalService = {
     }
 
     return data?.target_value || 0;
+  },
+
+  // Update goals based on match completion with precise tracking
+  async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<void> {
+    try {
+      console.log('🎯 Updating goals after match completion:', { userId, matchResult, finalScore, opponentScore });
+      
+      // Get active goals for the user
+      const activeGoals = await this.getActiveGoals(userId);
+      console.log('📋 Found active goals:', activeGoals.map(g => ({ title: g.title, current: g.currentValue, target: g.targetValue })));
+      
+      // Get user's match statistics for context
+      const userMatches = await matchService.getRecentMatches(userId, 1000);
+      const totalMatches = userMatches.length;
+      const totalWins = userMatches.filter(m => m.isWin).length;
+      const currentWinRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
+      const pointDifferential = finalScore - opponentScore;
+      
+      console.log('📊 Match context:', { totalMatches, totalWins, currentWinRate, pointDifferential });
+      
+      for (const goal of activeGoals) {
+        let shouldUpdate = false;
+        let newCurrentValue = goal.currentValue;
+        
+        console.log('🔍 Processing goal:', { 
+          title: goal.title, 
+          description: goal.description,
+          currentValue: goal.currentValue,
+          targetValue: goal.targetValue
+        });
+        
+        // Parse the goal category to determine exact tracking type
+        const category = goal.title;
+        
+        switch (category) {
+          case 'Total Matches Played':
+            // Track every match completion
+            newCurrentValue = goal.currentValue + 1;
+            shouldUpdate = true;
+            console.log('📊 Updating Total Matches goal:', goal.currentValue, '→', newCurrentValue);
+            break;
+            
+          case 'Wins':
+            // Track only wins
+            if (matchResult === 'win') {
+              newCurrentValue = goal.currentValue + 1;
+              shouldUpdate = true;
+              console.log('🏆 Updating Wins goal:', goal.currentValue, '→', newCurrentValue);
+            } else {
+              console.log('🔸 Wins goal not updated - match was not a win');
+            }
+            break;
+            
+          case 'Win Rate %':
+            // Track win rate percentage - this is calculated, not incremental
+            newCurrentValue = currentWinRate;
+            shouldUpdate = true;
+            console.log('📈 Updating Win Rate goal:', goal.currentValue, '→', newCurrentValue, '%');
+            break;
+            
+          case 'Points Scored':
+            // Track total points scored
+            newCurrentValue = goal.currentValue + finalScore;
+            shouldUpdate = true;
+            console.log('🎯 Updating Points Scored goal:', goal.currentValue, '→', newCurrentValue);
+            break;
+            
+          case 'Point Differential':
+            // Track cumulative point differential
+            newCurrentValue = goal.currentValue + pointDifferential;
+            shouldUpdate = true;
+            console.log('➕ Updating Point Differential goal:', goal.currentValue, '→', newCurrentValue);
+            break;
+            
+          case 'Streaks':
+            // Track current win streak
+            let currentStreak = 0;
+            // Calculate current streak from recent matches
+            for (let i = userMatches.length - 1; i >= 0; i--) {
+              if (userMatches[i].isWin) {
+                currentStreak++;
+              } else {
+                break;
+              }
+            }
+            newCurrentValue = currentStreak;
+            shouldUpdate = true;
+            console.log('🔥 Updating Streaks goal:', goal.currentValue, '→', newCurrentValue);
+            break;
+            
+          default:
+            // Handle custom goal titles with pattern matching
+            const goalText = goal.title.toLowerCase();
+            const goalDescription = (goal.description || '').toLowerCase();
+            const combinedText = `${goalText} ${goalDescription}`;
+            
+            if ((combinedText.includes('win') || combinedText.includes('victory')) && 
+                (combinedText.includes('match') || combinedText.includes('bout'))) {
+              // Custom win goal
+              if (matchResult === 'win') {
+                newCurrentValue = goal.currentValue + 1;
+                shouldUpdate = true;
+                console.log('🏆 Updating custom win goal:', goal.title, goal.currentValue, '→', newCurrentValue);
+              }
+            } else if (combinedText.includes('match') || combinedText.includes('play')) {
+              // Custom match goal
+              newCurrentValue = goal.currentValue + 1;
+              shouldUpdate = true;
+              console.log('🎮 Updating custom match goal:', goal.title, goal.currentValue, '→', newCurrentValue);
+            } else if (combinedText.includes('point') || combinedText.includes('score')) {
+              // Custom points goal
+              newCurrentValue = goal.currentValue + finalScore;
+              shouldUpdate = true;
+              console.log('🎯 Updating custom points goal:', goal.title, goal.currentValue, '→', newCurrentValue);
+            } else {
+              console.log('❓ Goal type not recognized:', goal.title);
+            }
+            break;
+        }
+        
+        if (shouldUpdate) {
+          const updateSuccess = await this.updateGoalProgress(goal.id, newCurrentValue);
+          if (updateSuccess) {
+            console.log('✅ Goal successfully updated:', goal.title, 'to', newCurrentValue);
+          } else {
+            console.log('❌ Failed to update goal:', goal.title);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error updating goals after match:', error);
+    }
   },
 };
 

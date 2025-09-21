@@ -345,6 +345,8 @@ export default function HomeScreen() {
                 title={goals[0].title}
                 description={goals[0].description}
                 progress={goals[0].progress}
+                targetValue={goals[0].targetValue}
+                currentValue={goals[0].currentValue}
                 onSetNewGoal={handleSetNewGoal}
                 onUpdateGoal={handleUpdateGoal}
                 onGoalSaved={async (goalData) => {
@@ -374,6 +376,8 @@ export default function HomeScreen() {
                 title="No Active Goals"
                 description="Set a new goal to track your progress"
                 progress={0}
+                targetValue={0}
+                currentValue={0}
                 onSetNewGoal={handleSetNewGoal}
                 onUpdateGoal={handleUpdateGoal}
                 onGoalSaved={async (goalData) => {

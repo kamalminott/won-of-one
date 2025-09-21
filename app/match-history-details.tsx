@@ -34,6 +34,8 @@ export default function MatchDetailsScreen() {
     touchStreaks: '3 in a row'
   });
   
+  const [matchNotes, setMatchNotes] = useState('');
+  
   const [scoreProgression, setScoreProgression] = useState<{
     userData: Array<{ x: string; y: number }>;
     opponentData: Array<{ x: string; y: number }>;
@@ -174,11 +176,40 @@ export default function MatchDetailsScreen() {
     }
   };
 
+  // Fetch match notes
+  const fetchMatchNotes = async () => {
+    try {
+      // First try to get notes from match table
+      const { data: match, error } = await supabase
+        .from('match')
+        .select('*')
+        .eq('match_id', matchData.matchId)
+        .single();
 
-  // Load match insights and score progression when component mounts
+      if (error) {
+        console.log('No match found for notes:', error);
+        return;
+      }
+
+      // Check if notes field exists and has content
+      if (match && 'notes' in match && match.notes) {
+        setMatchNotes(match.notes);
+        console.log('📝 Match notes loaded from match table:', match.notes);
+      } else {
+        console.log('📝 No notes found in match record or notes field does not exist');
+        // Could implement alternative storage like a separate notes table if needed
+      }
+    } catch (error) {
+      console.error('Error fetching match notes:', error);
+    }
+  };
+
+
+  // Load match insights, score progression, and notes when component mounts
   useEffect(() => {
     calculateMatchInsights();
     fetchScoreProgression();
+    fetchMatchNotes();
   }, [matchData.matchId]);
 
   const handleBack = () => {
@@ -268,11 +299,25 @@ export default function MatchDetailsScreen() {
       shadowRadius: 30,
       elevation: 8,
     },
+    chartSection: {
+      backgroundColor: '#2A2A2A',
+      borderRadius: width * 0.05,
+      padding: 0, // No padding to let chart handle its own spacing
+      marginBottom: height * 0.03,
+      shadowColor: '#6C5CE7',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.04,
+      shadowRadius: 30,
+      elevation: 8,
+      overflow: 'hidden', // Ensure content doesn't overflow the rounded corners
+    },
     sectionTitle: {
-      fontSize: width * 0.045,
+      fontSize: width * 0.046, // 18px equivalent
       fontWeight: '500',
       color: 'white',
       marginBottom: height * 0.02,
+      fontFamily: 'Articulat CF',
+      lineHeight: height * 0.03, // 24px equivalent
     },
     insightRow: {
       flexDirection: 'row',
@@ -296,6 +341,30 @@ export default function MatchDetailsScreen() {
       color: 'white',
       fontWeight: '600',
       textTransform: 'capitalize',
+    },
+    notesContainer: {
+      width: width * 0.92, // 358px equivalent - keeping same width
+      height: height * 0.09, // Further reduced to ~75px equivalent
+      backgroundColor: '#2A2A2A',
+      borderRadius: width * 0.05, // 20px equivalent
+      shadowColor: 'rgba(108, 92, 231, 0.04)',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 1,
+      shadowRadius: 8,
+      elevation: 8, // Android shadow
+      padding: width * 0.08, // 32px equivalent
+      paddingTop: width * 0.03, // Reduced top padding to move text up
+      marginTop: height * 0.015,
+      alignSelf: 'center',
+      justifyContent: 'flex-start', // Changed from 'center' to 'flex-start'
+    },
+    notesText: {
+      fontSize: width * 0.035, // 14px equivalent
+      color: '#9D9D9D',
+      lineHeight: height * 0.027, // 22px equivalent
+      letterSpacing: 0.02,
+      fontFamily: 'Articulat CF',
+      fontWeight: '400',
     },
   });
 
@@ -344,11 +413,13 @@ export default function MatchDetailsScreen() {
           />
 
           {/* Score Progression Timeline */}
-          <ScoreProgressionChart 
-            scoreProgression={scoreProgression}
-            userScore={matchData.youScore}
-            opponentScore={matchData.opponentScore}
-          />
+          <View style={styles.chartSection}>
+            <ScoreProgressionChart 
+              scoreProgression={scoreProgression}
+              userScore={matchData.youScore}
+              opponentScore={matchData.opponentScore}
+            />
+          </View>
 
           {/* Match Insights */}
           <View style={styles.section}>
@@ -364,6 +435,16 @@ export default function MatchDetailsScreen() {
             <View style={[styles.insightRow, styles.insightRowLast]}>
               <Text style={styles.insightLabel}>Touch Streaks</Text>
               <Text style={styles.insightValue}>{matchInsights.touchStreaks}</Text>
+            </View>
+          </View>
+
+          {/* Match Notes Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Match Notes</Text>
+            <View style={styles.notesContainer}>
+              <Text style={styles.notesText}>
+                {matchNotes || 'No match notes'}
+              </Text>
             </View>
           </View>
 

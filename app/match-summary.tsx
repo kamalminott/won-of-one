@@ -3,7 +3,7 @@ import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { matchService } from '@/lib/database';
+import { goalService, matchService } from '@/lib/database';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function MatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
-  const { userName, profileImage } = useAuth();
+  const { user, userName, profileImage } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [bestRun, setBestRun] = useState<number>(0);
   const [scoreProgression, setScoreProgression] = useState<{
@@ -127,9 +127,34 @@ export default function MatchSummaryScreen() {
     console.log('Cancel match');
   };
 
-  const handleSaveMatch = () => {
-    // TODO: Implement save match
-    console.log('Save match');
+  const handleSaveMatch = async () => {
+    if (!match || !user?.id) {
+      console.log('No match or user data available for saving');
+      return;
+    }
+
+    try {
+      console.log('💾 Saving match and updating goals...');
+      
+      // Update goals based on match result (only if user participated)
+      if (match.user_id && match.result) {
+        await goalService.updateGoalsAfterMatch(
+          user.id, 
+          match.result as 'win' | 'loss', 
+          match.final_score || 0,
+          match.touches_against || 0
+        );
+        console.log('✅ Goals updated successfully');
+      } else {
+        console.log('ℹ️ Skipping goal update - anonymous match or no result');
+      }
+      
+      // Navigate back to home page
+      router.push('/(tabs)');
+      
+    } catch (error) {
+      console.error('Error saving match:', error);
+    }
   };
 
   const handleNotesPress = () => {
