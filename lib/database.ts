@@ -1,8 +1,8 @@
 import {
-  AppUser, DiaryEntry, Drill, Equipment,
-  FencingRemote, Goal, Match,
-  MatchApproval, MatchEvent,
-  SimpleGoal, SimpleMatch
+    AppUser, DiaryEntry, Drill, Equipment,
+    FencingRemote, Goal, Match,
+    MatchApproval, MatchEvent,
+    SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -544,14 +544,14 @@ $$;
         let opponentTouches = 0;
         
         for (const event of matchEvents) {
-          if (event.scoring_user_name === userName && userTouches < authoritativeUserScore) {
+          if (event.scoring_user_name === userName && userTouches < (authoritativeUserScore || 0)) {
             userTouches++;
-            console.log(`📊 User touch counted in period 1, total: ${userTouches}/${authoritativeUserScore}`);
-          } else if (event.scoring_user_name && event.scoring_user_name !== userName && opponentTouches < authoritativeOpponentScore) {
+            console.log(`📊 User touch counted in period 1, total: ${userTouches}/${authoritativeUserScore || 0}`);
+          } else if (event.scoring_user_name && event.scoring_user_name !== userName && opponentTouches < (authoritativeOpponentScore || 0)) {
             opponentTouches++;
-            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}/${authoritativeOpponentScore}`);
+            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}/${authoritativeOpponentScore || 0}`);
           } else {
-            console.log(`📊 Touch skipped - final scores reached (User: ${userTouches}/${authoritativeUserScore}, Opponent: ${opponentTouches}/${authoritativeOpponentScore})`);
+            console.log(`📊 Touch skipped - final scores reached (User: ${userTouches}/${authoritativeUserScore || 0}, Opponent: ${opponentTouches}/${authoritativeOpponentScore || 0})`);
           }
         }
         
@@ -604,18 +604,18 @@ $$;
         }
 
         // Count the touch, but only if we haven't reached the final scores
-        if (event.scoring_user_name === userName && totalUserTouches < authoritativeUserScore) {
+        if (event.scoring_user_name === userName && totalUserTouches < (authoritativeUserScore || 0)) {
           totalUserTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.user++;
           else if (eventPeriod === 2) touchesByPeriod.period2.user++;
           else if (eventPeriod === 3) touchesByPeriod.period3.user++;
-          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}/${authoritativeUserScore}`);
-        } else if (event.scoring_user_name && event.scoring_user_name !== userName && totalOpponentTouches < authoritativeOpponentScore) {
+          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}/${authoritativeUserScore || 0}`);
+        } else if (event.scoring_user_name && event.scoring_user_name !== userName && totalOpponentTouches < (authoritativeOpponentScore || 0)) {
           totalOpponentTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.opponent++;
           else if (eventPeriod === 2) touchesByPeriod.period2.opponent++;
           else if (eventPeriod === 3) touchesByPeriod.period3.opponent++;
-          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}/${authoritativeOpponentScore}`);
+          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}/${authoritativeOpponentScore || 0}`);
         } else {
           console.log(`📊 Touch skipped - final scores reached (User: ${totalUserTouches}/${authoritativeUserScore}, Opponent: ${totalOpponentTouches}/${authoritativeOpponentScore})`);
         }
@@ -1581,4 +1581,6 @@ export const matchPeriodService = {
 
     return data;
   },
+
+  // Note: Removed duplicate calculateScoreProgression function that was causing score inconsistencies
 };

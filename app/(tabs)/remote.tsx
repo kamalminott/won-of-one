@@ -11,7 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -75,7 +75,59 @@ export default function RemoteScreen() {
   useEffect(() => {
     loadStoredImages();
     testImageLoading(); // Test function to verify AsyncStorage
+    // Removed loadPersistedMatchState() - now handled only on focus
   }, []);
+
+  // Save match state when scores or other important state changes
+  useEffect(() => {
+    // Only save if there's an active match
+    const hasActiveMatch = aliceScore > 0 || bobScore > 0 || currentPeriod > 1 || 
+                          period1Time > 0 || period2Time > 0 || period3Time > 0 || isPlaying;
+    
+    if (hasActiveMatch) {
+      saveMatchState();
+    }
+  }, [aliceScore, bobScore, currentPeriod, isPlaying, period1Time, period2Time, period3Time]);
+
+  // Handle focus/blur events for match persistence
+  useFocusEffect(
+    useCallback(() => {
+      resumePromptShownRef.current = false; // reset for this focus
+
+      let cancelled = false;
+
+      const run = async () => {
+        // wait until nav animations & interactions are done — Alert/Modal will show immediately
+        await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()));
+
+        console.log('🎯 Checking resume conditions:', {
+          cancelled,
+          hasNavigatedAwayRef: hasNavigatedAwayRef.current,
+          resumePromptShown: resumePromptShownRef.current
+        });
+        
+        if (!cancelled && hasNavigatedAwayRef.current && !resumePromptShownRef.current) {
+          console.log('🎯 Showing resume prompt');
+          resumePromptShownRef.current = true;
+          // force the prompt
+          await loadPersistedMatchState({ forcePrompt: true });
+        } else {
+          console.log('🎯 Skipping resume prompt - conditions not met');
+        }
+      };
+
+      run();
+
+      return () => {
+        // mark we left, persist and pause
+        setHasNavigatedAway(true);
+        // don't await in cleanup
+        saveMatchState();
+        if (isPlaying) pauseTimer();
+        cancelled = true;
+      };
+    }, [isPlaying]) // keep deps minimal (no hasNavigatedAway here!)
+  );
 
   const loadStoredImages = async () => {
     try {
@@ -117,6 +169,254 @@ export default function RemoteScreen() {
     } catch (error) {
       console.error('Error saving image:', error);
     }
+  };
+
+  // Match state persistence functions
+  const saveMatchState = async () => {
+    try {
+      // Only save if there's an active match or match has started
+      const hasMatchStarted = aliceScore > 0 || bobScore > 0 || currentPeriod > 1 || 
+                             period1Time > 0 || period2Time > 0 || period3Time > 0;
+      
+      if (!hasMatchStarted && !isPlaying) {
+        // No active match to save
+        await AsyncStorage.removeItem('ongoing_match_state');
+        console.log('💾 No active match - cleared any saved state');
+        return;
+      }
+
+      const matchState = {
+        currentPeriod,
+        aliceScore,
+        bobScore,
+        isPlaying: false, // Always pause when saving
+        matchTime,
+        period1Time,
+        period2Time,
+        period3Time,
+        fencerNames,
+        fencerPositions,
+        showUserProfile,
+        matchStartTime: matchStartTime?.toISOString(),
+        lastEventTime: lastEventTime?.toISOString(),
+        totalPausedTime,
+        savedAt: new Date().toISOString()
+      };
+
+      await AsyncStorage.setItem('ongoing_match_state', JSON.stringify(matchState));
+      console.log('💾 Match state saved:', matchState);
+    } catch (error) {
+      console.error('Error saving match state:', error);
+    }
+  };
+
+  const loadPersistedMatchState = async (opts?: { forcePrompt?: boolean }) => {
+    const forcePrompt = !!opts?.forcePrompt;
+    try {
+      const savedState = await AsyncStorage.getItem('ongoing_match_state');
+      if (!savedState) {
+        console.log('💾 No saved match state found');
+        return;
+      }
+
+      const matchState = JSON.parse(savedState);
+      const savedAt = new Date(matchState.savedAt);
+      const now = new Date();
+      const minutesSinceLastSave = (now.getTime() - savedAt.getTime()) / (1000 * 60);
+
+      // Clear old saved states (older than 1 hour)
+      if (minutesSinceLastSave > 60) {
+        await AsyncStorage.removeItem('ongoing_match_state');
+        console.log('💾 Cleared old match state (1+ hours old)');
+        return;
+      }
+
+      // Check if there's actually a match to restore
+      const hasMatchData = matchState.aliceScore > 0 || matchState.bobScore > 0 || 
+                          matchState.currentPeriod > 1 || matchState.period1Time > 0 || 
+                          matchState.period2Time > 0 || matchState.period3Time > 0;
+
+      if (!hasMatchData) {
+        await AsyncStorage.removeItem('ongoing_match_state');
+        console.log('💾 Cleared empty match state');
+        return;
+      }
+
+      // previous guards – now skip them when forced
+      if (!forcePrompt) {
+        if (isChangingScore) {
+          console.log('💾 Score is being changed - skipping dialog to prevent conflicts');
+          return;
+        }
+        
+        if (!hasNavigatedAwayRef.current) {
+          console.log('💾 User has not navigated away - skipping dialog');
+          return;
+        }
+      }
+
+      // Check if this is a completed match
+      if (matchState.isCompleted) {
+        // Completed match dialog
+        const timeText = minutesSinceLastSave < 1 ? 'just now' : 
+                        minutesSinceLastSave < 2 ? '1 minute ago' : 
+                        `${Math.round(minutesSinceLastSave)} minutes ago`;
+        
+        Alert.alert(
+          '🏁 Completed Match Found',
+          `You have a completed match from ${timeText}:\n\n` +
+          `${matchState.fencerNames?.alice || 'Alice'}: ${matchState.aliceScore}\n` +
+          `${matchState.fencerNames?.bob || 'Bob'}: ${matchState.bobScore}\n` +
+          `Period: ${matchState.currentPeriod}\n\n` +
+          'What would you like to do?',
+          [
+            {
+              text: 'Delete Match',
+              style: 'destructive',
+              onPress: async () => {
+                await AsyncStorage.removeItem('ongoing_match_state');
+                setHasNavigatedAway(false); // Reset navigation flag
+                resetAll(); // Reset the entire match state
+                console.log('💾 User chose to delete completed match');
+              }
+            },
+            {
+              text: 'Resume Match',
+              onPress: () => {
+                setHasNavigatedAway(false); // Reset navigation flag
+                console.log('🔄 User chose to resume completed match');
+                restoreMatchState(matchState);
+              }
+            }
+          ]
+        );
+      } else {
+        // Active match dialog
+        const timeText = minutesSinceLastSave < 1 ? 'just now' : 
+                        minutesSinceLastSave < 2 ? '1 minute ago' : 
+                        `${Math.round(minutesSinceLastSave)} minutes ago`;
+        
+        Alert.alert(
+          '🔄 Resume Your Match?',
+          `You have a paused match from ${timeText}:\n\n` +
+          `${matchState.fencerNames?.alice || 'Alice'}: ${matchState.aliceScore}\n` +
+          `${matchState.fencerNames?.bob || 'Bob'}: ${matchState.bobScore}\n` +
+          `Period: ${matchState.currentPeriod}\n\n` +
+          'Would you like to resume this match?',
+          [
+            {
+              text: 'Start New Match',
+              style: 'destructive',
+              onPress: async () => {
+                await AsyncStorage.removeItem('ongoing_match_state');
+                setHasNavigatedAway(false); // Reset navigation flag
+                resetAll(); // Reset the entire match state
+                console.log('💾 User chose to start new match - cleared saved state and reset match');
+              }
+            },
+            {
+              text: 'Resume Match',
+              onPress: () => {
+                setHasNavigatedAway(false); // Reset navigation flag
+                console.log('🔄 User chose to resume match');
+                restoreMatchState(matchState);
+              }
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error loading match state:', error);
+    }
+  };
+
+  const restoreMatchState = (matchState: any) => {
+    try {
+      console.log('🔄 Restoring match state:', matchState);
+      
+      setCurrentPeriod(matchState.currentPeriod || 1);
+      setAliceScore(matchState.aliceScore || 0);
+      setBobScore(matchState.bobScore || 0);
+      setIsPlaying(false); // Always start paused when resuming
+      setMatchTime(matchState.matchTime || 180);
+      setPeriod1Time(matchState.period1Time || 0);
+      setPeriod2Time(matchState.period2Time || 0);
+      setPeriod3Time(matchState.period3Time || 0);
+      
+      // If this was a completed match, clear the completed flag
+      if (matchState.isCompleted) {
+        console.log('🔄 Resuming completed match - clearing completed flag');
+        const updatedState = { ...matchState, isCompleted: false };
+        AsyncStorage.setItem('ongoing_match_state', JSON.stringify(updatedState));
+      }
+      
+      if (matchState.fencerNames) {
+        setFencerNames(matchState.fencerNames);
+      }
+      if (matchState.fencerPositions) {
+        setFencerPositions(matchState.fencerPositions);
+      }
+      if (typeof matchState.showUserProfile === 'boolean') {
+        setShowUserProfile(matchState.showUserProfile);
+      }
+
+      // Restore time tracking if available
+      if (matchState.matchStartTime) {
+        setMatchStartTime(new Date(matchState.matchStartTime));
+      }
+      if (matchState.lastEventTime) {
+        setLastEventTime(new Date(matchState.lastEventTime));
+      }
+      if (matchState.totalPausedTime) {
+        setTotalPausedTime(matchState.totalPausedTime);
+      }
+
+      console.log('✅ Match state restored successfully');
+    } catch (error) {
+      console.error('Error restoring match state:', error);
+    }
+  };
+
+  // Timer control functions (pauseTimer already exists in the file)
+
+  const clearMatchState = async () => {
+    try {
+      await AsyncStorage.removeItem('ongoing_match_state');
+      setHasNavigatedAway(false); // Reset navigation flag
+      console.log('💾 Match state cleared from persistence');
+    } catch (error) {
+      console.error('Error clearing match state:', error);
+    }
+  };
+
+  // Enhanced reset function that clears both UI state and persistence
+  const resetAllWithPersistence = async () => {
+    console.log('🔄 Starting Reset All with persistence clearing...');
+    
+    // Clear persisted match state first
+    await clearMatchState();
+    
+    // Reset all UI state to initial values
+    setCurrentPeriod(1);
+    setAliceScore(0);
+    setBobScore(0);
+    setIsPlaying(false);
+    setMatchTime(180);
+    setPeriod1Time(0);
+    setPeriod2Time(0);
+    setPeriod3Time(0);
+    
+    // Reset fencer info to defaults
+    setFencerNames({ alice: 'Alice', bob: 'Bob' });
+    setFencerPositions({ alice: 'left', bob: 'right' });
+    setShowUserProfile(true);
+    
+    // Reset time tracking
+    setMatchStartTime(null);
+    setLastEventTime(null);
+    setTotalPausedTime(0);
+    
+    console.log('✅ Reset All completed with persistence clearing');
   };
 
   const handleImageSelection = (fencer: 'alice' | 'bob') => {
@@ -558,6 +858,23 @@ export default function RemoteScreen() {
       setIsManualReset(false);
       setLastEventTime(null); // Reset event timing
       
+      // Save completed match state instead of clearing it
+      const completedMatchState = {
+        aliceScore,
+        bobScore,
+        currentPeriod,
+        matchTime,
+        period1Time,
+        period2Time,
+        period3Time,
+        fencerNames,
+        isCompleted: true, // Mark as completed
+        savedAt: new Date().toISOString()
+      };
+      await AsyncStorage.setItem('ongoing_match_state', JSON.stringify(completedMatchState));
+      setHasNavigatedAway(false); // Reset navigation flag
+      console.log('💾 Saved completed match state for potential resume');
+      
     } catch (error) {
       console.error('Error completing match:', error);
     }
@@ -579,8 +896,17 @@ export default function RemoteScreen() {
   const [isManualReset, setIsManualReset] = useState(false); // Flag to prevent auto-sync during manual reset
   const [hasMatchStarted, setHasMatchStarted] = useState(false); // Track if match has been started
   const [isAssigningPriority, setIsAssigningPriority] = useState(false); // Track if priority is being assigned
+  const [isChangingScore, setIsChangingScore] = useState(false); // Flag to prevent state restoration during score changes
+  const [hasNavigatedAway, setHasNavigatedAway] = useState(false); // Flag to track if user has navigated away
   const [priorityLightPosition, setPriorityLightPosition] = useState<'left' | 'right' | null>(null); // Track where priority light is
   const [priorityFencer, setPriorityFencer] = useState<'alice' | 'bob' | null>(null); // Track which fencer has priority
+
+  // Mirror hasNavigatedAway into a ref to avoid stale closures
+  const hasNavigatedAwayRef = useRef(hasNavigatedAway);
+  useEffect(() => { hasNavigatedAwayRef.current = hasNavigatedAway; }, [hasNavigatedAway]);
+
+  // Prevent double prompts
+  const resumePromptShownRef = useRef(false);
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
   const [aliceYellowCards, setAliceYellowCards] = useState<number[]>([]); // Track Alice's yellow cards
   const [bobYellowCards, setBobYellowCards] = useState<number[]>([]); // Track Bob's yellow cards
@@ -714,13 +1040,7 @@ export default function RemoteScreen() {
     }
   }, [timeRemaining]);
 
-  // Reset remote when navigating back from match summary
-  useFocusEffect(
-    useCallback(() => {
-      // Reset all state when returning to remote screen
-      resetAll();
-    }, [])
-  );
+  // Note: Removed conflicting useFocusEffect that was resetting all state
 
   const incrementPeriod = () => {
     if (currentPeriod < 3) {
@@ -739,9 +1059,13 @@ export default function RemoteScreen() {
   };
 
   const incrementAliceScore = async () => {
+    setIsChangingScore(true);
+    setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    
     // Prevent score changes if match is being completed
     if (isCompletingMatch) {
       console.log('🚫 Score change blocked - match is being completed');
+      setIsChangingScore(false);
       return;
     }
     
@@ -832,9 +1156,15 @@ export default function RemoteScreen() {
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    
+    // Reset the flag after a short delay to allow state to settle
+    setTimeout(() => setIsChangingScore(false), 100);
   };
   
   const decrementAliceScore = () => {
+    setIsChangingScore(true);
+    setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
@@ -846,6 +1176,7 @@ export default function RemoteScreen() {
         setPendingScoreAction(() => () => {
           setAliceScore(Math.max(0, aliceScore - 1));
           setScoreChangeCount(0); // Reset counter
+          setIsChangingScore(false);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -873,12 +1204,19 @@ export default function RemoteScreen() {
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    
+    // Reset the flag after a short delay to allow state to settle
+    setTimeout(() => setIsChangingScore(false), 100);
   };
   
   const incrementBobScore = async () => {
+    setIsChangingScore(true);
+    setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    
     // Prevent score changes if match is being completed
     if (isCompletingMatch) {
       console.log('🚫 Score change blocked - match is being completed');
+      setIsChangingScore(false);
       return;
     }
     
@@ -969,9 +1307,15 @@ export default function RemoteScreen() {
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    
+    // Reset the flag after a short delay to allow state to settle
+    setTimeout(() => setIsChangingScore(false), 100);
   };
   
   const decrementBobScore = () => {
+    setIsChangingScore(true);
+    setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
       // This is an active match - check for repeated score changes
@@ -983,6 +1327,7 @@ export default function RemoteScreen() {
         setPendingScoreAction(() => () => {
           setBobScore(Math.max(0, bobScore - 1));
           setScoreChangeCount(0); // Reset counter
+          setIsChangingScore(false);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -1010,6 +1355,9 @@ export default function RemoteScreen() {
       setScoreChangeCount(0); // Reset counter for new match
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    
+    // Reset the flag after a short delay to allow state to settle
+    setTimeout(() => setIsChangingScore(false), 100);
   };
 
   const togglePlay = useCallback(async () => {
@@ -1083,6 +1431,7 @@ export default function RemoteScreen() {
   const resetScores = useCallback(() => {
     setAliceScore(0);
     setBobScore(0);
+    setHasNavigatedAway(false); // Reset navigation flag
     logMatchEvent('score', 'alice', 'decrease'); // Log score reset
     logMatchEvent('score', 'bob', 'decrease'); // Log score reset
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1339,6 +1688,7 @@ export default function RemoteScreen() {
     setBreakTimeRemaining(60); // Reset break timer
     setScoreChangeCount(0); // Reset score change counter
     setShowScoreWarning(false); // Reset warning popup
+    setHasNavigatedAway(false); // Reset navigation flag
       setLastEventTime(null); // Reset event timing
     setPendingScoreAction(null); // Reset pending action
     setPreviousMatchState(null); // Reset previous match state
@@ -1523,6 +1873,7 @@ export default function RemoteScreen() {
     setIsPlaying(true);
     setHasMatchStarted(true); // Mark that match has been started
     setScoreChangeCount(0); // Reset score change counter when starting
+    setHasNavigatedAway(false); // Reset navigation flag when starting match
     
     // If resuming from pause, add the paused time to total
     if (pauseStartTime) {
@@ -2884,6 +3235,7 @@ export default function RemoteScreen() {
   };
 
   const addYellowCardToAlice = async () => {
+    setHasNavigatedAway(false); // Reset navigation flag when changing cards
     // Pause timer when card is issued
     if (isPlaying) {
       pauseTimer();
@@ -2923,6 +3275,7 @@ export default function RemoteScreen() {
   };
 
   const addYellowCardToBob = async () => {
+    setHasNavigatedAway(false); // Reset navigation flag when changing cards
     // Pause timer when card is issued
     if (isPlaying) {
       pauseTimer();
@@ -2963,6 +3316,7 @@ export default function RemoteScreen() {
 
   // Red card management functions
   const addRedCardToAlice = async () => {
+    setHasNavigatedAway(false); // Reset navigation flag when changing cards
     if (aliceRedCards.length > 0) {
       // Show popup asking if user wants to remove or add
       Alert.alert(
@@ -3034,6 +3388,7 @@ export default function RemoteScreen() {
   };
 
   const addRedCardToBob = async () => {
+    setHasNavigatedAway(false); // Reset navigation flag when changing cards
     if (bobRedCards.length > 0) {
       // Show popup asking if user wants to remove or add
       Alert.alert(

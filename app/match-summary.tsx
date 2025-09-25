@@ -46,6 +46,7 @@ export default function MatchSummaryScreen() {
     await loadUserProfileImage();
   };
 
+
   const loadUserProfileImage = async () => {
     try {
       const savedImage = await AsyncStorage.getItem('user_profile_image');
@@ -81,8 +82,7 @@ export default function MatchSummaryScreen() {
 
             const calculatedScoreProgression = await matchService.calculateScoreProgression(
               params.matchId as string,
-              matchData.fencer_1_name,
-              params.remoteId as string
+              matchData.fencer_1_name || 'You'
             );
             console.log('📈 Calculated score progression:', calculatedScoreProgression);
             setScoreProgression(calculatedScoreProgression);

@@ -85,8 +85,22 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       flexDirection: 'row',
       alignItems: 'center',
     },
+    lossPill: {
+      backgroundColor: 'rgb(91, 52, 53)', // Same red as LossPill component
+      borderRadius: width * 0.04,
+      paddingHorizontal: width * 0.03,
+      paddingVertical: height * 0.01,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
     winText: {
       color: '#DDFFF8',
+      fontWeight: '600',
+      marginLeft: width * 0.01,
+      fontSize: Math.round(width * 0.035),
+    },
+    lossText: {
+      color: 'rgb(250, 178, 178)', // Same light red as LossPill component
       fontWeight: '600',
       marginLeft: width * 0.01,
       fontSize: Math.round(width * 0.035),
@@ -148,13 +162,13 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
           </Text>
         </View>
         {match.outcome && (
-          <View style={styles.winPill}>
+          <View style={match.outcome === 'victory' ? styles.winPill : styles.lossPill}>
             <Ionicons 
               name={match.outcome === 'victory' ? "checkmark" : "close"} 
               size={16} 
-              color="white" 
+              color={match.outcome === 'victory' ? "white" : "rgb(250, 178, 178)"} 
             />
-            <Text style={styles.winText}>
+            <Text style={match.outcome === 'victory' ? styles.winText : styles.lossText}>
               {match.outcome === 'victory' ? 'Win' : 'Loss'}
             </Text>
           </View>

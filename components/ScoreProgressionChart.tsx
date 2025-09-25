@@ -153,7 +153,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     }
     
     // Fallback to legacy data format
-    if (scoreProgression && scoreProgression.userData && scoreProgression.userData.length > 0) {
+    if (scoreProgression && (scoreProgression.userData.length > 0 || scoreProgression.opponentData.length > 0)) {
       // Debug logging for original data
       console.log('📊 Original Score Progression Data:');
       console.log('📊 User data:', scoreProgression.userData);
@@ -401,6 +401,12 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           ]
         };
 
+        // Calculate maxValue BEFORE using it in chartConfig
+        const maxValue = Math.max(
+          ...chartData.userSeries.map(p => p.y),
+          ...chartData.oppSeries.map(p => p.y),
+          1
+        );
         
         const chartConfig = {
           backgroundColor: "#2B2B2B", // Match the card background color
@@ -411,7 +417,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
           style: {
             borderRadius: 16,
-            paddingLeft: 10 // Reduced padding to move chart closer to left
+            paddingLeft: 10 // Increased padding to ensure y-axis labels are visible
           },
           propsForDots: {
             r: "4",
@@ -431,14 +437,17 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             fontSize: 10,
             fill: "rgba(255, 255, 255, 0.7)",
             rotation: 0
-          }
+          },
+          // Y-axis label configuration - try different approach
+          propsForHorizontalLabels: {
+            fontSize: 12,
+            fill: "rgba(255, 255, 255, 0.9)",
+            fontWeight: "500"
+          },
+          // Force y-axis labels to show
+          formatYLabel: (yValue: string) => yValue,
+          count: Math.min(maxValue, 5) // Ensure we have proper segments
         };
-
-        const maxValue = Math.max(
-          ...chartData.userSeries.map(p => p.y),
-          ...chartData.oppSeries.map(p => p.y),
-          1
-        );
 
         const chartComponent = (
           <TouchableOpacity
@@ -449,7 +458,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           >
             <RNChartKit
               data={chartData_kit}
-              width={isScrollable ? scrollableChartWidth : width * 0.9}
+              width={isScrollable ? scrollableChartWidth : width * 0.85}
               height={chartHeight - 40}
               chartConfig={chartConfig}
               bezier={false}
@@ -471,7 +480,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         );
 
         return (
-          <View style={{ height: chartHeight, width: width * 1, overflow: 'hidden', marginLeft: -width * 0.05 }}>
+          <View style={{ height: chartHeight, width: width * 1, overflow: 'visible', marginLeft: 0, paddingLeft: width * 0.02 }}>
             {isScrollable ? (
               <ScrollView 
                 horizontal 

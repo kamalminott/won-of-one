@@ -49,6 +49,13 @@ export default function HomeScreen() {
     }, [user, loading])
   );
 
+  // Redirect to login if no user is logged in
+  useEffect(() => {
+    if (!user) {
+      router.replace('/login');
+    }
+  }, [user]);
+
   const fetchUserData = async () => {
     if (!user) {
       console.log('No user found, skipping data fetch');
@@ -286,9 +293,7 @@ export default function HomeScreen() {
     );
   }
 
-  // Redirect to login if no user is logged in
   if (!user) {
-    router.replace('/login');
     return null;
   }
 

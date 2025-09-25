@@ -48,8 +48,8 @@ export default function MatchDetailsScreen() {
   // Get match data from route params
   const matchData: MatchDetailsProps = {
     matchId: params.matchId as string || '1',
-    youScore: parseInt(params.youScore as string) || 5,
-    opponentScore: parseInt(params.opponentScore as string) || 3,
+    youScore: params.youScore ? parseInt(params.youScore as string) : 0,  // Fixed: Check if param exists first
+    opponentScore: params.opponentScore ? parseInt(params.opponentScore as string) : 0,  // Fixed: Check if param exists first
     opponentName: params.opponentName as string || 'Alex',
     opponentImage: params.opponentImage as string || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
     date: params.date as string || 'Today',
@@ -170,6 +170,7 @@ export default function MatchDetailsScreen() {
         matchData.matchId, 
         userName || 'You'
       );
+      console.log('📊 fetchScoreProgression received:', progression);
       setScoreProgression(progression);
     } catch (error) {
       console.error('Error fetching score progression:', error);
@@ -211,6 +212,11 @@ export default function MatchDetailsScreen() {
     fetchScoreProgression();
     fetchMatchNotes();
   }, [matchData.matchId]);
+
+  // Debug score progression state changes
+  useEffect(() => {
+    console.log('📊 scoreProgression state changed:', scoreProgression);
+  }, [scoreProgression]);
 
   const handleBack = () => {
     router.back();
@@ -418,6 +424,8 @@ export default function MatchDetailsScreen() {
               scoreProgression={scoreProgression}
               userScore={matchData.youScore}
               opponentScore={matchData.opponentScore}
+              userLabel={userName || 'You'}
+              opponentLabel={matchData.opponentName || 'Opponent'}
             />
           </View>
 
