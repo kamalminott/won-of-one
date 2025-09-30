@@ -93,7 +93,7 @@ export default function NeutralMatchSummary() {
         <StatusBar barStyle="light-content" backgroundColor="#171717" />
 
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => router.back()}
@@ -110,36 +110,41 @@ export default function NeutralMatchSummary() {
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Match Result Card with Gradient */}
-        <LinearGradient
-          colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
-          style={styles.resultCard}
-        >
-          <View style={styles.resultBadge}>
-            <Text style={styles.resultText}>Result</Text>
+        <View style={styles.resultCardContainer}>
+          {/* Win Badge */}
+          <View style={styles.winBadge}>
+            <View style={styles.winBadgeContent}>
+              <View style={styles.checkIcon} />
+              <Text style={styles.winText}>Win</Text>
+            </View>
           </View>
           
-          <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
-          
-          <View style={styles.fencerInfo}>
-            <View style={styles.fencerLeft}>
-              <View style={styles.fencerAvatar} />
-              <Text style={styles.fencerName}>{fencer1Name}</Text>
+          <LinearGradient
+            colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
+            style={styles.resultCard}
+          >
+            {/* Player 1 - Left */}
+            <View style={styles.playerLeft}>
+              <View style={styles.playerAvatar} />
+              <Text style={styles.playerName}>{fencer1Name}</Text>
             </View>
             
-            <View style={styles.fencerRight}>
-              <View style={styles.fencerAvatar} />
-              <Text style={styles.fencerName}>{fencer2Name}</Text>
+            {/* Center Content */}
+            <View style={styles.centerContent}>
+              <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
+              <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
+              <View style={styles.trainingBadge}>
+                <Text style={styles.trainingText}>Training</Text>
+              </View>
             </View>
-          </View>
-
-          {/* Winner Badge */}
-          {winner !== 'Tied' && (
-            <View style={styles.winnerBadge}>
-              <Ionicons name="trophy" size={20} color="white" />
-              <Text style={styles.winnerText}>{winner} wins by {scoreDiff} point{scoreDiff !== 1 ? 's' : ''}</Text>
+            
+            {/* Player 2 - Right */}
+            <View style={styles.playerRight}>
+              <View style={styles.playerAvatar} />
+              <Text style={styles.playerName}>{fencer2Name}</Text>
             </View>
-          )}
-        </LinearGradient>
+          </LinearGradient>
+        </View>
 
         {/* Two Column Layout for Meta and Touches */}
         <View style={styles.twoColumnContainer}>
@@ -366,79 +371,124 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  resultCard: {
-    margin: 16,
-    padding: 20,
-    borderRadius: 20,
-    alignItems: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
+  resultCardContainer: {
+    position: 'relative',
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 20,
   },
-  resultBadge: {
+  winBadge: {
+    position: 'absolute',
+    top: -12,
+    left: '50%',
+    transform: [{ translateX: -37.5 }], // 75px / 2
+    zIndex: 10,
     backgroundColor: '#4D4159',
     borderWidth: 2,
     borderColor: '#D1A3F0',
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    marginBottom: 16,
+    width: 75,
+    height: 34,
   },
-  resultText: {
+  winBadgeContent: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 7,
+  },
+  checkIcon: {
+    width: 14,
+    height: 14,
+    backgroundColor: 'white',
+    borderRadius: 2,
+  },
+  winText: {
     fontFamily: 'Articulat CF',
     fontSize: 16,
-    fontWeight: '700',
-    color: 'white',
-  },
-  scoreText: {
-    fontFamily: 'Articulat CF',
-    fontSize: 30,
     fontWeight: '600',
-    color: 'white',
-    marginBottom: 20,
+    lineHeight: 22,
+    color: '#FFFFFF',
   },
-  fencerInfo: {
+  resultCard: {
+    width: 358,
+    height: 160,
+    borderRadius: 20,
+    shadowColor: 'rgba(108, 92, 231, 0.04)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 30,
+    elevation: 8,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 20,
+    paddingHorizontal: 20,
   },
-  fencerLeft: {
+  playerLeft: {
     alignItems: 'center',
+    width: 60,
+    height: 89,
   },
-  fencerRight: {
+  playerRight: {
     alignItems: 'center',
+    width: 60,
+    height: 89,
   },
-  fencerAvatar: {
+  playerAvatar: {
     width: 60,
     height: 60,
     borderRadius: 30,
     backgroundColor: '#343434',
     marginBottom: 8,
   },
-  fencerName: {
+  playerName: {
     fontFamily: 'Articulat CF',
     fontSize: 16,
     fontWeight: '600',
-    color: 'white',
+    lineHeight: 22,
+    color: '#FFFFFF',
     textAlign: 'center',
   },
-  winnerBadge: {
-    flexDirection: 'row',
+  centerContent: {
     alignItems: 'center',
-    backgroundColor: '#345042',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
+    flex: 1,
+    paddingHorizontal: 20,
   },
-  winnerText: {
+  scoreText: {
+    fontFamily: 'Articulat CF',
+    fontSize: 30,
+    fontWeight: '600',
+    lineHeight: 41,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  durationText: {
     fontFamily: 'Articulat CF',
     fontSize: 14,
     fontWeight: '500',
-    color: 'white',
+    lineHeight: 19,
+    color: '#9D9D9D',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  trainingBadge: {
+    backgroundColor: '#625971',
+    borderRadius: 60,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    width: 67,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trainingText: {
+    fontFamily: 'Articulat CF',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 16,
+    color: '#FFFFFF',
   },
   twoColumnContainer: {
     flexDirection: 'row',
