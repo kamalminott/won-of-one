@@ -65,11 +65,14 @@ export default function NeutralMatchSummary() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading match summary...</Text>
-        </View>
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <SafeAreaView style={styles.container}>
+          <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+            <Text style={styles.loadingText}>Loading match summary...</Text>
+          </View>
+        </SafeAreaView>
+      </>
     );
   }
 
@@ -86,11 +89,11 @@ export default function NeutralMatchSummary() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#171717" />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => router.back()}
@@ -184,8 +187,8 @@ export default function NeutralMatchSummary() {
                 period2: { user: 0, opponent: 0 },
                 period3: { user: 0, opponent: 0 }
               }}
-              userLabel={fencer1Name}
-              opponentLabel={fencer2Name}
+              userLabel={fencer1Name as string}
+              opponentLabel={fencer2Name as string}
             />
           </View>
         </View>
@@ -200,8 +203,8 @@ export default function NeutralMatchSummary() {
             }}
             userScore={aliceScoreNum}
             opponentScore={bobScoreNum}
-            userLabel={fencer1Name}
-            opponentLabel={fencer2Name}
+            userLabel={fencer1Name as string}
+            opponentLabel={fencer2Name as string}
           />
         </View>
 
@@ -311,7 +314,7 @@ export default function NeutralMatchSummary() {
           </View>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
     </>
   );
 }
@@ -338,7 +341,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     backgroundColor: '#212121',
   },
   backButton: {
