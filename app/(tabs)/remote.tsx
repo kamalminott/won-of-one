@@ -817,23 +817,44 @@ export default function RemoteScreen() {
 
       console.log('Match completion process finished');
       
-      // 4. Navigate to match summary with match data
-      router.push({
-        pathname: '/match-summary',
-        params: {
-          matchId: currentMatchPeriod.match_id,
-          remoteId: remoteSession.remote_id,
-          // Pass current match state for display
-          aliceScore: aliceScore.toString(),
-          bobScore: bobScore.toString(),
-          aliceCards: JSON.stringify(aliceCards),
-          bobCards: JSON.stringify(bobCards),
-          matchDuration: matchDuration.toString(),
-          result: result || '',
-          fencer1Name: fencerNames.alice,
-          fencer2Name: fencerNames.bob,
-        }
-      });
+      // 4. Navigate to appropriate match summary based on user toggle
+      if (user?.id && showUserProfile) {
+        // User is registered AND toggle is on - go to regular match summary
+        router.push({
+          pathname: '/match-summary',
+          params: {
+            matchId: currentMatchPeriod.match_id,
+            remoteId: remoteSession.remote_id,
+            // Pass current match state for display
+            aliceScore: aliceScore.toString(),
+            bobScore: bobScore.toString(),
+            aliceCards: JSON.stringify(aliceCards),
+            bobCards: JSON.stringify(bobCards),
+            matchDuration: matchDuration.toString(),
+            result: result || '',
+            fencer1Name: fencerNames.alice,
+            fencer2Name: fencerNames.bob,
+          }
+        });
+      } else {
+        // User toggle is off OR no registered user - go to neutral match summary
+        router.push({
+          pathname: '/neutral-match-summary',
+          params: {
+            matchId: currentMatchPeriod.match_id,
+            remoteId: remoteSession.remote_id,
+            // Pass current match state for display
+            aliceScore: aliceScore.toString(),
+            bobScore: bobScore.toString(),
+            aliceCards: JSON.stringify(aliceCards),
+            bobCards: JSON.stringify(bobCards),
+            matchDuration: matchDuration.toString(),
+            result: result || '',
+            fencer1Name: fencerNames.alice,
+            fencer2Name: fencerNames.bob,
+          }
+        });
+      }
 
       // 5. Reset the remote to clean state after completion
       // The match data is now saved in the database and accessible elsewhere
