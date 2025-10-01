@@ -1,8 +1,8 @@
 import {
-    AppUser, DiaryEntry, Drill, Equipment,
-    FencingRemote, Goal, Match,
-    MatchApproval, MatchEvent,
-    SimpleGoal, SimpleMatch
+  AppUser, DiaryEntry, Drill, Equipment,
+  FencingRemote, Goal, Match,
+  MatchApproval, MatchEvent,
+  SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -284,46 +284,25 @@ $$;
     }
   },
 
-  // Calculate score progression data for chart
+  // Calculate score progression data for chart (for user vs opponent matches)
   async calculateScoreProgression(matchId: string, userName: string, remoteId?: string): Promise<{
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }> {
     try {
-      console.log('📈 Calculating score progression for match:', matchId, 'user:', userName);
+      console.log('📈 Calculating score progression for USER vs OPPONENT match:', matchId, 'user:', userName);
       
-      // 1. Get all match events ordered by timestamp (same logic as best run)
-      let matchEvents = null;
-      
-      // First try to get events by match_id
-      const { data: eventsByMatchId, error: matchIdError } = await supabase
+      // 1. Get all match events ordered by match_time_elapsed (the stored time when hit was scored)
+      const { data: matchEvents, error: eventsError } = await supabase
         .from('match_event')
-        .select('*')
+        .select('scoring_user_name, match_time_elapsed')
         .eq('match_id', matchId)
-        .order('timestamp', { ascending: true });
+        .not('match_time_elapsed', 'is', null) // Only events with stored time
+        .order('match_time_elapsed', { ascending: true });
       
-      if (matchIdError) {
-        console.error('Error fetching match events by match_id for score progression:', matchIdError);
-      } else if (eventsByMatchId && eventsByMatchId.length > 0) {
-        matchEvents = eventsByMatchId;
-        console.log('Found', matchEvents.length, 'match events by match_id for score progression');
-      } else {
-        // If no events found by match_id, try to find events by fencing_remote_id
-        if (remoteId) {
-          console.log('Trying to find events by fencing_remote_id for score progression:', remoteId);
-          const { data: eventsByRemoteId, error: remoteIdError } = await supabase
-            .from('match_event')
-            .select('*')
-            .eq('fencing_remote_id', remoteId)
-            .order('timestamp', { ascending: true });
-          
-          if (remoteIdError) {
-            console.error('Error fetching match events by fencing_remote_id for score progression:', remoteIdError);
-          } else if (eventsByRemoteId && eventsByRemoteId.length > 0) {
-            matchEvents = eventsByRemoteId;
-            console.log('Found', matchEvents.length, 'match events by fencing_remote_id for score progression');
-          }
-        }
+      if (eventsError) {
+        console.error('Error fetching match events for score progression:', eventsError);
+        return { userData: [], opponentData: [] };
       }
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -331,125 +310,69 @@ $$;
         return { userData: [], opponentData: [] };
       }
 
-      // 2. Get match start time from match_period
-      const { data: matchPeriods, error: periodsError } = await supabase
-        .from('match_period')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('period_number', { ascending: true });
-
-      let matchStartTime: Date;
-      if (periodsError || !matchPeriods || matchPeriods.length === 0) {
-        console.log('No match periods found, using first event as match start');
-        matchStartTime = new Date(matchEvents[0].timestamp);
-      } else {
-        // Use the match period start time as the official match start
-        // This is when the user clicked "Play" and the match timer started
-        matchStartTime = new Date(matchPeriods[0].start_time);
-        console.log('📈 Using match period start time as match start:', matchStartTime.toISOString());
-      }
-
-      console.log('📈 Match start time:', matchStartTime.toISOString());
-      console.log('📈 Processing', matchEvents.length, 'events for score progression');
-
-      // 3. Get final match scores to ensure accuracy
+      // 2. Get match data to determine user vs opponent
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('final_score, touches_against, is_complete, bout_length_s')
+        .select('fencer_1_name, fencer_2_name')
         .eq('match_id', matchId)
         .single();
 
-      if (matchError) {
-        console.error('Error fetching match data:', matchError);
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for score progression:', matchError);
+        return { userData: [], opponentData: [] };
       }
 
-      // 4. Calculate score progression for both user and opponent
-      const userScoreProgression: {x: string, y: number}[] = [];
-      const opponentScoreProgression: {x: string, y: number}[] = [];
+      console.log('📈 USER vs OPPONENT - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
+      console.log('📈 USER vs OPPONENT - Match events found:', matchEvents.length);
+
+      // 3. Process events using stored match_time_elapsed
+      const userData: {x: string, y: number}[] = [];
+      const opponentData: {x: string, y: number}[] = [];
+      
       let userScore = 0;
       let opponentScore = 0;
 
-      // Get the authoritative final scores
-      const finalUserScore = matchData?.final_score || 0;
-      const finalOpponentScore = matchData?.touches_against || 0;
-      
-      console.log('📈 Using authoritative final scores:', finalUserScore, '-', finalOpponentScore);
-
-      // Calculate actual match duration from the match data
-      const actualMatchDuration = matchData?.bout_length_s || 0;
-      console.log('📈 Actual match duration from database:', actualMatchDuration, 'seconds');
-      
-      // Use actual event timestamps relative to match start (not proportional distribution)
-      console.log('📈 CHART TIME CALCULATION - Using actual timestamps:');
-      console.log('📈 Match start time (period):', matchStartTime.toISOString());
-      console.log('📈 Actual match duration:', actualMatchDuration, 'seconds');
-      
-      // Use stored match_time_elapsed for accurate X-axis labels
-      console.log('📈 CHART TIME CALCULATION - Using stored match_time_elapsed:');
-      console.log('📈 Match events with stored times:', matchEvents.map(e => ({ 
-        scorer: e.scoring_user_name, 
-        match_time_elapsed: e.match_time_elapsed 
-      })));
-      
-      for (let i = 0; i < matchEvents.length; i++) {
-        const event = matchEvents[i];
-        
-        // Use the stored match_time_elapsed for accurate timing
-        let displaySeconds = event.match_time_elapsed || 0;
-        
-        // Handle pre-match scores (negative or zero times)
-        if (displaySeconds < 0) {
-          displaySeconds = 0; // Show as 0:00 on the chart
-        }
-        
-        // Cap the time at the actual match duration to avoid showing events beyond match end
-        const matchDurationSeconds = actualMatchDuration || 180;
-        if (displaySeconds > matchDurationSeconds) {
-          displaySeconds = matchDurationSeconds;
-        }
+      for (const event of matchEvents) {
+        const displaySeconds = event.match_time_elapsed || 0;
         
         // Convert to MM:SS format
         const minutes = Math.floor(displaySeconds / 60);
         const seconds = displaySeconds % 60;
-        const timeString = `(${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')})`;
-
-        console.log(`📈 Processing event ${i + 1}/${matchEvents.length}: ${event.scoring_user_name} at ${timeString} (stored match_time_elapsed: ${event.match_time_elapsed}s, display: ${displaySeconds}s)`);
+        const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
         if (event.scoring_user_name === userName) {
-          // Only increment if we haven't reached the final user score
-          if (userScore < finalUserScore) {
-            userScore++;
-            userScoreProgression.push({
-              x: timeString,
-              y: userScore
-            });
-            console.log(`📈 User score progression: ${timeString} -> Score ${userScore}`);
-          } else {
-            console.log(`📈 User score reached final (${finalUserScore}), skipping event at ${timeString}`);
-          }
-        } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
-          // Only increment if we haven't reached the final opponent score
-          if (opponentScore < finalOpponentScore) {
-            opponentScore++;
-            opponentScoreProgression.push({
-              x: timeString,
-              y: opponentScore
-            });
-            console.log(`📈 Opponent score progression: ${timeString} -> Score ${opponentScore}`);
-          } else {
-            console.log(`📈 Opponent score reached final (${finalOpponentScore}), skipping event at ${timeString}`);
-          }
+          // User scored (exact match with userName parameter)
+          userScore++;
+          const dataPoint = { x: timeString, y: userScore };
+          userData.push(dataPoint);
+        } else if (event.scoring_user_name === matchData.fencer_1_name && matchData.fencer_1_name !== userName) {
+          // Fencer 1 scored, but they're not the current user (name changed scenario)
+          userScore++;
+          const dataPoint = { x: timeString, y: userScore };
+          userData.push(dataPoint);
+        } else if (event.scoring_user_name === matchData.fencer_2_name) {
+          // Fencer 2 scored (opponent)
+          opponentScore++;
+          const dataPoint = { x: timeString, y: opponentScore };
+          opponentData.push(dataPoint);
+        } else {
+          // Handle cases where scoring_user_name doesn't match any known fencer names
+          // This happens when fencer names changed between match creation and completion
+          // For now, treat any unmatched scorer as opponent (this matches the "Touches by Period" logic)
+          opponentScore++;
+          const dataPoint = { x: timeString, y: opponentScore };
+          opponentData.push(dataPoint);
         }
       }
       
 
-      console.log('📈 User score progression calculated:', userScoreProgression);
-      console.log('📈 Opponent score progression calculated:', opponentScoreProgression);
-      console.log('📈 Final calculated scores:', userScore, '-', opponentScore);
-      console.log('📈 CHART FINAL TIMES - User events:', userScoreProgression.map(p => p.x));
-      console.log('📈 CHART FINAL TIMES - Opponent events:', opponentScoreProgression.map(p => p.x));
-      
-      return { userData: userScoreProgression, opponentData: opponentScoreProgression };
+      console.log('📈 Final USER score progression:', userData);
+      console.log('📈 Final OPPONENT score progression:', opponentData);
+
+      return {
+        userData,
+        opponentData
+      };
     } catch (error) {
       console.error('Error calculating score progression:', error);
       return { userData: [], opponentData: [] };
@@ -822,6 +745,89 @@ $$;
     } catch (error) {
       console.error('Error in deleteMatch:', error);
       return false;
+    }
+  },
+
+  // Calculate score progression data for anonymous matches (no user/opponent concept)
+  async calculateAnonymousScoreProgression(matchId: string): Promise<{
+    fencer1Data: {x: string, y: number}[],
+    fencer2Data: {x: string, y: number}[]
+  }> {
+    try {
+      console.log('📈 Calculating ANONYMOUS score progression for match:', matchId);
+      
+      // 1. Get all match events ordered by match_time_elapsed (the stored time when hit was scored)
+      const { data: matchEvents, error: eventsError } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .not('match_time_elapsed', 'is', null) // Only events with stored time
+        .order('match_time_elapsed', { ascending: true });
+      
+      if (eventsError) {
+        console.error('Error fetching match events for anonymous score progression:', eventsError);
+        return { fencer1Data: [], fencer2Data: [] };
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        console.log('No match events found for anonymous score progression calculation');
+        return { fencer1Data: [], fencer2Data: [] };
+      }
+
+      // 2. Get match data to get fencer names
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for anonymous score progression:', matchError);
+        return { fencer1Data: [], fencer2Data: [] };
+      }
+
+      console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
+      console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
+
+      // 3. Process events using stored match_time_elapsed
+      const fencer1Data: {x: string, y: number}[] = [];
+      const fencer2Data: {x: string, y: number}[] = [];
+      
+      let fencer1Score = 0;
+      let fencer2Score = 0;
+
+      for (const event of matchEvents) {
+        const displaySeconds = event.match_time_elapsed || 0;
+        
+        // Convert to MM:SS format
+        const minutes = Math.floor(displaySeconds / 60);
+        const seconds = displaySeconds % 60;
+        const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+        if (event.scoring_user_name === matchData.fencer_1_name) {
+          // Fencer 1 scored
+          fencer1Score++;
+          const dataPoint = { x: timeString, y: fencer1Score };
+          fencer1Data.push(dataPoint);
+        } else if (event.scoring_user_name === matchData.fencer_2_name) {
+          // Fencer 2 scored
+          fencer2Score++;
+          const dataPoint = { x: timeString, y: fencer2Score };
+          fencer2Data.push(dataPoint);
+        } else {
+        }
+      }
+
+      console.log('📈 Final fencer 1 score progression:', fencer1Data);
+      console.log('📈 Final fencer 2 score progression:', fencer2Data);
+
+      return {
+        fencer1Data,
+        fencer2Data
+      };
+    } catch (error) {
+      console.error('Error calculating anonymous score progression:', error);
+      return { fencer1Data: [], fencer2Data: [] };
     }
   },
 };
