@@ -173,19 +173,21 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       
       // Convert legacy format directly to chart data, preserving actual Y values
       const userSeries: ScoreSeries = scoreProgression.userData.map(point => {
-        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
+        // Handle time format like "00:08" or "(8:00)" 
+        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
         const [minutes, seconds] = timeStr.split(':').map(Number);
         const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
         console.log(`📊 Converting user point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
-        return { x: totalSeconds, y: point.y }; // Use seconds instead of decimal minutes
+        return { x: totalSeconds, y: point.y };
       });
       
       const oppSeries: ScoreSeries = scoreProgression.opponentData.map(point => {
-        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses
+        // Handle time format like "00:08" or "(8:00)"
+        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
         const [minutes, seconds] = timeStr.split(':').map(Number);
         const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
         console.log(`📊 Converting opponent point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
-        return { x: totalSeconds, y: point.y }; // Use seconds instead of decimal minutes
+        return { x: totalSeconds, y: point.y };
       });
       
       // Calculate gap series
@@ -234,7 +236,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       marginHorizontal: width * 0.04,
       left: 0,
       right: 0,
-      overflow: 'hidden',
+      overflow: 'visible',
     },
     title: {
       fontSize: Math.round(width * 0.035),
@@ -247,7 +249,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     chartWrapper: {
       alignItems: 'center',
       justifyContent: 'center',
-      overflow: 'hidden',
+      overflow: 'visible',
       width: '100%',
     },
     legend: {
@@ -417,7 +419,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
           style: {
             borderRadius: 16,
-            paddingLeft: 10 // Increased padding to ensure y-axis labels are visible
+            paddingLeft: 30 // Increased padding to ensure y-axis labels are visible
           },
           propsForDots: {
             r: "4",
@@ -458,7 +460,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           >
             <RNChartKit
               data={chartData_kit}
-              width={isScrollable ? scrollableChartWidth : width * 0.85}
+              width={isScrollable ? scrollableChartWidth : width * 0.8}
               height={chartHeight - 40}
               chartConfig={chartConfig}
               bezier={false}
@@ -480,7 +482,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         );
 
         return (
-          <View style={{ height: chartHeight, width: width * 1, overflow: 'visible', marginLeft: 0, paddingLeft: width * 0.02 }}>
+          <View style={{ height: chartHeight, width: width * 1, overflow: 'visible', marginLeft: 0, paddingLeft: width * 0.05 }}>
             {isScrollable ? (
               <ScrollView 
                 horizontal 

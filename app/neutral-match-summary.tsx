@@ -1,6 +1,7 @@
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,6 +18,19 @@ export default function NeutralMatchSummary() {
   
   const [matchData, setMatchData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [touchesByPeriod, setTouchesByPeriod] = useState<{
+    period1: { user: number; opponent: number };
+    period2: { user: number; opponent: number };
+    period3: { user: number; opponent: number };
+  }>({
+    period1: { user: 0, opponent: 0 },
+    period2: { user: 0, opponent: 0 },
+    period3: { user: 0, opponent: 0 }
+  });
+  const [scoreProgression, setScoreProgression] = useState<{
+    userData: {x: string, y: number}[],
+    opponentData: {x: string, y: number}[]
+  }>({ userData: [], opponentData: [] });
 
   // Extract match data from params
   const {
@@ -36,6 +50,164 @@ export default function NeutralMatchSummary() {
         if (matchId) {
           const data = await matchService.getMatchById(matchId as string);
           setMatchData(data);
+          
+          // Fetch actual period scores from match_period table
+          try {
+            const { data: matchPeriods, error: periodsError } = await supabase
+              .from('match_period')
+              .select('period_number, fencer_1_score, fencer_2_score')
+              .eq('match_id', matchId as string)
+              .order('period_number', { ascending: true });
+
+            if (periodsError) {
+              console.error('Error fetching match periods:', periodsError);
+              throw periodsError;
+            }
+
+            if (matchPeriods && matchPeriods.length > 0) {
+              console.log('📊 Found match periods:', matchPeriods);
+              
+              // Initialize with zeros
+              const touchesByPeriodData = {
+                period1: { user: 0, opponent: 0 },
+                period2: { user: 0, opponent: 0 },
+                period3: { user: 0, opponent: 0 }
+              };
+
+              // Fill in actual period scores
+              matchPeriods.forEach(period => {
+                const periodNum = period.period_number || 1;
+                if (periodNum === 1) {
+                  touchesByPeriodData.period1.user = period.fencer_1_score || 0;
+                  touchesByPeriodData.period1.opponent = period.fencer_2_score || 0;
+                } else if (periodNum === 2) {
+                  touchesByPeriodData.period2.user = period.fencer_1_score || 0;
+                  touchesByPeriodData.period2.opponent = period.fencer_2_score || 0;
+                } else if (periodNum === 3) {
+                  touchesByPeriodData.period3.user = period.fencer_1_score || 0;
+                  touchesByPeriodData.period3.opponent = period.fencer_2_score || 0;
+                }
+              });
+
+              console.log('📊 Using actual period scores from database:', touchesByPeriodData);
+              setTouchesByPeriod(touchesByPeriodData);
+              
+              // Also fetch score progression data
+              if (data && data.fencer_1_name) {
+                try {
+                  const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
+                    matchId as string
+                  );
+                  console.log('📈 Calculated anonymous score progression from database:', calculatedScoreProgression);
+                  
+                  // Check if we got meaningful data for both players
+                  const hasFencer1Data = calculatedScoreProgression.fencer1Data.length > 0;
+                  const hasFencer2Data = calculatedScoreProgression.fencer2Data.length > 0;
+                  
+                  console.log('📈 DATA VALIDATION:', {
+                    hasFencer1Data,
+                    hasFencer2Data,
+                    fencer1DataLength: calculatedScoreProgression.fencer1Data.length,
+                    fencer2DataLength: calculatedScoreProgression.fencer2Data.length
+                  });
+                  
+                  if (hasFencer1Data && hasFencer2Data) {
+                    console.log('📈 Using real anonymous score progression data from database');
+                    // Convert to the format expected by the chart component
+                    const scoreProgression = {
+                      userData: calculatedScoreProgression.fencer1Data,
+                      opponentData: calculatedScoreProgression.fencer2Data
+                    };
+                    setScoreProgression(scoreProgression);
+                  } else {
+                    console.log('📈 Anonymous score progression data incomplete, using real data where available');
+                    // Use the real data we have and create simple fallback for missing data
+                    const aliceScoreNum = parseInt(aliceScore as string) || 0;
+                    const bobScoreNum = parseInt(bobScore as string) || 0;
+                    const matchDurationNum = parseInt(matchDuration as string) || 1;
+                    
+                    let finalFencer1Data = calculatedScoreProgression.fencer1Data;
+                    let finalFencer2Data = calculatedScoreProgression.fencer2Data;
+                    
+                    // If fencer 1 data is missing, create simple fallback
+                    if (!hasFencer1Data && aliceScoreNum > 0) {
+                      const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
+                      finalFencer1Data = [
+                        { x: "0:00", y: 0 },
+                        { x: finalTime, y: aliceScoreNum }
+                      ];
+                    }
+                    
+                    // If fencer 2 data is missing, create simple fallback
+                    if (!hasFencer2Data && bobScoreNum > 0) {
+                      const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
+                      finalFencer2Data = [
+                        { x: "0:00", y: 0 },
+                        { x: finalTime, y: bobScoreNum }
+                      ];
+                    }
+                    
+                    const mixedScoreProgression = {
+                      userData: finalFencer1Data,
+                      opponentData: finalFencer2Data
+                    };
+                    
+                    console.log('📈 Using mixed anonymous score progression (real + fallback):', mixedScoreProgression);
+                    setScoreProgression(mixedScoreProgression);
+                  }
+                } catch (error) {
+                  console.error('Error calculating score progression:', error);
+                  
+                  // Create simple fallback score progression from final scores
+                  const aliceScoreNum = parseInt(aliceScore as string) || 0;
+                  const bobScoreNum = parseInt(bobScore as string) || 0;
+                  const matchDurationNum = parseInt(matchDuration as string) || 1;
+                  
+                  const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
+                  
+                  const fallbackScoreProgression = {
+                    userData: [
+                      { x: "0:00", y: 0 },
+                      { x: finalTime, y: aliceScoreNum }
+                    ],
+                    opponentData: [
+                      { x: "0:00", y: 0 },
+                      { x: finalTime, y: bobScoreNum }
+                    ]
+                  };
+                  
+                  console.log('📈 ERROR: Simple fallback score progression:', fallbackScoreProgression);
+                  setScoreProgression(fallbackScoreProgression);
+                }
+              }
+            } else {
+              console.log('📊 No match periods found, using final scores as fallback');
+              // Fallback to final scores if no period data
+              const aliceScoreNum = parseInt(aliceScore as string) || 0;
+              const bobScoreNum = parseInt(bobScore as string) || 0;
+              
+              const touchesByPeriodData = {
+                period1: { user: aliceScoreNum, opponent: bobScoreNum },
+                period2: { user: 0, opponent: 0 },
+                period3: { user: 0, opponent: 0 }
+              };
+              
+              setTouchesByPeriod(touchesByPeriodData);
+            }
+          } catch (error) {
+            console.error('Error fetching period data:', error);
+            // Fallback to final scores
+            const aliceScoreNum = parseInt(aliceScore as string) || 0;
+            const bobScoreNum = parseInt(bobScore as string) || 0;
+            
+            const touchesByPeriodData = {
+              period1: { user: aliceScoreNum, opponent: bobScoreNum },
+              period2: { user: 0, opponent: 0 },
+              period3: { user: 0, opponent: 0 }
+            };
+            
+            setTouchesByPeriod(touchesByPeriodData);
+          }
         }
         setLoading(false);
       } catch (error) {
@@ -109,41 +281,45 @@ export default function NeutralMatchSummary() {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Match Result Card with Gradient */}
+        {/* Match Result Card with Gradient Border */}
         <View style={styles.resultCardContainer}>
           {/* Win Badge */}
           <View style={styles.winBadge}>
-            <View style={styles.winBadgeContent}>
-              <View style={styles.checkIcon} />
-              <Text style={styles.winText}>Win</Text>
-            </View>
+            <Text style={styles.winText}>Result</Text>
           </View>
           
-          <LinearGradient
-            colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
-            style={styles.resultCard}
-          >
-            {/* Player 1 - Left */}
-            <View style={styles.playerLeft}>
-              <View style={styles.playerAvatar} />
-              <Text style={styles.playerName}>{fencer1Name}</Text>
-            </View>
-            
-            {/* Center Content */}
-            <View style={styles.centerContent}>
-              <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
-              <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
-              <View style={styles.trainingBadge}>
-                <Text style={styles.trainingText}>Training</Text>
+          {/* Card with Gradient Border */}
+          <View style={styles.resultCardBorder}>
+            <LinearGradient
+              colors={['#D2A3F0', '#989DFA']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.resultCardGradientBorder}
+            >
+              <View style={styles.resultCard}>
+                {/* Left Player */}
+                <View style={styles.leftPlayerContainer}>
+                  <View style={styles.playerAvatar} />
+                  <Text style={styles.playerName}>{fencer1Name}</Text>
+                </View>
+
+                {/* Right Player */}
+                <View style={styles.rightPlayerContainer}>
+                  <View style={styles.playerAvatar} />
+                  <Text style={styles.playerName}>{fencer2Name}</Text>
+                </View>
+
+                {/* Score Container */}
+                <View style={styles.scoreContainer}>
+                  <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
+                  <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
+                  <View style={styles.matchTypeBadge}>
+                    <Text style={styles.matchTypeText}>Training</Text>
+                  </View>
+                </View>
               </View>
-            </View>
-            
-            {/* Player 2 - Right */}
-            <View style={styles.playerRight}>
-              <View style={styles.playerAvatar} />
-              <Text style={styles.playerName}>{fencer2Name}</Text>
-            </View>
-          </LinearGradient>
+            </LinearGradient>
+          </View>
         </View>
 
         {/* Two Column Layout for Meta and Touches */}
@@ -187,11 +363,8 @@ export default function NeutralMatchSummary() {
           <View style={styles.touchesChartCard}>
             <Text style={styles.chartTitle}>Touches by Period</Text>
             <TouchesByPeriodChart 
-              touchesByPeriod={{
-                period1: { user: 0, opponent: 0 },
-                period2: { user: 0, opponent: 0 },
-                period3: { user: 0, opponent: 0 }
-              }}
+              title=""
+              touchesByPeriod={touchesByPeriod}
               userLabel={fencer1Name as string}
               opponentLabel={fencer2Name as string}
             />
@@ -202,10 +375,8 @@ export default function NeutralMatchSummary() {
         <View style={styles.scoreProgressionCard}>
           <Text style={styles.chartTitle}>Score Progression</Text>
           <ScoreProgressionChart 
-            scoreProgression={{
-              userData: [],
-              opponentData: []
-            }}
+            title=""
+            scoreProgression={scoreProgression}
             userScore={aliceScoreNum}
             opponentScore={bobScoreNum}
             userLabel={fencer1Name as string}
@@ -372,37 +543,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   resultCardContainer: {
-    position: 'relative',
-    marginHorizontal: 16,
-    marginTop: 16,
+    marginHorizontal: 0,
+    marginTop: 20,
     marginBottom: 20,
+    position: 'relative',
   },
   winBadge: {
     position: 'absolute',
-    top: -12,
+    top: -10,
     left: '50%',
-    transform: [{ translateX: -37.5 }], // 75px / 2
+    marginLeft: -37.5,
     zIndex: 10,
     backgroundColor: '#4D4159',
     borderWidth: 2,
     borderColor: '#D1A3F0',
     borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     width: 75,
     height: 34,
   },
-  winBadgeContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 7,
-  },
-  checkIcon: {
-    width: 14,
-    height: 14,
-    backgroundColor: 'white',
-    borderRadius: 2,
+  winIcon: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 7,
+    lineHeight: 22,
+    marginTop: -2,
   },
   winText: {
     fontFamily: 'Articulat CF',
@@ -410,30 +580,47 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 22,
     color: '#FFFFFF',
+    marginTop: -2,
+  },
+  resultCardBorder: {
+    width: '92%',
+    height: 160,
+    borderRadius: 24,
+    padding: 5,
+    alignSelf: 'center',
+  },
+  resultCardGradientBorder: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   resultCard: {
-    width: 358,
-    height: 160,
+    flex: 1,
+    margin: 5,
     borderRadius: 20,
-    shadowColor: 'rgba(108, 92, 231, 0.04)',
+    backgroundColor: 'rgba(77, 65, 89, 1)',
+    shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
+    shadowOpacity: 0.04,
     shadowRadius: 30,
     elevation: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    position: 'relative',
   },
-  playerLeft: {
-    alignItems: 'center',
+  leftPlayerContainer: {
+    position: 'absolute',
     width: 60,
     height: 89,
-  },
-  playerRight: {
+    left: 20,
+    top: 32,
     alignItems: 'center',
+  },
+  rightPlayerContainer: {
+    position: 'absolute',
     width: 60,
     height: 89,
+    right: 20,
+    top: 32,
+    alignItems: 'center',
   },
   playerAvatar: {
     width: 60,
@@ -443,58 +630,72 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   playerName: {
-    fontFamily: 'Articulat CF',
+    position: 'absolute',
+    width: 60,
+    height: 22,
+    left: 0,
+    top: 68,
     fontSize: 16,
     fontWeight: '600',
-    lineHeight: 22,
-    color: '#FFFFFF',
+    color: 'white',
     textAlign: 'center',
   },
-  centerContent: {
+  scoreContainer: {
+    position: 'absolute',
+    width: 150,
+    height: 95,
+    left: '50%',
+    marginLeft: -75,
+    top: 32,
     alignItems: 'center',
-    flex: 1,
-    paddingHorizontal: 20,
   },
   scoreText: {
-    fontFamily: 'Articulat CF',
+    position: 'absolute',
+    width: 80,
+    height: 41,
+    left: 35,
+    top: 0,
     fontSize: 30,
     fontWeight: '600',
-    lineHeight: 41,
-    color: '#FFFFFF',
+    color: 'white',
     textAlign: 'center',
-    marginBottom: 4,
   },
   durationText: {
-    fontFamily: 'Articulat CF',
+    position: 'absolute',
+    width: 150,
+    height: 19,
+    left: 0,
+    top: 44,
     fontSize: 14,
     fontWeight: '500',
-    lineHeight: 19,
     color: '#9D9D9D',
     textAlign: 'center',
-    marginBottom: 8,
   },
-  trainingBadge: {
+  matchTypeBadge: {
+    position: 'absolute',
+    width: 80,
+    height: 24,
+    left: 35,
+    top: 71,
     backgroundColor: '#625971',
     borderRadius: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 4,
-    width: 67,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  trainingText: {
-    fontFamily: 'Articulat CF',
+  matchTypeText: {
     fontSize: 12,
     fontWeight: '500',
-    lineHeight: 16,
-    color: '#FFFFFF',
+    color: 'white',
+    textAlign: 'center',
   },
   twoColumnContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
     marginBottom: 20,
-    gap: 16,
+    gap: 8,
   },
   metaCard: {
     flex: 1,
@@ -512,12 +713,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: 28,
   },
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   metaIcon: {
     width: 46,
@@ -526,14 +727,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#393939',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 12,
+    marginLeft: -12,
   },
   metaContent: {
     flex: 1,
   },
   metaValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '500',
     color: 'white',
     marginBottom: 4,

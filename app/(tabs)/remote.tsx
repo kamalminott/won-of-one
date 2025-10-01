@@ -106,21 +106,42 @@ export default function RemoteScreen() {
           resumePromptShown: resumePromptShownRef.current
         });
         
-        if (!cancelled && hasNavigatedAwayRef.current && !resumePromptShownRef.current) {
-          console.log('🎯 Showing resume prompt');
-          resumePromptShownRef.current = true;
-          // force the prompt
-          await loadPersistedMatchState({ forcePrompt: true });
+        if (!cancelled && hasNavigatedAwayRef.current && !resumePromptShownRef.current && !isActivelyUsingAppRef.current) {
+          // Check if there's actually a saved match state worth resuming
+          const savedState = await AsyncStorage.getItem('ongoing_match_state');
+          if (savedState) {
+            const matchState = JSON.parse(savedState);
+            const hasActiveMatch = matchState.aliceScore > 0 || matchState.bobScore > 0 || matchState.currentPeriod > 1;
+            
+            if (hasActiveMatch) {
+              console.log('🎯 Showing resume prompt - active match found');
+              resumePromptShownRef.current = true;
+              // force the prompt
+              await loadPersistedMatchState({ forcePrompt: true });
+            } else {
+              console.log('🎯 No active match to resume - clearing flag');
+              setHasNavigatedAway(false);
+            }
+          } else {
+            console.log('🎯 No saved state - clearing flag');
+            setHasNavigatedAway(false);
+          }
         } else {
           console.log('🎯 Skipping resume prompt - conditions not met');
+          // Reset navigation flag when screen gains focus normally
+          if (hasNavigatedAwayRef.current) {
+            setHasNavigatedAway(false);
+          }
         }
       };
 
       run();
 
       return () => {
-        // mark we left, persist and pause
-        setHasNavigatedAway(true);
+        // Only mark as navigated away if we're not actively using the app
+        if (!isActivelyUsingAppRef.current) {
+          setHasNavigatedAway(true);
+        }
         // don't await in cleanup
         saveMatchState();
         if (isPlaying) pauseTimer();
@@ -202,6 +223,21 @@ export default function RemoteScreen() {
         totalPausedTime,
         savedAt: new Date().toISOString()
       };
+      
+      // Log what's being saved in match state
+      console.log('💾 SAVING MATCH STATE:', {
+        aliceScore,
+        bobScore,
+        currentPeriod,
+        fencerNames,
+        matchStartTime: matchStartTime?.toISOString(),
+        lastEventTime: lastEventTime?.toISOString(),
+        totalPausedTime,
+        matchId: currentMatchPeriod?.match_id
+      });
+      
+      // Note: Individual scoring events with timing are stored in match_event table, not in match state
+      console.log('💾 NOTE: Individual scoring events are stored in database (match_event table), not in match state');
 
       await AsyncStorage.setItem('ongoing_match_state', JSON.stringify(matchState));
       console.log('💾 Match state saved:', matchState);
@@ -338,6 +374,7 @@ export default function RemoteScreen() {
       setAliceScore(matchState.aliceScore || 0);
       setBobScore(matchState.bobScore || 0);
       setIsPlaying(false); // Always start paused when resuming
+      setIsCompletingMatch(false); // Always reset completion flag when restoring
       setMatchTime(matchState.matchTime || 180);
       setPeriod1Time(matchState.period1Time || 0);
       setPeriod2Time(matchState.period2Time || 0);
@@ -401,6 +438,8 @@ export default function RemoteScreen() {
     setAliceScore(0);
     setBobScore(0);
     setIsPlaying(false);
+    setIsCompletingMatch(false);
+    isActivelyUsingAppRef.current = false; // Reset active usage flag
     setMatchTime(180);
     setPeriod1Time(0);
     setPeriod2Time(0);
@@ -572,18 +611,52 @@ export default function RemoteScreen() {
     }
     // If user toggle is off, score_diff remains null
 
-    // Calculate actual match timer time using the match timer's elapsed time
-    // matchTime is the total match duration (180s), timeRemaining is what's left
-    const matchTimeElapsed = matchTime - timeRemaining;
+    // Calculate actual match time elapsed (excluding paused time)
+    const totalElapsed = now.getTime() - (matchStartTime?.getTime() || now.getTime());
+    const actualMatchTimeMs = totalElapsed - totalPausedTime;
     
-    console.log('⏱️ Capturing match time for event:', {
-      matchTime,
-      timeRemaining,
-      matchTimeElapsed,
-      matchStartTime: matchStartTime?.toISOString(),
-      totalPausedTime
-    });
+    // Use the actual match timer time instead of wall clock time
+    // matchTime is the total match duration (e.g., 180 seconds)
+    // timeRemaining is how much time is left on the timer
+    // So elapsed time = matchTime - timeRemaining
+    const matchTimeElapsed = Math.max(0, matchTime - timeRemaining);
     
+    
+    // Display the time elapsed that will be used for x-axis
+    const minutes = Math.floor(matchTimeElapsed / 60);
+    const seconds = matchTimeElapsed % 60;
+    const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    console.log(`🕐 TIME ELAPSED FOR X-AXIS: ${timeString} (${matchTimeElapsed} seconds)`);
+    
+    // Determine the actual scorer name - use the names that will be stored in fencer_1_name/fencer_2_name
+    const fencer1Name = showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice;
+    const fencer2Name = showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob;
+    
+    // Determine who actually scored
+    let scoringUserName;
+    if (showUserProfile) {
+      // User vs opponent mode: use scorer parameter
+      scoringUserName = scorer === 'user' ? fencer1Name : fencer2Name;
+    } else {
+      // Anonymous mode: use which score actually changed to determine actual fencer
+      // Check if Alice score changed (newAliceScore is defined) or Bob score changed (newBobScore is defined)
+      if (newAliceScore !== undefined) {
+        scoringUserName = fencerNames.alice; // Alice scored
+      } else if (newBobScore !== undefined) {
+        scoringUserName = fencerNames.bob; // Bob scored
+      } else {
+        // Fallback - shouldn't happen
+        scoringUserName = fencerNames.alice;
+      }
+    }
+    
+    
+    // Display the complete scoring event information
+    console.log(`🎯 SCORING EVENT: ${scoringUserName} scored at ${timeString} (${matchTimeElapsed}s elapsed)`);
+    console.log(`🎯 SCORING DEBUG: scorer="${scorer}", showUserProfile=${showUserProfile}, toggleCardPosition="${toggleCardPosition}"`);
+    console.log(`🎯 SCORING DEBUG: fencer1Name="${fencer1Name}", fencer2Name="${fencer2Name}"`);
+    console.log(`🎯 SCORING DEBUG: newAliceScore=${newAliceScore}, newBobScore=${newBobScore}, fencerNames.alice="${fencerNames.alice}", fencerNames.bob="${fencerNames.bob}"`);
+
     const eventData = {
       match_id: currentMatchPeriod?.match_id || null, // Add match_id to link event to match
       fencing_remote_id: remoteSession.remote_id,
@@ -591,11 +664,9 @@ export default function RemoteScreen() {
       event_time: now.toISOString(),
       event_type: "touch",
       scoring_user_id: scorer === 'user' ? user?.id : null,
-      scoring_user_name: scorer === 'user' 
-        ? userDisplayName  // User always scores as themselves when user toggle is on
-        : (showUserProfile && toggleCardPosition === 'left' ? fencerNames.bob : fencerNames.alice), // Opponent is the other fencer
-      fencer_1_name: showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice,
-      fencer_2_name: showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob,
+      scoring_user_name: scoringUserName, // Use the determined scorer name
+      fencer_1_name: fencer1Name,
+      fencer_2_name: fencer2Name,
       card_given: cardGiven || null, // Only tracks actual cards: 'yellow', 'red', or null
       score_diff: scoreDiff,
       seconds_since_last_event: secondsSinceLastEvent,
@@ -759,23 +830,77 @@ export default function RemoteScreen() {
       }
 
       // Calculate period-based data
-      // When user toggle is off, use Alice as the "user" for data structure consistency
-      const effectiveUserName = showUserProfile ? userDisplayName : fencerNames.alice;
-      const touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, effectiveUserName, undefined, finalScore, touchesAgainst);
-      
-      // Calculate period number (count non-zero periods)
-      const periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
-        .filter(period => period.user > 0 || period.opponent > 0).length;
-      
-      // Calculate score per period (user only)
-      const scoreSpp = periodNumber > 0 ? finalScore / periodNumber : 0;
-      
-      // Structure score by period data
-      const scoreByPeriod = {
-        period1: { user: touchesByPeriod.period1.user, opponent: touchesByPeriod.period1.opponent },
-        period2: { user: touchesByPeriod.period2.user, opponent: touchesByPeriod.period2.opponent },
-        period3: { user: touchesByPeriod.period3.user, opponent: touchesByPeriod.period3.opponent }
-      };
+      let touchesByPeriod;
+      let periodNumber;
+      let scoreSpp;
+      let scoreByPeriod;
+
+      if (user?.id && showUserProfile) {
+        // User match - use existing logic
+        const effectiveUserName = userDisplayName;
+        touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, effectiveUserName, undefined, finalScore, touchesAgainst);
+        
+        // Calculate period number (count non-zero periods)
+        periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
+          .filter(period => period.user > 0 || period.opponent > 0).length;
+        
+        // Calculate score per period (user only)
+        scoreSpp = periodNumber > 0 ? finalScore / periodNumber : 0;
+        
+        // Structure score by period data
+        scoreByPeriod = {
+          period1: { user: touchesByPeriod.period1.user, opponent: touchesByPeriod.period1.opponent },
+          period2: { user: touchesByPeriod.period2.user, opponent: touchesByPeriod.period2.opponent },
+          period3: { user: touchesByPeriod.period3.user, opponent: touchesByPeriod.period3.opponent }
+        };
+      } else {
+        // Anonymous match - use match_period data directly
+        console.log('📊 Anonymous match - using match_period data directly');
+        
+        // Get the actual match period data
+        const { data: matchPeriods } = await supabase
+          .from('match_period')
+          .select('fencer_1_score, fencer_2_score, period_number')
+          .eq('match_id', currentMatchPeriod.match_id)
+          .order('period_number', { ascending: true });
+
+        if (matchPeriods && matchPeriods.length > 0) {
+          const period = matchPeriods[0]; // Use first period
+          
+          // For anonymous matches, both fencers are equal participants
+          periodNumber = 1; // All touches in first period for now
+          scoreSpp = (period.fencer_1_score + period.fencer_2_score) / periodNumber;
+          
+          // Structure score by period data using actual fencer scores
+          scoreByPeriod = {
+            period1: { user: period.fencer_1_score, opponent: period.fencer_2_score },
+            period2: { user: 0, opponent: 0 },
+            period3: { user: 0, opponent: 0 }
+          };
+          
+          touchesByPeriod = {
+            period1: { user: period.fencer_1_score, opponent: period.fencer_2_score },
+            period2: { user: 0, opponent: 0 },
+            period3: { user: 0, opponent: 0 }
+          };
+        } else {
+          // Fallback if no period data
+          periodNumber = 1;
+          scoreSpp = (aliceScore + bobScore) / periodNumber;
+          
+          scoreByPeriod = {
+            period1: { user: aliceScore, opponent: bobScore },
+            period2: { user: 0, opponent: 0 },
+            period3: { user: 0, opponent: 0 }
+          };
+          
+          touchesByPeriod = {
+            period1: { user: aliceScore, opponent: bobScore },
+            period2: { user: 0, opponent: 0 },
+            period3: { user: 0, opponent: 0 }
+          };
+        }
+      }
 
       console.log('📊 Period calculations:', {
         periodNumber,
@@ -928,6 +1053,8 @@ export default function RemoteScreen() {
 
   // Prevent double prompts
   const resumePromptShownRef = useRef(false);
+  // Track if user is actively using the app (to prevent resume prompts during normal interaction)
+  const isActivelyUsingAppRef = useRef(false);
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
   const [aliceYellowCards, setAliceYellowCards] = useState<number[]>([]); // Track Alice's yellow cards
   const [bobYellowCards, setBobYellowCards] = useState<number[]>([]); // Track Bob's yellow cards
@@ -1082,6 +1209,7 @@ export default function RemoteScreen() {
   const incrementAliceScore = async () => {
     setIsChangingScore(true);
     setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
     
     // Prevent score changes if match is being completed
     if (isCompletingMatch) {
@@ -1114,7 +1242,7 @@ export default function RemoteScreen() {
           
           // Create match event for the score - determine if Alice is user or opponent
           const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-          await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
+          await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, undefined);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -1144,7 +1272,7 @@ export default function RemoteScreen() {
       
       // Create match event for the score - determine if Alice is user or opponent
       const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, undefined);
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -1173,7 +1301,7 @@ export default function RemoteScreen() {
       
       // Create match event for the score - determine if Alice is user or opponent
       const aliceIsUser = showUserProfile && toggleCardPosition === 'left';
-      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, bobScore);
+      await createMatchEvent(aliceIsUser ? 'user' : 'opponent', undefined, newAliceScore, undefined);
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -1185,6 +1313,7 @@ export default function RemoteScreen() {
   const decrementAliceScore = () => {
     setIsChangingScore(true);
     setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
     
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
@@ -1233,6 +1362,7 @@ export default function RemoteScreen() {
   const incrementBobScore = async () => {
     setIsChangingScore(true);
     setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
     
     // Prevent score changes if match is being completed
     if (isCompletingMatch) {
@@ -1265,7 +1395,7 @@ export default function RemoteScreen() {
           
           // Create match event for the score - determine if Bob is user or opponent
           const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-          await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
+          await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, undefined, newBobScore);
           
           // Pause timer if it's currently running
           if (isPlaying) {
@@ -1295,7 +1425,7 @@ export default function RemoteScreen() {
       
       // Create match event for the score - determine if Bob is user or opponent
       const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, undefined, newBobScore);
       
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -1324,7 +1454,7 @@ export default function RemoteScreen() {
       
       // Create match event for the score - determine if Bob is user or opponent
       const bobIsUser = showUserProfile && toggleCardPosition === 'right';
-      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, aliceScore, newBobScore);
+      await createMatchEvent(bobIsUser ? 'user' : 'opponent', undefined, undefined, newBobScore);
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -1336,6 +1466,7 @@ export default function RemoteScreen() {
   const decrementBobScore = () => {
     setIsChangingScore(true);
     setHasNavigatedAway(false); // Reset navigation flag when changing scores
+    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
     
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
@@ -1394,6 +1525,12 @@ export default function RemoteScreen() {
         setMatchStartTime(new Date());
         console.log('🕐 Match start time set to:', new Date().toISOString());
       }
+      
+      // Ensure match completion flag is reset when starting
+      setIsCompletingMatch(false);
+      
+      // Mark that user is actively using the app
+      isActivelyUsingAppRef.current = true;
       
       // Create remote session when starting timer
       const session = await ensureRemoteSession();
@@ -1506,6 +1643,7 @@ export default function RemoteScreen() {
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
       setIsCompletingMatch(false); // Reset the completion flag
+      isActivelyUsingAppRef.current = false; // Reset active usage flag
       console.log('🔍 Current state:', { 
         currentMatchPeriod: currentMatchPeriod ? 'exists' : 'null',
         remoteSession: remoteSession ? 'exists' : 'null',

@@ -117,11 +117,11 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
     chartContainer: {
       alignItems: 'flex-start',
       justifyContent: 'center',
-      overflow: 'hidden',
+      overflow: 'visible',
       width: '100%',
       paddingBottom: height * 0.01,
       paddingLeft: 0,
-      marginLeft: -(width * 0.03),
+      marginLeft: -(width * 0.07),
     },
     legend: {
       flexDirection: 'row',
@@ -178,28 +178,28 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
 
   const data = touchesByPeriod || defaultData;
 
-  // Chart data for touches by period - only show periods with touches
+  // Chart data for touches by period - only show periods with touches, but always show both bars
   const chartData = [];
   
-  // Only add periods that have touches (user or opponent)
+  // Only add periods that have touches (user or opponent), but always show both bars for that period
   if (data.period1.user > 0 || data.period1.opponent > 0) {
     chartData.push(
       { value: data.period1.user, label: 'P1', frontColor: '#10B981' },
-      { value: data.period1.opponent, label: 'P1', frontColor: '#EF4444' }
+      { value: data.period1.opponent > 0 ? data.period1.opponent : 0.1, label: 'P1', frontColor: '#EF4444' }
     );
   }
   
   if (data.period2.user > 0 || data.period2.opponent > 0) {
     chartData.push(
       { value: data.period2.user, label: 'P2', frontColor: '#10B981' },
-      { value: data.period2.opponent, label: 'P2', frontColor: '#EF4444' }
+      { value: data.period2.opponent > 0 ? data.period2.opponent : 0.1, label: 'P2', frontColor: '#EF4444' }
     );
   }
   
   if (data.period3.user > 0 || data.period3.opponent > 0) {
     chartData.push(
       { value: data.period3.user, label: 'P3', frontColor: '#10B981' },
-      { value: data.period3.opponent, label: 'P3', frontColor: '#EF4444' }
+      { value: data.period3.opponent > 0 ? data.period3.opponent : 0.1, label: 'P3', frontColor: '#EF4444' }
     );
   }
 
@@ -214,7 +214,8 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   );
   
   // Set Y-axis maximum to the highest score, with a minimum of 1 for visibility
-  const yAxisMaxValue = Math.max(maxValue, 1);
+  // Ensure it's a whole number and round up to the next integer
+  const yAxisMaxValue = Math.max(Math.ceil(maxValue), 1);
 
   // Render tooltip
   const renderTooltip = () => {
@@ -249,12 +250,16 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
           hideRules
           xAxisColor="rgba(255, 255, 255, 0.3)"
           yAxisColor="rgba(255, 255, 255, 0.3)"
-          yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.02), marginRight: Math.round(width * 0.015) }}
+          yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025), marginRight: -(width * 0.02) }}
+          formatYLabel={(value) => Math.round(value).toString()}
           xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.02) }}
           barBorderRadius={Math.round(width * 0.008)}
           maxValue={yAxisMaxValue}
           yAxisSuffix=""
           noOfSections={Math.min(yAxisMaxValue, 5)}
+          showYAxisIndices={true}
+          yAxisIndicesColor="rgba(255, 255, 255, 0.3)"
+          yAxisIndicesWidth={1}
           onPress={(data: any, index: number) => handleBarPress(data, index)}
         />
       </View>
