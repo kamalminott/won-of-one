@@ -31,6 +31,20 @@ export default function NeutralMatchSummary() {
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }>({ userData: [], opponentData: [] });
+  const [leadChanges, setLeadChanges] = useState<number>(0);
+  const [timeLeading, setTimeLeading] = useState<{
+    fencer1: number;
+    fencer2: number;
+    tied: number;
+  }>({ fencer1: 0, fencer2: 0, tied: 100 });
+  const [bounceBackTimes, setBounceBackTimes] = useState<{
+    fencer1: number;
+    fencer2: number;
+  }>({ fencer1: 0, fencer2: 0 });
+  const [longestRuns, setLongestRuns] = useState<{
+    fencer1: number;
+    fencer2: number;
+  }>({ fencer1: 0, fencer2: 0 });
 
   // Extract match data from params
   const {
@@ -43,6 +57,290 @@ export default function NeutralMatchSummary() {
     fencer1Name,
     fencer2Name,
   } = params;
+
+  // Function to calculate longest runs from match events
+  const calculateLongestRuns = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for longest runs:', error);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      let fencer1CurrentRun = 0;
+      let fencer2CurrentRun = 0;
+      let fencer1LongestRun = 0;
+      let fencer2LongestRun = 0;
+
+      // Process events chronologically to find consecutive scoring streaks
+      for (const event of matchEvents) {
+        if (event.scoring_user_name === fencer1Name) {
+          // Fencer 1 scored - increment their run, reset fencer 2's run
+          fencer1CurrentRun++;
+          fencer2CurrentRun = 0;
+          
+          // Update longest run if current run is longer
+          if (fencer1CurrentRun > fencer1LongestRun) {
+            fencer1LongestRun = fencer1CurrentRun;
+          }
+        } else if (event.scoring_user_name === fencer2Name) {
+          // Fencer 2 scored - increment their run, reset fencer 1's run
+          fencer2CurrentRun++;
+          fencer1CurrentRun = 0;
+          
+          // Update longest run if current run is longer
+          if (fencer2CurrentRun > fencer2LongestRun) {
+            fencer2LongestRun = fencer2CurrentRun;
+          }
+        }
+      }
+
+      console.log('📊 Calculated longest runs:', {
+        fencer1: fencer1LongestRun,
+        fencer2: fencer2LongestRun,
+        totalEvents: matchEvents.length
+      });
+
+      return {
+        fencer1: fencer1LongestRun,
+        fencer2: fencer2LongestRun
+      };
+    } catch (error) {
+      console.error('Error calculating longest runs:', error);
+      return { fencer1: 0, fencer2: 0 };
+    }
+  };
+
+  // Function to calculate bounce back times from match events
+  const calculateBounceBackTimes = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for bounce back times:', error);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      if (!matchEvents || matchEvents.length < 2) {
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      const fencer1BounceBackTimes: number[] = [];
+      const fencer2BounceBackTimes: number[] = [];
+
+      // Track the last time each fencer was scored against
+      let lastFencer1ScoredAgainst: number | null = null;
+      let lastFencer2ScoredAgainst: number | null = null;
+
+      // Process events chronologically
+      for (const event of matchEvents) {
+        const currentTime = event.match_time_elapsed || 0;
+
+        if (event.scoring_user_name === fencer1Name) {
+          // Fencer 1 scored - check if fencer 2 was scored against recently
+          if (lastFencer2ScoredAgainst !== null) {
+            const bounceBackTime = currentTime - lastFencer2ScoredAgainst;
+            fencer2BounceBackTimes.push(bounceBackTime);
+          }
+          lastFencer2ScoredAgainst = currentTime;
+        } else if (event.scoring_user_name === fencer2Name) {
+          // Fencer 2 scored - check if fencer 1 was scored against recently
+          if (lastFencer1ScoredAgainst !== null) {
+            const bounceBackTime = currentTime - lastFencer1ScoredAgainst;
+            fencer1BounceBackTimes.push(bounceBackTime);
+          }
+          lastFencer1ScoredAgainst = currentTime;
+        }
+      }
+
+      // Calculate average bounce back times
+      const fencer1AvgBounceBack = fencer1BounceBackTimes.length > 0 
+        ? Math.round(fencer1BounceBackTimes.reduce((sum, time) => sum + time, 0) / fencer1BounceBackTimes.length)
+        : 0;
+      
+      const fencer2AvgBounceBack = fencer2BounceBackTimes.length > 0 
+        ? Math.round(fencer2BounceBackTimes.reduce((sum, time) => sum + time, 0) / fencer2BounceBackTimes.length)
+        : 0;
+
+      console.log('📊 Calculated bounce back times:', {
+        fencer1: fencer1AvgBounceBack,
+        fencer2: fencer2AvgBounceBack,
+        fencer1BounceBackTimes,
+        fencer2BounceBackTimes
+      });
+
+      return {
+        fencer1: fencer1AvgBounceBack,
+        fencer2: fencer2AvgBounceBack
+      };
+    } catch (error) {
+      console.error('Error calculating bounce back times:', error);
+      return { fencer1: 0, fencer2: 0 };
+    }
+  };
+
+  // Function to calculate time leading percentages from match events
+  const calculateTimeLeading = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for time leading:', error);
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      let aliceScore = 0;
+      let bobScore = 0;
+      let fencer1LeadingTime = 0;
+      let fencer2LeadingTime = 0;
+      let tiedTime = 0;
+      let lastTime = 0;
+
+      // Process each scoring event chronologically
+      for (let i = 0; i < matchEvents.length; i++) {
+        const event = matchEvents[i];
+        const currentTime = event.match_time_elapsed || 0;
+        const timeDiff = currentTime - lastTime;
+
+        // Determine who was leading during this time period
+        if (aliceScore > bobScore) {
+          fencer1LeadingTime += timeDiff;
+        } else if (bobScore > aliceScore) {
+          fencer2LeadingTime += timeDiff;
+        } else {
+          tiedTime += timeDiff;
+        }
+
+        // Update scores
+        if (event.scoring_user_name === fencer1Name) {
+          aliceScore++;
+        } else if (event.scoring_user_name === fencer2Name) {
+          bobScore++;
+        }
+
+        lastTime = currentTime;
+      }
+
+      // Handle time from last event to end of match
+      const matchDurationNum = parseInt(matchDuration as string) || 1;
+      const totalMatchTime = matchDurationNum * 60; // Convert to seconds
+      const remainingTime = totalMatchTime - lastTime;
+      
+      if (remainingTime > 0) {
+        if (aliceScore > bobScore) {
+          fencer1LeadingTime += remainingTime;
+        } else if (bobScore > aliceScore) {
+          fencer2LeadingTime += remainingTime;
+        } else {
+          tiedTime += remainingTime;
+        }
+      }
+
+      // Calculate percentages
+      const totalTime = fencer1LeadingTime + fencer2LeadingTime + tiedTime;
+      const fencer1Percentage = totalTime > 0 ? Math.round((fencer1LeadingTime / totalTime) * 100) : 0;
+      const fencer2Percentage = totalTime > 0 ? Math.round((fencer2LeadingTime / totalTime) * 100) : 0;
+      const tiedPercentage = 100 - fencer1Percentage - fencer2Percentage;
+
+      console.log('📊 Calculated time leading:', {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage,
+        totalTime,
+        fencer1LeadingTime,
+        fencer2LeadingTime,
+        tiedTime
+      });
+
+      return {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage
+      };
+    } catch (error) {
+      console.error('Error calculating time leading:', error);
+      return { fencer1: 0, fencer2: 0, tied: 100 };
+    }
+  };
+
+  // Function to calculate lead changes from match events
+  const calculateLeadChanges = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for lead changes:', error);
+        return 0;
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        return 0;
+      }
+
+      let leadChanges = 0;
+      let currentLeader: string | null = null;
+      let aliceScore = 0;
+      let bobScore = 0;
+
+      // Process each scoring event chronologically
+      for (const event of matchEvents) {
+        if (event.scoring_user_name === fencer1Name) {
+          aliceScore++;
+        } else if (event.scoring_user_name === fencer2Name) {
+          bobScore++;
+        }
+
+        // Check if lead has changed
+        let newLeader: string | null = null;
+        if (aliceScore > bobScore) {
+          newLeader = fencer1Name as string;
+        } else if (bobScore > aliceScore) {
+          newLeader = fencer2Name as string;
+        } else {
+          newLeader = null; // Tied
+        }
+
+        // If leader changed (and we're not at 0-0), count as lead change
+        if (newLeader !== currentLeader && (aliceScore > 0 || bobScore > 0)) {
+          if (currentLeader !== null) { // Don't count the first score as a lead change
+            leadChanges++;
+          }
+          currentLeader = newLeader;
+        }
+      }
+
+      console.log('📊 Calculated lead changes:', leadChanges);
+      return leadChanges;
+    } catch (error) {
+      console.error('Error calculating lead changes:', error);
+      return 0;
+    }
+  };
 
   useEffect(() => {
     const loadMatchData = async () => {
@@ -209,6 +507,26 @@ export default function NeutralMatchSummary() {
             setTouchesByPeriod(touchesByPeriodData);
           }
         }
+
+        // Calculate lead changes, time leading, bounce back times, and longest runs
+        if (matchId) {
+          try {
+            const calculatedLeadChanges = await calculateLeadChanges(matchId as string);
+            setLeadChanges(calculatedLeadChanges);
+            
+            const calculatedTimeLeading = await calculateTimeLeading(matchId as string);
+            setTimeLeading(calculatedTimeLeading);
+            
+            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string);
+            setBounceBackTimes(calculatedBounceBackTimes);
+            
+            const calculatedLongestRuns = await calculateLongestRuns(matchId as string);
+            setLongestRuns(calculatedLongestRuns);
+          } catch (error) {
+            console.error('Error calculating match statistics:', error);
+          }
+        }
+
         setLoading(false);
       } catch (error) {
         console.error('Error loading match data:', error);
@@ -313,8 +631,14 @@ export default function NeutralMatchSummary() {
                 <View style={styles.scoreContainer}>
                   <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
                   <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
-                  <View style={styles.matchTypeBadge}>
-                    <Text style={styles.matchTypeText}>Training</Text>
+                  <View style={styles.trophyPill}>
+                    <Ionicons name="trophy-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.trophyPillText}>
+                      {aliceScoreNum > bobScoreNum 
+                        ? `${fencer1Name} win by ${aliceScoreNum - bobScoreNum} point${aliceScoreNum - bobScoreNum !== 1 ? 's' : ''}`
+                        : `${fencer2Name} win by ${bobScoreNum - aliceScoreNum} point${bobScoreNum - aliceScoreNum !== 1 ? 's' : ''}`
+                      }
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -392,7 +716,7 @@ export default function NeutralMatchSummary() {
             <View style={styles.statContent}>
               <View style={styles.statItem}>
                 <View style={styles.statCircle}>
-                  <Text style={styles.statValue}>4</Text>
+                  <Text style={styles.statValue}>{leadChanges}</Text>
                 </View>
                 <Text style={styles.statLabel}>Total</Text>
               </View>
@@ -405,19 +729,19 @@ export default function NeutralMatchSummary() {
             <View style={styles.statContent}>
               <View style={styles.statItem}>
                 <View style={[styles.statCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.statValue}>65%</Text>
+                  <Text style={styles.statValue}>{timeLeading.fencer1}%</Text>
                 </View>
                 <Text style={styles.statLabel}>{fencer1Name}</Text>
               </View>
               <View style={styles.statItem}>
                 <View style={[styles.statCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.statValue}>25%</Text>
+                  <Text style={styles.statValue}>{timeLeading.fencer2}%</Text>
                 </View>
                 <Text style={styles.statLabel}>{fencer2Name}</Text>
               </View>
               <View style={styles.statItem}>
                 <View style={[styles.statCircle, { backgroundColor: 'white' }]}>
-                  <Text style={[styles.statValue, { color: '#171717' }]}>10%</Text>
+                  <Text style={[styles.statValue, { color: '#171717' }]}>{timeLeading.tied}%</Text>
                 </View>
                 <Text style={styles.statLabel}>Tied</Text>
               </View>
@@ -433,13 +757,13 @@ export default function NeutralMatchSummary() {
             <View style={styles.bounceBackContent}>
               <View style={styles.bounceBackItem}>
                 <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>10s</Text>
+                  <Text style={styles.bounceBackValue}>{bounceBackTimes.fencer1}s</Text>
                 </View>
                 <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
               </View>
               <View style={styles.bounceBackItem}>
                 <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>14s</Text>
+                  <Text style={styles.bounceBackValue}>{bounceBackTimes.fencer2}s</Text>
                 </View>
                 <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
               </View>
@@ -452,13 +776,13 @@ export default function NeutralMatchSummary() {
             <View style={styles.bounceBackContent}>
               <View style={styles.bounceBackItem}>
                 <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>3x</Text>
+                  <Text style={styles.bounceBackValue}>{longestRuns.fencer1}x</Text>
                 </View>
                 <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
               </View>
               <View style={styles.bounceBackItem}>
                 <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>2x</Text>
+                  <Text style={styles.bounceBackValue}>{longestRuns.fencer2}x</Text>
                 </View>
                 <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
               </View>
@@ -671,25 +995,25 @@ const styles = StyleSheet.create({
     color: '#9D9D9D',
     textAlign: 'center',
   },
-  matchTypeBadge: {
-    position: 'absolute',
-    width: 80,
-    height: 24,
-    left: 35,
-    top: 71,
+  trophyPill: {
+    width: 175,
+    height: 26,
     backgroundColor: '#625971',
     borderRadius: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    gap: 8,
+    alignSelf: 'center',
+    marginTop: 70,
   },
-  matchTypeText: {
-    fontSize: 12,
+  trophyPillText: {
+    fontSize: 14,
     fontWeight: '500',
-    color: 'white',
+    color: '#FFFFFF',
     textAlign: 'center',
+    fontFamily: 'System',
   },
   twoColumnContainer: {
     flexDirection: 'row',

@@ -1,17 +1,17 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Image,
-    PanResponder,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View
+  Animated,
+  Dimensions,
+  Image,
+  PanResponder,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
 } from 'react-native';
 
 interface CarouselItem {
@@ -66,8 +66,14 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
 }) => {
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isLayoutReady, setIsLayoutReady] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
+
+  // Ensure layout is ready before rendering
+  useLayoutEffect(() => {
+    setIsLayoutReady(true);
+  }, [width, height]);
 
   // Limit to maxItems maximum
   const displayItems = items.slice(0, maxItems);
@@ -363,10 +369,10 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       lineHeight: height * 0.02,
       textAlign: 'center',
       position: 'absolute',
-      left: '50%',
+      left: 0,
+      right: 0,
       top: height * 0.06,
-      width: width * 0.25,
-      transform: [{ translateX: -width * 0.125 }],
+      marginHorizontal: 'auto',
     },
     scoreGroup: {
       position: 'absolute',
@@ -518,81 +524,83 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       </View>
 
       {/* Carousel */}
-      <View {...panResponder.panHandlers}>
-        <Animated.View
-          style={[
-            styles.carouselContainer,
-            { transform: [{ translateX }] }
-          ]}
-        >
-          {customItemRenderer ? (
-            customItemRenderer(displayItems[currentIndex], currentIndex)
-          ) : (
-            <TouchableOpacity
-              key={displayItems[currentIndex]?.id}
-              style={styles.matchCard}
-              onPress={() => handleItemPress(displayItems[currentIndex])}
-            >
-              {/* Left Profile Container */}
-              <View style={styles.profileContainerLeft}>
-                <View style={styles.profileCircle}>
-                  {userProfileImage ? (
-                    <Image
-                      source={{ uri: userProfileImage }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        borderRadius: width * 0.05,
-                      }}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Text style={styles.profileInitial}>
-                      {userName?.charAt(0)?.toUpperCase() || 'Y'}
-                    </Text>
-                  )}
-                </View>
-                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                  {userName || 'You'}
-                </Text>
-              </View>
-              
-              {/* Right Profile Container */}
-              <View style={styles.profileContainerRight}>
-                <View style={styles.profileCircle}>
-                  <Text style={styles.profileInitial}>
-                    {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
+      {isLayoutReady && (
+        <View {...panResponder.panHandlers}>
+          <Animated.View
+            style={[
+              styles.carouselContainer,
+              { transform: [{ translateX }] }
+            ]}
+          >
+            {customItemRenderer ? (
+              customItemRenderer(displayItems[currentIndex], currentIndex)
+            ) : (
+              <TouchableOpacity
+                key={displayItems[currentIndex]?.id}
+                style={styles.matchCard}
+                onPress={() => handleItemPress(displayItems[currentIndex])}
+              >
+                {/* Left Profile Container */}
+                <View style={styles.profileContainerLeft}>
+                  <View style={styles.profileCircle}>
+                    {userProfileImage ? (
+                      <Image
+                        source={{ uri: userProfileImage }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: width * 0.05,
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.profileInitial}>
+                        {userName?.charAt(0)?.toUpperCase() || 'Y'}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                    {userName || 'You'}
                   </Text>
                 </View>
-                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                  {displayItems[currentIndex]?.opponentName}
-                </Text>
-              </View>
-              
-              {/* Score Group with Equal Spacing */}
-              <View style={styles.scoreGroup}>
-                <View style={styles.scoreContainer}>
-                  <View style={styles.scoreDotLeft} />
-                  <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                
+                {/* Right Profile Container */}
+                <View style={styles.profileContainerRight}>
+                  <View style={styles.profileCircle}>
+                    <Text style={styles.profileInitial}>
+                      {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
+                    </Text>
+                  </View>
+                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                    {displayItems[currentIndex]?.opponentName}
+                  </Text>
                 </View>
                 
-                <Text style={styles.dash}>-</Text>
-                
-                <View style={styles.scoreContainer}>
-                  <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
-                  <View style={styles.scoreDotRight} />
+                {/* Score Group with Equal Spacing */}
+                <View style={styles.scoreGroup}>
+                  <View style={styles.scoreContainer}>
+                    <View style={styles.scoreDotLeft} />
+                    <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                  </View>
+                  
+                  <Text style={styles.dash}>-</Text>
+                  
+                  <View style={styles.scoreContainer}>
+                    <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
+                    <View style={styles.scoreDotRight} />
+                  </View>
                 </View>
-              </View>
-              
-              {/* Date */}
-              <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-      </View>
+                
+                {/* Date */}
+                <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
+              </TouchableOpacity>
+            )}
+          </Animated.View>
+        </View>
+      )}
 
       {/* Dot Indicators */}
-      {showDots && displayItems.length > 1 && (
+      {showDots && displayItems.length > 1 && isLayoutReady && (
         <View style={styles.dotsContainer}>
           {displayItems.map((_, index) => (
             <View

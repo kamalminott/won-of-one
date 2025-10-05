@@ -353,20 +353,18 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         
         // Create user data array aligned with time points - ensure no duplicate Y values
         const userData = sortedTimePoints.map(time => {
-          // Find the last user score at or before this time point
-          const lastUserPoint = chartData.userSeries
-            .filter(p => p.x <= time)
-            .sort((a, b) => b.x - a.x)[0];
-          return lastUserPoint ? lastUserPoint.y : 0;
+          // Find the highest user score at or before this time point
+          const userPointsAtOrBefore = chartData.userSeries.filter(p => p.x <= time);
+          const maxUserScore = userPointsAtOrBefore.length > 0 ? Math.max(...userPointsAtOrBefore.map(p => p.y)) : 0;
+          return maxUserScore;
         });
         
         // Create opponent data array aligned with time points - ensure no duplicate Y values
         const opponentData = sortedTimePoints.map(time => {
-          // Find the last opponent score at or before this time point
-          const lastOppPoint = chartData.oppSeries
-            .filter(p => p.x <= time)
-            .sort((a, b) => b.x - a.x)[0];
-          return lastOppPoint ? lastOppPoint.y : 0;
+          // Find the highest opponent score at or before this time point
+          const oppPointsAtOrBefore = chartData.oppSeries.filter(p => p.x <= time);
+          const maxOppScore = oppPointsAtOrBefore.length > 0 ? Math.max(...oppPointsAtOrBefore.map(p => p.y)) : 0;
+          return maxOppScore;
         });
         
         // Use the original data without padding to prevent extending beyond X-axis
@@ -384,8 +382,10 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log('📊 Opponent Data:', opponentData);
         console.log('📊 User Data length:', userData.length);
         console.log('📊 Opponent Data length:', opponentData.length);
-        console.log('📊 Unique User Y values:', [...new Set(userData)]);
-        console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)]);
+        console.log('📊 Unique User Y values:', [...new Set(userData)].sort((a, b) => a - b));
+        console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)].sort((a, b) => a - b));
+        console.log('📊 User Y values (sorted):', userData);
+        console.log('📊 Opponent Y values (sorted):', opponentData);
         
         const chartData_kit = {
           labels: displayLabels,
