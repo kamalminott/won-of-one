@@ -1,3 +1,4 @@
+import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, TimeLeadingCard } from '@/components';
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
@@ -195,6 +196,9 @@ export default function NeutralMatchSummary() {
   // Function to calculate time leading percentages from match events
   const calculateTimeLeading = async (matchId: string) => {
     try {
+      console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
+      console.log('🔍 TIME LEADING DEBUG - Fencer names:', { fencer1Name, fencer2Name });
+      
       const { data: matchEvents, error } = await supabase
         .from('match_event')
         .select('scoring_user_name, match_time_elapsed')
@@ -206,7 +210,13 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
+      console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
+      if (matchEvents && matchEvents.length > 0) {
+        console.log('🔍 TIME LEADING DEBUG - Sample events:', matchEvents.slice(0, 3));
+      }
+
       if (!matchEvents || matchEvents.length === 0) {
+        console.log('🔍 TIME LEADING DEBUG - No events found, returning default values');
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
@@ -221,41 +231,43 @@ export default function NeutralMatchSummary() {
       for (let i = 0; i < matchEvents.length; i++) {
         const event = matchEvents[i];
         const currentTime = event.match_time_elapsed || 0;
+        
+        // Calculate time leading BEFORE this event (based on current scores)
         const timeDiff = currentTime - lastTime;
-
-        // Determine who was leading during this time period
+        
+        console.log(`🔍 TIME LEADING DEBUG - Event ${i}: scorer="${event.scoring_user_name}", time=${currentTime}`);
+        console.log(`🔍 TIME LEADING DEBUG - Before event: aliceScore=${aliceScore}, bobScore=${bobScore}, timeDiff=${timeDiff}`);
+        
+        // Determine who was leading during this time period (BEFORE the event)
         if (aliceScore > bobScore) {
           fencer1LeadingTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer1 was leading for ${timeDiff}s`);
         } else if (bobScore > aliceScore) {
           fencer2LeadingTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer2 was leading for ${timeDiff}s`);
         } else {
           tiedTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Tied for ${timeDiff}s`);
         }
 
-        // Update scores
+        // Update scores AFTER calculating time leading
         if (event.scoring_user_name === fencer1Name) {
           aliceScore++;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer1 scored! New aliceScore: ${aliceScore}`);
         } else if (event.scoring_user_name === fencer2Name) {
           bobScore++;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer2 scored! New bobScore: ${bobScore}`);
+        } else {
+          console.log(`🔍 TIME LEADING DEBUG - Unknown scorer: ${event.scoring_user_name}`);
         }
 
         lastTime = currentTime;
       }
 
-      // Handle time from last event to end of match
-      const matchDurationNum = parseInt(matchDuration as string) || 1;
-      const totalMatchTime = matchDurationNum * 60; // Convert to seconds
-      const remainingTime = totalMatchTime - lastTime;
-      
-      if (remainingTime > 0) {
-        if (aliceScore > bobScore) {
-          fencer1LeadingTime += remainingTime;
-        } else if (bobScore > aliceScore) {
-          fencer2LeadingTime += remainingTime;
-        } else {
-          tiedTime += remainingTime;
-        }
-      }
+      // Handle time from last event to actual match end (not remaining time)
+      // The match ended at the last event time, so no additional time should be added
+      console.log(`🔍 TIME LEADING DEBUG - Final calculation: match ended at ${lastTime}s, aliceScore=${aliceScore}, bobScore=${bobScore}`);
+      console.log(`🔍 TIME LEADING DEBUG - No additional time added - match ended at last event`);
 
       // Calculate percentages
       const totalTime = fencer1LeadingTime + fencer2LeadingTime + tiedTime;
@@ -270,7 +282,9 @@ export default function NeutralMatchSummary() {
         totalTime,
         fencer1LeadingTime,
         fencer2LeadingTime,
-        tiedTime
+        tiedTime,
+        finalAliceScore: aliceScore,
+        finalBobScore: bobScore
       });
 
       return {
@@ -515,6 +529,7 @@ export default function NeutralMatchSummary() {
             setLeadChanges(calculatedLeadChanges);
             
             const calculatedTimeLeading = await calculateTimeLeading(matchId as string);
+            console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
             setTimeLeading(calculatedTimeLeading);
             
             const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string);
@@ -552,6 +567,16 @@ export default function NeutralMatchSummary() {
     });
   };
 
+  // Debug logging
+  console.log('🔍 TIME LEADING DEBUG - Component render with timeLeading state:', timeLeading);
+  console.log('🔍 TIME LEADING DEBUG - Fencer names from params:', { fencer1Name, fencer2Name });
+  
+  // Temporary test values to verify UI is working
+  const testTimeLeading = {
+    fencer1: 45,
+    fencer2: 35,
+    tied: 20
+  };
 
   if (loading) {
     return (
@@ -711,83 +736,31 @@ export default function NeutralMatchSummary() {
         {/* Two Column Layout for Lead Changes and Time Leading */}
         <View style={styles.twoColumnContainer}>
           {/* Lead Changes Card */}
-          <View style={styles.statCard}>
-            <Text style={styles.statTitle}>Lead Changes</Text>
-            <View style={styles.statContent}>
-              <View style={styles.statItem}>
-                <View style={styles.statCircle}>
-                  <Text style={styles.statValue}>{leadChanges}</Text>
-                </View>
-                <Text style={styles.statLabel}>Total</Text>
-              </View>
-            </View>
-          </View>
+          <LeadChangesCard leadChanges={leadChanges} />
 
           {/* Time Leading Card */}
-          <View style={styles.statCard}>
-            <Text style={styles.statTitle}>Time Leading</Text>
-            <View style={styles.statContent}>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.statValue}>{timeLeading.fencer1}%</Text>
-                </View>
-                <Text style={styles.statLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.statValue}>{timeLeading.fencer2}%</Text>
-                </View>
-                <Text style={styles.statLabel}>{fencer2Name}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: 'white' }]}>
-                  <Text style={[styles.statValue, { color: '#171717' }]}>{timeLeading.tied}%</Text>
-                </View>
-                <Text style={styles.statLabel}>Tied</Text>
-              </View>
-            </View>
-          </View>
+          <TimeLeadingCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            timeLeading={timeLeading}
+          />
         </View>
 
         {/* Two Column Layout for Bounce Back and Longest Run */}
         <View style={styles.twoColumnContainer}>
           {/* Bounce Back Time Card */}
-          <View style={styles.bounceBackCard}>
-            <Text style={styles.statTitle}>Bounce Back Time</Text>
-            <View style={styles.bounceBackContent}>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>{bounceBackTimes.fencer1}s</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>{bounceBackTimes.fencer2}s</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
-              </View>
-            </View>
-          </View>
+          <BounceBackTimeCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            bounceBackTimes={bounceBackTimes}
+          />
 
           {/* Longest Run Card */}
-          <View style={styles.longestRunCard}>
-            <Text style={styles.statTitle}>Longest Run</Text>
-            <View style={styles.bounceBackContent}>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>{longestRuns.fencer1}x</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>{longestRuns.fencer2}x</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
-              </View>
-            </View>
-          </View>
+          <LongestRunCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            longestRuns={longestRuns}
+          />
         </View>
 
         {/* Cards Section */}
@@ -854,7 +827,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 20,
+    fontSize: width * 0.05,
     fontWeight: '700',
     color: 'white',
   },
@@ -892,19 +865,19 @@ const styles = StyleSheet.create({
   },
   winIcon: {
     color: 'white',
-    fontSize: 14,
+    fontSize: width * 0.035,
     fontWeight: '600',
-    marginRight: 7,
-    lineHeight: 22,
-    marginTop: -2,
+    marginRight: width * 0.0175,
+    lineHeight: width * 0.055,
+    marginTop: -width * 0.005,
   },
   winText: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '600',
-    lineHeight: 22,
+    lineHeight: width * 0.055,
     color: '#FFFFFF',
-    marginTop: -2,
+    marginTop: -width * 0.005,
   },
   resultCardBorder: {
     width: '92%',
@@ -959,7 +932,7 @@ const styles = StyleSheet.create({
     height: 22,
     left: 0,
     top: 68,
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
@@ -979,7 +952,7 @@ const styles = StyleSheet.create({
     height: 41,
     left: 35,
     top: 0,
-    fontSize: 30,
+    fontSize: width * 0.075,
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
@@ -990,7 +963,7 @@ const styles = StyleSheet.create({
     height: 19,
     left: 0,
     top: 44,
-    fontSize: 14,
+    fontSize: width * 0.035,
     fontWeight: '500',
     color: '#9D9D9D',
     textAlign: 'center',
@@ -1009,7 +982,7 @@ const styles = StyleSheet.create({
     marginTop: 70,
   },
   trophyPillText: {
-    fontSize: 14,
+    fontSize: width * 0.035,
     fontWeight: '500',
     color: '#FFFFFF',
     textAlign: 'center',
@@ -1034,10 +1007,10 @@ const styles = StyleSheet.create({
   },
   metaTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 28,
+    marginBottom: width * 0.07,
   },
   metaItem: {
     flexDirection: 'row',
@@ -1059,14 +1032,14 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 4,
+    marginBottom: width * 0.01,
   },
   metaLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },
@@ -1095,10 +1068,10 @@ const styles = StyleSheet.create({
   },
   chartTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 18,
+    fontSize: width * 0.045,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: width * 0.04,
   },
   statCard: {
     flex: 1,
@@ -1113,10 +1086,10 @@ const styles = StyleSheet.create({
   },
   statTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: width * 0.04,
   },
   statContent: {
     flexDirection: 'row',
@@ -1126,9 +1099,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#393939',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1136,13 +1109,13 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
   },
   statLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },
@@ -1185,13 +1158,13 @@ const styles = StyleSheet.create({
   },
   bounceBackValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 18,
+    fontSize: width * 0.045,
     fontWeight: '700',
     color: 'white',
   },
   bounceBackLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },

@@ -36,19 +36,23 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       marginTop: height * 0.02,
       marginBottom: height * 0.025,
       position: 'relative',
+      overflow: 'visible',
     },
     gradientContainer: {
       flex: 1,
       borderRadius: 20,
+      borderWidth: 2,
+      borderColor: '#D1A3F0',
       shadowColor: 'rgba(108, 92, 231, 0.04)',
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 1,
       shadowRadius: 30,
       elevation: 8,
+      overflow: 'visible',
     },
     winPill: {
       position: 'absolute',
-      top: -12, // Position to overlap the card
+      top: -17, // Half of pill height (34px / 2 = 17px) to make it exactly half inside/outside
       left: '50%',
       marginLeft: -37.5, // Half of pill width (75px / 2)
       width: 75,
@@ -160,7 +164,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       position: 'absolute',
       top:178, // Center between the numbers and labels
       width: 1,
-      height: 28,
+      height: 36,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
     },
     leftDivider: {
@@ -173,19 +177,28 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
 
   return (
     <View style={styles.container}>
+      {/* Win Pill */}
+      {match.outcome === 'victory' && (
+        <View style={styles.winPill}>
+          <Ionicons name="checkmark" size={14} color="#FFFFFF" style={styles.winPillIcon} />
+          <Text style={styles.winPillText}>Win</Text>
+        </View>
+      )}
+
+      {/* Loss Pill */}
+      {match.outcome === 'defeat' && (
+        <View style={styles.winPill}>
+          <Ionicons name="close" size={14} color="#FFFFFF" style={styles.winPillIcon} />
+          <Text style={styles.winPillText}>Loss</Text>
+        </View>
+      )}
+
       <LinearGradient
         colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={styles.gradientContainer}
       >
-        {/* Win Pill */}
-        {match.outcome === 'victory' && (
-          <View style={styles.winPill}>
-            <Ionicons name="checkmark" size={14} color="#FFFFFF" style={styles.winPillIcon} />
-            <Text style={styles.winPillText}>Win</Text>
-          </View>
-        )}
 
         {/* Left Player */}
         <View style={[styles.playerContainer, styles.leftPlayer]}>
@@ -194,7 +207,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
             style={styles.playerImage}
           />
           <Text style={styles.playerName}>
-            {match.userName || match.fencer1Name || 'Player 1'}
+            {match.userName ? match.userName.split(' ')[0] : match.fencer1Name ? match.fencer1Name.split(' ')[0] : 'Player 1'}
           </Text>
         </View>
 
@@ -205,7 +218,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
             style={styles.playerImage}
           />
           <Text style={styles.playerName}>
-            {match.opponent || match.fencer2Name || 'Player 2'}
+            {match.opponent ? match.opponent.split(' ')[0] : match.fencer2Name ? match.fencer2Name.split(' ')[0] : 'Player 2'}
           </Text>
         </View>
 
@@ -232,8 +245,15 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
           </View>
           
           <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>{match.bestRun}</Text>
-            <Text style={styles.statLabel}>Best Run</Text>
+            <Text style={styles.statNumber}>
+              {match.userScore > match.opponentScore 
+                ? `+${match.userScore - match.opponentScore}` 
+                : match.userScore < match.opponentScore 
+                  ? `-${match.opponentScore - match.userScore}` 
+                  : '0'
+              }
+            </Text>
+            <Text style={styles.statLabel}>Score Diff</Text>
           </View>
         </View>
 

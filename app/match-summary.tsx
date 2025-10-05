@@ -237,6 +237,7 @@ export default function MatchSummaryScreen() {
       flex: 1,
     },
     scrollContent: {
+      paddingTop: height * 0.02, // Add space for the pill to show
       paddingBottom: height * 0.05,
     },
     modalOverlay: {
