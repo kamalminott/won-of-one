@@ -3,16 +3,32 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View
+    Animated,
+    Dimensions,
+    Image,
+    PanResponder,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
+
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
 
 interface CarouselItem {
   id: string;
@@ -167,7 +183,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
         params: { 
           matchId: item.id,
           opponentName: item.opponentName,
-          opponentImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face', // Default opponent image
+          opponentImage: '', // No default image - will use initials fallback
           youScore: item.youScore.toString(),
           opponentScore: item.opponentScore.toString(),
           matchType: 'Competition', // Default match type for carousel items
@@ -288,16 +304,17 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       width: width * 0.1,
       height: width * 0.1,
       borderRadius: width * 0.05,
-      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      backgroundColor: '#393939',
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
       borderColor: '#FFFFFF',
     },
     profileInitial: {
-      color: 'white',
+      color: '#FFFFFF',
       fontSize: width * 0.04,
-      fontWeight: '700',
+      fontWeight: '500',
+      textAlign: 'center',
     },
     scoreInfo: {
       alignItems: 'center',
@@ -543,7 +560,11 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
                 {/* Left Profile Container */}
                 <View style={styles.profileContainerLeft}>
                   <View style={styles.profileCircle}>
-                    {userProfileImage ? (
+                    {userProfileImage && 
+                     userProfileImage !== 'https://via.placeholder.com/60x60' &&
+                     !userProfileImage.includes('example.com') &&
+                     !userProfileImage.includes('placeholder') &&
+                     (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
                       <Image
                         source={{ uri: userProfileImage }}
                         style={{
@@ -555,7 +576,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
                       />
                     ) : (
                       <Text style={styles.profileInitial}>
-                        {userName?.charAt(0)?.toUpperCase() || 'Y'}
+                        {getInitials(userName)}
                       </Text>
                     )}
                   </View>
@@ -568,7 +589,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
                 <View style={styles.profileContainerRight}>
                   <View style={styles.profileCircle}>
                     <Text style={styles.profileInitial}>
-                      {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
+                      {getInitials(displayItems[currentIndex]?.opponentName)}
                     </Text>
                   </View>
                   <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">

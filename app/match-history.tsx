@@ -58,7 +58,7 @@ export default function RecentMatchesScreen() {
   const convertToMatch = (simpleMatch: SimpleMatch): Match => ({
     id: simpleMatch.id,
     opponentName: simpleMatch.opponentName,
-    opponentImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face', // Default image
+    opponentImage: '', // No default image - will use initials fallback
     date: formatDate(simpleMatch.date),
     matchType: 'Competition', // Default to Competition, could be made dynamic
     outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',

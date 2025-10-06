@@ -567,6 +567,24 @@ export default function NeutralMatchSummary() {
     });
   };
 
+  // Helper function to get initials from a name
+  const getInitials = (name: string | undefined): string => {
+    if (!name || name.trim() === '') {
+      return '?';
+    }
+    
+    const trimmedName = name.trim();
+    const words = trimmedName.split(' ').filter(word => word.length > 0);
+    
+    if (words.length === 0) {
+      return '?';
+    } else if (words.length === 1) {
+      return words[0].charAt(0).toUpperCase();
+    } else {
+      return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+    }
+  };
+
   // Debug logging
   console.log('🔍 TIME LEADING DEBUG - Component render with timeLeading state:', timeLeading);
   console.log('🔍 TIME LEADING DEBUG - Fencer names from params:', { fencer1Name, fencer2Name });
@@ -642,13 +660,17 @@ export default function NeutralMatchSummary() {
               <View style={styles.resultCard}>
                 {/* Left Player */}
                 <View style={styles.leftPlayerContainer}>
-                  <View style={styles.playerAvatar} />
+                  <View style={styles.playerAvatar}>
+                    <Text style={styles.playerInitials}>{getInitials(fencer1Name as string)}</Text>
+                  </View>
                   <Text style={styles.playerName}>{fencer1Name}</Text>
                 </View>
 
                 {/* Right Player */}
                 <View style={styles.rightPlayerContainer}>
-                  <View style={styles.playerAvatar} />
+                  <View style={styles.playerAvatar}>
+                    <Text style={styles.playerInitials}>{getInitials(fencer2Name as string)}</Text>
+                  </View>
                   <Text style={styles.playerName}>{fencer2Name}</Text>
                 </View>
 
@@ -768,7 +790,9 @@ export default function NeutralMatchSummary() {
           <Text style={styles.cardsTitle}>Cards</Text>
           <View style={styles.cardsContent}>
             <View style={styles.cardItem}>
-              <View style={styles.cardAvatar} />
+              <View style={styles.cardAvatar}>
+                <Text style={styles.cardInitials}>{getInitials(fencer1Name as string)}</Text>
+              </View>
               <Text style={styles.cardName}>{fencer1Name}</Text>
             </View>
             
@@ -782,7 +806,9 @@ export default function NeutralMatchSummary() {
             
             <View style={styles.cardItem}>
               <Text style={styles.cardName}>{fencer2Name}</Text>
-              <View style={styles.cardAvatar} />
+              <View style={styles.cardAvatar}>
+                <Text style={styles.cardInitials}>{getInitials(fencer2Name as string)}</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -923,8 +949,18 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#343434',
+    backgroundColor: '#393939',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
     marginBottom: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playerInitials: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   playerName: {
     position: 'absolute',
@@ -1198,10 +1234,18 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#343434',
+    backgroundColor: '#393939',
     borderWidth: 1,
     borderColor: 'white',
     marginBottom: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardInitials: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   cardName: {
     fontFamily: 'Articulat CF',

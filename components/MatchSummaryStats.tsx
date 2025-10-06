@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 interface Match {
@@ -27,6 +27,92 @@ interface MatchSummaryStatsProps {
 
 export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, customStyle = {} }) => {
   const { width, height } = useWindowDimensions();
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+
+  // Debug the match data
+  console.log('🔍 MatchSummaryStats - Full match data:', {
+    userName: match.userName,
+    fencer1Name: match.fencer1Name,
+    opponent: match.opponent,
+    fencer2Name: match.fencer2Name,
+    userImage: match.userImage,
+    opponentImage: match.opponentImage
+  });
+
+  // Helper function to get initials from a name
+  const getInitials = (name: string | undefined): string => {
+    console.log('🔍 getInitials called with:', name);
+    
+    if (!name || name.trim() === '') {
+      console.log('🔍 No name provided, returning ?');
+      return '?';
+    }
+    
+    const trimmedName = name.trim();
+    const words = trimmedName.split(' ').filter(word => word.length > 0);
+    
+    console.log('🔍 Words found:', words);
+    
+    if (words.length === 0) {
+      return '?';
+    } else if (words.length === 1) {
+      const initial = words[0].charAt(0).toUpperCase();
+      console.log('🔍 Single word, returning:', initial);
+      return initial;
+    } else {
+      const initials = words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+      console.log('🔍 Multiple words, returning:', initials);
+      return initials;
+    }
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isUser: boolean = false) => {
+    const displayName = isUser 
+      ? (match.userName || match.fencer1Name || 'Player')
+      : (match.opponent || match.fencer2Name || 'Opponent');
+    
+    const initials = getInitials(displayName);
+    
+    // Only show image if it's a real image, not placeholder or example URLs
+    const isValidImage = imageUri && 
+      imageUri !== 'https://via.placeholder.com/60x60' && 
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'));
+    
+    console.log('🔍 Profile Image Debug:', {
+      isUser,
+      displayName,
+      initials,
+      imageUri,
+      isValidImage,
+      willShowInitials: !isValidImage
+    });
+    
+    if (isValidImage && !imageLoadErrors.has(imageUri)) {
+      console.log('🖼️ Attempting to load image:', imageUri);
+      return (
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.playerImage}
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error.nativeEvent.error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.playerImage, { backgroundColor: '#393939', borderWidth: 1, borderColor: '#FFFFFF' }]}>
+        <Text style={styles.initialsText}>{initials}</Text>
+      </View>
+    );
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -95,6 +181,17 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       width: 60,
       height: 60,
       borderRadius: 30,
+      backgroundColor: '#393939',
+      borderWidth: 1,
+      borderColor: '#FFFFFF',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    initialsText: {
+      color: '#FFFFFF',
+      fontSize: 32,
+      fontWeight: '500',
+      textAlign: 'center',
     },
     playerName: {
       position: 'absolute',
@@ -202,10 +299,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
 
         {/* Left Player */}
         <View style={[styles.playerContainer, styles.leftPlayer]}>
-          <Image
-            source={{ uri: match.userImage || 'https://via.placeholder.com/60x60' }}
-            style={styles.playerImage}
-          />
+          {renderProfileImage(match.userImage, match.userName || match.fencer1Name, true)}
           <Text style={styles.playerName}>
             {match.userName ? match.userName.split(' ')[0] : match.fencer1Name ? match.fencer1Name.split(' ')[0] : 'Player 1'}
           </Text>
@@ -213,10 +307,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
 
         {/* Right Player */}
         <View style={[styles.playerContainer, styles.rightPlayer]}>
-          <Image
-            source={{ uri: match.opponentImage || 'https://via.placeholder.com/60x60' }}
-            style={styles.playerImage}
-          />
+          {renderProfileImage(match.opponentImage, match.opponent || match.fencer2Name, false)}
           <Text style={styles.playerName}>
             {match.opponent ? match.opponent.split(' ')[0] : match.fencer2Name ? match.fencer2Name.split(' ')[0] : 'Player 2'}
           </Text>

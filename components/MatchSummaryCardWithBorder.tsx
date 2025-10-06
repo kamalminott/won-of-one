@@ -1,6 +1,22 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
 
 interface MatchSummaryCardProps {
   leftPlayerName: string;
@@ -28,6 +44,47 @@ export default function MatchSummaryCardWithBorder({
   style,
 }: MatchSummaryCardProps) {
   const { width, height } = useWindowDimensions();
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isLeftPlayer: boolean = true) => {
+    const initials = getInitials(name);
+    const imageStyle = isLeftPlayer ? styles.leftPlayerImage : styles.rightPlayerImage;
+    const initialsStyle = isLeftPlayer ? styles.leftPlayerInitials : styles.rightPlayerInitials;
+
+    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image
+          source={{ uri: imageUri }}
+          style={imageStyle}
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error.nativeEvent.error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[imageStyle, { backgroundColor: '#393939', justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={initialsStyle}>{initials}</Text>
+      </View>
+    );
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -131,6 +188,12 @@ export default function MatchSummaryCardWithBorder({
       borderWidth: 2,
       borderColor: 'white',
     },
+    leftPlayerInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     leftPlayerName: {
       position: 'absolute',
       width: width * 0.15, // Dynamic width
@@ -156,6 +219,12 @@ export default function MatchSummaryCardWithBorder({
       borderRadius: width * 0.075, // Half of width for perfect circle
       borderWidth: 2,
       borderColor: 'white',
+    },
+    rightPlayerInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
     },
     rightPlayerName: {
       position: 'absolute',
@@ -247,19 +316,13 @@ export default function MatchSummaryCardWithBorder({
           <View style={styles.matchSummaryCard}>
             {/* Left Player */}
             <View style={styles.leftPlayerContainer}>
-              <Image
-                source={{ uri: leftPlayerImage }}
-                style={styles.leftPlayerImage}
-              />
+              {renderProfileImage(leftPlayerImage, leftPlayerName, true)}
               <Text style={styles.leftPlayerName}>{leftPlayerName}</Text>
             </View>
 
             {/* Right Player */}
             <View style={styles.rightPlayerContainer}>
-              <Image
-                source={{ uri: rightPlayerImage }}
-                style={styles.rightPlayerImage}
-              />
+              {renderProfileImage(rightPlayerImage, rightPlayerName, false)}
               <Text style={styles.rightPlayerName}>{rightPlayerName}</Text>
             </View>
 

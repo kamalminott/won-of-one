@@ -1,10 +1,26 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
 import { WinPill } from './WinPill';
+
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
 
 interface Match {
   id: string;
@@ -27,6 +43,46 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   customStyle = {} 
 }) => {
   const { width, height } = useWindowDimensions();
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined) => {
+    const initials = getInitials(name);
+
+    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.profileImage}
+          contentFit="cover"
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.profileImage, { backgroundColor: '#393939', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFFFFF' }]}>
+        <Text style={styles.profileInitials}>{initials}</Text>
+      </View>
+    );
+  };
 
   const handleCardPress = () => {
     router.push({
@@ -64,6 +120,12 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       height: width * 0.12,
       borderRadius: width * 0.06,
       marginRight: width * 0.03,
+    },
+    profileInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.045,
+      fontWeight: '500',
+      textAlign: 'center',
     },
     opponentInfo: {
       flex: 1,
@@ -135,11 +197,7 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
     >
       {/* Opponent Info */}
       <View style={styles.matchHeader}>
-        <Image
-          source={{ uri: match.opponentImage }}
-          style={styles.profileImage}
-          contentFit="cover"
-        />
+        {renderProfileImage(match.opponentImage, match.opponentName)}
         <View style={styles.opponentInfo}>
           <Text style={styles.opponentName} numberOfLines={2} ellipsizeMode="tail">
             {match.opponentName}

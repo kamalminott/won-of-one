@@ -15,6 +15,22 @@ import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, Style
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
+
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -51,6 +67,7 @@ export default function RemoteScreen() {
     bob: null as string | null,
   });
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [selectedFencer, setSelectedFencer] = useState<'alice' | 'bob' | null>(null);
   const [isCompletingMatch, setIsCompletingMatch] = useState(false);
@@ -180,9 +197,48 @@ export default function RemoteScreen() {
         console.error('Error loading user profile image:', error);
       }
     };
-    
+
     loadUserProfileImage();
   }, []);
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isUser: boolean = false) => {
+    const initials = getInitials(name);
+
+    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image 
+          source={{ uri: imageUri }} 
+          style={styles.profileImage}
+          resizeMode="cover"
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.profileImageContainer, { backgroundColor: '#393939', borderWidth: 1, borderColor: '#FFFFFF' }]}>
+        <Text style={styles.profileInitials}>{initials}</Text>
+      </View>
+    );
+  };
 
   const saveImage = async (key: string, imageUri: string) => {
     try {
@@ -3272,6 +3328,12 @@ export default function RemoteScreen() {
       fontWeight: '700',
       color: 'white',
     },
+    profileInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     fencerDetails: {
       alignItems: 'center',
     },
@@ -3954,30 +4016,10 @@ export default function RemoteScreen() {
             >
               {toggleCardPosition === 'left' && showUserProfile ? (
                 // User profile - show user image or initials
-                userProfileImage ? (
-                  <Image 
-                    source={{ uri: userProfileImage }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('User image error:', error)}
-                    onLoad={() => console.log('User image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>👤</Text>
-                )
+                renderProfileImage(userProfileImage, userDisplayName, true)
               ) : (
-                // Opponent profile - show opponent image or emoji
-                opponentImages.alice ? (
-                  <Image 
-                    source={{ uri: opponentImages.alice }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('Alice image error:', error)}
-                    onLoad={() => console.log('Alice image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>{aliceProfileEmoji}</Text>
-                )
+                // Opponent profile - show opponent image or initials
+                renderProfileImage(opponentImages.alice, fencerNames.alice, false)
               )}
               {!(toggleCardPosition === 'left' && showUserProfile) && (
               <View style={styles.cameraIcon}>
@@ -4131,30 +4173,10 @@ export default function RemoteScreen() {
             >
               {toggleCardPosition === 'right' && showUserProfile ? (
                 // User profile - show user image or initials
-                userProfileImage ? (
-                  <Image 
-                    source={{ uri: userProfileImage }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('User image error:', error)}
-                    onLoad={() => console.log('User image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>👤</Text>
-                )
+                renderProfileImage(userProfileImage, userDisplayName, true)
               ) : (
-                // Opponent profile - show opponent image or emoji
-                opponentImages.bob ? (
-                  <Image 
-                    source={{ uri: opponentImages.bob }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('Bob image error:', error)}
-                    onLoad={() => console.log('Bob image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>{bobProfileEmoji}</Text>
-                )
+                // Opponent profile - show opponent image or initials
+                renderProfileImage(opponentImages.bob, fencerNames.bob, false)
               )}
               {!(toggleCardPosition === 'right' && showUserProfile) && (
               <View style={styles.cameraIcon}>
