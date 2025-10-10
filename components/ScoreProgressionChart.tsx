@@ -392,12 +392,12 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           datasets: [
             {
               data: paddedUserData,
-              color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, // Green for user
+              color: (opacity = 1) => `rgba(255, 118, 117, ${opacity})`, // Red for user
               strokeWidth: 3,
             },
             {
               data: paddedOpponentData,
-              color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`, // Red for opponent
+              color: (opacity = 1) => `rgba(0, 184, 148, ${opacity})`, // Green for opponent
               strokeWidth: 3,
             }
           ]
@@ -505,9 +505,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               data={userChartData}
               height={stackedHeights.top}
               width={width * 0.8}
-              color="#10B981"
+              color="#FF7675"
               thickness={3}
-              dataPointsColor="#10B981"
+              dataPointsColor="#FF7675"
               dataPointsRadius={4}
               curved
               showVerticalLines
@@ -522,9 +522,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               data={opponentChartData}
               height={stackedHeights.bottom}
               width={width * 0.8}
-              color="#EF4444"
+              color="#00B894"
               thickness={3}
-              dataPointsColor="#EF4444"
+              dataPointsColor="#00B894"
               dataPointsRadius={4}
               curved
               showVerticalLines
@@ -543,9 +543,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             data={gapChartData}
             height={chartHeight}
             width={width * 0.8}
-            color="#10B981"
+            color="#FF7675"
             thickness={3}
-            dataPointsColor="#10B981"
+            dataPointsColor="#FF7675"
             dataPointsRadius={4}
             curved
             showVerticalLines
@@ -565,9 +565,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             data={userChartData}
             height={chartHeight}
             width={width * 0.8}
-            color="#10B981"
+            color="#FF7675"
             thickness={3}
-            dataPointsColor="#10B981"
+            dataPointsColor="#FF7675"
             dataPointsRadius={4}
             curved
             showVerticalLines
@@ -606,11 +606,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={legendStyle}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
               <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>
@@ -620,7 +620,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>Score Gap ({userLabel} − {opponentLabel})</Text>
             </View>
           </View>
@@ -630,11 +630,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
               <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>

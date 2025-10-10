@@ -48,6 +48,64 @@ export const matchService = {
     return data || [];
   },
 
+  // Create a manual match
+  async createManualMatch(matchData: {
+    userId: string;
+    opponentName: string;
+    yourScore: number;
+    opponentScore: number;
+    matchType: 'training' | 'competition';
+    date: string;
+    time: string;
+    notes?: string;
+    weaponType?: string;
+  }): Promise<Match | null> {
+    const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
+    
+    // Parse date and time
+    const [day, month, year] = date.split('/');
+    const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
+    const isPM = time.toUpperCase().includes('PM');
+    
+    let hour24 = parseInt(hour);
+    if (isPM && hour24 !== 12) hour24 += 12;
+    if (!isPM && hour24 === 12) hour24 = 0;
+    
+    const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+    
+    const insertData = {
+      user_id: userId,
+      fencer_1_name: 'You', // User is always fencer 1 in manual matches
+      fencer_2_name: opponentName,
+      final_score: yourScore,
+      // touches_against: opponentScore, // This is a generated column - will be calculated automatically
+      event_date: eventDateTime.toISOString().split('T')[0],
+      result: yourScore > opponentScore ? 'win' : 'loss',
+      score_diff: yourScore - opponentScore,
+      match_type: matchType,
+      weapon_type: weaponType || 'foil',
+      notes: notes || null,
+      source: 'manual',
+      is_complete: true,
+    };
+
+    console.log('🔄 Creating manual match with data:', insertData);
+
+    const { data, error } = await supabase
+      .from('match')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Error creating manual match:', error);
+      return null;
+    }
+
+    console.log('✅ Manual match created successfully:', data);
+    return data;
+  },
+
   // Create a new match from fencing remote data
   async createMatchFromRemote(remoteData: FencingRemote, userId: string | null): Promise<Match | null> {
     const matchData = {

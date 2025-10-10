@@ -208,8 +208,8 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
       position: 'absolute',
       top: 66, // 222px - 156px
       left: '50%',
-      marginLeft: -42, // Half of score width (84px / 2)
-      width: 84,
+      marginLeft: -width * 0.15, // Responsive margin
+      width: width * 0.3,
       height: 41,
       justifyContent: 'center',
       alignItems: 'center',

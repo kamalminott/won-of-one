@@ -900,8 +900,8 @@ export default function RemoteScreen() {
         periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
           .filter(period => period.user > 0 || period.opponent > 0).length;
         
-        // Calculate score per period (user only)
-        scoreSpp = periodNumber > 0 ? finalScore / periodNumber : 0;
+        // Calculate score per period (user only) - round to integer
+        scoreSpp = periodNumber > 0 ? Math.round(finalScore / periodNumber) : 0;
         
         // Structure score by period data
         scoreByPeriod = {
@@ -925,7 +925,7 @@ export default function RemoteScreen() {
           
           // For anonymous matches, both fencers are equal participants
           periodNumber = 1; // All touches in first period for now
-          scoreSpp = (period.fencer_1_score + period.fencer_2_score) / periodNumber;
+          scoreSpp = Math.round((period.fencer_1_score + period.fencer_2_score) / periodNumber);
           
           // Structure score by period data using actual fencer scores
           scoreByPeriod = {
@@ -942,7 +942,7 @@ export default function RemoteScreen() {
         } else {
           // Fallback if no period data
           periodNumber = 1;
-          scoreSpp = (aliceScore + bobScore) / periodNumber;
+          scoreSpp = Math.round((aliceScore + bobScore) / periodNumber);
           
           scoreByPeriod = {
             period1: { user: aliceScore, opponent: bobScore },
@@ -1246,17 +1246,66 @@ export default function RemoteScreen() {
 
   // Note: Removed conflicting useFocusEffect that was resetting all state
 
-  const incrementPeriod = () => {
+  const incrementPeriod = async () => {
     if (currentPeriod < 3) {
       const newPeriod = currentPeriod + 1;
+      
+      // End the current period if it exists
+      if (currentMatchPeriod) {
+        console.log('🏁 Ending current period:', currentPeriod);
+        await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+          end_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+        });
+        
+        // Create new period record for the next period
+        console.log('🆕 Creating new period:', newPeriod);
+        const periodData = {
+          match_id: currentMatchPeriod.match_id,
+          period_number: newPeriod,
+          start_time: new Date().toISOString(),
+          fencer_1_score: aliceScore, // Carry over current scores
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+          priority_assigned: priorityFencer || undefined,
+          priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+        };
+        
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        if (newPeriodRecord) {
+          console.log('✅ New period created successfully:', newPeriodRecord);
+          setCurrentMatchPeriod(newPeriodRecord);
+        }
+      }
+      
       setCurrentPeriod(newPeriod);
       currentPeriodRef.current = newPeriod; // Update ref
     }
   };
 
-  const decrementPeriod = () => {
+  const decrementPeriod = async () => {
     if (currentPeriod > 1) {
       const newPeriod = currentPeriod - 1;
+      
+      // Note: Decrementing period is unusual in a real match, but we'll support it
+      // We need to find the previous period record
+      if (currentMatchPeriod) {
+        const { data: previousPeriod } = await supabase
+          .from('match_period')
+          .select('*')
+          .eq('match_id', currentMatchPeriod.match_id)
+          .eq('period_number', newPeriod)
+          .single();
+        
+        if (previousPeriod) {
+          setCurrentMatchPeriod(previousPeriod);
+        }
+      }
+      
       setCurrentPeriod(newPeriod);
       currentPeriodRef.current = newPeriod; // Update ref
     }
@@ -2138,9 +2187,38 @@ export default function RemoteScreen() {
               { 
                 text: 'No', 
                 style: 'cancel',
-                onPress: () => {
+                onPress: async () => {
                   // Go to next period
                   const nextPeriod = currentPeriodValue + 1;
+                  
+                  // End current period and create new one
+                  if (currentMatchPeriod) {
+                    await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                      end_time: new Date().toISOString(),
+                      fencer_1_score: aliceScore,
+                      fencer_2_score: bobScore,
+                      fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                      fencer_2_cards: bobCards.yellow + bobCards.red,
+                    });
+                    
+                    const periodData = {
+                      match_id: currentMatchPeriod.match_id,
+                      period_number: nextPeriod,
+                      start_time: new Date().toISOString(),
+                      fencer_1_score: aliceScore,
+                      fencer_2_score: bobScore,
+                      fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                      fencer_2_cards: bobCards.yellow + bobCards.red,
+                      priority_assigned: priorityFencer || undefined,
+                      priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+                    };
+                    
+                    const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                    if (newPeriodRecord) {
+                      setCurrentMatchPeriod(newPeriodRecord);
+                    }
+                  }
+                  
                   setCurrentPeriod(nextPeriod);
                   currentPeriodRef.current = nextPeriod; // Update ref
                   setTimeRemaining(matchTime);
@@ -2229,9 +2307,38 @@ export default function RemoteScreen() {
                 { 
                   text: 'No', 
                   style: 'cancel',
-                  onPress: () => {
+                  onPress: async () => {
                     // Go to next period
                     const nextPeriod = currentPeriodValue + 1;
+                    
+                    // End current period and create new one
+                    if (currentMatchPeriod) {
+                      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                        end_time: new Date().toISOString(),
+                        fencer_1_score: aliceScore,
+                        fencer_2_score: bobScore,
+                        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                        fencer_2_cards: bobCards.yellow + bobCards.red,
+                      });
+                      
+                      const periodData = {
+                        match_id: currentMatchPeriod.match_id,
+                        period_number: nextPeriod,
+                        start_time: new Date().toISOString(),
+                        fencer_1_score: aliceScore,
+                        fencer_2_score: bobScore,
+                        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                        fencer_2_cards: bobCards.yellow + bobCards.red,
+                        priority_assigned: priorityFencer || undefined,
+                        priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+                      };
+                      
+                      const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                      if (newPeriodRecord) {
+                        setCurrentMatchPeriod(newPeriodRecord);
+                      }
+                    }
+                    
                     setCurrentPeriod(nextPeriod);
                     currentPeriodRef.current = nextPeriod; // Update ref
                     setTimeRemaining(matchTime);
@@ -2327,12 +2434,41 @@ export default function RemoteScreen() {
           setIsBreakTime(false);
           setBreakTimeRemaining(60);
           
-          // Increment period
-          setCurrentPeriod(prev => {
-            const newPeriod = Math.min(prev + 1, 3);
-            currentPeriodRef.current = newPeriod; // Update ref
-            return newPeriod;
-          });
+          // Increment period and create new period record
+          const nextPeriod = Math.min(currentPeriod + 1, 3);
+          
+          // End current period and create new one
+          if (currentMatchPeriod && nextPeriod > currentPeriod) {
+            (async () => {
+              await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                end_time: new Date().toISOString(),
+                fencer_1_score: aliceScore,
+                fencer_2_score: bobScore,
+                fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                fencer_2_cards: bobCards.yellow + bobCards.red,
+              });
+              
+              const periodData = {
+                match_id: currentMatchPeriod.match_id,
+                period_number: nextPeriod,
+                start_time: new Date().toISOString(),
+                fencer_1_score: aliceScore,
+                fencer_2_score: bobScore,
+                fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                fencer_2_cards: bobCards.yellow + bobCards.red,
+                priority_assigned: priorityFencer || undefined,
+                priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+              };
+              
+              const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+              if (newPeriodRecord) {
+                setCurrentMatchPeriod(newPeriodRecord);
+              }
+            })();
+          }
+          
+          setCurrentPeriod(nextPeriod);
+          currentPeriodRef.current = nextPeriod; // Update ref
           
           
           // Restart main timer from where it was paused
@@ -2366,8 +2502,39 @@ export default function RemoteScreen() {
     setIsBreakTime(false);
     setBreakTimeRemaining(60);
     
-    // Increment period
+    // Increment period and create new period record
     const nextPeriod = Math.min(currentPeriod + 1, 3);
+    
+    // End current period and create new one
+    if (currentMatchPeriod && nextPeriod > currentPeriod) {
+      (async () => {
+        await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+          end_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+        });
+        
+        const periodData = {
+          match_id: currentMatchPeriod.match_id,
+          period_number: nextPeriod,
+          start_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+          priority_assigned: priorityFencer || undefined,
+          priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+        };
+        
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        if (newPeriodRecord) {
+          setCurrentMatchPeriod(newPeriodRecord);
+        }
+      })();
+    }
+    
     setCurrentPeriod(nextPeriod);
     currentPeriodRef.current = nextPeriod; // Update ref
     

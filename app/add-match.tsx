@@ -1,36 +1,71 @@
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
+  const params = useLocalSearchParams();
+  const { user } = useAuth();
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
     return Math.round(base * percentage);
   };
   
-  const [matchDate, setMatchDate] = useState(new Date());
+  // Check if we're in edit mode
+  const isEditMode = params.editMode === 'true';
+  
+  // Initialize state with params if in edit mode
+  const [matchDate, setMatchDate] = useState(() => {
+    if (isEditMode && params.date && params.time) {
+      // Parse date and time from params
+      const dateStr = params.date as string;
+      const timeStr = params.time as string;
+      // Simple parsing - you might want to make this more robust
+      const [day, month, year] = dateStr.split('/');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      
+      // Parse time
+      const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        const ampm = timeMatch[3].toUpperCase();
+        
+        if (ampm === 'PM' && hours !== 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+        
+        date.setHours(hours, minutes);
+      }
+      
+      return date;
+    }
+    return new Date();
+  });
+  
   const [showCalendar, setShowCalendar] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [opponentName, setOpponentName] = useState('');
-  const [event, setEvent] = useState('Training');
+  const [opponentName, setOpponentName] = useState(params.opponentName as string || '');
+  const [event, setEvent] = useState(params.matchType as string || 'Training');
   const [showEventDropdown, setShowEventDropdown] = useState(false);
   const [weaponType, setWeaponType] = useState('Foil');
   const [showWeaponDropdown, setShowWeaponDropdown] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(params.notes as string || '');
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [editingScore, setEditingScore] = useState<'your' | 'opponent' | null>(null);
   const [tempScore, setTempScore] = useState('');
-  const [yourScore, setYourScore] = useState('10');
-  const [opponentScore, setOpponentScore] = useState('12');
+  const [yourScore, setYourScore] = useState(params.yourScore as string || '10');
+  const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '12');
+  const [isSaving, setIsSaving] = useState(false);
 
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
@@ -93,17 +128,83 @@ export default function AddMatchScreen() {
     }
   };
 
-  const handleSaveMatch = () => {
-    // TODO: Implement save match logic
-    console.log('Saving match...', {
-      matchDate,
-      opponentName,
-      event,
-      weaponType,
-      notes,
-      yourScore,
-      opponentScore
-    });
+  const handleSaveMatch = async () => {
+    // Prevent double submissions
+    if (isSaving) {
+      console.log('⏳ Already saving match, ignoring duplicate request');
+      return;
+    }
+
+    if (!user?.id) {
+      Alert.alert('Error', 'You must be logged in to save a match');
+      return;
+    }
+
+    if (!opponentName.trim()) {
+      Alert.alert('Error', 'Please enter an opponent name');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      console.log('💾 Saving manual match...', {
+        matchDate,
+        opponentName,
+        event,
+        weaponType,
+        notes,
+        yourScore,
+        opponentScore
+      });
+
+      // Save to database
+      const savedMatch = await matchService.createManualMatch({
+        userId: user.id,
+        opponentName: opponentName.trim(),
+        yourScore: parseInt(yourScore),
+        opponentScore: parseInt(opponentScore),
+        matchType: event === 'Training' ? 'training' : 'competition',
+        date: matchDate.toLocaleDateString('en-GB'),
+        time: matchDate.toLocaleTimeString('en-US', { 
+          hour: 'numeric', 
+          minute: '2-digit',
+          hour12: true 
+        }),
+        notes: notes.trim() || undefined,
+        weaponType: weaponType,
+      });
+
+      if (savedMatch) {
+        console.log('✅ Match saved successfully:', savedMatch);
+        
+        // Navigate to manual match summary page
+        router.push({
+          pathname: '/manual-match-summary',
+          params: {
+            matchId: savedMatch.match_id,
+            yourScore,
+            opponentScore,
+            opponentName,
+            matchType: event,
+            date: matchDate.toLocaleDateString('en-GB'),
+            time: matchDate.toLocaleTimeString('en-US', { 
+              hour: 'numeric', 
+              minute: '2-digit',
+              hour12: true 
+            }),
+            isWin: (parseInt(yourScore) > parseInt(opponentScore)).toString(),
+            notes,
+          }
+        });
+      } else {
+        Alert.alert('Error', 'Failed to save match. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Error saving match:', error);
+      Alert.alert('Error', 'Failed to save match. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleBack = () => {
@@ -680,12 +781,13 @@ export default function AddMatchScreen() {
       {/* Header */}
       <View style={styles.header}>
         <BackButton onPress={handleBack} />
-        <Text style={styles.headerTitle}>Add New Match</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? 'Edit Match' : 'Add New Match'}</Text>
       </View>
 
-      <View style={styles.content}>
-        {/* Match Details Section */}
-        <View style={styles.section}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.content}>
+          {/* Match Details Section */}
+          <View style={styles.section}>
           <Text style={styles.sectionTitle}>Match Details</Text>
           
           <View style={styles.inputGroup}>
@@ -921,7 +1023,8 @@ export default function AddMatchScreen() {
             </View>
           </View>
         </View>
-      </View>
+        </View>
+      </TouchableWithoutFeedback>
 
       {/* Save Match Button */}
       <View style={{ padding: getDimension(0.04, width) }}>
@@ -931,8 +1034,14 @@ export default function AddMatchScreen() {
           start={Colors.gradientButton.start}
           end={Colors.gradientButton.end}
         >
-          <TouchableOpacity onPress={handleSaveMatch} style={{ width: '100%', alignItems: 'center' }}>
-            <Text style={styles.saveButtonText}>Save Match</Text>
+          <TouchableOpacity 
+            onPress={handleSaveMatch} 
+            style={{ width: '100%', alignItems: 'center' }}
+            disabled={isSaving}
+          >
+            <Text style={[styles.saveButtonText, isSaving && { opacity: 0.7 }]}>
+              {isSaving ? 'Saving...' : (isEditMode ? 'Update Match' : 'Save Match')}
+            </Text>
           </TouchableOpacity>
         </LinearGradient>
       </View>
@@ -943,6 +1052,7 @@ export default function AddMatchScreen() {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {
+          Keyboard.dismiss();
           setShowCalendar(false);
         }}
       >
@@ -950,6 +1060,7 @@ export default function AddMatchScreen() {
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => {
+            Keyboard.dismiss();
             setShowCalendar(false);
           }}
         >
@@ -1063,6 +1174,7 @@ export default function AddMatchScreen() {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {
+          Keyboard.dismiss();
           setShowTimePicker(false);
         }}
       >
@@ -1070,6 +1182,7 @@ export default function AddMatchScreen() {
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => {
+            Keyboard.dismiss();
             setShowTimePicker(false);
           }}
         >
@@ -1225,6 +1338,7 @@ export default function AddMatchScreen() {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {
+          Keyboard.dismiss();
           closeScoreModal();
         }}
       >
@@ -1232,6 +1346,7 @@ export default function AddMatchScreen() {
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => {
+            Keyboard.dismiss();
             closeScoreModal();
           }}
         >

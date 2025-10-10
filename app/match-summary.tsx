@@ -70,6 +70,12 @@ export default function MatchSummaryScreen() {
           console.log('⏱️ MATCH DURATION FORMATTED:', matchData?.bout_length_s ? `${Math.floor(matchData.bout_length_s / 60)}:${(matchData.bout_length_s % 60).toString().padStart(2, '0')}` : 'N/A');
           setMatch(matchData);
           
+          // Load existing notes if available
+          if (matchData?.notes) {
+            console.log('📝 Loading existing notes:', matchData.notes);
+            setNotes(matchData.notes);
+          }
+          
           // Calculate best run and score progression if we have match data and user info
           if (matchData && matchData.fencer_1_name) {
             const calculatedBestRun = await matchService.calculateBestRun(
@@ -165,11 +171,19 @@ export default function MatchSummaryScreen() {
     setNotes(text);
   };
 
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
+    if (match?.match_id) {
+      try {
+        console.log('💾 Saving notes to database:', notes);
+        await matchService.updateMatch(match.match_id, {
+          notes: notes
+        });
+        console.log('✅ Notes saved successfully');
+      } catch (error) {
+        console.error('❌ Error saving notes:', error);
+      }
+    }
     setShowNotesModal(false);
-    // Notes are already saved in state via handleNotesChange
-    // TODO: Save notes to database
-    console.log('Saving notes:', notes);
   };
 
   const handleCancelNotes = () => {

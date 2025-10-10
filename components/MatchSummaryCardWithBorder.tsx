@@ -239,18 +239,18 @@ export default function MatchSummaryCardWithBorder({
     },
     scoreContainer: {
       position: 'absolute',
-      width: width * 0.24, // Dynamic width
+      width: width * 0.35, // Increased width for larger scores
       height: height * 0.12, // Dynamic height
       left: '50%', // Center horizontally
-      marginLeft: -(width * 0.24) / 2, // Half of width to center properly
+      marginLeft: -(width * 0.35) / 2, // Half of width to center properly
       top: height * 0.043, // Dynamic top position
       alignItems: 'center',
     },
     score: {
       position: 'absolute',
-      width: width * 0.2, // Dynamic width
+      width: width * 0.3, // Increased width for larger scores
       height: height * 0.051, // Dynamic height
-      left: width * 0.02, // Dynamic left position
+      left: width * 0.025, // Adjusted left position
       top: 0,
       fontSize: width * 0.07, // Dynamic font size
       fontWeight: '600',
@@ -259,7 +259,7 @@ export default function MatchSummaryCardWithBorder({
     },
     duration: {
       position: 'absolute',
-      width: width * 0.24, // Dynamic width
+      width: width * 0.35, // Match the score container width
       height: height * 0.024, // Dynamic height
       left: 0,
       top: height * 0.05, // Dynamic top position
@@ -270,9 +270,9 @@ export default function MatchSummaryCardWithBorder({
     },
     matchTypeBadge: {
       position: 'absolute',
-      width: width * 0.25, // Increased width to accommodate longer text
+      width: width * 0.25, // Match the score container width
       height: height * 0.03, // Dynamic height
-      left: width * 0.015, // Adjusted left position to center better
+      left: width * 0.05, // Center within the score container (35% - 25%) / 2 = 5%
       top: height * 0.08, // Dynamic top position
       backgroundColor: '#625971',
       borderRadius: width * 0.15, // Dynamic border radius

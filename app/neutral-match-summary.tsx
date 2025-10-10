@@ -646,7 +646,7 @@ export default function NeutralMatchSummary() {
         <View style={styles.resultCardContainer}>
           {/* Win Badge */}
           <View style={styles.winBadge}>
-            <Text style={styles.winText}>Result</Text>
+            <Text style={styles.winText}>Results</Text>
           </View>
           
           {/* Card with Gradient Border */}
@@ -874,8 +874,7 @@ const styles = StyleSheet.create({
   winBadge: {
     position: 'absolute',
     top: -10,
-    left: '50%',
-    marginLeft: -37.5,
+    alignSelf: 'center',
     zIndex: 10,
     backgroundColor: '#4D4159',
     borderWidth: 2,
@@ -884,10 +883,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    width: 75,
-    height: 34,
+    paddingHorizontal: width * 0.03,
+    paddingVertical: height * 0.007,
+    minWidth: width * 0.16,
   },
   winIcon: {
     color: 'white',
@@ -1005,24 +1003,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   trophyPill: {
-    width: 175,
-    height: 26,
     backgroundColor: '#625971',
     borderRadius: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
-    gap: 8,
+    paddingHorizontal: width * 0.01,
+    paddingVertical: height * 0.0,
+    gap: 0,
     alignSelf: 'center',
     marginTop: 70,
+    minHeight: height * 0.035,
+    minWidth: width * 0.35,
+    marginHorizontal: 0,
   },
   trophyPillText: {
-    fontSize: width * 0.035,
+    fontSize: width * 0.028,
     fontWeight: '500',
     color: '#FFFFFF',
     textAlign: 'center',
     fontFamily: 'System',
+    flex: 1,
+    flexWrap: 'wrap',
+    textAlignVertical: 'center',
   },
   twoColumnContainer: {
     flexDirection: 'row',

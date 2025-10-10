@@ -184,22 +184,22 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   // Only add periods that have touches (user or opponent), but always show both bars for that period
   if (data.period1.user > 0 || data.period1.opponent > 0) {
     chartData.push(
-      { value: data.period1.user, label: 'P1', frontColor: '#10B981' },
-      { value: data.period1.opponent > 0 ? data.period1.opponent : 0.1, label: 'P1', frontColor: '#EF4444' }
+      { value: data.period1.user, label: 'P1', frontColor: '#FF7675' },
+      { value: data.period1.opponent > 0 ? data.period1.opponent : 0.1, label: 'P1', frontColor: '#00B894' }
     );
   }
   
   if (data.period2.user > 0 || data.period2.opponent > 0) {
     chartData.push(
-      { value: data.period2.user, label: 'P2', frontColor: '#10B981' },
-      { value: data.period2.opponent > 0 ? data.period2.opponent : 0.1, label: 'P2', frontColor: '#EF4444' }
+      { value: data.period2.user, label: 'P2', frontColor: '#FF7675' },
+      { value: data.period2.opponent > 0 ? data.period2.opponent : 0.1, label: 'P2', frontColor: '#00B894' }
     );
   }
   
   if (data.period3.user > 0 || data.period3.opponent > 0) {
     chartData.push(
-      { value: data.period3.user, label: 'P3', frontColor: '#10B981' },
-      { value: data.period3.opponent > 0 ? data.period3.opponent : 0.1, label: 'P3', frontColor: '#EF4444' }
+      { value: data.period3.user, label: 'P3', frontColor: '#FF7675' },
+      { value: data.period3.opponent > 0 ? data.period3.opponent : 0.1, label: 'P3', frontColor: '#00B894' }
     );
   }
 
@@ -267,11 +267,11 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       {/* Legend showing both players */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+          <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
           <Text style={styles.legendText}>{userLabel}</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+          <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
           <Text style={styles.legendText}>{opponentLabel}</Text>
         </View>
       </View>

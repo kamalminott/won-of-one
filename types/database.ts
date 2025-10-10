@@ -36,6 +36,7 @@ export interface Match {
   touches_against?: number;
   is_win?: boolean;
   is_complete?: boolean; // NEW: Track completion status
+  notes?: string; // Match notes
 }
 
 export interface FencingRemote {

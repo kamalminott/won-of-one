@@ -16,7 +16,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
   userName,
   userProfileImage,
 }) => {
-  // Convert SimpleMatch to CarouselItem format
+  // Convert SimpleMatch to CarouselItem format and reverse to show most recent first
   const carouselItems = matches.map(match => ({
     id: match.id,
     date: match.date,
@@ -24,7 +24,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
     youScore: match.youScore,
     opponentScore: match.opponentScore,
     opponentName: match.opponentName,
-  }));
+  })).reverse();
 
   return (
     <MatchCarousel

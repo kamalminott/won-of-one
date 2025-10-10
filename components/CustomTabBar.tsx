@@ -28,7 +28,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
   const { height, width } = useWindowDimensions();
 
   return (
-    <View style={[styles.tabBar, { height: height * 0.12 }]}>
+    <View style={[styles.tabBar, { height: height * 0.10 }]}>
       {state.routes
         .filter((route) => route.name !== 'diary') // Hide diary tab
         .map((route, index) => {
@@ -85,6 +85,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
                   width: width * 0.05, // 20px equivalent
                   height: height * 0.004, // 3px equivalent
                   borderRadius: width * 0.025, // 60px equivalent
+                  top: -height * 0.025, // Dynamic positioning based on screen height
                 }]} />
               )}
               
@@ -131,7 +132,7 @@ const styles = StyleSheet.create({
   },
   indicator: {
     backgroundColor: '#FF7675',
-    marginBottom: 4,
+    position: 'absolute',
   },
   tabText: {
     fontSize: 12,
