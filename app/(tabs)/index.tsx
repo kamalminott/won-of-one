@@ -1,8 +1,9 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ConfettiCannon from 'react-native-confetti-cannon';
 
 import { AddNewMatchButton } from '@/components/AddNewMatchButton';
 import { GoalCard } from '@/components/GoalCard';
@@ -18,6 +19,9 @@ import { SimpleGoal, SimpleMatch } from '@/types/database';
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
   const { user, loading, signOut, userName, profileImage } = useAuth();
+  const params = useLocalSearchParams();
+  const confettiRef = useRef<any>(null);
+  const [goalCardPosition, setGoalCardPosition] = useState<{ x: number; y: number } | null>(null);
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
@@ -55,6 +59,19 @@ export default function HomeScreen() {
       router.replace('/login');
     }
   }, [user]);
+
+  // Trigger confetti when returning from completed goal
+  useEffect(() => {
+    if (params.showGoalConfetti === 'true' && confettiRef.current && !dataLoading) {
+      // Small delay to ensure goal card is rendered and positioned
+      const timer = setTimeout(() => {
+        console.log('🎊 Firing goal confetti!');
+        confettiRef.current?.start();
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [params.showGoalConfetti, dataLoading]);
 
   const fetchUserData = async () => {
     if (!user) {
@@ -424,6 +441,27 @@ export default function HomeScreen() {
           </View>
         </SafeAreaView>
       </View>
+      
+      {/* Confetti for goal completion */}
+      {params.showGoalConfetti === 'true' && (
+        <ConfettiCannon
+          ref={confettiRef}
+          count={150}
+          origin={{ x: width * 0.5, y: height * 0.55 }}
+          autoStart={false}
+          fadeOut
+          fallSpeed={2000}
+          explosionSpeed={350}
+          colors={[
+            Colors.purple.primary,
+            Colors.pink.light,
+            Colors.yellow.accent,
+            Colors.blue.light,
+            '#00B894',
+            '#FF7675',
+          ]}
+        />
+      )}
     </>
   );
 }

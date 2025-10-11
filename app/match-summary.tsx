@@ -182,9 +182,16 @@ export default function MatchSummaryScreen() {
 
   const handleCelebrationClose = () => {
     setShowCelebration(false);
+    const goalData = completedGoal;
     setCompletedGoal(null);
-    // Navigate to home after celebration
-    router.push('/(tabs)');
+    // Navigate to home after celebration with goal completion flag
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        showGoalConfetti: 'true',
+        completedGoalTitle: goalData?.title || '',
+      }
+    });
   };
 
   const handleNotesChange = (text: string) => {
