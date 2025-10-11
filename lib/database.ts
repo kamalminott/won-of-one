@@ -1016,37 +1016,55 @@ export const goalService = {
   },
 
   // Update goal progress
-  async updateGoalProgress(goalId: string, currentValue: number): Promise<boolean> {
-    // First get the goal to check target value
+  async updateGoalProgress(goalId: string, currentValue: number): Promise<{ success: boolean; justCompleted: boolean; goalData?: any }> {
+    // First get the goal to check target value and current completion status
     const { data: goal, error: fetchError } = await supabase
       .from('goal')
-      .select('target_value')
+      .select('*')
       .eq('goal_id', goalId)
       .single();
 
     if (fetchError) {
       console.error('Error fetching goal for progress update:', fetchError);
-      return false;
+      return { success: false, justCompleted: false };
     }
 
-    const isCompleted = currentValue >= (goal?.target_value || 0);
+    const wasCompletedBefore = goal?.is_completed || false;
+    const isCompletedNow = currentValue >= (goal?.target_value || 0);
+    const justCompleted = !wasCompletedBefore && isCompletedNow;
 
     const { error } = await supabase
       .from('goal')
       .update({ 
         current_value: currentValue,
         updated_at: new Date().toISOString(),
-        is_completed: isCompleted
+        is_completed: isCompletedNow
       })
       .eq('goal_id', goalId);
 
     if (error) {
       console.error('Error updating goal:', error);
-      return false;
+      return { success: false, justCompleted: false };
     }
 
-    console.log('✅ Goal progress updated:', { goalId, currentValue, targetValue: goal?.target_value, isCompleted });
-    return true;
+    console.log('✅ Goal progress updated:', { 
+      goalId, 
+      currentValue, 
+      targetValue: goal?.target_value, 
+      isCompleted: isCompletedNow,
+      justCompleted 
+    });
+    
+    return { 
+      success: true, 
+      justCompleted,
+      goalData: justCompleted ? {
+        title: goal.category,
+        description: goal.description,
+        targetValue: goal.target_value,
+        currentValue: currentValue
+      } : undefined
+    };
   },
 
   // Get goal target value
@@ -1066,7 +1084,9 @@ export const goalService = {
   },
 
   // Update goals based on match completion with precise tracking
-  async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<void> {
+  async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<{ completedGoals: any[] }> {
+    const completedGoals: any[] = [];
+    
     try {
       console.log('🎯 Updating goals after match completion:', { userId, matchResult, finalScore, opponentScore });
       
@@ -1184,9 +1204,14 @@ export const goalService = {
         }
         
         if (shouldUpdate) {
-          const updateSuccess = await this.updateGoalProgress(goal.id, newCurrentValue);
-          if (updateSuccess) {
+          const result = await this.updateGoalProgress(goal.id, newCurrentValue);
+          if (result.success) {
             console.log('✅ Goal successfully updated:', goal.title, 'to', newCurrentValue);
+            
+            if (result.justCompleted && result.goalData) {
+              console.log('🎉 GOAL JUST COMPLETED!', result.goalData);
+              completedGoals.push(result.goalData);
+            }
           } else {
             console.log('❌ Failed to update goal:', goal.title);
           }
@@ -1195,6 +1220,8 @@ export const goalService = {
     } catch (error) {
       console.error('Error updating goals after match:', error);
     }
+    
+    return { completedGoals };
   },
 };
 

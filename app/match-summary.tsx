@@ -1,4 +1,5 @@
 import { BackButton } from '@/components/BackButton';
+import { GoalCelebrationModal } from '@/components/GoalCelebrationModal';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { Colors } from '@/constants/Colors';
@@ -36,6 +37,8 @@ export default function MatchSummaryScreen() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notes, setNotes] = useState('');
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [completedGoal, setCompletedGoal] = useState<any>(null);
 
   // Load user profile data
   useEffect(() => {
@@ -144,13 +147,23 @@ export default function MatchSummaryScreen() {
       
       // Update goals based on match result (only if user participated)
       if (match.user_id && match.result) {
-        await goalService.updateGoalsAfterMatch(
+        const result = await goalService.updateGoalsAfterMatch(
           user.id, 
           match.result as 'win' | 'loss', 
           match.final_score || 0,
           match.touches_against || 0
         );
         console.log('✅ Goals updated successfully');
+        
+        // Check if any goals were completed
+        if (result.completedGoals && result.completedGoals.length > 0) {
+          // Show celebration for the first completed goal
+          console.log('🎉 Showing celebration for completed goal:', result.completedGoals[0]);
+          setCompletedGoal(result.completedGoals[0]);
+          setShowCelebration(true);
+          // Don't navigate yet - wait for user to close celebration
+          return;
+        }
       } else {
         console.log('ℹ️ Skipping goal update - anonymous match or no result');
       }
@@ -165,6 +178,13 @@ export default function MatchSummaryScreen() {
 
   const handleNotesPress = () => {
     setShowNotesModal(true);
+  };
+
+  const handleCelebrationClose = () => {
+    setShowCelebration(false);
+    setCompletedGoal(null);
+    // Navigate to home after celebration
+    router.push('/(tabs)');
   };
 
   const handleNotesChange = (text: string) => {
@@ -469,6 +489,13 @@ export default function MatchSummaryScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Goal Celebration Modal */}
+      <GoalCelebrationModal
+        visible={showCelebration}
+        goalData={completedGoal}
+        onClose={handleCelebrationClose}
+      />
     </SafeAreaView>
   );
 }
