@@ -1,5 +1,6 @@
 import { BackButton } from '@/components/BackButton';
 import { GoalCelebrationModal } from '@/components/GoalCelebrationModal';
+import { SetNewGoalPrompt } from '@/components/SetNewGoalPrompt';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { Colors } from '@/constants/Colors';
@@ -39,6 +40,8 @@ export default function MatchSummaryScreen() {
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
   const [completedGoal, setCompletedGoal] = useState<any>(null);
+  const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
+  const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
 
   // Load user profile data
   useEffect(() => {
@@ -159,7 +162,14 @@ export default function MatchSummaryScreen() {
         if (result.completedGoals && result.completedGoals.length > 0) {
           // Show celebration for the first completed goal
           console.log('🎉 Showing celebration for completed goal:', result.completedGoals[0]);
-          setCompletedGoal(result.completedGoals[0]);
+          const goalData = result.completedGoals[0];
+          setCompletedGoal(goalData);
+          // Store the goal ID from the activeGoals list
+          const activeGoals = await goalService.getActiveGoals(user.id);
+          const matchingGoal = activeGoals.find(g => g.title === goalData.title);
+          if (matchingGoal) {
+            setCompletedGoalId(matchingGoal.id);
+          }
           setShowCelebration(true);
           // Don't navigate yet - wait for user to close celebration
           return;
@@ -182,16 +192,32 @@ export default function MatchSummaryScreen() {
 
   const handleCelebrationClose = () => {
     setShowCelebration(false);
-    const goalData = completedGoal;
+    // Show new goal prompt instead of navigating
+    setShowNewGoalPrompt(true);
+  };
+
+  const handleSetNewGoal = () => {
+    setShowNewGoalPrompt(false);
     setCompletedGoal(null);
-    // Navigate to home after celebration with goal completion flag
-    router.push({
-      pathname: '/(tabs)',
-      params: {
-        showGoalConfetti: 'true',
-        completedGoalTitle: goalData?.title || '',
-      }
-    });
+    setCompletedGoalId(null);
+    // Navigate to goal creation screen
+    router.push('/set-goal');
+  };
+
+  const handleLater = async () => {
+    setShowNewGoalPrompt(false);
+    
+    // Deactivate the completed goal
+    if (completedGoalId) {
+      console.log('🔒 Deactivating goal:', completedGoalId);
+      await goalService.deactivateGoal(completedGoalId);
+    }
+    
+    setCompletedGoal(null);
+    setCompletedGoalId(null);
+    
+    // Navigate to home
+    router.push('/(tabs)');
   };
 
   const handleNotesChange = (text: string) => {
@@ -502,6 +528,14 @@ export default function MatchSummaryScreen() {
         visible={showCelebration}
         goalData={completedGoal}
         onClose={handleCelebrationClose}
+      />
+
+      {/* Set New Goal Prompt Modal */}
+      <SetNewGoalPrompt
+        visible={showNewGoalPrompt}
+        completedGoal={completedGoal}
+        onSetGoal={handleSetNewGoal}
+        onLater={handleLater}
       />
     </SafeAreaView>
   );

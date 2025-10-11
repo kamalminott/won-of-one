@@ -1083,6 +1083,27 @@ export const goalService = {
     return data?.target_value || 0;
   },
 
+  // Deactivate a completed goal
+  async deactivateGoal(goalId: string): Promise<boolean> {
+    console.log('🔒 Deactivating completed goal:', goalId);
+    
+    const { error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId);
+
+    if (error) {
+      console.error('Error deactivating goal:', error);
+      return false;
+    }
+
+    console.log('✅ Goal deactivated successfully');
+    return true;
+  },
+
   // Update goals based on match completion with precise tracking
   async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<{ completedGoals: any[] }> {
     const completedGoals: any[] = [];
