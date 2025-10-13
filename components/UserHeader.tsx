@@ -112,12 +112,8 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
           )}
         </View>
         <View style={styles.textContainer}>
-          <Text style={styles.greeting}>Hi, {userName}</Text>
+          <Text style={styles.greeting}>Hi, {userName.split(' ')[0]}</Text>
           <Text style={styles.subtitle}>Your Daily Fitness Goals</Text>
-          <View style={styles.streakContainer}>
-            <Text style={styles.fireEmoji}>🔥</Text>
-            <Text style={styles.streakText}>{streak} day streak</Text>
-          </View>
         </View>
       </TouchableOpacity>
       

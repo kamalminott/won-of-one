@@ -832,10 +832,10 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
-      // 2. Get match data to get fencer names
+      // 2. Get match data to get fencer names and final scores
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name')
+        .select('fencer_1_name, fencer_2_name, final_score, touches_against')
         .eq('match_id', matchId)
         .single();
 
@@ -844,7 +844,12 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
+      // Get authoritative final scores to cap the count
+      const maxFencer1Score = matchData.final_score || 15;
+      const maxFencer2Score = matchData.touches_against || 15;
+
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
+      console.log('📈 ANONYMOUS - Final scores (max cap):', maxFencer1Score, '-', maxFencer2Score);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
       // 3. Process events using stored match_time_elapsed
@@ -862,17 +867,21 @@ $$;
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-        if (event.scoring_user_name === matchData.fencer_1_name) {
-          // Fencer 1 scored
+        if (event.scoring_user_name === matchData.fencer_1_name && fencer1Score < maxFencer1Score) {
+          // Fencer 1 scored (only count if below final score - handles accidental score adds/removes)
           fencer1Score++;
           const dataPoint = { x: timeString, y: fencer1Score };
           fencer1Data.push(dataPoint);
-        } else if (event.scoring_user_name === matchData.fencer_2_name) {
-          // Fencer 2 scored
+          console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score}/${maxFencer1Score} at ${timeString}`);
+        } else if (event.scoring_user_name === matchData.fencer_2_name && fencer2Score < maxFencer2Score) {
+          // Fencer 2 scored (only count if below final score - handles accidental score adds/removes)
           fencer2Score++;
           const dataPoint = { x: timeString, y: fencer2Score };
           fencer2Data.push(dataPoint);
+          console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score}/${maxFencer2Score} at ${timeString}`);
         } else {
+          // Log skipped events to help diagnose issues
+          console.log(`📈 ⏭️  Event skipped - Scorer: "${event.scoring_user_name}", F1: ${fencer1Score}/${maxFencer1Score}, F2: ${fencer2Score}/${maxFencer2Score}`);
         }
       }
 
@@ -939,17 +948,19 @@ export const userService = {
 export const goalService = {
   // Get active goals for a user
   async getActiveGoals(userId: string): Promise<SimpleGoal[]> {
-    console.log('getActiveGoals called with userId:', userId);
+    console.log('📊 getActiveGoals called with userId:', userId);
     
     const { data, error } = await supabase
       .from('goal')
       .select('*')
       .eq('user_id', userId)
       .eq('is_active', true)
+      .eq('is_failed', false)  // Exclude failed goals
       .order('created_at', { ascending: false });
 
-    console.log('Raw goal data from database:', data);
-    console.log('Goal query error:', error);
+    console.log('📊 Raw goal data from database:', data);
+    console.log('📊 Number of active goals found:', data?.length || 0);
+    console.log('📊 Goal query error:', error);
 
     if (error) {
       console.error('Error fetching goals:', error);
@@ -959,14 +970,16 @@ export const goalService = {
     const mappedGoals = data?.map(goal => {
       const currentValue = goal.current_value || 0;
       const targetValue = goal.target_value || 1;
-      const calculatedProgress = targetValue > 0 ? Math.round((currentValue / targetValue) * 100) : 0;
+      const rawProgress = targetValue > 0 ? Math.round((currentValue / targetValue) * 100) : 0;
+      // Cap progress between 0% and 100% for display
+      const calculatedProgress = Math.max(0, Math.min(rawProgress, 100));
       
       console.log('🎯 Goal progress calculation:', {
         title: goal.category,
         currentValue,
         targetValue,
-        calculatedProgress,
-        rawProgress: (currentValue / targetValue) * 100
+        rawProgress,
+        displayProgress: calculatedProgress
       });
       
       return {
@@ -977,7 +990,10 @@ export const goalService = {
         currentValue: currentValue,
         deadline: goal.deadline,
         isCompleted: goal.is_completed || false,
+        isFailed: goal.is_failed || false,
         progress: calculatedProgress,
+        match_window: goal.match_window,
+        starting_match_count: goal.starting_match_count,
       };
     }) || [];
     
@@ -1104,6 +1120,133 @@ export const goalService = {
     return true;
   },
 
+  // Delete a goal (soft delete by marking inactive)
+  async deleteGoal(goalId: string): Promise<boolean> {
+    console.log('🗑️ Deleting goal:', goalId);
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId)
+      .select();
+
+    if (error) {
+      console.error('❌ Error deleting goal:', error);
+      return false;
+    }
+
+    console.log('✅ Goal deleted successfully (deactivated):', data);
+    return true;
+  },
+
+  // Deactivate all completed goals for a user
+  async deactivateAllCompletedGoals(userId: string): Promise<number> {
+    console.log('🧹 Deactivating all completed goals for user:', userId);
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('is_completed', true)
+      .eq('is_active', true)
+      .select();
+
+    if (error) {
+      console.error('❌ Error deactivating completed goals:', error);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    console.log(`✅ Deactivated ${count} completed goals`);
+    return count;
+  },
+
+  // Deactivate expired goals (past deadline and not completed)
+  async deactivateExpiredGoals(userId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    console.log('⏰ Checking for expired goals (deadline before:', today, ')');
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .eq('is_completed', false)  // Only incomplete goals
+      .lt('deadline', today)       // deadline < today
+      .select();
+
+    if (error) {
+      console.error('❌ Error deactivating expired goals:', error);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    if (count > 0) {
+      console.log(`⏰ Auto-deactivated ${count} expired goal(s)`);
+    }
+    return count;
+  },
+
+  // Mark a goal as failed (impossible to achieve)
+  async markGoalAsFailed(goalId: string): Promise<boolean> {
+    console.log('💥 Marking goal as failed:', goalId);
+    
+    const { error } = await supabase
+      .from('goal')
+      .update({ 
+        is_failed: true,
+        is_active: false,  // Also deactivate failed goals
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId);
+
+    if (error) {
+      console.error('❌ Error marking goal as failed:', error);
+      return false;
+    }
+
+    console.log('✅ Goal marked as failed successfully');
+    return true;
+  },
+
+  // Get failed goals for cleanup or display
+  async getFailedGoals(userId: string): Promise<SimpleGoal[]> {
+    const { data, error } = await supabase
+      .from('goal')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_failed', true)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching failed goals:', error);
+      return [];
+    }
+
+    return data?.map(goal => ({
+      id: goal.goal_id,
+      title: goal.category,
+      description: goal.description || '',
+      targetValue: goal.target_value,
+      currentValue: goal.current_value || 0,
+      deadline: goal.deadline,
+      isCompleted: false, // Failed goals are not completed
+      isFailed: true,
+      progress: 0, // Failed goals show 0% progress
+      match_window: goal.match_window,
+      starting_match_count: goal.starting_match_count,
+    })) || [];
+  },
+
   // Update goals based on match completion with precise tracking
   async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<{ completedGoals: any[] }> {
     const completedGoals: any[] = [];
@@ -1148,34 +1291,151 @@ export const goalService = {
             
           case 'Wins':
             // Track only wins
-            if (matchResult === 'win') {
-              newCurrentValue = goal.currentValue + 1;
-              shouldUpdate = true;
-              console.log('🏆 Updating Wins goal:', goal.currentValue, '→', newCurrentValue);
+            if (goal.match_window && goal.starting_match_count !== undefined) {
+              // NEW: Windowed wins - "Win X out of next Y matches"
+              const matchesSinceGoalCreated = userMatches.slice(0, totalMatches - (goal.starting_match_count || 0));
+              const windowMatches = matchesSinceGoalCreated.slice(0, goal.match_window);
+              
+              if (windowMatches.length > 0) {
+                const winsInWindow = windowMatches.filter(m => m.isWin).length;
+                const lossesInWindow = windowMatches.filter(m => !m.isWin).length;
+                const remainingMatches = goal.match_window - windowMatches.length;
+                const maxPossibleWins = winsInWindow + remainingMatches;
+                
+                console.log('🏆 Updating Wins goal (Windowed):', {
+                  previousValue: goal.currentValue,
+                  newValue: winsInWindow,
+                  matchesInWindow: windowMatches.length,
+                  winsInWindow,
+                  lossesInWindow,
+                  remainingMatches,
+                  maxPossibleWins,
+                  targetValue: goal.targetValue,
+                  windowSize: goal.match_window,
+                  matchesPlayed: windowMatches.length + '/' + goal.match_window
+                });
+                
+                // ✅ NEW: Check if goal is impossible to achieve
+                if (maxPossibleWins < goal.targetValue) {
+                  console.log('💥 Goal failed - impossible to achieve:', {
+                    goalTitle: goal.title,
+                    currentWins: winsInWindow,
+                    maxPossibleWins,
+                    targetValue: goal.targetValue,
+                    remainingMatches
+                  });
+                  
+                  // Mark goal as failed
+                  await this.markGoalAsFailed(goal.id);
+                  
+                  // Don't update the goal value since it's failed
+                  continue; // Skip to next goal
+                }
+                
+                newCurrentValue = winsInWindow;
+                shouldUpdate = true;
+              }
             } else {
-              console.log('🔸 Wins goal not updated - match was not a win');
+              // ORIGINAL: Simple wins goal (no window)
+              if (matchResult === 'win') {
+                newCurrentValue = goal.currentValue + 1;
+                shouldUpdate = true;
+                console.log('🏆 Updating Wins goal (Simple):', goal.currentValue, '→', newCurrentValue);
+              } else {
+                console.log('🔸 Wins goal not updated - match was not a win');
+              }
             }
             break;
             
           case 'Win Rate %':
-            // Track win rate percentage - this is calculated, not incremental
+            // Legacy support for old "Win Rate %" goals
+            // New goals should use "Wins" with match_window instead
             newCurrentValue = currentWinRate;
             shouldUpdate = true;
-            console.log('📈 Updating Win Rate goal:', goal.currentValue, '→', newCurrentValue, '%');
+            console.log('📈 Updating Win Rate goal (Legacy - Career %):', goal.currentValue, '→', newCurrentValue, '%');
             break;
             
-          case 'Points Scored':
-            // Track total points scored
-            newCurrentValue = goal.currentValue + finalScore;
-            shouldUpdate = true;
-            console.log('🎯 Updating Points Scored goal:', goal.currentValue, '→', newCurrentValue);
-            break;
-            
-          case 'Point Differential':
-            // Track cumulative point differential
-            newCurrentValue = goal.currentValue + pointDifferential;
-            shouldUpdate = true;
-            console.log('➕ Updating Point Differential goal:', goal.currentValue, '→', newCurrentValue);
+          case 'Average Margin of Victory':
+            // Track average margin of victory over window
+            if (goal.match_window && goal.starting_match_count !== undefined) {
+              // Windowed: "Win by average X+ points over next Y matches"
+              const matchesSinceGoalCreated = userMatches.slice(0, totalMatches - (goal.starting_match_count || 0));
+              const windowMatches = matchesSinceGoalCreated.slice(0, goal.match_window);
+              
+              if (windowMatches.length > 0) {
+                // Calculate average margin for ALL matches in this window (wins AND losses)
+                let totalMargin = 0;
+                
+                // ✅ Calculate actual margin from all matches (wins are positive, losses are negative)
+                for (const match of windowMatches) {
+                  // Margin is positive for wins, negative for losses
+                  const margin = match.youScore - match.opponentScore;
+                  totalMargin += margin;
+                }
+                
+                const averageMargin = windowMatches.length > 0 ? totalMargin / windowMatches.length : 0;
+                newCurrentValue = Math.round(averageMargin * 100) / 100; // Round to 2 decimals
+                
+                const winCount = windowMatches.filter(m => m.isWin).length;
+                const lossCount = windowMatches.filter(m => !m.isWin).length;
+                
+                console.log('🏆 Updating Average Margin of Victory goal (Windowed - All Matches):', {
+                  previousValue: goal.currentValue,
+                  newValue: newCurrentValue,
+                  matchesInWindow: windowMatches.length,
+                  winsInWindow: winCount,
+                  lossesInWindow: lossCount,
+                  totalMargin,
+                  averageMargin,
+                  targetValue: goal.targetValue,
+                  windowSize: goal.match_window
+                });
+                
+                // ✅ Improved failure detection
+                // Goal fails if: even with perfect 15-0 wins remaining, average can't reach target
+                const remainingMatches = goal.match_window - windowMatches.length;
+                
+                // Best case: all remaining matches are 15-0 victories
+                const bestCaseTotalMargin = totalMargin + (remainingMatches * 15);
+                const maxPossibleAverage = goal.match_window > 0 ? bestCaseTotalMargin / goal.match_window : 0;
+                
+                if (remainingMatches === 0 && averageMargin < goal.targetValue) {
+                  // Window complete but target not reached
+                  console.log('💥 Average Margin goal failed - window complete, target not reached:', {
+                    goalTitle: goal.title,
+                    currentAverage: newCurrentValue,
+                    targetValue: goal.targetValue,
+                    matchesPlayed: windowMatches.length,
+                    windowSize: goal.match_window
+                  });
+                  
+                  await this.markGoalAsFailed(goal.id);
+                  continue; // Skip to next goal
+                } else if (maxPossibleAverage < goal.targetValue) {
+                  // Mathematically impossible even with perfect remaining matches
+                  console.log('💥 Average Margin goal failed - mathematically impossible:', {
+                    goalTitle: goal.title,
+                    currentAverage: newCurrentValue,
+                    maxPossibleAverage,
+                    targetValue: goal.targetValue,
+                    remainingMatches,
+                    matchesPlayed: windowMatches.length,
+                    totalMargin
+                  });
+                  
+                  await this.markGoalAsFailed(goal.id);
+                  continue; // Skip to next goal
+                }
+                
+                shouldUpdate = true;
+              }
+            } else {
+              // Simple/Legacy: Cumulative - not a true average
+              // This adds point differential to a running total (deprecated approach)
+              newCurrentValue = goal.currentValue + pointDifferential;
+              shouldUpdate = true;
+              console.log('🏆 Updating Average Margin goal (Simple/Legacy):', goal.currentValue, '→', newCurrentValue);
+            }
             break;
             
           case 'Streaks':

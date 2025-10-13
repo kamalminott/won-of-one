@@ -1,6 +1,6 @@
-import { SwipeToCompleteButton } from '@/components/SwipeToCompleteButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,13 +34,11 @@ const getInitials = (name: string | undefined): string => {
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const layout = useDynamicLayout();
   const router = useRouter();
   const { user, userName } = useAuth();
   
-  // Responsive breakpoints for small screens
-  const isSmallScreen = width < 400;
-  const isTinyScreen = width < 360;
-  const isNexusS = width <= 360; // Nexus S specific optimization
+  // Responsive breakpoints for small screens - simplified for consistency across devices
   
   const [currentPeriod, setCurrentPeriod] = useState(1);
   const [aliceScore, setAliceScore] = useState(0);
@@ -2769,27 +2767,27 @@ export default function RemoteScreen() {
     // Timer Ready State (never started, can edit)
     if (!hasMatchStarted && !isPlaying && timeRemaining === matchTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.015 : height * 0.02, // Less margin for ready state
+        timerDisplayMargin: height * 0.02, // Consistent margin for ready state
       };
     }
     
     // Match Active State (running or paused)
     if (hasMatchStarted && !isBreakTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.03 : height * 0.04, // More margin for active state
+        timerDisplayMargin: height * 0.04, // Consistent margin for active state
       };
     }
     
     // Break State
     if (isBreakTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03, // Medium margin for break state
+        timerDisplayMargin: height * 0.03, // Consistent margin for break state
       };
     }
     
     // Default state
     return {
-      timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03,
+      timerDisplayMargin: height * 0.03,
     };
   };
 
@@ -2799,21 +2797,39 @@ export default function RemoteScreen() {
     container: {
       flex: 1,
       backgroundColor: Colors.dark.background,
-      padding: isNexusS ? width * 0.005 : width * 0.01,
-      paddingTop: isNexusS ? height * 0.002 : height * 0.005,
-      paddingBottom: isNexusS ? height * 0.001 : height * 0.002,
-      overflow: 'hidden',
+    },
+    headerSafeArea: {
+      backgroundColor: Colors.dark.background,
+    },
+    safeArea: {
+      flex: 1,
+      backgroundColor: Colors.dark.background,
+    },
+    stickyHeader: {
+      backgroundColor: Colors.dark.background,
+      paddingHorizontal: '5%',
+      paddingVertical: height * 0.02,
+      zIndex: 10,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    contentContainer: {
+      flex: 1,
+      paddingHorizontal: '5%',
+      paddingTop: layout.adjustPadding(height * -0.005, 'top'),
+      paddingBottom: layout.adjustPadding(height * 0.02, 'bottom'),
     },
     
     // Match Timer Section
     matchTimerCard: {
       // Background will be handled by LinearGradient
-      borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+      borderWidth: width * 0.005,
       borderColor: Colors.timerBackground.borderColors[0],
-      borderRadius: isNexusS ? width * 0.03 : width * 0.04,
-      padding: isNexusS ? width * 0.005 : width * 0.01,
-      marginTop: 0,
-      marginBottom: isNexusS ? height * 0.0005 : height * 0.001,
+      borderRadius: width * 0.03,
+      padding: width * 0.008,
+      marginTop: layout.adjustMargin(0, 'top'),
+      marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
       position: 'relative',
       // Shadow effects
       shadowColor: Colors.timerBackground.shadowColor,
@@ -2848,30 +2864,30 @@ export default function RemoteScreen() {
     countdownDisplay: {
       alignItems: 'center',
       justifyContent: 'center',
-      height: isNexusS ? height * 0.06 : height * 0.08, // Smaller height on Nexus S
+      height: height * 0.06, // Smaller height for more compact card
       width: '100%',
       // Timer background styling removed - now handled by main container
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      borderRadius: width * 0.03,
     },
     countdownText: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
+      fontSize: width * 0.1, // Smaller font for more compact card
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: height * 0.002 },
       textShadowRadius: width * 0.005,
-      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
+      marginTop: -(height * 0.015),
     },
     countdownTextWarning: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
+      fontSize: width * 0.12, // Smaller font on Nexus S, minimum 28px
       color: Colors.yellow.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: height * 0.002 },
       textShadowRadius: width * 0.005,
-      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
+      marginTop: -(height * 0.015),
     },
     countdownTextDanger: {
       fontSize: width * 0.12,
@@ -2898,7 +2914,7 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.005,
     },
     editButton: {
       width: width * 0.06,
@@ -2911,21 +2927,40 @@ export default function RemoteScreen() {
     editButtonText: {
       fontSize: width * 0.04,
     },
+    completeMatchCircle: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      width: width * 0.12,
+      height: width * 0.12,
+      borderRadius: width * 0.06,
+      backgroundColor: Colors.green.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 5,
+    },
+    completeMatchFlag: {
+      fontSize: width * 0.06,
+    },
     periodControl: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       backgroundColor: '#E6DDFF',
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
-      padding: isNexusS ? width * 0.015 : width * 0.025, // Smaller padding on Nexus S
-      marginTop: isNexusS ? height * 0.001 : height * 0.002, // Smaller margin on Nexus S
-      borderWidth: isNexusS ? width * 0.002 : width * 0.0025,
+      borderRadius: width * 0.03,
+      padding: width * 0.025,
+      marginTop: height * 0.002,
+      borderWidth: width * 0.0025,
       borderColor: 'rgba(168, 85, 247, 0.3)',
     },
     periodButton: {
-      width: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
-      height: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
-      borderRadius: isNexusS ? width * 0.03 : width * 0.035,
+      width: width * 0.07,
+      height: width * 0.07,
+      borderRadius: width * 0.035,
       backgroundColor: 'rgb(98,80,242)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -2934,7 +2969,7 @@ export default function RemoteScreen() {
       shadowOpacity: 0.3,
       shadowRadius: width * 0.01,
       elevation: 6,
-      borderWidth: isNexusS ? width * 0.003 : width * 0.005, // Thinner border on Nexus S
+      borderWidth: width * 0.005,
       borderColor: 'rgba(255,255,255,0.2)',
     },
     periodButtonText: {
@@ -2958,43 +2993,43 @@ export default function RemoteScreen() {
 
     // Fencers Section
     fencersHeading: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 16) : width * 0.05, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginTop: isNexusS ? height * -0.008 : height * -0.01, // Smaller margin on Nexus S
+      marginBottom: height * 0.005, // Smaller margin on Nexus S
+      marginTop: height * -0.01, // Smaller margin on Nexus S
     },
     fencersHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginLeft: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
+      marginBottom: height * 0.005, // Smaller margin on Nexus S
+      marginLeft: width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButton: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
+      width: width * 0.06, // Smaller button on Nexus S
+      height: width * 0.06, // Smaller button on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
+      marginRight: width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
     },
     fencersContainer: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginBottom: isNexusS ? height * 0.01 : height * 0.015, // Smaller margin on Nexus S
-      gap: isNexusS ? width * 0.02 : width * 0.03, // Smaller gap on Nexus S
+      marginBottom: height * 0.015, // Smaller margin on Nexus S
+      gap: width * 0.03, // Smaller gap on Nexus S
     },
     fencerCard: {
-      width: isNexusS ? width * 0.44 : width * 0.42, // Slightly wider on Nexus S for better fit
-      padding: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
-      minHeight: isNexusS ? height * 0.2 : height * 0.25, // Smaller height on Nexus S
+      width: width * 0.42, // Slightly wider on Nexus S for better fit
+      padding: width * 0.04, // Smaller padding on Nexus S
+      minHeight: height * 0.25, // Smaller height on Nexus S
       backgroundColor: Colors.purple.primary,
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      borderRadius: width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
@@ -3011,23 +3046,23 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     profilePicture: {
-      width: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
-      height: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
-      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
+      width: width * 0.16, // Smaller profile on Nexus S
+      height: width * 0.16, // Smaller profile on Nexus S
+      borderRadius: width * 0.08,
       backgroundColor: Colors.gray.medium,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
     },
     profileInitial: {
-      fontSize: isNexusS ? Math.max(width * 0.065, 20) : width * 0.075, // Smaller font on Nexus S, minimum 20px
+      fontSize: width * 0.075, // Smaller font on Nexus S, minimum 20px
       fontWeight: '700',
       color: 'white',
     },
     profileImage: {
       width: '100%',
       height: '100%',
-      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
+      borderRadius: width * 0.08,
       backgroundColor: 'transparent',
     },
     cameraIcon: {
@@ -3056,48 +3091,48 @@ export default function RemoteScreen() {
       fontSize: width * 0.045,
     },
     fencerName: {
-      fontSize: isNexusS ? Math.max(width * 0.05, 14) : width * 0.055, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.055, // Smaller font on Nexus S, minimum 14px
       fontWeight: '600',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.004 : height * 0.006, // Smaller margin on Nexus S
+      marginBottom: height * 0.006, // Smaller margin on Nexus S
     },
     fencerScore: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 32) : width * 0.105, // Smaller font on Nexus S, minimum 32px
+      fontSize: width * 0.105, // Smaller font on Nexus S, minimum 32px
       fontWeight: '700',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.01 : height * 0.015,
+      marginBottom: height * 0.015,
     },
     scoreControls: {
       flexDirection: 'row',
       gap: width * 0.035,
     },
     scoreButton: {
-      width: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
-      height: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
-      borderRadius: isNexusS ? width * 0.05 : width * 0.06,
+      width: width * 0.12, // Smaller buttons on Nexus S
+      height: width * 0.12, // Smaller buttons on Nexus S
+      borderRadius: width * 0.06,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: isNexusS ? 1 : 2, // Thinner border on Nexus S
+      borderWidth: 2, // Thinner border on Nexus S
       borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     scoreButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.065, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
     },
     swapButton: {
-      width: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.055 : width * 0.065,
+      width: width * 0.13, // Smaller button on Nexus S
+      height: width * 0.13, // Smaller button on Nexus S
+      borderRadius: width * 0.065,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
-      borderWidth: isNexusS ? 0.5 : 1, // Thinner border on Nexus S
+      borderWidth: 1, // Thinner border on Nexus S
       borderColor: '#FFFFFF',
     },
     swapIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.065, // Smaller font on Nexus S, minimum 16px
       color: 'white',
     },
 
@@ -3107,16 +3142,16 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 0,
-      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
+      gap: width * 0.05, // Smaller gap on Nexus S
     },
     decorativeCards: {
       flexDirection: 'row',
       gap: width * 0.03,
     },
     decorativeCard: {
-      width: isNexusS ? width * 0.06 : width * 0.08, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.09 : width * 0.12, // Smaller height on Nexus S
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      width: width * 0.08, // Smaller cards on Nexus S
+      height: width * 0.12, // Smaller height on Nexus S
+      borderRadius: width * 0.015,
     },
     cardRed: {
       backgroundColor: Colors.red.accent,
@@ -3134,10 +3169,10 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     yellowCard: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.06, // Smaller cards on Nexus S
+      height: width * 0.06, // Smaller cards on Nexus S
       backgroundColor: Colors.yellow.accent,
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      borderRadius: width * 0.015,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
@@ -3147,29 +3182,29 @@ export default function RemoteScreen() {
       elevation: 5,
     },
     yellowCardText: {
-      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.035, // Smaller font on Nexus S, minimum 10px
       color: 'white',
       fontWeight: '700',
     },
     redCardText: {
-      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.035, // Smaller font on Nexus S, minimum 10px
       color: 'white',
       fontWeight: '700',
     },
     assignPriorityButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
+      gap: width * 0.02, // Smaller gap on Nexus S
       backgroundColor: Colors.purple.primary,
-      paddingHorizontal: isNexusS ? width * 0.02 : width * 0.03, // Smaller padding on Nexus S
-      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      paddingHorizontal: width * 0.03, // Smaller padding on Nexus S
+      paddingVertical: height * 0.012, // Smaller padding on Nexus S
+      borderRadius: width * 0.03,
     },
     assignPriorityIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     assignPriorityText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -3180,38 +3215,39 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: 0,
-      gap: isNexusS ? width * 0.025 : width * 0.04, // Smaller gap on Nexus S
+      marginTop: height * 0.005, // Reduced top margin for more compact card
+      gap: width * 0.04, // Smaller gap on Nexus S
       width: '100%',
     },
     playButton: {
       flex: 1,
-      marginRight: isNexusS ? width * 0.025 : width * 0.04, // Smaller margin on Nexus S
+      marginRight: width * 0.04, // Smaller margin on Nexus S
       backgroundColor: Colors.green.accent,
-      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      paddingVertical: height * 0.012, // Smaller padding on Nexus S
+      borderRadius: width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
-      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
+      gap: width * 0.02, // Smaller gap on Nexus S
     },
     playIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     playText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
     resetButton: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
+      width: width * 0.06, // Smaller button on Nexus S
+      height: width * 0.06, // Smaller button on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
     },
     resetIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
 
 
@@ -3310,20 +3346,20 @@ export default function RemoteScreen() {
     addTimeControls: {
       flexDirection: 'row',
       justifyContent: 'space-around',
-      marginTop: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
+      marginTop: height * 0.005, // Smaller margin on Nexus S
+      marginBottom: height * 0.01, // Smaller margin on Nexus S
       width: '100%',
     },
     addTimeButton: {
       backgroundColor: Colors.purple.primary,
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
-      paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
-      paddingVertical: isNexusS ? height * 0.005 : height * 0.008, // Smaller padding on Nexus S
-      minWidth: isNexusS ? width * 0.15 : width * 0.18, // Smaller width on Nexus S
+      borderRadius: width * 0.03,
+      paddingHorizontal: width * 0.04, // Smaller padding on Nexus S
+      paddingVertical: height * 0.008, // Smaller padding on Nexus S
+      minWidth: width * 0.18, // Smaller width on Nexus S
       alignItems: 'center',
     },
     addTimeButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -3449,10 +3485,10 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     redCard: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.06, // Smaller cards on Nexus S
+      height: width * 0.06, // Smaller cards on Nexus S
       backgroundColor: Colors.red.accent,
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      borderRadius: width * 0.015,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
@@ -3541,19 +3577,19 @@ export default function RemoteScreen() {
     completeMatchButton: {
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
-      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
+      marginBottom: height * 0.01, // Smaller margin on Nexus S
+      gap: width * 0.05, // Smaller gap on Nexus S
     },
     completeButton: {
-      width: isNexusS ? width * 0.4 : width * 0.35, // Slightly wider on Nexus S for better fit
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller height on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      width: width * 0.35, // Slightly wider on Nexus S for better fit
+      height: width * 0.06, // Smaller height on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: Colors.green.accent,
       alignItems: 'center',
       justifyContent: 'center',
     },
     completeButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -3877,24 +3913,21 @@ export default function RemoteScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-            <SafeAreaView style={[styles.container, { 
-        paddingTop: insets.top * 0.1, 
-        paddingBottom: insets.bottom,
-        backgroundColor: Colors.dark.background 
-      }]}>
-        <View style={styles.container}>
+      <View style={styles.container}>
+        {/* Header with top safe area */}
+        <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
+          <View style={styles.stickyHeader}>
+            {/* Empty header for now, but keeps structure consistent */}
+          </View>
+        </SafeAreaView>
+        
+        {/* Content with bottom safe area */}
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+          <View style={styles.contentContainer}>
           {/* Match Timer Section */}
       <LinearGradient
         colors={Colors.timerBackground.colors}
-        style={[
-          styles.matchTimerCard,
-          // Make match timer card smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-            padding: isNexusS ? width * 0.002 : width * 0.004, // Reduce padding even more
-            marginTop: isNexusS ? height * 0.0005 : height * 0.001, // Reduce top margin even more
-            marginBottom: isNexusS ? height * 0.0002 : height * 0.0005, // Reduce bottom margin even more
-          } : {}
-        ]}
+        style={styles.matchTimerCard}
         start={Colors.timerBackground.start}
         end={Colors.timerBackground.end}
       >
@@ -3905,6 +3938,14 @@ export default function RemoteScreen() {
           {!isPlaying && !hasMatchStarted && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
               <Ionicons name="pencil" size={16} color="white" />
+            </TouchableOpacity>
+          )}
+          {hasMatchStarted && (
+            <TouchableOpacity 
+              style={styles.completeMatchCircle} 
+              onPress={completeMatch}
+            >
+              <Text style={styles.completeMatchFlag}>🏁</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -4267,7 +4308,7 @@ export default function RemoteScreen() {
           colors={['#D6A4F0', '#969DFA']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[styles.swapButton, { position: 'absolute', zIndex: 10, left: width * 0.5 - width * 0.075 }]}
+          style={[styles.swapButton, { position: 'absolute', zIndex: 10, alignSelf: 'center' }]}
         >
           <TouchableOpacity 
             style={{ 
@@ -4550,44 +4591,38 @@ export default function RemoteScreen() {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-          marginVertical: isNexusS ? height * 0.008 : height * 0.012,
-          marginTop: isNexusS ? height * 0.004 : height * 0.006,
-          paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
+          marginVertical: height * 0.012,
+          marginTop: height * 0.006,
+          paddingHorizontal: width * 0.04,
             backgroundColor: 'transparent',
-          borderRadius: isNexusS ? width * 0.015 : width * 0.02,
-          gap: isNexusS ? height * 0.008 : height * 0.012, // Reduced gap between elements
-          marginBottom: isNexusS ? height * 0.015 : height * 0.02 // Bottom margin from tab bar
+          borderRadius: width * 0.02,
+          gap: height * 0.012, // Reduced gap between elements
+          marginBottom: layout.adjustMargin(height * 0.02, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset // Bottom margin with dynamic adjustments
           }
         ]}>
         
         {/* Play and Reset Row */}
-        <View style={[
-          {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            width: '100%'
-          },
-          // Move buttons down when match hasn't started (no swipe to complete button)
-          !hasMatchStarted && {
-            marginTop: height * 0.03, // Add extra margin to move buttons down
-          }
-        ]}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%'
+        }}>
           {/* Play Button / Skip Button */}
           <TouchableOpacity 
             style={{
               flex: 1,
               backgroundColor: '#2A2A2A',
-              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
-              paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
-              borderRadius: isNexusS ? width * 0.015 : width * 0.02,
+              paddingVertical: layout.adjustPadding(height * 0.028, 'bottom'),
+              paddingHorizontal: width * 0.04,
+              borderRadius: width * 0.02,
               alignItems: 'center',
               justifyContent: 'center',
               flexDirection: 'row',
-              marginRight: isNexusS ? width * 0.015 : width * 0.02,
-              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              marginRight: width * 0.02,
+              borderWidth: width * 0.005,
               borderColor: 'white',
-              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              minHeight: layout.adjustPadding(height * 0.1, 'bottom'),
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
             onPress={async () => {
@@ -4631,11 +4666,11 @@ export default function RemoteScreen() {
                 isPlaying ? 'pause' : 
                 'play'
               }
-              size={isNexusS ? Math.max(width * 0.04, 16) : width * 0.045} 
+              size={width * 0.045} 
               color="white" 
-              style={{marginRight: isNexusS ? width * 0.01 : width * 0.015}}
+              style={{marginRight: width * 0.015}}
             />
-            <Text style={{fontSize: isNexusS ? Math.max(width * 0.03, 12) : width * 0.035, fontWeight: '600', color: 'white'}}>
+            <Text style={{fontSize: width * 0.035, fontWeight: '600', color: 'white'}}>
               {isInjuryTimer ? 'Skip Injury' : 
                isBreakTime ? 'Skip Break' : 
                isPlaying ? 'Pause' : 
@@ -4646,15 +4681,15 @@ export default function RemoteScreen() {
           {/* Reset Button */}
                       <TouchableOpacity 
               style={{
-              width: isNexusS ? width * 0.13 : width * 0.15,
+              width: width * 0.15,
                 backgroundColor: '#FB5D5C',
-              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
-              borderRadius: isNexusS ? width * 0.04 : width * 0.05,
+              paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
+              borderRadius: width * 0.05,
                 alignItems: 'center',
                 justifyContent: 'center',
-              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              borderWidth: width * 0.005,
                 borderColor: 'transparent',
-              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
               shadowColor: '#6C5CE7',
               shadowOffset: { width: 0, height: height * 0.005 },
               shadowOpacity: 0.25,
@@ -4663,24 +4698,10 @@ export default function RemoteScreen() {
             }} 
             onPress={resetTimer}
           >
-            <Ionicons name="refresh" size={isNexusS ? 20 : 24} color="white" />
+            <Ionicons name="refresh" size={24} color="white" />
           </TouchableOpacity>
         </View>
 
-        {/* Complete Match Slider - Only show when match has started */}
-        {hasMatchStarted && (
-          <SwipeToCompleteButton
-            title="Swipe To Complete The Match"
-            customStyle={{
-              position: 'relative',
-              width: '100%',
-              alignSelf: 'stretch', // Makes it stretch to fill the container width
-              flex: 1, // Takes up available space
-              minWidth: '100%' // Ensures minimum width matches container
-            }}
-            onSwipeSuccess={completeMatch}
-          />
-        )}
       </View>
 
       {/* Edit Time Popup */}
@@ -4916,8 +4937,9 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
-        </View>
-    </SafeAreaView>
-  </GestureHandlerRootView>
+          </View>
+        </SafeAreaView>
+      </View>
+    </GestureHandlerRootView>
   );
 }

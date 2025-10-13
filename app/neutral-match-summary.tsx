@@ -386,18 +386,32 @@ export default function NeutralMatchSummary() {
                 period3: { user: 0, opponent: 0 }
               };
 
-              // Fill in actual period scores
-              matchPeriods.forEach(period => {
+              // Sort periods by period_number to ensure correct order
+              const sortedPeriods = matchPeriods.sort((a, b) => (a.period_number || 0) - (b.period_number || 0));
+              
+              // Fill in actual period scores (touches scored PER period, not cumulative)
+              sortedPeriods.forEach((period, index) => {
                 const periodNum = period.period_number || 1;
+                const currentFencer1Score = period.fencer_1_score || 0;
+                const currentFencer2Score = period.fencer_2_score || 0;
+                
+                // Get previous period's cumulative scores (0 if first period)
+                const previousFencer1Score = index > 0 ? (sortedPeriods[index - 1].fencer_1_score || 0) : 0;
+                const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
+                
+                // Calculate touches scored DURING this period
+                const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
+                const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+                
                 if (periodNum === 1) {
-                  touchesByPeriodData.period1.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period1.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod;
                 } else if (periodNum === 2) {
-                  touchesByPeriodData.period2.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period2.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod;
                 } else if (periodNum === 3) {
-                  touchesByPeriodData.period3.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period3.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod;
                 }
               });
 
@@ -973,18 +987,18 @@ const styles = StyleSheet.create({
   },
   scoreContainer: {
     position: 'absolute',
-    width: 150,
-    height: 95,
+    width: '80%', // Responsive width
+    height: height * 0.12, // Responsive height
     left: '50%',
-    marginLeft: -75,
-    top: 32,
+    marginLeft: '-40%', // Half of 80% to center
+    top: height * 0.04, // Responsive top position
     alignItems: 'center',
   },
   scoreText: {
     position: 'absolute',
-    width: 80,
-    height: 41,
-    left: 35,
+    width: '90%', // Responsive width within container
+    height: height * 0.05, // Responsive height
+    left: '5%', // Center within the 90% width
     top: 0,
     fontSize: width * 0.075,
     fontWeight: '600',
@@ -993,10 +1007,10 @@ const styles = StyleSheet.create({
   },
   durationText: {
     position: 'absolute',
-    width: 150,
-    height: 19,
-    left: 0,
-    top: 44,
+    width: '80%', // Match the score container width
+    height: height * 0.025, // Responsive height
+    left: '10%', // Center within the 80% width
+    top: height * 0.042, // Moved up further - Responsive top position
     fontSize: width * 0.035,
     fontWeight: '500',
     color: '#9D9D9D',
@@ -1012,7 +1026,7 @@ const styles = StyleSheet.create({
     paddingVertical: height * 0.0,
     gap: 0,
     alignSelf: 'center',
-    marginTop: 70,
+    marginTop: height * 0.066, // Moved up further - Responsive
     minHeight: height * 0.035,
     minWidth: width * 0.35,
     marginHorizontal: 0,

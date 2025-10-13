@@ -215,7 +215,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.02,
+      marginBottom: height * 0.01,
     },
     headerTitle: {
       fontSize: width * 0.05,

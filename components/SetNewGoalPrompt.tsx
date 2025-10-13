@@ -1,13 +1,13 @@
 import { Colors } from '@/constants/Colors';
 import React, { useEffect, useRef } from 'react';
 import {
-  Animated,
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    Animated,
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 
 interface SetNewGoalPromptProps {

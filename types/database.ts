@@ -67,8 +67,11 @@ export interface Goal {
   tracking_mode?: string;
   linked_session_id?: string;
   is_active?: boolean;
+  is_failed?: boolean;                // New: Goal became impossible to achieve
   created_at?: string;
   updated_at?: string;
+  match_window?: number;              // For windowed goals (e.g., next 20 matches)
+  starting_match_count?: number;      // Total matches when goal was created
 }
 
 export interface AppUser {
@@ -168,5 +171,8 @@ export interface SimpleGoal {
   currentValue: number;
   deadline: string;
   isCompleted: boolean;
+  isFailed?: boolean;                 // New: Goal became impossible to achieve
   progress: number;
+  match_window?: number;              // For windowed goals
+  starting_match_count?: number;      // Starting point for window
 }

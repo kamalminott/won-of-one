@@ -92,7 +92,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   const styles = StyleSheet.create({
     container: {
       width: '100%',
-      height: height * 0.16,
+      height: height * 0.12,
       marginBottom: height * 0.012,
       position: 'relative',
       overflow: 'visible',
@@ -147,18 +147,18 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     title: {
       fontFamily: 'Articulat CF',
       fontWeight: '700',
-      fontSize: width * 0.036,
-      lineHeight: height * 0.02,
+      fontSize: width * 0.034,
+      lineHeight: height * 0.018,
       color: '#FFFFFF',
-      marginBottom: height * 0.002,
+      marginBottom: height * 0.001,
     },
     progressText: {
       fontFamily: 'Articulat CF',
       fontWeight: '700',
-      fontSize: width * 0.048,
-      lineHeight: height * 0.028,
+      fontSize: width * 0.044,
+      lineHeight: height * 0.024,
       color: '#FFFFFF',
-      marginBottom: height * 0.012,
+      marginBottom: height * 0.008,
     },
     progressBar: {
       width: '100%',

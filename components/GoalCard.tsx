@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { forwardRef, useImperativeHandle, useState } from 'react';
+import { Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import CircularProgress from 'react-native-circular-progress-indicator';
 
 interface GoalCardProps {
@@ -14,10 +14,19 @@ interface GoalCardProps {
   onSetNewGoal: () => void;
   onUpdateGoal: () => void;
   onGoalSaved?: (goalData: any) => void;
+  onGoalDeleted?: (goalId: string) => void;
+  goalId?: string;
   useModal?: boolean; // If true, use internal modal; if false, use onSetNewGoal callback
+  matchWindow?: number; // For windowed goals
+  totalMatches?: number; // Total matches played in user's history
+  currentRecord?: { wins: number; losses: number }; // Current W-L record
 }
 
-export const GoalCard: React.FC<GoalCardProps> = ({
+export interface GoalCardRef {
+  openModal: () => void;
+}
+
+export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   daysLeft,
   title,
   description,
@@ -27,8 +36,13 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   onSetNewGoal,
   onUpdateGoal,
   onGoalSaved,
+  onGoalDeleted,
+  goalId,
   useModal = false,
-}) => {
+  matchWindow,
+  totalMatches,
+  currentRecord,
+}, ref) => {
   const { width, height } = useWindowDimensions();
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [isUpdatingGoal, setIsUpdatingGoal] = useState(false);
@@ -41,18 +55,25 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   const [showTimeframeDropdown, setShowTimeframeDropdown] = useState(false);
   const [showTimeframeNumberDropdown, setShowTimeframeNumberDropdown] = useState(false);
   const [matchesForWinRate, setMatchesForWinRate] = useState('20');
-  const [matchesForPoints, setMatchesForPoints] = useState('10');
   const [matchesForDifferential, setMatchesForDifferential] = useState('15');
   const [matchesInARow, setMatchesInARow] = useState('5');
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState('');
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [enableMatchWindow, setEnableMatchWindow] = useState(false);
+
+  // Expose openModal method to parent via ref
+  useImperativeHandle(ref, () => ({
+    openModal: () => {
+      console.log('🎯 Opening goal modal via ref');
+      setShowGoalModal(true);
+    }
+  }));
 
   const goalTypes = [
     { label: 'Total Matches Played', icon: '📊' },
     { label: 'Wins', icon: '🥇' },
-    { label: 'Win Rate %', icon: '📈' },
-    { label: 'Points Scored', icon: '🎯' },
-    { label: 'Point Differential', icon: '➕' },
+    { label: 'Average Margin of Victory', icon: '🏆' },
     { label: 'Streaks', icon: '🔥' }
   ];
 
@@ -95,15 +116,48 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
 
   const handleSaveGoal = () => {
+    const targetValue = parseInt(targetValueInput);
+    
     // Prepare goal data for database
-    const goalData = {
+    const goalData: any = {
       category: goalType,
       description: notes,
-      target_value: parseInt(targetValueInput),
+      target_value: targetValue,
       unit: timeframe,
       deadline: calculateDeadline(timeframe, timeframeNumber),
       tracking_mode: 'manual', // Default tracking mode
     };
+
+    // Add match_window for goals that track over specific number of matches (only if enabled)
+    if (enableMatchWindow && ['Wins', 'Average Margin of Victory'].includes(goalType)) {
+      let windowSize = 0;
+      switch (goalType) {
+        case 'Wins':
+          windowSize = parseInt(matchesForWinRate);
+          break;
+        case 'Average Margin of Victory':
+          windowSize = parseInt(matchesForDifferential);
+          break;
+      }
+      
+      // Validate window for Wins goal
+      if (goalType === 'Wins' && windowSize > 0) {
+        if (windowSize < targetValue) {
+          Alert.alert(
+            'Invalid Goal',
+            `You cannot win ${targetValue} matches out of only ${windowSize} matches. The window must be at least ${targetValue} matches.`,
+            [{ text: 'OK' }]
+          );
+          return; // Don't save the goal
+        }
+      }
+      
+      // Only add window if user specified one (windowSize > 0)
+      if (windowSize > 0) {
+        goalData.match_window = windowSize;
+        console.log('Adding match_window to goal:', windowSize);
+      }
+    }
 
     console.log('Saving goal:', goalData);
     console.log('onGoalSaved callback exists:', !!onGoalSaved);
@@ -150,6 +204,48 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     setShowTimeframeNumberDropdown(false);
   };
 
+  const handleDeleteGoal = () => {
+    setShowOptionsMenu(false);
+    
+    if (!goalId) {
+      Alert.alert('Error', 'Cannot delete goal - no goal ID provided');
+      return;
+    }
+    
+    Alert.alert(
+      'Delete Goal',
+      'Are you sure you want to delete this goal? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            console.log('🗑️ Deleting goal:', goalId);
+            if (onGoalDeleted) {
+              onGoalDeleted(goalId);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleEditGoal = () => {
+    setShowOptionsMenu(false);
+    // Open the goal modal in edit mode
+    setIsUpdatingGoal(true);
+    setGoalType(title);
+    setNotes(description);
+    if (targetValue) {
+      setTargetValueInput(targetValue.toString());
+    }
+    setShowGoalModal(true);
+  };
+
   const closeDropdowns = () => {
     setShowGoalTypeDropdown(false);
     setShowTimeframeDropdown(false);
@@ -175,9 +271,6 @@ export const GoalCard: React.FC<GoalCardProps> = ({
             break;
           case 'matchesForWinRate':
             setMatchesForWinRate(tempValue);
-            break;
-          case 'matchesForPoints':
-            setMatchesForPoints(tempValue);
             break;
           case 'matchesForDifferential':
             setMatchesForDifferential(tempValue);
@@ -216,10 +309,6 @@ export const GoalCard: React.FC<GoalCardProps> = ({
         const currentWinRate = parseInt(matchesForWinRate);
         setMatchesForWinRate((currentWinRate + 1).toString());
         break;
-      case 'points':
-        const currentPoints = parseInt(matchesForPoints);
-        setMatchesForPoints((currentPoints + 1).toString());
-        break;
       case 'differential':
         const currentDifferential = parseInt(matchesForDifferential);
         setMatchesForDifferential((currentDifferential + 1).toString());
@@ -239,12 +328,6 @@ export const GoalCard: React.FC<GoalCardProps> = ({
           setMatchesForWinRate((currentWinRate - 1).toString());
         }
         break;
-      case 'points':
-        const currentPoints = parseInt(matchesForPoints);
-        if (currentPoints > 1) {
-          setMatchesForPoints((currentPoints - 1).toString());
-        }
-        break;
       case 'differential':
         const currentDifferential = parseInt(matchesForDifferential);
         if (currentDifferential > 1) {
@@ -261,16 +344,14 @@ export const GoalCard: React.FC<GoalCardProps> = ({
   };
 
   const shouldShowMatchesField = () => {
-    return ['Win Rate %', 'Points Scored', 'Point Differential'].includes(goalType);
+    return ['Wins', 'Average Margin of Victory'].includes(goalType);
   };
 
   const getMatchesFieldLabel = () => {
     switch (goalType) {
-      case 'Win Rate %':
-        return 'Over Next X Matches';
-      case 'Points Scored':
-        return 'Over Next X Matches';
-      case 'Point Differential':
+      case 'Wins':
+        return 'Out of Next X Matches (Optional)';
+      case 'Average Margin of Victory':
         return 'Over Next X Matches';
       default:
         return '';
@@ -279,11 +360,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const getMatchesFieldValue = () => {
     switch (goalType) {
-      case 'Win Rate %':
+      case 'Wins':
         return matchesForWinRate;
-      case 'Points Scored':
-        return matchesForPoints;
-      case 'Point Differential':
+      case 'Average Margin of Victory':
         return matchesForDifferential;
       default:
         return '';
@@ -292,11 +371,9 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const getMatchesFieldKey = () => {
     switch (goalType) {
-      case 'Win Rate %':
+      case 'Wins':
         return 'matchesForWinRate';
-      case 'Points Scored':
-        return 'matchesForPoints';
-      case 'Point Differential':
+      case 'Average Margin of Victory':
         return 'matchesForDifferential';
       default:
         return '';
@@ -305,13 +382,10 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const setMatchesFieldValue = (value: string) => {
     switch (goalType) {
-      case 'Win Rate %':
+      case 'Wins':
         setMatchesForWinRate(value);
         break;
-      case 'Points Scored':
-        setMatchesForPoints(value);
-        break;
-      case 'Point Differential':
+      case 'Average Margin of Victory':
         setMatchesForDifferential(value);
         break;
     }
@@ -319,13 +393,10 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const incrementMatchesField = () => {
     switch (goalType) {
-      case 'Win Rate %':
+      case 'Wins':
         incrementMatches('winRate');
         break;
-      case 'Points Scored':
-        incrementMatches('points');
-        break;
-      case 'Point Differential':
+      case 'Average Margin of Victory':
         incrementMatches('differential');
         break;
     }
@@ -333,13 +404,10 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const decrementMatchesField = () => {
     switch (goalType) {
-      case 'Win Rate %':
+      case 'Wins':
         decrementMatches('winRate');
         break;
-      case 'Points Scored':
-        decrementMatches('points');
-        break;
-      case 'Point Differential':
+      case 'Average Margin of Victory':
         decrementMatches('differential');
         break;
     }
@@ -353,15 +421,27 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       case 'Total Matches Played':
         return `Play ${targetValueInput} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
       case 'Wins':
+        // Check if user enabled match window
+        if (enableMatchWindow) {
+          const windowSize = parseInt(matchesForWinRate);
+          if (windowSize && windowSize > 0) {
+            // Windowed wins goal: "Win X out of next Y matches"
+            return `Win ${targetValueInput} out of your next ${windowSize} matches`;
+          }
+        }
+        // Simple wins goal: "Win X matches"
         return `Win ${targetValueInput} matches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
-      case 'Win Rate %':
-        return `Achieve ${targetValueInput}% win rate over next ${matchesForWinRate} matches`;
-      case 'Points Scored':
-        return `Score ${targetValueInput} touches in ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
-      case 'Point Differential':
-        return `End +${targetValueInput} in point differential over ${matchesForDifferential} matches`;
+        
+      case 'Average Margin of Victory':
+        // Check if user enabled match window
+        if (enableMatchWindow && matchesForDifferential) {
+          const windowSize = parseInt(matchesForDifferential);
+          return `Win by an average of ${targetValueInput}+ points over next ${windowSize} matches`;
+        } else {
+          return `Win by an average of ${targetValueInput}+ points (all-time)`;
+        }
       case 'Streaks':
-        return `Win ${targetValueInput} matches in a row`;
+        return `Build a ${targetValueInput}-match winning streak`;
       default:
         return `Set a goal for ${number} ${timeframe.toLowerCase()}${isPlural ? 's' : ''}`;
     }
@@ -369,6 +449,170 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   const shouldShowTimeframe = () => {
     return !['Streaks'].includes(goalType);
+  };
+
+  // Calculate warning state based on days left
+  const getWarningState = (daysLeft: number): {
+    state: 'normal' | 'warning' | 'urgent' | 'lastDay';
+    color: string;
+    message: string;
+  } => {
+    if (daysLeft === 0) {
+      return {
+        state: 'lastDay',
+        color: '#FF7675',
+        message: '🚨 LAST DAY! Expires today'
+      };
+    } else if (daysLeft === 1) {
+      return {
+        state: 'urgent',
+        color: '#FF7675',
+        message: '🚨 1 day left - URGENT!'
+      };
+    } else if (daysLeft === 2) {
+      return {
+        state: 'urgent',
+        color: '#FF7675',
+        message: '🚨 2 days left - Complete soon!'
+      };
+    } else if (daysLeft <= 5) {
+      return {
+        state: 'warning',
+        color: '#FFA500',
+        message: `⚠️ ${daysLeft} days left`
+      };
+    } else {
+      return {
+        state: 'normal',
+        color: Colors.yellow.accent,
+        message: `${daysLeft} days left`
+      };
+    }
+  };
+
+  const warningInfo = getWarningState(daysLeft);
+
+  // Helper function to get color based on value and thresholds
+  const getStatColor = (value: number, thresholds: { red: number; yellow: number }, inverse: boolean = false): string => {
+    if (inverse) {
+      // For values where lower is worse (e.g., losses allowed)
+      if (value === 0) return '#FF7675'; // Red
+      if (value <= thresholds.yellow) return '#FFB800'; // Yellow
+      return 'white'; // Normal
+    } else {
+      // For values where higher is worse (e.g., win rate needed)
+      if (value >= thresholds.red) return '#FF7675'; // Red
+      if (value >= thresholds.yellow) return '#FFB800'; // Yellow
+      return 'white'; // Normal
+    }
+  };
+
+  // Render Progress Insights based on goal type
+  const renderInsights = () => {
+    if (!goalId || title === "No Active Goals" || !targetValue || currentValue === undefined) {
+      return null;
+    }
+
+    const insights: Array<{ text: string; color?: string }> = [];
+
+    switch (title) {
+      case 'Total Matches Played':
+        const matchesRemaining = targetValue - currentValue;
+        const pacePerDay = daysLeft > 0 ? matchesRemaining / daysLeft : 0;
+        const daysPerMatch = pacePerDay > 0 ? 1 / pacePerDay : 0;
+        
+        insights.push({ text: `• Completed: ${currentValue}/${targetValue} matches` });
+        insights.push({ text: `• Remaining: ${matchesRemaining} matches` });
+        if (daysLeft > 0 && matchesRemaining > 0) {
+          if (daysPerMatch >= 1) {
+            insights.push({ text: `• Pace: ~1 match every ${Math.round(daysPerMatch)} days` });
+          } else {
+            insights.push({ text: `• Pace: ~${Math.ceil(pacePerDay)} matches per day` });
+          }
+        }
+        break;
+
+      case 'Wins':
+        if (matchWindow && totalMatches !== undefined && currentRecord) {
+          // Windowed Wins
+          const matchesPlayed = Math.min(totalMatches, matchWindow);
+          const winsNeeded = targetValue - currentValue;
+          const matchesRemaining = matchWindow - matchesPlayed;
+          const lossesAllowed = matchesRemaining - winsNeeded;
+          const winRateNeeded = matchesRemaining > 0 ? (winsNeeded / matchesRemaining) * 100 : 0;
+          
+          insights.push({ text: `• Progress: ${matchesPlayed}/${matchWindow} matches (${currentRecord.wins}W-${currentRecord.losses}L)` });
+          insights.push({ text: `• Wins: ${currentValue}/${targetValue} (need ${winsNeeded} more)` });
+          insights.push({ 
+            text: `• Losses allowed: ${Math.max(0, lossesAllowed)} max`,
+            color: getStatColor(lossesAllowed, { red: 0, yellow: 3 }, true)
+          });
+          if (matchesRemaining > 0) {
+            insights.push({ 
+              text: `• Win rate needed: ${Math.round(winRateNeeded)}%`,
+              color: getStatColor(winRateNeeded, { red: 85, yellow: 70 }, false)
+            });
+          }
+        } else {
+          // Simple Wins
+          const winsRemaining = targetValue - currentValue;
+          const totalMatchesPlayed = currentRecord ? currentRecord.wins + currentRecord.losses : currentValue;
+          const recordText = currentRecord ? `${currentRecord.wins}W-${currentRecord.losses}L` : `${currentValue}W`;
+          
+          insights.push({ text: `• Wins: ${currentValue}/${targetValue}` });
+          insights.push({ text: `• Remaining: ${winsRemaining} wins` });
+          insights.push({ text: `• Record: ${recordText}` });
+        }
+        break;
+
+      case 'Average Margin of Victory':
+        const gap = currentValue - targetValue;
+        const matchesPlayed = matchWindow && totalMatches !== undefined ? Math.min(totalMatches, matchWindow) : 0;
+        const matchesLeft = matchWindow ? matchWindow - matchesPlayed : 0;
+        
+        insights.push({ text: `• Current avg: ${currentValue.toFixed(1)} points` });
+        insights.push({ text: `• Target avg: ${targetValue.toFixed(1)} points` });
+        insights.push({ 
+          text: `• Gap: ${gap >= 0 ? '+' : ''}${gap.toFixed(1)} points`,
+          color: gap >= 0 ? '#00B894' : (gap >= -1 ? '#FFB800' : '#FF7675')
+        });
+        
+        if (matchWindow && matchesLeft > 0) {
+          insights.push({ text: `• Matches: ${matchesPlayed}/${matchWindow} played` });
+          
+          // Calculate what average is needed in remaining matches
+          const totalNeeded = targetValue * matchWindow;
+          const totalSoFar = currentValue * matchesPlayed;
+          const neededInRemaining = (totalNeeded - totalSoFar) / matchesLeft;
+          
+          insights.push({ 
+            text: `• Need avg: ${neededInRemaining.toFixed(1)} pts in next ${matchesLeft}`,
+            color: getStatColor(neededInRemaining, { red: targetValue + 2, yellow: targetValue }, false)
+          });
+        }
+        break;
+
+      case 'Streaks':
+        const streakWinsToGo = targetValue - currentValue;
+        const fireEmojis = '🔥'.repeat(Math.min(currentValue, 10));
+        
+        insights.push({ text: `• Current: ${currentValue} wins ${fireEmojis}` });
+        insights.push({ text: `• Target: ${targetValue} wins` });
+        insights.push({ text: `• To go: ${streakWinsToGo} consecutive wins` });
+        insights.push({ text: `• ⚠️ Any loss resets streak`, color: '#FFB800' });
+        break;
+    }
+
+    return (
+      <View style={styles.insightsContainer}>
+        <Text style={styles.insightsTitle}>📊 Progress Insights</Text>
+        {insights.map((insight, index) => (
+          <Text key={index} style={[styles.insightText, insight.color && { color: insight.color }]}>
+            {insight.text}
+          </Text>
+        ))}
+      </View>
+    );
   };
 
   const styles = StyleSheet.create({
@@ -380,7 +624,8 @@ export const GoalCard: React.FC<GoalCardProps> = ({
     },
     header: {
       flexDirection: 'row',
-      justifyContent: 'flex-start',
+      justifyContent: 'space-between',
+      alignItems: 'center',
       marginBottom: height * 0.008,
     },
     daysLeftTag: {
@@ -394,6 +639,70 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       fontWeight: '600',
       color: Colors.gray.dark,
     },
+    menuButton: {
+      padding: width * 0.01,
+      marginTop: -height * 0.009,
+      marginRight: -width * 0.025,
+    },
+    menuOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    menuContainer: {
+      backgroundColor: '#2A2A2A',
+      borderRadius: width * 0.03,
+      width: width * 0.5,
+      paddingVertical: height * 0.01,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    menuOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.015,
+      gap: width * 0.03,
+    },
+    menuOptionText: {
+      fontSize: width * 0.04,
+      color: 'white',
+      fontWeight: '500',
+    },
+    menuDivider: {
+      height: 1,
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      marginHorizontal: width * 0.04,
+    },
+    deleteText: {
+      color: '#FF7675',
+    },
+    checkboxContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: height * 0.02,
+      marginTop: height * 0.01,
+    },
+    checkbox: {
+      width: width * 0.05,
+      height: width * 0.05,
+      borderRadius: width * 0.01,
+      borderWidth: 2,
+      borderColor: Colors.purple.primary,
+      backgroundColor: 'transparent',
+      marginRight: width * 0.03,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkboxLabel: {
+      fontSize: width * 0.035,
+      color: 'white',
+      flex: 1,
+    },
     title: {
       fontSize: width * 0.045,
       fontWeight: '700',
@@ -405,6 +714,30 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       color: Colors.gray.light,
       marginTop: height * 0.010, // Added space between heading and text
       marginBottom: height * 0.0005,
+    },
+    insightsContainer: {
+      backgroundColor: '#1F1F1F',
+      borderRadius: width * 0.02,
+      padding: width * 0.025,
+      paddingVertical: height * 0.01,
+      marginTop: height * -0.035,
+      marginBottom: height * 0.01,
+      marginLeft: 0,
+      marginRight: width * 0.18,
+      borderWidth: 1,
+      borderColor: '#3A3A3A',
+    },
+    insightsTitle: {
+      fontSize: width * 0.032,
+      fontWeight: '600',
+      color: 'white',
+      marginBottom: height * 0.006,
+    },
+    insightText: {
+      fontSize: width * 0.028,
+      color: 'white',
+      marginBottom: height * 0.003,
+      lineHeight: width * 0.04,
     },
     contentRow: {
       flexDirection: 'row',
@@ -718,19 +1051,37 @@ export const GoalCard: React.FC<GoalCardProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.daysLeftTag}>
-          <Text style={styles.daysLeftTagText}>{daysLeft} days left</Text>
+      {/* Only show header with days left pill if there's an active goal */}
+      {goalId && title !== "No Active Goals" && (
+        <View style={styles.header}>
+          <View style={[styles.daysLeftTag, { backgroundColor: warningInfo.color }]}>
+            <Text style={[
+              styles.daysLeftTagText,
+              warningInfo.state === 'lastDay' && { fontWeight: '700' }
+            ]}>
+              {warningInfo.message}
+            </Text>
+          </View>
+          
+          {/* Three-dot menu */}
+          <TouchableOpacity 
+            onPress={() => setShowOptionsMenu(true)}
+            style={styles.menuButton}
+          >
+            <Ionicons name="ellipsis-vertical" size={width * 0.05} color="rgba(255, 255, 255, 0.7)" />
+          </TouchableOpacity>
         </View>
-      </View>
+      )}
       
       <Text style={styles.title}>{title}</Text>
       
       <View style={styles.contentRow}>
         <View style={styles.textSection}>
-          <Text style={styles.description}>
-            {description ? truncateDescription(description) : 'Track your progress and stay motivated'}
-          </Text>
+          {title === "No Active Goals" && (
+            <Text style={styles.description}>
+              {description ? truncateDescription(description) : 'Track your progress and stay motivated'}
+            </Text>
+          )}
         </View>
         
         <View style={styles.progressSection}>
@@ -755,17 +1106,50 @@ export const GoalCard: React.FC<GoalCardProps> = ({
         </View>
       </View>
       
-      <View style={styles.buttonContainer}>
-        {title === "No Active Goals" ? (
+      {/* Progress Insights Section */}
+      {renderInsights()}
+      
+      {title === "No Active Goals" && (
+        <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.secondaryButton} onPress={handleSetNewGoalClick}>
             <Text style={styles.secondaryButtonText}>Set New Goal</Text>
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleSetNewGoalClick}>
-            <Text style={styles.primaryButtonText}>Update Goal</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      )}
+
+      {/* Options Menu Modal */}
+      <Modal
+        visible={showOptionsMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOptionsMenu(false)}
+      >
+        <TouchableOpacity 
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setShowOptionsMenu(false)}
+        >
+          <View style={styles.menuContainer}>
+            <TouchableOpacity 
+              style={styles.menuOption}
+              onPress={handleEditGoal}
+            >
+              <Ionicons name="create-outline" size={width * 0.05} color="white" />
+              <Text style={styles.menuOptionText}>Edit Goal</Text>
+            </TouchableOpacity>
+            
+            <View style={styles.menuDivider} />
+            
+            <TouchableOpacity 
+              style={styles.menuOption}
+              onPress={handleDeleteGoal}
+            >
+              <Ionicons name="trash-outline" size={width * 0.05} color="#FF7675" />
+              <Text style={[styles.menuOptionText, styles.deleteText]}>Delete This Goal</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Goal Modal (Create/Update) */}
       <Modal
@@ -934,40 +1318,63 @@ export const GoalCard: React.FC<GoalCardProps> = ({
                 </View>
               )}
 
-              {/* Conditional Matches Field */}
+              {/* Conditional Matches Field with Checkbox */}
               {shouldShowMatchesField() && (
-                <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>{getMatchesFieldLabel()}</Text>
-                  <View style={styles.targetValueContainer}>
-                    <TouchableOpacity style={styles.targetButton} onPress={decrementMatchesField}>
-                      <Text style={styles.targetButtonText}>-</Text>
-                    </TouchableOpacity>
-                    
-                    {editingField === getMatchesFieldKey() ? (
-                      <TextInput
-                        style={styles.targetValueInput}
-                        value={tempValue}
-                        onChangeText={handleTextChange}
-                        onBlur={finishEditing}
-                        onSubmitEditing={finishEditing}
-                        keyboardType="numeric"
-                        autoFocus={true}
-                        selectTextOnFocus={true}
-                      />
-                    ) : (
-                      <TouchableOpacity 
-                        style={styles.targetValueTouchable}
-                        onPress={() => startEditing(getMatchesFieldKey(), getMatchesFieldValue())}
-                      >
-                        <Text style={styles.targetValue}>{getMatchesFieldValue()}</Text>
-                      </TouchableOpacity>
-                    )}
-                    
-                    <TouchableOpacity style={styles.targetButton} onPress={incrementMatchesField}>
-                      <Text style={styles.targetButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <>
+                  {/* Checkbox to enable match window */}
+                  <TouchableOpacity 
+                    style={styles.checkboxContainer}
+                    onPress={() => setEnableMatchWindow(!enableMatchWindow)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.checkbox}>
+                      {enableMatchWindow && (
+                        <Ionicons name="checkmark" size={width * 0.04} color={Colors.purple.primary} />
+                      )}
+                    </View>
+                    <Text style={styles.checkboxLabel}>
+                      {goalType === 'Wins' 
+                        ? 'Track over specific number of matches' 
+                        : 'Limit to next X matches'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Show matches field only if checkbox is enabled */}
+                  {enableMatchWindow && (
+                    <View style={styles.formField}>
+                      <Text style={styles.fieldLabel}>{getMatchesFieldLabel()}</Text>
+                      <View style={styles.targetValueContainer}>
+                        <TouchableOpacity style={styles.targetButton} onPress={decrementMatchesField}>
+                          <Text style={styles.targetButtonText}>-</Text>
+                        </TouchableOpacity>
+                        
+                        {editingField === getMatchesFieldKey() ? (
+                          <TextInput
+                            style={styles.targetValueInput}
+                            value={tempValue}
+                            onChangeText={handleTextChange}
+                            onBlur={finishEditing}
+                            onSubmitEditing={finishEditing}
+                            keyboardType="numeric"
+                            autoFocus={true}
+                            selectTextOnFocus={true}
+                          />
+                        ) : (
+                          <TouchableOpacity 
+                            style={styles.targetValueTouchable}
+                            onPress={() => startEditing(getMatchesFieldKey(), getMatchesFieldValue())}
+                          >
+                            <Text style={styles.targetValue}>{getMatchesFieldValue()}</Text>
+                          </TouchableOpacity>
+                        )}
+                        
+                        <TouchableOpacity style={styles.targetButton} onPress={incrementMatchesField}>
+                          <Text style={styles.targetButtonText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </>
               )}
 
               {/* Matches in a Row Field for Streaks */}
@@ -1045,4 +1452,6 @@ export const GoalCard: React.FC<GoalCardProps> = ({
       </Modal>
     </View>
   );
-};
+});
+
+GoalCard.displayName = 'GoalCard';

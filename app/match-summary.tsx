@@ -1,8 +1,8 @@
 import { BackButton } from '@/components/BackButton';
 import { GoalCelebrationModal } from '@/components/GoalCelebrationModal';
-import { SetNewGoalPrompt } from '@/components/SetNewGoalPrompt';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
+import { SetNewGoalPrompt } from '@/components/SetNewGoalPrompt';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService } from '@/lib/database';
@@ -40,8 +40,8 @@ export default function MatchSummaryScreen() {
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
   const [completedGoal, setCompletedGoal] = useState<any>(null);
-  const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
   const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
+  const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
 
   // Load user profile data
   useEffect(() => {
@@ -192,16 +192,29 @@ export default function MatchSummaryScreen() {
 
   const handleCelebrationClose = () => {
     setShowCelebration(false);
-    // Show new goal prompt instead of navigating
+    // Show the "Set New Goal?" prompt
     setShowNewGoalPrompt(true);
   };
 
-  const handleSetNewGoal = () => {
+  const handleSetNewGoal = async () => {
     setShowNewGoalPrompt(false);
+    
+    // Deactivate the completed goal
+    if (completedGoalId) {
+      console.log('🔒 Deactivating completed goal:', completedGoalId);
+      await goalService.deactivateGoal(completedGoalId);
+    }
+    
     setCompletedGoal(null);
     setCompletedGoalId(null);
-    // Navigate to goal creation screen
-    router.push('/set-goal');
+    
+    // Navigate to home with auto-open flag to trigger goal modal
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        autoOpenGoalModal: 'true',
+      }
+    });
   };
 
   const handleLater = async () => {
@@ -209,14 +222,14 @@ export default function MatchSummaryScreen() {
     
     // Deactivate the completed goal
     if (completedGoalId) {
-      console.log('🔒 Deactivating goal:', completedGoalId);
+      console.log('🔒 Deactivating completed goal:', completedGoalId);
       await goalService.deactivateGoal(completedGoalId);
     }
     
     setCompletedGoal(null);
     setCompletedGoalId(null);
     
-    // Navigate to home
+    // Navigate to home WITHOUT auto-open flag (user chose "Later")
     router.push('/(tabs)');
   };
 

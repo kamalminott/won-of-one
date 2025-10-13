@@ -3,6 +3,7 @@ import { PlatformPressable } from '@react-navigation/elements';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Entypo from 'react-native-vector-icons/Entypo';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -26,9 +27,13 @@ const iconNames = {
 
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { height, width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.tabBar, { height: height * 0.10 }]}>
+    <View style={[styles.tabBar, { 
+      height: height * 0.10 + insets.bottom,
+      paddingBottom: insets.bottom,
+    }]}>
       {state.routes
         .filter((route) => route.name !== 'diary') // Hide diary tab
         .map((route, index) => {
@@ -117,7 +122,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: 0,
     paddingTop: 0,
   },
   tabButton: {
