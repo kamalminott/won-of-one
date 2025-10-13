@@ -1,8 +1,8 @@
 import {
-  AppUser, DiaryEntry, Drill, Equipment,
-  FencingRemote, Goal, Match,
-  MatchApproval, MatchEvent,
-  SimpleGoal, SimpleMatch
+    AppUser, DiaryEntry, Drill, Equipment,
+    FencingRemote, Goal, Match,
+    MatchApproval, MatchEvent,
+    SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
