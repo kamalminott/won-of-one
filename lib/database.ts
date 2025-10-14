@@ -1956,3 +1956,300 @@ export const matchPeriodService = {
 
   // Note: Removed duplicate calculateScoreProgression function that was causing score inconsistencies
 };
+
+// ============================================
+// WEEKLY TARGETS & SESSION LOGGING
+// ============================================
+
+// Types for Weekly Targets
+export interface WeeklyTarget {
+  target_id: string;
+  user_id: string;
+  activity_type: string;
+  week_start_date: string; // ISO date string
+  week_end_date: string;
+  target_sessions: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeeklySessionLog {
+  session_id: string;
+  user_id: string;
+  activity_type: string;
+  session_date: string; // ISO date string
+  duration_minutes?: number;
+  notes?: string;
+  created_at: string;
+}
+
+export interface WeeklyProgress {
+  activity_type: string;
+  target_sessions: number;
+  completed_sessions: number;
+  week_start_date: string;
+  week_end_date: string;
+  days_left: number;
+  completion_rate: number; // 0-100
+}
+
+// Weekly Target Service
+export const weeklyTargetService = {
+  
+  // Create or update a weekly target
+  async setWeeklyTarget(
+    userId: string,
+    activityType: string,
+    weekStartDate: Date,
+    weekEndDate: Date,
+    targetSessions: number
+  ): Promise<WeeklyTarget | null> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .upsert({
+          user_id: userId,
+          activity_type: activityType,
+          week_start_date: weekStartDate.toISOString().split('T')[0],
+          week_end_date: weekEndDate.toISOString().split('T')[0],
+          target_sessions: targetSessions,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,activity_type,week_start_date'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error setting weekly target:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in setWeeklyTarget:', error);
+      return null;
+    }
+  },
+
+  // Get target for a specific week
+  async getWeeklyTarget(
+    userId: string,
+    activityType: string,
+    weekStartDate: Date
+  ): Promise<WeeklyTarget | null> {
+    try {
+      const dateString = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getDate()).padStart(2, '0')}`;
+      
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('week_start_date', dateString)
+        .single();
+      
+      console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
+
+      if (error) {
+        if (error.code === 'PGRST116') return null; // No rows found
+        console.error('Error getting weekly target:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in getWeeklyTarget:', error);
+      return null;
+    }
+  },
+
+  // Delete a weekly target
+  async deleteWeeklyTarget(targetId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('target_id', targetId);
+
+      if (error) {
+        console.error('Error deleting weekly target:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error in deleteWeeklyTarget:', error);
+      return false;
+    }
+  }
+};
+
+// Weekly Session Log Service
+export const weeklySessionLogService = {
+  
+  // Log a new session
+  async logSession(
+    userId: string,
+    activityType: string,
+    sessionDate?: Date,
+    durationMinutes?: number,
+    notes?: string
+  ): Promise<WeeklySessionLog | null> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_session_log')
+        .insert({
+          user_id: userId,
+          activity_type: activityType,
+          session_date: sessionDate 
+            ? sessionDate.toISOString().split('T')[0] 
+            : new Date().toISOString().split('T')[0],
+          duration_minutes: durationMinutes,
+          notes: notes
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error logging session:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in logSession:', error);
+      return null;
+    }
+  },
+
+  // Delete a session
+  async deleteSession(sessionId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('weekly_session_log')
+        .delete()
+        .eq('session_id', sessionId);
+
+      if (error) {
+        console.error('Error deleting session:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error in deleteSession:', error);
+      return false;
+    }
+  },
+
+  // Get sessions for a specific week
+  async getSessionsForWeek(
+    userId: string,
+    weekStartDate: Date,
+    weekEndDate: Date,
+    activityType?: string
+  ): Promise<WeeklySessionLog[]> {
+    try {
+      let query = supabase
+        .from('weekly_session_log')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('session_date', weekStartDate.toISOString().split('T')[0])
+        .lte('session_date', weekEndDate.toISOString().split('T')[0])
+        .order('session_date', { ascending: false });
+
+      if (activityType) {
+        query = query.eq('activity_type', activityType);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error getting sessions for week:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getSessionsForWeek:', error);
+      return [];
+    }
+  }
+};
+
+// Weekly Progress Service
+export const weeklyProgressService = {
+  
+  // Get current week progress
+  async getCurrentWeekProgress(
+    userId: string,
+    activityType: string
+  ): Promise<WeeklyProgress | null> {
+    try {
+      // Calculate current week boundaries (Monday to Sunday) in local time
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Local date only
+      
+      const dayOfWeek = today.getDay();
+      const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() + daysToMonday);
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      console.log('📅 Week calculation:', {
+        today: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+        dayOfWeek,
+        daysToMonday,
+        weekStart: `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`,
+        weekEnd: `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`
+      });
+
+      // Get target
+      const target = await weeklyTargetService.getWeeklyTarget(
+        userId,
+        activityType,
+        weekStart
+      );
+      
+      console.log('🎯 Target fetched:', target);
+
+      // Get completed sessions
+      const sessions = await weeklySessionLogService.getSessionsForWeek(
+        userId,
+        weekStart,
+        weekEnd,
+        activityType
+      );
+
+      // Calculate days left
+      const daysLeft = Math.ceil(
+        (weekEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Calculate completion rate
+      const targetSessions = target?.target_sessions || 0;
+      const completedSessions = sessions.length;
+      const completionRate = targetSessions > 0 
+        ? Math.round((completedSessions / targetSessions) * 100) 
+        : 0;
+
+      return {
+        activity_type: activityType,
+        target_sessions: targetSessions,
+        completed_sessions: completedSessions,
+        week_start_date: `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`,
+        week_end_date: `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`,
+        days_left: Math.max(0, daysLeft),
+        completion_rate: Math.min(100, completionRate)
+      };
+    } catch (error) {
+      console.error('Error in getCurrentWeekProgress:', error);
+      return null;
+    }
+  }
+};

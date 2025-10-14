@@ -176,3 +176,24 @@ export interface SimpleGoal {
   match_window?: number;              // For windowed goals
   starting_match_count?: number;      // Starting point for window
 }
+
+export interface WeeklyTarget {
+  target_id: string;
+  user_id: string;
+  activity_type: string;
+  week_start_date: string;
+  week_end_date: string;
+  target_sessions: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeeklySessionLog {
+  session_id: string;
+  user_id: string;
+  activity_type: string;
+  session_date: string;
+  duration_minutes?: number;
+  notes?: string;
+  created_at: string;
+}

@@ -222,10 +222,6 @@ export default function MatchDetailsScreen() {
     router.back();
   };
 
-  const handleEdit = () => {
-    console.log('Edit match details');
-  };
-
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -271,20 +267,6 @@ export default function MatchDetailsScreen() {
       color: 'white',
       flex: 1,
       textAlign: 'center',
-      marginLeft: width * 0.06, // Offset for back button
-    },
-    editButton: {
-      width: width * 0.055,
-      height: width * 0.055,
-      borderRadius: width * 0.0275,
-      backgroundColor: '#343434',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    editButtonText: {
-      color: 'white',
-      fontSize: width * 0.035,
-      fontWeight: '600',
     },
     content: {
       flex: 1,
@@ -393,9 +375,6 @@ export default function MatchDetailsScreen() {
               <Text style={styles.backButtonText}>←</Text>
             </TouchableOpacity>
             <Text style={styles.title}>Match History Details</Text>
-            <TouchableOpacity onPress={handleEdit} style={styles.editButton}>
-              <Text style={styles.editButtonText}>✏️</Text>
-            </TouchableOpacity>
           </View>
         </View>
 

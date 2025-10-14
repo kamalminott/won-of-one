@@ -1,31 +1,41 @@
+import { useAuth } from '@/contexts/AuthContext';
+import { weeklyProgressService, weeklySessionLogService, weeklyTargetService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 interface ProgressCardProps {
-  title: string;
-  current: number;
-  total: number;
-  subtitle?: string;
-  daysRemaining?: number;
+  activityType?: string; // Make it configurable
+  onDataUpdate?: () => void; // Callback when data changes
 }
 
 export const ProgressCard: React.FC<ProgressCardProps> = ({
-  title,
-  current,
-  total,
-  subtitle,
-  daysRemaining,
+  activityType = 'Conditioning',
+  onDataUpdate,
 }) => {
   const { width, height } = useWindowDimensions();
-  const progress = current / total;
+  const { user } = useAuth();
+  
+  // State for current week progress
+  const [current, setCurrent] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [daysRemaining, setDaysRemaining] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Modal state
   const [showModal, setShowModal] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState('Conditioning');
+  const [selectedActivity, setSelectedActivity] = useState(activityType);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState(0);
   const [showWeekDropdown, setShowWeekDropdown] = useState(false);
   const [sessionCount, setSessionCount] = useState(3);
+  
+  // Counter state for animated text
+  const [counterText, setCounterText] = useState('1');
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  const progress = total > 0 ? current / total : 0;
   
   const activityOptions = ['Footwork', '1-2-1 Lessons', 'Recovery', 'Video Review'];
   
@@ -88,6 +98,164 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   const incrementSession = () => {
     setSessionCount(prev => Math.min(20, prev + 1)); // Cap at 20 sessions
   };
+
+  // Fetch current week progress
+  const fetchProgress = async () => {
+    if (!user?.id) return;
+    
+    setIsLoading(true);
+    console.log('📊 Fetching progress for:', { userId: user.id, activity: selectedActivity });
+    
+    const progressData = await weeklyProgressService.getCurrentWeekProgress(
+      user.id,
+      selectedActivity
+    );
+    
+    console.log('📈 Progress data received:', progressData);
+    
+    if (progressData) {
+      setCurrent(progressData.completed_sessions);
+      setTotal(progressData.target_sessions);
+      setDaysRemaining(progressData.days_left);
+      console.log('✅ Updated state:', {
+        current: progressData.completed_sessions,
+        total: progressData.target_sessions,
+        daysLeft: progressData.days_left
+      });
+    } else {
+      console.warn('⚠️ No progress data returned');
+    }
+    setIsLoading(false);
+  };
+
+  // Load progress on mount and when activity changes
+  useEffect(() => {
+    fetchProgress();
+  }, [user?.id, selectedActivity]);
+
+  // Handle manual session increment (+1 button)
+  const handleIncrementSession = async () => {
+    if (!user?.id || isProcessing) return;
+    
+    setIsProcessing(true);
+    setCounterText('+1');
+    
+    const session = await weeklySessionLogService.logSession(
+      user.id,
+      selectedActivity
+    );
+    
+    if (session) {
+      // Refresh progress
+      await fetchProgress();
+      onDataUpdate?.();
+    }
+    
+    // Reset to "1" after operation completes
+    setTimeout(() => {
+      setCounterText('1');
+      setIsProcessing(false);
+    }, 500);
+  };
+
+  // Handle manual session decrement
+  const handleDecrementSession = async () => {
+    if (!user?.id || isProcessing || current === 0) return; // Can't decrement if no sessions
+    
+    setIsProcessing(true);
+    setCounterText('-1');
+    
+    // Get the most recent session for this week
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() + daysToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+    
+    const sessions = await weeklySessionLogService.getSessionsForWeek(
+      user.id,
+      weekStart,
+      weekEnd,
+      selectedActivity
+    );
+    
+    // Delete the most recent session
+    if (sessions.length > 0) {
+      const mostRecentSession = sessions[0]; // Already sorted by date descending
+      await weeklySessionLogService.deleteSession(mostRecentSession.session_id);
+      
+      // Refresh progress
+      await fetchProgress();
+      onDataUpdate?.();
+    }
+    
+    // Reset to "1" after operation completes
+    setTimeout(() => {
+      setCounterText('1');
+      setIsProcessing(false);
+    }, 500);
+  };
+
+  // Handle save target
+  const handleSaveTarget = async () => {
+    if (!user?.id) return;
+    
+    const selectedWeekData = weekOptions[selectedWeek];
+    
+    console.log('💾 Saving target:', {
+      userId: user.id,
+      activity: selectedActivity,
+      weekStart: selectedWeekData.startDate,
+      weekEnd: selectedWeekData.endDate,
+      targetSessions: sessionCount
+    });
+    
+    const result = await weeklyTargetService.setWeeklyTarget(
+      user.id,
+      selectedActivity,
+      selectedWeekData.startDate,
+      selectedWeekData.endDate,
+      sessionCount
+    );
+    
+    if (result) {
+      console.log('✅ Target saved successfully:', result);
+      // Close modal first for immediate feedback
+      setShowModal(false);
+      // Refresh progress in background
+      await fetchProgress();
+      onDataUpdate?.();
+    } else {
+      console.error('❌ Failed to save target');
+    }
+  };
+
+  // Handle clear target
+  const handleClearTarget = async () => {
+    if (!user?.id) return;
+    
+    const selectedWeekData = weekOptions[selectedWeek];
+    // Set target to 0 (or you could delete it)
+    const result = await weeklyTargetService.setWeeklyTarget(
+      user.id,
+      selectedActivity,
+      selectedWeekData.startDate,
+      selectedWeekData.endDate,
+      0
+    );
+    
+    if (result) {
+      await fetchProgress();
+      setShowModal(false);
+      onDataUpdate?.();
+    }
+  };
   
   const styles = StyleSheet.create({
     container: {
@@ -140,7 +308,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     mainContent: {
       position: 'absolute',
       left: width * 0.06,
-      top: height * 0.032, // Reduced space for the pill
+      top: height * 0.02, // Moved upwards
       width: '65%',
       height: '80%',
     },
@@ -185,7 +353,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     controlBar: {
       position: 'absolute',
       right: width * 0.028,
-      top: height * 0.024,
+      top: height * 0.01, // Moved further upwards
       width: width * 0.09,
       height: height * 0.096,
       backgroundColor: '#625971',
@@ -225,7 +393,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       backgroundColor: '#212121',
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingHorizontal: width * 0.04,
       paddingTop: height * 0.07,
     },
@@ -248,7 +416,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     modalCard: {
       position: 'absolute',
       width: '90%',
-      height: height * 0.55,
+      height: height * 0.6,
       left: '5%',
       top: height * 0.18,
       backgroundColor: '#2A2A2A',
@@ -506,27 +674,33 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         >
           {/* Main Content */}
           <View style={styles.mainContent}>
-            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.title}>Sessions This Week</Text>
             <Text style={styles.progressText}>{`${current}/${total}`}</Text>
             
             <View style={styles.progressBar}>
               <View style={styles.progressFill} />
             </View>
             
-            {subtitle && (
-              <Text style={styles.subtitle}>{subtitle}</Text>
-            )}
+            <Text style={styles.subtitle}>{selectedActivity}</Text>
           </View>
 
           {/* Control Bar */}
           <View style={styles.controlBar}>
-            <TouchableOpacity style={[styles.controlButton, styles.upButton]}>
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.upButton]}
+              onPress={handleIncrementSession}
+              disabled={isProcessing}
+            >
               <Ionicons name="chevron-up" size={width * 0.036} color="#FFFFFF" />
             </TouchableOpacity>
             
-            <Text style={styles.plusOneText}>+1</Text>
+            <Text style={styles.plusOneText}>{counterText}</Text>
             
-            <TouchableOpacity style={[styles.controlButton, styles.downButton]}>
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.downButton]}
+              onPress={handleDecrementSession}
+              disabled={isProcessing}
+            >
               <Ionicons name="chevron-down" size={width * 0.036} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
@@ -551,17 +725,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           {/* Header */}
           <View style={styles.modalHeader}>
             <TouchableOpacity 
-              style={styles.headerButton}
+              style={[styles.headerButton, { position: 'absolute', left: width * 0.04, top: height * 0.085 }]}
               onPress={() => setShowModal(false)}
             >
               <Ionicons name="arrow-back" size={width * 0.048} color="#FFFFFF" />
             </TouchableOpacity>
             
             <Text style={styles.modalTitle}>Set Goal Modal</Text>
-            
-            <TouchableOpacity style={styles.headerButton}>
-              <Ionicons name="settings" size={width * 0.04} color="#FFFFFF" />
-            </TouchableOpacity>
           </View>
 
           {/* Modal Content */}
@@ -691,14 +861,24 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             </View>
 
             {/* Status Message */}
-            <Text style={styles.statusText}>No sessions logged yet.</Text>
+            <Text style={styles.statusText}>
+              {current > 0 
+                ? `${current} session${current !== 1 ? 's' : ''} logged this week.` 
+                : 'No sessions logged yet.'}
+            </Text>
 
             {/* Action Buttons */}
-            <TouchableOpacity style={styles.saveButton}>
+            <TouchableOpacity 
+              style={styles.saveButton}
+              onPress={handleSaveTarget}
+            >
               <Text style={styles.saveButtonText}>Save Target</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.clearButton}>
+            <TouchableOpacity 
+              style={styles.clearButton}
+              onPress={handleClearTarget}
+            >
               <Text style={styles.clearButtonText}>Clear Target</Text>
             </TouchableOpacity>
           </TouchableOpacity>

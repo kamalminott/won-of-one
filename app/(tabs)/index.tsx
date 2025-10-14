@@ -345,10 +345,7 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
             <ProgressCard
-              title="Sessions this Week"
-              current={weeklySessions.current}
-              total={weeklySessions.total}
-              daysRemaining={weeklySessions.daysRemaining}
+              activityType="Conditioning"
             />
             
             <View style={styles.summaryRow}>

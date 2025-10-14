@@ -746,14 +746,14 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       marginBottom: height * 0.012,
     },
     textSection: {
-      width: width * 0.55, // Increased from 0.45 to 0.55
-      maxWidth: width * 0.55, // Same as width to enforce limit
+      width: width * 0.6, // Increased to 0.6 to prevent text wrapping
+      maxWidth: width * 0.6, // Same as width to enforce limit
       marginRight: width * 0.04, // Further reduced margin
     },
     progressSection: {
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: -height * 0.04,
+      marginTop: -height * 0.03,
     },
     progressCircle: {
       position: 'relative',
@@ -1078,7 +1078,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       <View style={styles.contentRow}>
         <View style={styles.textSection}>
           {title === "No Active Goals" && (
-            <Text style={styles.description}>
+            <Text style={styles.description} numberOfLines={1}>
               {description ? truncateDescription(description) : 'Track your progress and stay motivated'}
             </Text>
           )}
