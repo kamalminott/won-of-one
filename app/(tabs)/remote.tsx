@@ -4597,7 +4597,7 @@ export default function RemoteScreen() {
             backgroundColor: 'transparent',
           borderRadius: width * 0.02,
           gap: height * 0.012, // Reduced gap between elements
-          marginBottom: layout.adjustMargin(height * 0.02, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset // Bottom margin with dynamic adjustments
+          marginBottom: layout.adjustMargin(height * 0.02, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset
           }
         ]}>
         

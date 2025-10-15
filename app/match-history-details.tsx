@@ -331,20 +331,15 @@ export default function MatchDetailsScreen() {
       textTransform: 'capitalize',
     },
     notesContainer: {
-      width: width * 0.92, // 358px equivalent - keeping same width
-      height: height * 0.09, // Further reduced to ~75px equivalent
-      backgroundColor: '#2A2A2A',
-      borderRadius: width * 0.05, // 20px equivalent
-      shadowColor: 'rgba(108, 92, 231, 0.04)',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 1,
-      shadowRadius: 8,
-      elevation: 8, // Android shadow
-      padding: width * 0.08, // 32px equivalent
-      paddingTop: width * 0.03, // Reduced top padding to move text up
-      marginTop: height * 0.015,
-      alignSelf: 'center',
-      justifyContent: 'flex-start', // Changed from 'center' to 'flex-start'
+      width: '100%', // Fit the parent section container
+      minHeight: height * 0.09,
+      backgroundColor: '#1F1F1F',
+      borderRadius: width * 0.03,
+      borderWidth: 1,
+      borderColor: '#3A3A3A',
+      padding: width * 0.04,
+      marginTop: height * 0.01,
+      justifyContent: 'flex-start',
     },
     notesText: {
       fontSize: width * 0.035, // 14px equivalent
