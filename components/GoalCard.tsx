@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
-import { Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import CircularProgress from 'react-native-circular-progress-indicator';
 
 interface GoalCardProps {
@@ -14,6 +14,7 @@ interface GoalCardProps {
   onSetNewGoal: () => void;
   onUpdateGoal: () => void;
   onGoalSaved?: (goalData: any) => void;
+  onGoalUpdated?: (goalId: string, updates: any) => void;
   onGoalDeleted?: (goalId: string) => void;
   goalId?: string;
   useModal?: boolean; // If true, use internal modal; if false, use onSetNewGoal callback
@@ -36,6 +37,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   onSetNewGoal,
   onUpdateGoal,
   onGoalSaved,
+  onGoalUpdated,
   onGoalDeleted,
   goalId,
   useModal = false,
@@ -56,7 +58,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   const [showTimeframeNumberDropdown, setShowTimeframeNumberDropdown] = useState(false);
   const [matchesForWinRate, setMatchesForWinRate] = useState('20');
   const [matchesForDifferential, setMatchesForDifferential] = useState('15');
-  const [matchesInARow, setMatchesInARow] = useState('5');
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState('');
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -121,7 +122,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
     // Prepare goal data for database
     const goalData: any = {
       category: goalType,
-      description: notes,
+      description: getGoalDescription(), // Use auto-generated description instead of notes
       target_value: targetValue,
       unit: timeframe,
       deadline: calculateDeadline(timeframe, timeframeNumber),
@@ -159,15 +160,112 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       }
     }
 
-    console.log('Saving goal:', goalData);
-    console.log('onGoalSaved callback exists:', !!onGoalSaved);
-    
-    // Call the callback to save to database
-    if (onGoalSaved) {
-      console.log('Calling onGoalSaved callback...');
-      onGoalSaved(goalData);
+    if (isUpdatingGoal && goalId) {
+      // Update existing goal - perform validation before updating
+      console.log('Updating existing goal:', goalId, 'with data:', goalData);
+      
+      // VALIDATION 1: Check if deadline is in the past
+      const newDeadline = new Date(goalData.deadline);
+      const now = new Date();
+      if (newDeadline < now) {
+        Alert.alert(
+          'Invalid Deadline',
+          'The deadline you selected is in the past. Please choose a future date.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      // VALIDATION 2: For windowed goals - validate if already completed some matches
+      if (goalData.match_window && matchWindow !== goalData.match_window && (currentValue || 0) > 0) {
+        // Window size is changing and there's existing progress
+        Alert.alert(
+          'Warning: Changing Match Window',
+          `Changing the match window will reset your goal tracking to start from your current match count.\n\nCurrent progress: ${currentValue || 0}/${targetValue}\n\nAre you sure you want to continue?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Continue', 
+              onPress: () => {
+                if (onGoalUpdated) {
+                  onGoalUpdated(goalId, goalData);
+                  setShowGoalModal(false);
+                }
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
+      // VALIDATION 3: Check if lowering target makes goal auto-complete
+      if (targetValue && targetValue > goalData.target_value && (currentValue || 0) >= goalData.target_value) {
+        Alert.alert(
+          'Goal Already Achieved',
+          `You've already achieved ${currentValue || 0} which meets your new target of ${goalData.target_value}!\n\nThis goal will be marked as complete.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Update Anyway', 
+              onPress: () => {
+                if (onGoalUpdated) {
+                  onGoalUpdated(goalId, goalData);
+                  setShowGoalModal(false);
+                }
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
+      // VALIDATION 4: For windowed goals - check if raising target makes goal impossible
+      if (matchWindow && goalData.match_window && totalMatches !== undefined) {
+        const windowSize = goalData.match_window;
+        const matchesSinceGoalCreation = totalMatches - (matchWindow || 0);
+        const remainingMatches = windowSize - matchesSinceGoalCreation;
+        
+        if (goalType === 'Wins' && remainingMatches >= 0) {
+          const maxPossibleWins = (currentValue || 0) + remainingMatches;
+          
+          if (maxPossibleWins < goalData.target_value) {
+            Alert.alert(
+              'Impossible Goal',
+              `You cannot achieve ${goalData.target_value} wins with only ${remainingMatches} matches remaining.\n\nMaximum possible: ${maxPossibleWins} wins`,
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+        }
+      }
+      
+      // VALIDATION 5: Prevent removing match window from windowed goals with progress
+      if (matchWindow && !goalData.match_window && (currentValue || 0) > 0) {
+        Alert.alert(
+          'Cannot Remove Match Window',
+          `This goal is currently tracking progress over a specific window of matches.\n\nRemoving the window would invalidate your current progress (${currentValue || 0}/${targetValue}).\n\nPlease create a new goal instead.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      if (onGoalUpdated) {
+        console.log('Calling onGoalUpdated callback...');
+        onGoalUpdated(goalId, goalData);
+      } else {
+        console.log('No onGoalUpdated callback provided!');
+      }
     } else {
-      console.log('No onGoalSaved callback provided!');
+      // Create new goal
+      console.log('Creating new goal:', goalData);
+      console.log('onGoalSaved callback exists:', !!onGoalSaved);
+      
+      if (onGoalSaved) {
+        console.log('Calling onGoalSaved callback...');
+        onGoalSaved(goalData);
+      } else {
+        console.log('No onGoalSaved callback provided!');
+      }
     }
     
     setShowGoalModal(false);
@@ -236,13 +334,48 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
 
   const handleEditGoal = () => {
     setShowOptionsMenu(false);
-    // Open the goal modal in edit mode
+    
+    // Open the goal modal in edit mode and populate all fields
     setIsUpdatingGoal(true);
     setGoalType(title);
-    setNotes(description);
+    // Note: description is auto-generated, no need to set notes
+    
+    // Set target value
     if (targetValue) {
       setTargetValueInput(targetValue.toString());
     }
+    
+    // Calculate and set timeframe from deadline
+    if (daysLeft > 0) {
+      if (daysLeft <= 7) {
+        setTimeframe('Week');
+        setTimeframeNumber('1');
+      } else if (daysLeft <= 31) {
+        setTimeframe('Month');
+        setTimeframeNumber('1');
+      } else if (daysLeft <= 365) {
+        const months = Math.ceil(daysLeft / 30);
+        setTimeframe('Month');
+        setTimeframeNumber(months.toString());
+      } else {
+        const years = Math.ceil(daysLeft / 365);
+        setTimeframe('Year');
+        setTimeframeNumber(years.toString());
+      }
+    }
+    
+    // Set match window if exists
+    if (matchWindow) {
+      setEnableMatchWindow(true);
+      if (title === 'Wins') {
+        setMatchesForWinRate(matchWindow.toString());
+      } else if (title === 'Average Margin of Victory') {
+        setMatchesForDifferential(matchWindow.toString());
+      }
+    } else {
+      setEnableMatchWindow(false);
+    }
+    
     setShowGoalModal(true);
   };
 
@@ -274,9 +407,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
             break;
           case 'matchesForDifferential':
             setMatchesForDifferential(tempValue);
-            break;
-          case 'matchesInARow':
-            setMatchesInARow(tempValue);
             break;
         }
       }
@@ -313,10 +443,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
         const currentDifferential = parseInt(matchesForDifferential);
         setMatchesForDifferential((currentDifferential + 1).toString());
         break;
-      case 'inARow':
-        const currentInARow = parseInt(matchesInARow);
-        setMatchesInARow((currentInARow + 1).toString());
-        break;
     }
   };
 
@@ -332,12 +458,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
         const currentDifferential = parseInt(matchesForDifferential);
         if (currentDifferential > 1) {
           setMatchesForDifferential((currentDifferential - 1).toString());
-        }
-        break;
-      case 'inARow':
-        const currentInARow = parseInt(matchesInARow);
-        if (currentInARow > 1) {
-          setMatchesInARow((currentInARow - 1).toString());
         }
         break;
     }
@@ -534,18 +654,24 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
 
       case 'Wins':
         if (matchWindow && totalMatches !== undefined && currentRecord) {
-          // Windowed Wins
+          // Windowed Wins - use currentRecord.wins instead of currentValue for accuracy
+          const actualWins = currentRecord.wins;
+          const actualLosses = currentRecord.losses;
           const matchesPlayed = Math.min(totalMatches, matchWindow);
-          const winsNeeded = targetValue - currentValue;
+          const winsNeeded = targetValue - actualWins;
           const matchesRemaining = matchWindow - matchesPlayed;
-          const lossesAllowed = matchesRemaining - winsNeeded;
+          
+          // Calculate losses allowed: total allowed losses - losses already taken
+          const totalLossesAllowed = matchWindow - targetValue; // e.g., Win 15/20 = 5 losses allowed total
+          const lossesRemaining = totalLossesAllowed - actualLosses; // How many more losses can we afford
+          
           const winRateNeeded = matchesRemaining > 0 ? (winsNeeded / matchesRemaining) * 100 : 0;
           
           insights.push({ text: `• Progress: ${matchesPlayed}/${matchWindow} matches (${currentRecord.wins}W-${currentRecord.losses}L)` });
-          insights.push({ text: `• Wins: ${currentValue}/${targetValue} (need ${winsNeeded} more)` });
+          insights.push({ text: `• Wins: ${actualWins}/${targetValue} (need ${winsNeeded} more)` });
           insights.push({ 
-            text: `• Losses allowed: ${Math.max(0, lossesAllowed)} max`,
-            color: getStatColor(lossesAllowed, { red: 0, yellow: 3 }, true)
+            text: `• Losses remaining: ${Math.max(0, lossesRemaining)}/${totalLossesAllowed}`,
+            color: getStatColor(lossesRemaining, { red: 0, yellow: 2 }, true)
           });
           if (matchesRemaining > 0) {
             insights.push({ 
@@ -861,6 +987,12 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       color: '#FFFFFF',
       marginBottom: height * 0.005,
     },
+    helperText: {
+      fontSize: width * 0.025,
+      color: 'rgba(255, 255, 255, 0.5)',
+      fontStyle: 'italic',
+      marginTop: height * 0.005,
+    },
     dropdownContainer: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -873,10 +1005,18 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       borderColor: '#464646',
       position: 'relative',
     },
+    dropdownDisabled: {
+      backgroundColor: '#1A1A1A',
+      borderColor: '#333333',
+      opacity: 0.6,
+    },
     dropdownText: {
       fontSize: width * 0.03,
       color: 'white',
       flex: 1,
+    },
+    dropdownTextDisabled: {
+      color: 'rgba(255, 255, 255, 0.4)',
     },
     dropdownOptions: {
       position: 'absolute',
@@ -947,18 +1087,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
     targetValueTouchable: {
       flex: 1,
       alignItems: 'center',
-    },
-    notesInput: {
-      fontSize: width * 0.03,
-      color: 'white',
-      backgroundColor: '#2B2B2B',
-      borderRadius: width * 0.025,
-      paddingHorizontal: width * 0.02,
-      paddingVertical: height * 0.01,
-      borderWidth: 1,
-      borderColor: '#464646',
-      textAlignVertical: 'top',
-      minHeight: height * 0.08,
     },
     goalSummary: {
       flexDirection: 'row',
@@ -1163,18 +1291,15 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
           activeOpacity={1} 
           onPress={handleModalPress}
         >
-          <TouchableOpacity 
-            style={styles.modalContainer} 
-            activeOpacity={1} 
-            onPress={() => {}}
-          >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalContainer}>
             {/* Header */}
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={handleCancel} style={styles.backButton}>
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
               <Text style={styles.modalTitle}>
-                {isUpdatingGoal ? 'Update Goal' : 'Set a New Goal'}
+                {isUpdatingGoal ? 'Edit Goal' : 'Set a New Goal'}
               </Text>
             </View>
 
@@ -1184,19 +1309,47 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
               <View style={styles.formField}>
                 <Text style={styles.fieldLabel}>Goal Type</Text>
                 <TouchableOpacity 
-                  style={styles.dropdownContainer}
-                  onPress={() => setShowGoalTypeDropdown(!showGoalTypeDropdown)}
-                  activeOpacity={0.7}
+                  style={[
+                    styles.dropdownContainer,
+                    isUpdatingGoal && styles.dropdownDisabled
+                  ]}
+                  onPress={() => {
+                    if (!isUpdatingGoal) {
+                      setShowGoalTypeDropdown(!showGoalTypeDropdown);
+                    }
+                  }}
+                  activeOpacity={isUpdatingGoal ? 1 : 0.7}
+                  disabled={isUpdatingGoal}
                 >
-                  <Text style={styles.dropdownText}>{goalType}</Text>
-                  <Ionicons 
-                    name={showGoalTypeDropdown ? "chevron-up" : "chevron-down"} 
-                    size={18} 
-                    color="rgba(255, 255, 255, 0.7)" 
-                  />
+                  <Text style={[
+                    styles.dropdownText,
+                    isUpdatingGoal && styles.dropdownTextDisabled
+                  ]}>
+                    {goalType}
+                  </Text>
+                  {!isUpdatingGoal && (
+                    <Ionicons 
+                      name={showGoalTypeDropdown ? "chevron-up" : "chevron-down"} 
+                      size={18} 
+                      color="rgba(255, 255, 255, 0.7)" 
+                    />
+                  )}
+                  {isUpdatingGoal && (
+                    <Ionicons 
+                      name="lock-closed" 
+                      size={16} 
+                      color="rgba(255, 255, 255, 0.4)" 
+                    />
+                  )}
                 </TouchableOpacity>
                 
-                {showGoalTypeDropdown && (
+                {isUpdatingGoal && (
+                  <Text style={styles.helperText}>
+                    Goal type cannot be changed after creation
+                  </Text>
+                )}
+                
+                {showGoalTypeDropdown && !isUpdatingGoal && (
                   <View style={styles.dropdownOptions}>
                     {goalTypes.map((type) => (
                       <TouchableOpacity
@@ -1377,55 +1530,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
                 </>
               )}
 
-              {/* Matches in a Row Field for Streaks */}
-              {goalType === 'Streaks' && (
-                <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>Matches in a Row</Text>
-                  <View style={styles.targetValueContainer}>
-                    <TouchableOpacity style={styles.targetButton} onPress={() => decrementMatches('inARow')}>
-                      <Text style={styles.targetButtonText}>-</Text>
-                    </TouchableOpacity>
-                    
-                    {editingField === 'matchesInARow' ? (
-                      <TextInput
-                        style={styles.targetValueInput}
-                        value={tempValue}
-                        onChangeText={handleTextChange}
-                        onBlur={finishEditing}
-                        onSubmitEditing={finishEditing}
-                        keyboardType="numeric"
-                        autoFocus={true}
-                        selectTextOnFocus={true}
-                      />
-                    ) : (
-                      <TouchableOpacity 
-                        style={styles.targetValueTouchable}
-                        onPress={() => startEditing('matchesInARow', matchesInARow)}
-                      >
-                        <Text style={styles.targetValue}>{matchesInARow}</Text>
-                      </TouchableOpacity>
-                    )}
-                    
-                    <TouchableOpacity style={styles.targetButton} onPress={() => incrementMatches('inARow')}>
-                      <Text style={styles.targetButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              {/* Notes */}
-              <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>Notes</Text>
-                <TextInput
-                  style={styles.notesInput}
-                  value={notes}
-                  onChangeText={setNotes}
-                  placeholder="Focus on consistency this month."
-                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                  multiline={true}
-                  numberOfLines={3}
-                />
-              </View>
 
               {/* Goal Summary */}
               <View style={styles.goalSummary}>
@@ -1443,11 +1547,12 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={handleSaveGoal}>
                 <Text style={styles.saveButtonText}>
-                  {isUpdatingGoal ? 'Update Goal' : 'Save Goal'}
+                  {isUpdatingGoal ? 'Edit Goal' : 'Save Goal'}
                 </Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
+          </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
     </View>

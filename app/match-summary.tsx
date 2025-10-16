@@ -148,8 +148,12 @@ export default function MatchSummaryScreen() {
     try {
       console.log('💾 Saving match and updating goals...');
       
-      // Update goals based on match result (only if user participated)
-      if (match.user_id && match.result) {
+      // Check if failed goal info was passed from remote.tsx (for remote matches)
+      const hasFailedGoalFromRemote = params.failedGoalTitle && params.failedGoalReason;
+      
+      // Update goals based on match result (only if user participated AND match is not already complete)
+      // Remote matches are already complete and goals already updated
+      if (match.user_id && match.result && !match.is_complete) {
         const result = await goalService.updateGoalsAfterMatch(
           user.id, 
           match.result as 'win' | 'loss', 
@@ -174,8 +178,34 @@ export default function MatchSummaryScreen() {
           // Don't navigate yet - wait for user to close celebration
           return;
         }
+        
+        // Check if any goals failed - pass to home screen
+        if (result.failedGoals && result.failedGoals.length > 0) {
+          const failedGoal = result.failedGoals[0]; // Show first failed goal
+          router.push({
+            pathname: '/(tabs)',
+            params: {
+              showFailedGoalAlert: 'true',
+              failedGoalTitle: failedGoal.title,
+              failedGoalReason: failedGoal.reason,
+            }
+          });
+          return; // Don't navigate normally
+        }
+      } else if (hasFailedGoalFromRemote) {
+        // Remote match with failed goal - pass through to home screen
+        console.log('🔄 Passing failed goal from remote to home screen');
+        router.push({
+          pathname: '/(tabs)',
+          params: {
+            showFailedGoalAlert: 'true',
+            failedGoalTitle: params.failedGoalTitle as string,
+            failedGoalReason: params.failedGoalReason as string,
+          }
+        });
+        return; // Don't navigate normally
       } else {
-        console.log('ℹ️ Skipping goal update - anonymous match or no result');
+        console.log('ℹ️ Skipping goal update - match already complete or anonymous');
       }
       
       // Navigate back to home page

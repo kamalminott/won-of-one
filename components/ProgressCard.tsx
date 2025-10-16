@@ -72,22 +72,34 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   
   const weekOptions = generateWeekOptions();
   
-  // Calculate days left for selected week
-  const calculateDaysLeft = () => {
-    const selectedWeekData = weekOptions[selectedWeek];
+  // Calculate days left for any week
+  const calculateDaysLeftForWeek = (weekId: number) => {
+    const weekData = weekOptions[weekId];
     const today = new Date();
-    const endOfWeek = new Date(selectedWeekData.endDate);
     
     // If it's a future week, return 7 days
-    if (today < selectedWeekData.startDate) {
+    if (today < weekData.startDate) {
       return 7;
     }
     
-    // If it's the current week, calculate actual days left
-    const timeDiff = endOfWeek.getTime() - today.getTime();
-    const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    // If it's a past week, return 0 days
+    if (today > weekData.endDate) {
+      return 0;
+    }
+    
+    // For current week, count days from today to end of week (inclusive)
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endDate = new Date(weekData.endDate.getFullYear(), weekData.endDate.getMonth(), weekData.endDate.getDate());
+    
+    // Simple calculation: days between today and end of week + 1 (to include today)
+    const daysLeft = Math.ceil((endDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     
     return Math.max(0, daysLeft);
+  };
+
+  // Calculate days left for selected week
+  const calculateDaysLeft = () => {
+    return calculateDaysLeftForWeek(selectedWeek);
   };
   
   // Session counter functions
@@ -674,7 +686,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         >
           {/* Main Content */}
           <View style={styles.mainContent}>
-            <Text style={styles.title}>Sessions This Week</Text>
+            <Text style={styles.title}>Performance Preparation</Text>
             <Text style={styles.progressText}>{`${current}/${total}`}</Text>
             
             <View style={styles.progressBar}>
@@ -731,7 +743,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               <Ionicons name="arrow-back" size={width * 0.048} color="#FFFFFF" />
             </TouchableOpacity>
             
-            <Text style={styles.modalTitle}>Set Goal Modal</Text>
+            <Text style={styles.modalTitle}>Performance Preparation Target</Text>
           </View>
 
           {/* Modal Content */}
@@ -828,7 +840,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                         styles.weekDropdownItemText,
                         selectedWeek === week.id && styles.selectedWeekDropdownItemText
                       ]}>
-                        {week.label} - {week.id === selectedWeek ? calculateDaysLeft() : (week.id === 0 ? calculateDaysLeft() : 7)} days left
+                        {week.label} - {calculateDaysLeftForWeek(week.id)} days left
                       </Text>
                     </TouchableOpacity>
                   ))}

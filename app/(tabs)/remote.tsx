@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
-import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -978,8 +978,31 @@ export default function RemoteScreen() {
         score_by_period: scoreByPeriod,
       });
 
+      let failedGoalData: any = null; // Declare in outer scope
+      
       if (updatedMatch) {
         console.log('Match completed successfully:', updatedMatch);
+        
+        // Update goals if user is registered and match has a result
+        if (user?.id && result) {
+          console.log('🎯 Updating goals after match completion...');
+          try {
+            const goalResult = await goalService.updateGoalsAfterMatch(
+              user.id,
+              result as 'win' | 'loss',
+              finalScore,
+              touchesAgainst
+            );
+            console.log('✅ Goals updated successfully:', goalResult);
+            
+            // Store failed goal info to pass through navigation
+            if (goalResult.failedGoals && goalResult.failedGoals.length > 0) {
+              failedGoalData = goalResult.failedGoals[0];
+            }
+          } catch (goalError) {
+            console.error('❌ Error updating goals:', goalError);
+          }
+        }
       }
 
       // 2. End the current period
@@ -999,21 +1022,29 @@ export default function RemoteScreen() {
       // 4. Navigate to appropriate match summary based on user toggle
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - go to regular match summary
+        const navParams: any = {
+          matchId: currentMatchPeriod.match_id,
+          remoteId: remoteSession.remote_id,
+          // Pass current match state for display
+          aliceScore: aliceScore.toString(),
+          bobScore: bobScore.toString(),
+          aliceCards: JSON.stringify(aliceCards),
+          bobCards: JSON.stringify(bobCards),
+          matchDuration: matchDuration.toString(),
+          result: result || '',
+          fencer1Name: fencerNames.alice,
+          fencer2Name: fencerNames.bob,
+        };
+        
+        // Pass failed goal info if any
+        if (failedGoalData) {
+          navParams.failedGoalTitle = failedGoalData.title;
+          navParams.failedGoalReason = failedGoalData.reason;
+        }
+        
         router.push({
           pathname: '/match-summary',
-          params: {
-            matchId: currentMatchPeriod.match_id,
-            remoteId: remoteSession.remote_id,
-            // Pass current match state for display
-            aliceScore: aliceScore.toString(),
-            bobScore: bobScore.toString(),
-            aliceCards: JSON.stringify(aliceCards),
-            bobCards: JSON.stringify(bobCards),
-            matchDuration: matchDuration.toString(),
-            result: result || '',
-            fencer1Name: fencerNames.alice,
-            fencer2Name: fencerNames.bob,
-          }
+          params: navParams
         });
       } else {
         // User toggle is off OR no registered user - go to neutral match summary
@@ -2067,6 +2098,20 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [fencerNames, showUserProfile, userDisplayName, toggleCardPosition]);
 
+  const handleFencerNameClick = useCallback((fencer: 'alice' | 'bob') => {
+    // Don't allow editing if user profile is shown and this is the user's position
+    if (showUserProfile) {
+      if ((fencer === 'alice' && toggleCardPosition === 'left') || 
+          (fencer === 'bob' && toggleCardPosition === 'right')) {
+        // This is the user's name, don't allow editing
+        return;
+      }
+    }
+    
+    // Open the edit names popup
+    openEditNamesPopup();
+  }, [showUserProfile, toggleCardPosition, openEditNamesPopup]);
+
   const saveFencerName = useCallback(() => {
     if (editAliceName.trim() && editBobName.trim()) {
       // Preserve user's name when toggle is on, based on card position
@@ -2102,9 +2147,13 @@ export default function RemoteScreen() {
   }, []);
 
   const resetTimer = useCallback(() => {
+    // If timer is running, pause it first
+    if (isPlaying) {
+      pauseTimer();
+    }
     // Show custom reset options popup
     setShowResetPopup(true);
-  }, []);
+  }, [isPlaying]);
 
   const resetToOriginalTime = useCallback(() => {
     // Reset timer to original match time
@@ -2864,20 +2913,20 @@ export default function RemoteScreen() {
     countdownDisplay: {
       alignItems: 'center',
       justifyContent: 'center',
-      height: height * 0.06, // Smaller height for more compact card
+      height: height * 0.035, // Much smaller height for injury timer
       width: '100%',
       // Timer background styling removed - now handled by main container
-      borderRadius: width * 0.03,
+      borderRadius: width * 0.02,
     },
     countdownText: {
-      fontSize: width * 0.1, // Smaller font for more compact card
+      fontSize: width * 0.06, // Much smaller font for injury timer
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
-      textShadowOffset: { width: 0, height: height * 0.002 },
-      textShadowRadius: width * 0.005,
-      marginTop: -(height * 0.015),
+      textShadowOffset: { width: 0, height: height * 0.001 },
+      textShadowRadius: width * 0.002,
+      marginTop: -(height * 0.008),
     },
     countdownTextWarning: {
       fontSize: width * 0.12, // Smaller font on Nexus S, minimum 28px
@@ -3095,6 +3144,17 @@ export default function RemoteScreen() {
       fontWeight: '600',
       color: 'white',
       marginBottom: height * 0.006, // Smaller margin on Nexus S
+      textAlign: 'center',
+    },
+    fencerNameContainer: {
+      // Container for clickable fencer names
+      paddingVertical: height * 0.005,
+      paddingHorizontal: width * 0.01,
+      borderRadius: width * 0.01,
+      maxWidth: '100%',
+      minHeight: height * 0.03, // Fixed minimum height to prevent layout shifts
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     fencerScore: {
       fontSize: width * 0.105, // Smaller font on Nexus S, minimum 32px
@@ -3169,25 +3229,25 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     yellowCard: {
-      width: width * 0.06, // Smaller cards on Nexus S
-      height: width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.035, // Much smaller cards
+      height: width * 0.035, // Much smaller cards
       backgroundColor: Colors.yellow.accent,
-      borderRadius: width * 0.015,
+      borderRadius: width * 0.01,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: height * 0.003 },
-      shadowOpacity: 0.3,
-      shadowRadius: width * 0.01,
-      elevation: 5,
+      shadowOffset: { width: 0, height: height * 0.001 },
+      shadowOpacity: 0.2,
+      shadowRadius: width * 0.006,
+      elevation: 3,
     },
     yellowCardText: {
-      fontSize: width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.022, // Much smaller font
       color: 'white',
       fontWeight: '700',
     },
     redCardText: {
-      fontSize: width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.022, // Much smaller font
       color: 'white',
       fontWeight: '700',
     },
@@ -3485,17 +3545,17 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     redCard: {
-      width: width * 0.06, // Smaller cards on Nexus S
-      height: width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.035, // Much smaller cards
+      height: width * 0.035, // Much smaller cards
       backgroundColor: Colors.red.accent,
-      borderRadius: width * 0.015,
+      borderRadius: width * 0.01,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: height * 0.003 },
-      shadowOpacity: 0.3,
-      shadowRadius: width * 0.01,
-      elevation: 5,
+      shadowOffset: { width: 0, height: height * 0.001 },
+      shadowOpacity: 0.2,
+      shadowRadius: width * 0.006,
+      elevation: 3,
     },
     cardCountContainer: {
       flexDirection: 'row',
@@ -3973,31 +4033,31 @@ export default function RemoteScreen() {
           {!isBreakTime && isInjuryTimer && (
             <View style={[styles.countdownDisplay, { 
               backgroundColor: hasMatchStarted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)',
-              borderWidth: width * 0.005,
+              borderWidth: width * 0.003,
               borderColor: hasMatchStarted ? '#EF4444' : '#6B7280',
-              borderRadius: width * 0.03,
-              paddingVertical: height * 0.02,
-              paddingHorizontal: width * 0.04,
-              minHeight: height * 0.12,
-              marginBottom: height * 0.02,
+              borderRadius: width * 0.02,
+              paddingVertical: height * 0.01,
+              paddingHorizontal: width * 0.025,
+              minHeight: height * 0.06,
+              marginBottom: height * 0.01,
               opacity: hasMatchStarted ? 1 : 0.6
             }]}>
               <Text style={[styles.countdownText, { 
                 color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.08 
+                fontSize: width * 0.045 
               }]}>
                 {formatTime(injuryTimeRemaining)}
               </Text>
               <Text style={[styles.countdownWarningText, { 
                 color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.035 
+                fontSize: width * 0.022 
               }]}>
                 🏥 INJURY TIME - 5:00
               </Text>
               {previousMatchState && (
                 <Text style={[styles.countdownWarningText, { 
                   color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                  fontSize: width * 0.03 
+                  fontSize: width * 0.018 
                 }]}>
                   Match paused at {formatTime(previousMatchState.timeRemaining)}
                 </Text>
@@ -4270,9 +4330,19 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'left' && showUserProfile ? userDisplayName : fencerNames.alice}
-          </Text>
+          <TouchableOpacity 
+            onPress={() => handleFencerNameClick('alice')}
+            activeOpacity={0.7}
+            style={styles.fencerNameContainer}
+          >
+            <Text 
+              style={[styles.fencerName, {color: 'black'}]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {toggleCardPosition === 'left' && showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0]}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{aliceScore.toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
@@ -4427,9 +4497,19 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'right' && showUserProfile ? userDisplayName : fencerNames.bob}
-          </Text>
+          <TouchableOpacity 
+            onPress={() => handleFencerNameClick('bob')}
+            activeOpacity={0.7}
+            style={styles.fencerNameContainer}
+          >
+            <Text 
+              style={[styles.fencerName, {color: 'black'}]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {toggleCardPosition === 'right' && showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.bob.split(' ')[0]}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{bobScore.toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
@@ -4613,16 +4693,16 @@ export default function RemoteScreen() {
             style={{
               flex: 1,
               backgroundColor: '#2A2A2A',
-              paddingVertical: layout.adjustPadding(height * 0.028, 'bottom'),
-              paddingHorizontal: width * 0.04,
+              paddingVertical: layout.adjustPadding(height * 0.035, 'bottom'),
+              paddingHorizontal: width * 0.05,
               borderRadius: width * 0.02,
               alignItems: 'center',
               justifyContent: 'center',
               flexDirection: 'row',
-              marginRight: width * 0.02,
+              marginRight: width * 0.025,
               borderWidth: width * 0.005,
               borderColor: 'white',
-              minHeight: layout.adjustPadding(height * 0.1, 'bottom'),
+              minHeight: layout.adjustPadding(height * 0.12, 'bottom'),
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
             onPress={async () => {

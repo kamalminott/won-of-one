@@ -71,6 +71,47 @@ export default function HomeScreen() {
     }
   }, [params.autoOpenGoalModal, dataLoading]);
 
+  // Show alert when goal fails
+  useEffect(() => {
+    if (params.showFailedGoalAlert === 'true' && params.failedGoalTitle && !dataLoading) {
+      const timer = setTimeout(() => {
+        Alert.alert(
+          '💥 Goal Failed',
+          `"${params.failedGoalTitle}" is no longer achievable.\n\n${params.failedGoalReason}\n\nWould you like to set a new goal?`,
+          [
+            { 
+              text: 'Later', 
+              style: 'cancel',
+              onPress: () => {
+                // Clear the params to prevent alert from showing again
+                router.setParams({ 
+                  showFailedGoalAlert: undefined,
+                  failedGoalTitle: undefined,
+                  failedGoalReason: undefined 
+                });
+              }
+            },
+            { 
+              text: 'Set New Goal', 
+              onPress: () => {
+                // Clear params first
+                router.setParams({ 
+                  showFailedGoalAlert: undefined,
+                  failedGoalTitle: undefined,
+                  failedGoalReason: undefined 
+                });
+                // Then open goal modal
+                goalCardRef.current?.openModal();
+              }
+            }
+          ]
+        );
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [params.showFailedGoalAlert, params.failedGoalTitle, params.failedGoalReason, dataLoading]);
+
   const fetchUserData = async () => {
     if (!user) {
       console.log('No user found, skipping data fetch');
@@ -101,8 +142,9 @@ export default function HomeScreen() {
       }
       
       // Fetch matches, goals, and training time data in parallel
+      // Note: Fetch more matches to support windowed goal calculations
       const [matchesData, goalsData, trainingTimeData] = await Promise.all([
-        matchService.getRecentMatches(user.id, 5),
+        matchService.getRecentMatches(user.id, 1000), // Increased from 5 to support windowed goals
         goalService.getActiveGoals(user.id),
         matchService.getAllMatchesForTrainingTime(user.id)
       ]);
@@ -273,6 +315,9 @@ export default function HomeScreen() {
       paddingBottom: height * 0.25, // Increased padding to ensure RecentMatches dots stay above tab bar
       width: '100%',
     },
+    progressCardContainer: {
+      marginTop: -height * 0.02, // Move Performance Preparation card up
+    },
     addButtonContainer: {
       alignItems: 'flex-end',
       marginBottom: height * 0.005,
@@ -344,9 +389,11 @@ export default function HomeScreen() {
         {/* Content with bottom safe area */}
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
-            <ProgressCard
-              activityType="Conditioning"
-            />
+            <View style={styles.progressCardContainer}>
+              <ProgressCard
+                activityType="Conditioning"
+              />
+            </View>
             
             <View style={styles.summaryRow}>
               <SummaryCard
@@ -371,13 +418,33 @@ export default function HomeScreen() {
                 
                 if (goal.match_window && goal.starting_match_count !== undefined) {
                   // Get matches since goal was created
-                  const matchesSinceGoal = matches.slice(0, matches.length - goal.starting_match_count);
+                  const matchesSinceGoalCreation = Math.max(0, matches.length - goal.starting_match_count);
+                  console.log('🔍 Frontend window calculation:', {
+                    totalMatches: matches.length,
+                    startingMatchCount: goal.starting_match_count,
+                    matchesSinceGoalCreation,
+                    matchWindow: goal.match_window
+                  });
+                  
+                  const matchesSinceGoal = matches.slice(0, matchesSinceGoalCreation);
                   // Limit to window size
                   windowMatches = matchesSinceGoal.slice(0, goal.match_window);
+                  
+                  console.log('🔍 Frontend window matches:', {
+                    matchesSinceGoalCount: matchesSinceGoal.length,
+                    windowMatchesCount: windowMatches.length,
+                    windowMatches: windowMatches.map(m => ({ id: m.id, isWin: m.isWin }))
+                  });
                 }
                 
                 const windowWins = windowMatches.filter(m => m.isWin).length;
                 const windowLosses = windowMatches.filter(m => !m.isWin).length;
+                
+                console.log('🔍 Frontend record calculation:', {
+                  windowWins,
+                  windowLosses,
+                  totalWindowMatches: windowMatches.length
+                });
                 
                 return (
                   <GoalCard
@@ -421,6 +488,48 @@ export default function HomeScreen() {
                       console.error('Error saving goal:', error);
                       Alert.alert('Error', 'Failed to create goal');
                     }
+                  }
+                }}
+                onGoalUpdated={async (goalId, updates) => {
+                  console.log('🔄 onGoalUpdated callback triggered with goalId:', goalId, 'updates:', updates);
+                  try {
+                    // If match_window is being added or modified, recalculate starting_match_count
+                    if (updates.match_window !== undefined && user) {
+                      const currentMatches = await matchService.getRecentMatches(user.id, 10000);
+                      updates.starting_match_count = currentMatches.length;
+                      console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
+                    }
+                    
+                    const updatedGoal = await goalService.updateGoal(goalId, updates);
+                    console.log('Update result:', updatedGoal);
+                    
+                    if (updatedGoal && user) {
+                      console.log('✅ Goal updated, recalculating progress...');
+                      
+                      // Recalculate progress if target, window, or deadline changed
+                      const needsRecalculation = 
+                        updates.target_value !== undefined || 
+                        updates.match_window !== undefined || 
+                        updates.deadline !== undefined;
+                      
+                      if (needsRecalculation) {
+                        await goalService.recalculateGoalProgress(goalId, user.id);
+                        console.log('✅ Progress recalculated');
+                      }
+                      
+                      // Small delay to ensure database update propagates
+                      setTimeout(async () => {
+                        await fetchUserData();
+                        console.log('✅ Home screen refreshed after update');
+                        Alert.alert('Success', 'Goal updated successfully!');
+                      }, 100);
+                    } else {
+                      console.log('❌ Update failed');
+                      Alert.alert('Error', 'Failed to update goal');
+                    }
+                  } catch (error) {
+                    console.error('❌ Exception during update:', error);
+                    Alert.alert('Error', 'Failed to update goal');
                   }
                 }}
                 onGoalDeleted={async (goalId) => {

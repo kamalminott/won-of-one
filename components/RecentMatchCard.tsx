@@ -27,6 +27,7 @@ interface Match {
   opponentName: string;
   opponentImage: string;
   date: string;
+  time?: string; // Time when match was completed
   matchType: 'Competition' | 'Training';
   outcome: 'Victory' | 'Defeat';
   playerScore: number;
@@ -141,6 +142,11 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       fontSize: width * 0.03,
       color: 'rgba(255, 255, 255, 0.6)',
     },
+    matchTime: {
+      fontSize: width * 0.028,
+      color: 'rgba(255, 255, 255, 0.5)',
+      marginTop: height * 0.002,
+    },
     outcomeBadgeContainer: {
       alignItems: 'flex-end',
     },
@@ -203,6 +209,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
             {match.opponentName}
           </Text>
           <Text style={styles.matchDate}>{match.date}</Text>
+          {match.time && (
+            <Text style={styles.matchTime}>{match.time}</Text>
+          )}
         </View>
         <View style={styles.outcomeBadgeContainer}>
           {match.outcome === 'Victory' ? (

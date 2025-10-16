@@ -22,6 +22,7 @@ export { RecentMatches } from './RecentMatches';
 export { ScoreProgressionChart } from './ScoreProgressionChart';
 export { SummaryCard } from './SummaryCard';
 export { SwipeToCompleteButton } from './SwipeToCompleteButton';
+export { default as SwipeToDeleteCard } from './SwipeToDeleteCard';
 export { ThemedText } from './ThemedText';
 export { ThemedView } from './ThemedView';
 export { default as TimeLeadingCard } from './TimeLeadingCard';

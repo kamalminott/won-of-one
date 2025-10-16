@@ -1,4 +1,4 @@
-import { RecentMatchCard } from '@/components';
+import { RecentMatchCard, SwipeToDeleteCard } from '@/components';
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    Alert,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -25,6 +26,7 @@ interface Match {
   opponentName: string;
   opponentImage: string;
   date: string;
+  time?: string; // Time when match was completed
   matchType: 'Competition' | 'Training';
   outcome: 'Victory' | 'Defeat';
   playerScore: number;
@@ -44,6 +46,7 @@ export default function RecentMatchesScreen() {
   const [selectedType, setSelectedType] = useState<'All' | 'Competition' | 'Training'>('All');
   const [showWinLossDropdown, setShowWinLossDropdown] = useState(false);
   const [selectedWinLoss, setSelectedWinLoss] = useState<'All' | 'Win' | 'Loss'>('All');
+  const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
   // Format date to DD/MM/YYYY
   const formatDate = (dateString: string): string => {
@@ -60,6 +63,7 @@ export default function RecentMatchesScreen() {
     opponentName: simpleMatch.opponentName,
     opponentImage: '', // No default image - will use initials fallback
     date: formatDate(simpleMatch.date),
+    time: simpleMatch.time, // Pass through the completion time
     matchType: 'Competition', // Default to Competition, could be made dynamic
     outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',
     playerScore: simpleMatch.youScore,
@@ -111,6 +115,32 @@ export default function RecentMatchesScreen() {
 
     fetchMatches();
   }, [user]);
+
+  // Handle match deletion
+  const handleDeleteMatch = async (matchId: string) => {
+    if (!user) return;
+    
+    try {
+      setDeletingMatchId(matchId);
+      const success = await matchService.deleteMatch(matchId);
+      
+      if (success) {
+        // Remove the match from local state
+        setAllMatches(prev => prev.filter(match => match.id !== matchId));
+        setMatches(prev => prev.filter(match => match.id !== matchId));
+        
+        // Show success message
+        Alert.alert('Success', 'Match deleted successfully');
+      } else {
+        Alert.alert('Error', 'Failed to delete match. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error deleting match:', error);
+      Alert.alert('Error', 'Failed to delete match. Please try again.');
+    } finally {
+      setDeletingMatchId(null);
+    }
+  };
 
   // Filter matches when selections or search query change
   useEffect(() => {
@@ -548,7 +578,14 @@ export default function RecentMatchesScreen() {
           </View>
         ) : (
           matches.map((match) => (
-            <RecentMatchCard key={match.id} match={match} />
+            <SwipeToDeleteCard
+              key={match.id}
+              matchId={match.id}
+              onDelete={() => handleDeleteMatch(match.id)}
+              disabled={deletingMatchId === match.id}
+            >
+              <RecentMatchCard match={match} />
+            </SwipeToDeleteCard>
           ))
         )}
       </ScrollView>

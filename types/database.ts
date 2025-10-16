@@ -159,6 +159,7 @@ export interface SimpleMatch {
   youScore: number;
   opponentScore: number;
   date: string;
+  time?: string; // Time when match was completed
   opponentName: string;
   isWin: boolean;
 }
