@@ -17,6 +17,10 @@ export default function LongestRunCard({
 }: LongestRunCardProps) {
   const { width } = Dimensions.get('window');
   
+  // Extract first names only
+  const fencer1FirstName = fencer1Name.split(' ')[0];
+  const fencer2FirstName = fencer2Name.split(' ')[0];
+  
   return (
     <View style={[styles.longestRunCard, { borderRadius: width * 0.05 }]}>
       <Text style={[styles.statTitle, { fontSize: width * 0.04 }]}>Longest Run</Text>
@@ -34,7 +38,13 @@ export default function LongestRunCard({
               fontSize: width * 0.045,
             }]}>{longestRuns.fencer1}x</Text>
           </View>
-          <Text style={[styles.bounceBackLabel, { fontSize: width * 0.03 }]}>{fencer1Name}</Text>
+          <Text 
+            style={[styles.bounceBackLabel, { fontSize: width * 0.03 }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {fencer1FirstName}
+          </Text>
         </View>
         <View style={styles.bounceBackItem}>
           <View style={[styles.bounceBackCircle, { 
@@ -49,7 +59,13 @@ export default function LongestRunCard({
               fontSize: width * 0.045,
             }]}>{longestRuns.fencer2}x</Text>
           </View>
-          <Text style={[styles.bounceBackLabel, { fontSize: width * 0.03 }]}>{fencer2Name}</Text>
+          <Text 
+            style={[styles.bounceBackLabel, { fontSize: width * 0.03 }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {fencer2FirstName}
+          </Text>
         </View>
       </View>
     </View>

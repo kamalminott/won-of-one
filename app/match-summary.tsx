@@ -1,4 +1,3 @@
-import { BackButton } from '@/components/BackButton';
 import { GoalCelebrationModal } from '@/components/GoalCelebrationModal';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
@@ -12,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MatchSummaryScreen() {
@@ -134,9 +133,48 @@ export default function MatchSummaryScreen() {
     console.log('See full summary');
   };
 
-  const handleCancelMatch = () => {
-    // TODO: Implement cancel match
-    console.log('Cancel match');
+  const handleCancelMatch = async () => {
+    if (!match?.match_id) {
+      console.log('No match ID available for deletion');
+      return;
+    }
+
+    // Show confirmation dialog
+    Alert.alert(
+      'Cancel Match',
+      'Are you sure you want to cancel this match? This will permanently delete the match from your history.',
+      [
+        {
+          text: 'Keep Match',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete Match',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🗑️ Canceling and deleting match:', match.match_id);
+              
+              // Delete the match from the database
+              const success = await matchService.deleteMatch(match.match_id);
+              
+              if (success) {
+                console.log('✅ Match deleted successfully');
+                
+                // Navigate back to home screen
+                router.replace('/(tabs)');
+              } else {
+                console.error('❌ Failed to delete match');
+                Alert.alert('Error', 'Failed to cancel match. Please try again.');
+              }
+            } catch (error) {
+              console.error('Error canceling match:', error);
+              Alert.alert('Error', 'An error occurred while canceling the match.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSaveMatch = async () => {
@@ -311,37 +349,17 @@ export default function MatchSummaryScreen() {
       flex: 1,
     },
     header: {
-      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingVertical: height * 0.02,
       paddingHorizontal: width * 0.04,
       marginBottom: height * 0.02,
-    },
-    backButton: {
-      width: width * 0.1,
-      height: width * 0.1,
-      borderRadius: width * 0.05,
-      backgroundColor: '#2e2e2e',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: '#E0E0E0',
     },
     title: {
       fontSize: Math.round(width * 0.06),
       fontWeight: '700',
       color: 'white',
-    },
-    editButton: {
-      width: width * 0.1,
-      height: width * 0.1,
-      borderRadius: width * 0.05,
-      backgroundColor: '#2e2e2e',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: '#E0E0E0',
+      textAlign: 'center',
     },
     scrollContainer: {
       flex: 1,
@@ -466,11 +484,7 @@ export default function MatchSummaryScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
       {/* Header */}
       <View style={styles.header}>
-        <BackButton onPress={handleBack} />
         <Text style={styles.title}>Match Summary</Text>
-        <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-          <Ionicons name="pencil" size={24} color="white" />
-        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView 

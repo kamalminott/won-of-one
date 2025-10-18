@@ -31,7 +31,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
 
   return (
     <View style={[styles.tabBar, { 
-      height: height * 0.10 + insets.bottom,
+      height: height * 0.08 + insets.bottom,
       paddingBottom: insets.bottom,
     }]}>
       {state.routes
@@ -90,14 +90,14 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
                   width: width * 0.05, // 20px equivalent
                   height: height * 0.004, // 3px equivalent
                   borderRadius: width * 0.025, // 60px equivalent
-                  top: -height * 0.025, // Dynamic positioning based on screen height
+                  top: -height * 0.020, // Dynamic positioning based on screen height
                 }]} />
               )}
               
               {/* Icon */}
               <Component
                 name={name}
-                size={height * 0.025}
+                size={height * 0.023}
                 color={iconColor}
               />
               
@@ -139,9 +139,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
-    marginTop: 2,
+    marginTop: 1,
     textAlign: 'center',
   },
 });

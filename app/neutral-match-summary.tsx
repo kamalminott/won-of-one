@@ -629,8 +629,12 @@ export default function NeutralMatchSummary() {
   const aliceCardsData = aliceCards ? JSON.parse(aliceCards as string) : { yellow: 0, red: 0 };
   const bobCardsData = bobCards ? JSON.parse(bobCards as string) : { yellow: 0, red: 0 };
 
+  // Extract first names only
+  const fencer1FirstName = (fencer1Name as string).split(' ')[0];
+  const fencer2FirstName = (fencer2Name as string).split(' ')[0];
+
   // Calculate winner
-  const winner = aliceScoreNum > bobScoreNum ? fencer1Name : bobScoreNum > aliceScoreNum ? fencer2Name : 'Tied';
+  const winner = aliceScoreNum > bobScoreNum ? fencer1FirstName : bobScoreNum > aliceScoreNum ? fencer2FirstName : 'Tied';
   const scoreDiff = Math.abs(aliceScoreNum - bobScoreNum);
 
   return (
@@ -677,7 +681,13 @@ export default function NeutralMatchSummary() {
                   <View style={styles.playerAvatar}>
                     <Text style={styles.playerInitials}>{getInitials(fencer1Name as string)}</Text>
                   </View>
-                  <Text style={styles.playerName}>{fencer1Name}</Text>
+                  <Text 
+                    style={styles.playerName}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {fencer1FirstName}
+                  </Text>
                 </View>
 
                 {/* Right Player */}
@@ -685,7 +695,13 @@ export default function NeutralMatchSummary() {
                   <View style={styles.playerAvatar}>
                     <Text style={styles.playerInitials}>{getInitials(fencer2Name as string)}</Text>
                   </View>
-                  <Text style={styles.playerName}>{fencer2Name}</Text>
+                  <Text 
+                    style={styles.playerName}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {fencer2FirstName}
+                  </Text>
                 </View>
 
                 {/* Score Container */}
@@ -694,10 +710,14 @@ export default function NeutralMatchSummary() {
                   <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
                   <View style={styles.trophyPill}>
                     <Ionicons name="trophy-outline" size={16} color="#FFFFFF" />
-                    <Text style={styles.trophyPillText}>
+                    <Text 
+                      style={styles.trophyPillText}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
                       {aliceScoreNum > bobScoreNum 
-                        ? `${fencer1Name} win by ${aliceScoreNum - bobScoreNum} point${aliceScoreNum - bobScoreNum !== 1 ? 's' : ''}`
-                        : `${fencer2Name} win by ${bobScoreNum - aliceScoreNum} point${bobScoreNum - aliceScoreNum !== 1 ? 's' : ''}`
+                        ? `${fencer1FirstName} win by ${aliceScoreNum - bobScoreNum} point${aliceScoreNum - bobScoreNum !== 1 ? 's' : ''}`
+                        : `${fencer2FirstName} win by ${bobScoreNum - aliceScoreNum} point${bobScoreNum - aliceScoreNum !== 1 ? 's' : ''}`
                       }
                     </Text>
                   </View>
@@ -807,7 +827,13 @@ export default function NeutralMatchSummary() {
               <View style={styles.cardAvatar}>
                 <Text style={styles.cardInitials}>{getInitials(fencer1Name as string)}</Text>
               </View>
-              <Text style={styles.cardName}>{fencer1Name}</Text>
+              <Text 
+                style={styles.cardName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer1FirstName}
+              </Text>
             </View>
             
             <View style={styles.cardsScore}>
@@ -819,12 +845,37 @@ export default function NeutralMatchSummary() {
             </View>
             
             <View style={styles.cardItem}>
-              <Text style={styles.cardName}>{fencer2Name}</Text>
+              <Text 
+                style={styles.cardName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer2FirstName}
+              </Text>
               <View style={styles.cardAvatar}>
                 <Text style={styles.cardInitials}>{getInitials(fencer2Name as string)}</Text>
               </View>
             </View>
           </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity 
+            style={styles.startNewMatchButton}
+            onPress={() => router.push('/(tabs)/remote')}
+          >
+            <Ionicons name="add-circle-outline" size={24} color="white" />
+            <Text style={styles.startNewMatchButtonText}>Start New Match</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.backToHomeButton}
+            onPress={() => router.push('/(tabs)')}
+          >
+            <Ionicons name="home-outline" size={24} color="white" />
+            <Text style={styles.backToHomeButtonText}>Back to Home</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -1292,5 +1343,52 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: 'white',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'column', // Changed from 'row' to 'column'
+    gap: height * 0.02, // Changed to height-based gap for vertical spacing
+    paddingHorizontal: width * 0.05,
+    paddingVertical: height * 0.03,
+    paddingBottom: height * 0.05,
+  },
+  startNewMatchButton: {
+    width: '100%', // Changed from flex: 1 to full width
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: height * 0.018,
+    borderRadius: width * 0.03,
+    gap: width * 0.02,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  startNewMatchButtonText: {
+    color: 'white',
+    fontSize: width * 0.04,
+    fontWeight: '600',
+  },
+  backToHomeButton: {
+    width: '100%', // Changed from flex: 1 to full width
+    backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: height * 0.018,
+    borderRadius: width * 0.03,
+    gap: width * 0.02,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  backToHomeButtonText: {
+    color: 'white',
+    fontSize: width * 0.04,
+    fontWeight: '600',
   },
 });

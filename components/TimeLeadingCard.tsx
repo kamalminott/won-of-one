@@ -19,6 +19,10 @@ export default function TimeLeadingCard({
   fencer2Name, 
   timeLeading 
 }: TimeLeadingCardProps) {
+  // Extract first names only
+  const fencer1FirstName = fencer1Name.split(' ')[0];
+  const fencer2FirstName = fencer2Name.split(' ')[0];
+
   return (
     <View style={styles.statCard}>
       <Text style={styles.statTitle}>Time Leading</Text>
@@ -42,7 +46,13 @@ export default function TimeLeadingCard({
             {/* Legend below circle */}
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
-              <Text style={styles.legendText}>{fencer1Name}</Text>
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer1FirstName}
+              </Text>
             </View>
           </View>
 
@@ -63,7 +73,13 @@ export default function TimeLeadingCard({
             {/* Legend below circle */}
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
-              <Text style={styles.legendText}>{fencer2Name}</Text>
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer2FirstName}
+              </Text>
             </View>
           </View>
 
@@ -84,7 +100,13 @@ export default function TimeLeadingCard({
             {/* Legend below circle */}
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: '#FFFFFF' }]} />
-              <Text style={styles.legendText}>Tied</Text>
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                Tied
+              </Text>
             </View>
           </View>
         </View>
@@ -126,6 +148,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     width: '100%',
     paddingHorizontal: 0,
+    gap: width * 0.02, // Add spacing between circles
   },
   circularProgressContainer: {
     alignItems: 'center',

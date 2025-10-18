@@ -2866,8 +2866,9 @@ export default function RemoteScreen() {
     contentContainer: {
       flex: 1,
       paddingHorizontal: '5%',
-      paddingTop: layout.adjustPadding(height * -0.005, 'top'),
+      paddingTop: layout.adjustPadding(height * -0.025, 'top'), // Reverted back from -0.06
       paddingBottom: layout.adjustPadding(height * 0.02, 'bottom'),
+      overflow: 'visible', // Allow pill to show outside bounds
     },
     
     // Match Timer Section
@@ -2877,9 +2878,10 @@ export default function RemoteScreen() {
       borderColor: Colors.timerBackground.borderColors[0],
       borderRadius: width * 0.03,
       padding: width * 0.008,
-      marginTop: layout.adjustMargin(0, 'top'),
+      marginTop: layout.adjustMargin(-height * 0.015, 'top'), // Reverted back from -0.035
       marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
       position: 'relative',
+      overflow: 'visible', // Allow pill to show outside card bounds
       // Shadow effects
       shadowColor: Colors.timerBackground.shadowColor,
       shadowOffset: Colors.timerBackground.shadowOffset,
@@ -2888,14 +2890,16 @@ export default function RemoteScreen() {
       elevation: Colors.timerBackground.elevation,
     },
     timerLabel: {
-      backgroundColor: Colors.yellow.accent,
-      paddingHorizontal: width * 0.02,
-      paddingVertical: height * 0.004,
-      borderRadius: width * 0.04,
       position: 'absolute',
-      top: height * 0.001, // Changed from negative to positive to move down in the card
-      left: '50%',
-      transform: [{ translateX: -width * 0.08 }], // Moved more to the left
+      width: width * 0.24, // Fixed width like Win badge
+      height: height * 0.03, // Fixed height
+      left: '50%', // Center horizontally
+      marginLeft: -(width * 0.24) / 2, // Half of width to center properly
+      top: -height * 0.028, // Moved pill higher up, more outside card
+      backgroundColor: Colors.yellow.accent,
+      borderRadius: width * 0.04,
+      alignItems: 'center',
+      justifyContent: 'center',
       zIndex: 10,
     },
     timerLabelText: {
@@ -2919,44 +2923,44 @@ export default function RemoteScreen() {
       borderRadius: width * 0.02,
     },
     countdownText: {
-      fontSize: width * 0.06, // Much smaller font for injury timer
+      fontSize: width * 0.10, // Increased from 0.06 for better visibility
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: height * 0.001 },
       textShadowRadius: width * 0.002,
-      marginTop: -(height * 0.008),
+      marginTop: -(height * 0.03), // Moved up from -0.008
     },
     countdownTextWarning: {
-      fontSize: width * 0.12, // Smaller font on Nexus S, minimum 28px
+      fontSize: width * 0.10, // Increased from 0.12 for better visibility
       color: Colors.yellow.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: height * 0.002 },
       textShadowRadius: width * 0.005,
-      marginTop: -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDanger: {
-      fontSize: width * 0.12,
+      fontSize: width * 0.16, // Increased from 0.12 for better visibility
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDangerPulse: {
-      fontSize: width * 0.12,
+      fontSize: width * 0.16, // Increased from 0.12 for better visibility
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
 
     timerHeader: {
@@ -3985,16 +3989,19 @@ export default function RemoteScreen() {
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
           {/* Match Timer Section */}
-      <LinearGradient
-        colors={Colors.timerBackground.colors}
-        style={styles.matchTimerCard}
-        start={Colors.timerBackground.start}
-        end={Colors.timerBackground.end}
-      >
-        <View style={styles.timerHeader}>
-          <View style={styles.timerLabel}>
-            <Text style={styles.timerLabelText}>Match Timer</Text>
-          </View>
+      <View style={{ overflow: 'visible', position: 'relative' }}>
+        {/* Period Label - Positioned outside card */}
+        <View style={styles.timerLabel}>
+          <Text style={styles.timerLabelText}>Match Timer</Text>
+        </View>
+        
+        <LinearGradient
+          colors={Colors.timerBackground.colors}
+          style={styles.matchTimerCard}
+          start={Colors.timerBackground.start}
+          end={Colors.timerBackground.end}
+        >
+          <View style={styles.timerHeader}>
           {!isPlaying && !hasMatchStarted && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
               <Ionicons name="pencil" size={16} color="white" />
@@ -4191,6 +4198,7 @@ export default function RemoteScreen() {
         </View>
         
       </LinearGradient>
+      </View>
 
       {/* Match Status Display */}
       <View style={styles.matchStatusContainer}>
@@ -4693,7 +4701,7 @@ export default function RemoteScreen() {
             style={{
               flex: 1,
               backgroundColor: '#2A2A2A',
-              paddingVertical: layout.adjustPadding(height * 0.035, 'bottom'),
+              paddingVertical: layout.adjustPadding(height * 0.045, 'bottom'), // Increased from 0.035
               paddingHorizontal: width * 0.05,
               borderRadius: width * 0.02,
               alignItems: 'center',
@@ -4702,7 +4710,7 @@ export default function RemoteScreen() {
               marginRight: width * 0.025,
               borderWidth: width * 0.005,
               borderColor: 'white',
-              minHeight: layout.adjustPadding(height * 0.12, 'bottom'),
+              minHeight: layout.adjustPadding(height * 0.14, 'bottom'), // Increased from 0.12
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
             onPress={async () => {
