@@ -46,6 +46,8 @@ export default function RecentMatchesScreen() {
   const [selectedType, setSelectedType] = useState<'All' | 'Competition' | 'Training'>('All');
   const [showWinLossDropdown, setShowWinLossDropdown] = useState(false);
   const [selectedWinLoss, setSelectedWinLoss] = useState<'All' | 'Win' | 'Loss'>('All');
+  const [showDateDropdown, setShowDateDropdown] = useState(false);
+  const [selectedDateRange, setSelectedDateRange] = useState<'All' | '7 Days' | '30 Days' | '3 Months' | '6 Months' | '1 Year'>('All');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
   // Format date to DD/MM/YYYY
@@ -55,6 +57,31 @@ export default function RecentMatchesScreen() {
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+  };
+
+  // Helper function to check if a date is within the selected range
+  const isDateInRange = (dateString: string, range: string): boolean => {
+    if (range === 'All') return true;
+    
+    const matchDate = new Date(dateString);
+    const now = new Date();
+    const diffTime = now.getTime() - matchDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    switch (range) {
+      case '7 Days':
+        return diffDays <= 7;
+      case '30 Days':
+        return diffDays <= 30;
+      case '3 Months':
+        return diffDays <= 90;
+      case '6 Months':
+        return diffDays <= 180;
+      case '1 Year':
+        return diffDays <= 365;
+      default:
+        return true;
+    }
   };
 
   // Convert SimpleMatch to Match format for the card
@@ -70,7 +97,7 @@ export default function RecentMatchesScreen() {
     opponentScore: simpleMatch.opponentScore,
   });
 
-  // Filter matches based on search query, selected type and win/loss
+  // Filter matches based on search query, selected type, win/loss, and date range
   const filterMatches = () => {
     let filtered = allMatches;
 
@@ -90,6 +117,11 @@ export default function RecentMatchesScreen() {
     if (selectedWinLoss !== 'All') {
       const outcomeMap = { 'Win': 'Victory', 'Loss': 'Defeat' };
       filtered = filtered.filter(match => match.outcome === outcomeMap[selectedWinLoss]);
+    }
+
+    // Filter by date range
+    if (selectedDateRange !== 'All') {
+      filtered = filtered.filter(match => isDateInRange(match.date, selectedDateRange));
     }
 
     setMatches(filtered);
@@ -145,7 +177,7 @@ export default function RecentMatchesScreen() {
   // Filter matches when selections or search query change
   useEffect(() => {
     filterMatches();
-  }, [selectedType, selectedWinLoss, searchQuery, allMatches]);
+  }, [selectedType, selectedWinLoss, selectedDateRange, searchQuery, allMatches]);
 
   const filters = ['All', 'Type', 'Win/Loss', 'Date'];
 
@@ -457,18 +489,25 @@ export default function RecentMatchesScreen() {
         <TouchableOpacity 
           style={[
             styles.filterButton,
-            activeFilter === 'Date' && styles.filterButtonActive
+            (activeFilter === 'Date' || selectedDateRange !== 'All') && styles.filterButtonActive
           ]}
-          onPress={() => setActiveFilter('Date')}
+          onPress={() => {
+            setActiveFilter('Date');
+            setShowDateDropdown(!showDateDropdown);
+            setShowTypeDropdown(false);
+            setShowWinLossDropdown(false);
+          }}
         >
-          {activeFilter === 'Date' ? (
+          {(activeFilter === 'Date' || selectedDateRange !== 'All') ? (
             <LinearGradient
               colors={Colors.glassyGradient.colors}
               style={[styles.filterButton, { borderWidth: 1, borderColor: Colors.glassyGradient.borderColor }]}
               start={Colors.glassyGradient.start}
               end={Colors.glassyGradient.end}
             >
-              <Text style={styles.filterButtonTextActive}>Date</Text>
+              <Text style={styles.filterButtonTextActive}>
+                {selectedDateRange === 'All' ? 'Date' : selectedDateRange}
+              </Text>
             </LinearGradient>
           ) : (
             <Text style={styles.filterButtonText}>Date</Text>
@@ -562,6 +601,90 @@ export default function RecentMatchesScreen() {
               styles.dropdownOptionText,
               selectedWinLoss === 'Loss' && styles.dropdownOptionTextActive
             ]}>Loss</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Date Dropdown */}
+      {showDateDropdown && (
+        <View style={styles.dropdownContainer}>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('All');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === 'All' && styles.dropdownOptionTextActive
+            ]}>All</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('7 Days');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === '7 Days' && styles.dropdownOptionTextActive
+            ]}>7 Days</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('30 Days');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === '30 Days' && styles.dropdownOptionTextActive
+            ]}>30 Days</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('3 Months');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === '3 Months' && styles.dropdownOptionTextActive
+            ]}>3 Months</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('6 Months');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === '6 Months' && styles.dropdownOptionTextActive
+            ]}>6 Months</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('1 Year');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === '1 Year' && styles.dropdownOptionTextActive
+            ]}>1 Year</Text>
           </TouchableOpacity>
         </View>
       )}
