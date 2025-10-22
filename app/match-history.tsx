@@ -47,7 +47,7 @@ export default function RecentMatchesScreen() {
   const [showWinLossDropdown, setShowWinLossDropdown] = useState(false);
   const [selectedWinLoss, setSelectedWinLoss] = useState<'All' | 'Win' | 'Loss'>('All');
   const [showDateDropdown, setShowDateDropdown] = useState(false);
-  const [selectedDateRange, setSelectedDateRange] = useState<'All' | '7 Days' | '30 Days' | '3 Months' | '6 Months' | '1 Year'>('All');
+  const [selectedDateRange, setSelectedDateRange] = useState<'All' | 'Today' | 'This Week' | 'This Month' | '3 Months' | 'This Year'>('All');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
   // Format date to DD/MM/YYYY
@@ -65,20 +65,26 @@ export default function RecentMatchesScreen() {
     
     const matchDate = new Date(dateString);
     const now = new Date();
-    const diffTime = now.getTime() - matchDate.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Reset time to start of day for accurate date comparisons
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const matchDay = new Date(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate());
     
     switch (range) {
-      case '7 Days':
-        return diffDays <= 7;
-      case '30 Days':
-        return diffDays <= 30;
+      case 'Today':
+        return matchDay.getTime() === today.getTime();
+      case 'This Week':
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - today.getDay()); // Start of current week (Sunday)
+        return matchDay >= startOfWeek && matchDay <= today;
+      case 'This Month':
+        return matchDate.getMonth() === now.getMonth() && matchDate.getFullYear() === now.getFullYear();
       case '3 Months':
-        return diffDays <= 90;
-      case '6 Months':
-        return diffDays <= 180;
-      case '1 Year':
-        return diffDays <= 365;
+        const threeMonthsAgo = new Date(now);
+        threeMonthsAgo.setMonth(now.getMonth() - 3);
+        return matchDate >= threeMonthsAgo && matchDate <= now;
+      case 'This Year':
+        return matchDate.getFullYear() === now.getFullYear();
       default:
         return true;
     }
@@ -624,28 +630,41 @@ export default function RecentMatchesScreen() {
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('7 Days');
+              setSelectedDateRange('Today');
               setShowDateDropdown(false);
               setActiveFilter('All');
             }}
           >
             <Text style={[
               styles.dropdownOptionText,
-              selectedDateRange === '7 Days' && styles.dropdownOptionTextActive
-            ]}>7 Days</Text>
+              selectedDateRange === 'Today' && styles.dropdownOptionTextActive
+            ]}>Today</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('30 Days');
+              setSelectedDateRange('This Week');
               setShowDateDropdown(false);
               setActiveFilter('All');
             }}
           >
             <Text style={[
               styles.dropdownOptionText,
-              selectedDateRange === '30 Days' && styles.dropdownOptionTextActive
-            ]}>30 Days</Text>
+              selectedDateRange === 'This Week' && styles.dropdownOptionTextActive
+            ]}>This Week</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.dropdownOption}
+            onPress={() => {
+              setSelectedDateRange('This Month');
+              setShowDateDropdown(false);
+              setActiveFilter('All');
+            }}
+          >
+            <Text style={[
+              styles.dropdownOptionText,
+              selectedDateRange === 'This Month' && styles.dropdownOptionTextActive
+            ]}>This Month</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.dropdownOption}
@@ -663,28 +682,15 @@ export default function RecentMatchesScreen() {
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('6 Months');
+              setSelectedDateRange('This Year');
               setShowDateDropdown(false);
               setActiveFilter('All');
             }}
           >
             <Text style={[
               styles.dropdownOptionText,
-              selectedDateRange === '6 Months' && styles.dropdownOptionTextActive
-            ]}>6 Months</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('1 Year');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === '1 Year' && styles.dropdownOptionTextActive
-            ]}>1 Year</Text>
+              selectedDateRange === 'This Year' && styles.dropdownOptionTextActive
+            ]}>This Year</Text>
           </TouchableOpacity>
         </View>
       )}
