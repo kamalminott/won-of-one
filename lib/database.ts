@@ -58,6 +58,8 @@ export const matchService = {
         time: completionTime,
         opponentName: match.fencer_2_name || 'Unknown',
         isWin: match.is_win || false,
+        source: match.source || 'unknown', // Include source field
+        notes: match.notes || '', // Include notes field
         _completionTimestamp: completionTimestamp, // Internal field for sorting
       };
     }) || [];
