@@ -8,6 +8,7 @@ interface RecentMatchesProps {
   onSwipeRight?: () => void;
   userName?: string;
   userProfileImage?: string | null;
+  hasActiveGoals?: boolean;
 }
 
 export const RecentMatches: React.FC<RecentMatchesProps> = ({
@@ -15,6 +16,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
   onViewAll,
   userName,
   userProfileImage,
+  hasActiveGoals = true,
 }) => {
   // Convert SimpleMatch to CarouselItem format (already ordered by most recent first from database)
   const carouselItems = matches.map(match => {
@@ -41,6 +43,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       onViewAll={onViewAll}
       userName={userName}
       userProfileImage={userProfileImage}
+      hasActiveGoals={hasActiveGoals}
     />
   );
 };

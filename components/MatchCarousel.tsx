@@ -3,15 +3,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Image,
-    PanResponder,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View
+  Animated,
+  Dimensions,
+  Image,
+  PanResponder,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
 } from 'react-native';
 
 // Helper function to get initials from a name
@@ -66,6 +66,8 @@ interface MatchCarouselProps {
   userName?: string;
   /** User's profile image */
   userProfileImage?: string | null;
+  /** Whether user has active goals (affects splash screen positioning) */
+  hasActiveGoals?: boolean;
 }
 
 export const MatchCarousel: React.FC<MatchCarouselProps> = ({
@@ -81,6 +83,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   customItemRenderer,
   userName,
   userProfileImage,
+  hasActiveGoals = true,
 }) => {
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -501,8 +504,9 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     emptyState: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: height * 0.04,
+      paddingVertical: height * 0.02, // Reduced from 0.04
       paddingHorizontal: width * 0.08,
+      marginTop: hasActiveGoals ? -height * 0.01 : height * 0.02, // Move up when goals exist, down when no goals
     },
     emptyIcon: {
       marginBottom: height * 0.015,

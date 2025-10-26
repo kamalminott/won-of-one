@@ -10,11 +10,13 @@ import { supabase } from './supabase';
 export const matchService = {
   // Get recent matches for a user
   async getRecentMatches(userId: string, limit: number = 10): Promise<SimpleMatch[]> {
+    console.log('🔍 getRecentMatches called with userId:', userId, 'limit:', limit);
+    
     const { data, error } = await supabase
       .from('match')
       .select(`
         *,
-        match_period!inner(end_time)
+        match_period(end_time)
       `)
       .eq('user_id', userId)
       .order('event_date', { ascending: false })
@@ -25,6 +27,14 @@ export const matchService = {
       console.error('Error fetching matches:', error);
       return [];
     }
+
+    console.log('📊 Raw matches data from database:', data?.length, 'matches found');
+    console.log('📊 Match details:', data?.map(m => ({ 
+      id: m.match_id, 
+      opponent: m.fencer_2_name, 
+      source: m.source, 
+      hasPeriods: m.match_period?.length > 0 
+    })));
 
     const matches = data?.map(match => {
       // Get the latest period end time as the match completion time
@@ -48,6 +58,16 @@ export const matchService = {
           const minutes = endTime.getMinutes().toString().padStart(2, '0');
           completionTime = `${hours}:${minutes}`;
         }
+      } else {
+        // For manual matches without match_period, use event_date and event_time
+        if (match.event_date) {
+          const eventDateTime = new Date(match.event_date);
+          completionTimestamp = eventDateTime.getTime();
+          // Format as HH:MM
+          const hours = eventDateTime.getHours().toString().padStart(2, '0');
+          const minutes = eventDateTime.getMinutes().toString().padStart(2, '0');
+          completionTime = `${hours}:${minutes}`;
+        }
       }
       
       return {
@@ -66,7 +86,7 @@ export const matchService = {
 
     // Sort by completion timestamp (most recent first)
     // Matches with timestamps come first, then by date
-    return matches.sort((a, b) => {
+    const sortedMatches = matches.sort((a, b) => {
       if (a._completionTimestamp && b._completionTimestamp) {
         return b._completionTimestamp - a._completionTimestamp;
       }
@@ -75,6 +95,17 @@ export const matchService = {
       // Fallback to date comparison
       return b.date.localeCompare(a.date);
     }).map(({ _completionTimestamp, ...match }) => match); // Remove internal field
+
+    console.log('✅ Final processed matches:', sortedMatches.length, 'matches');
+    console.log('✅ Match summary:', sortedMatches.map(m => ({ 
+      id: m.id, 
+      opponent: m.opponentName, 
+      source: m.source, 
+      date: m.date,
+      time: m.time 
+    })));
+
+    return sortedMatches;
   },
 
   // Get all matches for training time calculation
@@ -2278,6 +2309,7 @@ export const weeklyTargetService = {
           week_start_date: weekStartDate.toISOString().split('T')[0],
           week_end_date: weekEndDate.toISOString().split('T')[0],
           target_sessions: targetSessions,
+          status: 'active', // Set as active target
           updated_at: new Date().toISOString()
         }, {
           onConflict: 'user_id,activity_type,week_start_date'
@@ -2312,16 +2344,21 @@ export const weeklyTargetService = {
         .eq('user_id', userId)
         .eq('activity_type', activityType)
         .eq('week_start_date', dateString)
+        .eq('status', 'active') // Only get active targets
         .single();
       
       console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
 
       if (error) {
-        if (error.code === 'PGRST116') return null; // No rows found
+        if (error.code === 'PGRST116') {
+          console.log('🔍 No active target found for this week');
+          return null; // No rows found
+        }
         console.error('Error getting weekly target:', error);
         return null;
       }
 
+      console.log('🔍 Found active target:', data);
       return data;
     } catch (error) {
       console.error('Error in getWeeklyTarget:', error);
@@ -2332,6 +2369,84 @@ export const weeklyTargetService = {
   // Delete a weekly target
   async deleteWeeklyTarget(targetId: string): Promise<boolean> {
     try {
+      // First, get the target details to create history record
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for deletion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Check if there are any history records that reference this target
+      const { data: existingHistory } = await supabase
+        .from('weekly_completion_history')
+        .select('id')
+        .eq('original_target_id', targetId);
+
+      // Only delete history records if they exist
+      if (existingHistory && existingHistory.length > 0) {
+        const { error: deleteHistoryError } = await supabase
+          .from('weekly_completion_history')
+          .delete()
+          .eq('original_target_id', targetId);
+
+        if (deleteHistoryError) {
+          console.error('Error deleting existing history records:', deleteHistoryError);
+        } else {
+          console.log('✅ Existing history records deleted');
+        }
+      } else {
+        console.log('ℹ️ No existing history records to delete (this is normal for new targets)');
+      }
+
+      // Create history record for deleted target
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'abandoned', // Mark as abandoned since user manually deleted
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating deletion history:', historyError);
+        // Continue with deletion even if history creation fails
+      }
+
+      // Clear session logs for the deleted target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for deleted target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+      }
+
+      // Now delete the target
       const { error } = await supabase
         .from('weekly_target')
         .delete()
@@ -2342,9 +2457,111 @@ export const weeklyTargetService = {
         return false;
       }
 
+      console.log('✅ Target deleted and history record created');
       return true;
     } catch (error) {
       console.error('Error in deleteWeeklyTarget:', error);
+      return false;
+    }
+  },
+
+  // Get all targets for a specific activity
+  async getAllTargetsForActivity(userId: string, activityType: string): Promise<WeeklyTarget[]> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('status', 'active') // Only get active targets
+        .order('week_start_date', { ascending: true });
+
+      if (error) {
+        console.error('Error getting all targets for activity:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getAllTargetsForActivity:', error);
+      return [];
+    }
+  },
+
+  // Mark a target as complete and create history record
+  async markTargetComplete(targetId: string): Promise<boolean> {
+    try {
+      // First, get the target details
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for completion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count before clearing them
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Clear the session logs for the completed target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for completed target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+        console.log('✅ Session logs cleared for completed target');
+      }
+
+      // Create history record (without foreign key reference)
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'completed',
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating completion history:', historyError);
+        return false;
+      }
+
+      // Delete the target completely after creating history record
+      const { error: deleteError } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('target_id', targetId);
+
+      if (deleteError) {
+        console.error('Error deleting completed target:', deleteError);
+        return false;
+      }
+
+      console.log('✅ Target deleted and history record created');
+      return true;
+    } catch (error) {
+      console.error('Error in markTargetComplete:', error);
       return false;
     }
   }

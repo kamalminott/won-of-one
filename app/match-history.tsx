@@ -6,18 +6,18 @@ import { matchService } from '@/lib/database';
 import { SimpleMatch } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,6 +31,8 @@ interface Match {
   outcome: 'Victory' | 'Defeat';
   playerScore: number;
   opponentScore: number;
+  source?: string; // Source of the match (manual, remote, etc.)
+  notes?: string; // Match notes
 }
 
 export default function RecentMatchesScreen() {
@@ -47,7 +49,7 @@ export default function RecentMatchesScreen() {
   const [showWinLossDropdown, setShowWinLossDropdown] = useState(false);
   const [selectedWinLoss, setSelectedWinLoss] = useState<'All' | 'Win' | 'Loss'>('All');
   const [showDateDropdown, setShowDateDropdown] = useState(false);
-  const [selectedDateRange, setSelectedDateRange] = useState<'All' | 'Today' | 'Yesterday' | 'This Week' | 'Last Week' | 'This Month' | 'Last Month' | '3 Months' | '6 Months' | 'This Year' | 'Last Year'>('All');
+  const [selectedDateRange, setSelectedDateRange] = useState<'All Time' | 'Today' | 'This Week' | 'This Month' | 'Last 3 Months'>('All Time');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
   // Format date to DD/MM/YYYY
@@ -61,53 +63,66 @@ export default function RecentMatchesScreen() {
 
   // Helper function to check if a date is within the selected range
   const isDateInRange = (dateString: string, range: string): boolean => {
-    if (range === 'All') return true;
+    if (range === 'All Time') return true;
     
-    const matchDate = new Date(dateString);
+    // Validate the date string first
+    if (!dateString || dateString.trim() === '') {
+      console.log(`⚠️ Invalid date string: "${dateString}"`);
+      return false;
+    }
+    
+    // Parse DD/MM/YYYY format dates
+    let matchDate: Date;
+    
+    // Check if date is in DD/MM/YYYY format
+    if (dateString.includes('/') && dateString.split('/').length === 3) {
+      const parts = dateString.split('/');
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1; // JavaScript months are 0-indexed
+      const year = parseInt(parts[2], 10);
+      
+      matchDate = new Date(year, month, day);
+    } else {
+      // Try parsing as ISO string or other format
+      matchDate = new Date(dateString);
+    }
+    
+    // Check if the date is valid
+    if (isNaN(matchDate.getTime())) {
+      console.log(`⚠️ Invalid date created from: "${dateString}"`);
+      return false;
+    }
+    
     const now = new Date();
     
     // Reset time to start of day for accurate date comparisons
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const matchDay = new Date(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate());
     
+    let result = false;
+    
     switch (range) {
       case 'Today':
-        return matchDay.getTime() === today.getTime();
-      case 'Yesterday':
-        const yesterday = new Date(today);
-        yesterday.setDate(today.getDate() - 1);
-        return matchDay.getTime() === yesterday.getTime();
+        result = matchDay.getTime() === today.getTime();
+        break;
       case 'This Week':
         const startOfWeek = new Date(today);
         startOfWeek.setDate(today.getDate() - today.getDay()); // Start of current week (Sunday)
-        return matchDay >= startOfWeek && matchDay <= today;
-      case 'Last Week':
-        const startOfLastWeek = new Date(today);
-        startOfLastWeek.setDate(today.getDate() - today.getDay() - 7); // Start of last week
-        const endOfLastWeek = new Date(startOfLastWeek);
-        endOfLastWeek.setDate(startOfLastWeek.getDate() + 6); // End of last week
-        return matchDay >= startOfLastWeek && matchDay <= endOfLastWeek;
+        result = matchDay >= startOfWeek && matchDay <= today;
+        break;
       case 'This Month':
-        return matchDate.getMonth() === now.getMonth() && matchDate.getFullYear() === now.getFullYear();
-      case 'Last Month':
-        const lastMonth = new Date(now);
-        lastMonth.setMonth(now.getMonth() - 1);
-        return matchDate.getMonth() === lastMonth.getMonth() && matchDate.getFullYear() === lastMonth.getFullYear();
-      case '3 Months':
+        result = matchDate.getMonth() === now.getMonth() && matchDate.getFullYear() === now.getFullYear();
+        break;
+      case 'Last 3 Months':
         const threeMonthsAgo = new Date(now);
         threeMonthsAgo.setMonth(now.getMonth() - 3);
-        return matchDate >= threeMonthsAgo && matchDate <= now;
-      case '6 Months':
-        const sixMonthsAgo = new Date(now);
-        sixMonthsAgo.setMonth(now.getMonth() - 6);
-        return matchDate >= sixMonthsAgo && matchDate <= now;
-      case 'This Year':
-        return matchDate.getFullYear() === now.getFullYear();
-      case 'Last Year':
-        return matchDate.getFullYear() === (now.getFullYear() - 1);
+        result = matchDate >= threeMonthsAgo && matchDate <= now;
+        break;
       default:
-        return true;
+        result = true;
     }
+    
+    return result;
   };
 
   // Convert SimpleMatch to Match format for the card
@@ -121,6 +136,8 @@ export default function RecentMatchesScreen() {
     outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',
     playerScore: simpleMatch.youScore,
     opponentScore: simpleMatch.opponentScore,
+    source: (simpleMatch as any).source || 'unknown', // Pass through source field
+    notes: simpleMatch.notes || '', // Pass through notes field
   });
 
   // Filter matches based on search query, selected type, win/loss, and date range
@@ -146,7 +163,7 @@ export default function RecentMatchesScreen() {
     }
 
     // Filter by date range
-    if (selectedDateRange !== 'All') {
+    if (selectedDateRange !== 'All Time') {
       filtered = filtered.filter(match => isDateInRange(match.date, selectedDateRange));
     }
 
@@ -154,25 +171,38 @@ export default function RecentMatchesScreen() {
   };
 
   // Fetch matches data
-  useEffect(() => {
-    const fetchMatches = async () => {
-      if (!user) return;
-      
-      try {
-        setLoading(true);
-        const simpleMatches = await matchService.getRecentMatches(user.id, 50); // Get more matches for history page
-        const convertedMatches = simpleMatches.map(convertToMatch);
-        setAllMatches(convertedMatches);
-        setMatches(convertedMatches);
-      } catch (error) {
-        console.error('Error fetching matches:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchMatches = async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      console.log('🔄 Fetching matches for match history...');
+      const simpleMatches = await matchService.getRecentMatches(user.id, 50); // Get more matches for history page
+      const convertedMatches = simpleMatches.map(convertToMatch);
+      console.log(`📊 Fetched ${convertedMatches.length} matches for history`);
+      setAllMatches(convertedMatches);
+      setMatches(convertedMatches);
+    } catch (error) {
+      console.error('Error fetching matches:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // Fetch matches when component mounts
+  useEffect(() => {
     fetchMatches();
   }, [user]);
+
+  // Refresh matches when screen comes into focus (e.g., when returning from add-match)
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        console.log('🎯 Match history screen focused - refreshing matches...');
+        fetchMatches();
+      }
+    }, [user])
+  );
 
   // Handle match deletion
   const handleDeleteMatch = async (matchId: string) => {
@@ -234,14 +264,6 @@ export default function RecentMatchesScreen() {
       color: 'white',
       flex: 1,
       textAlign: 'center',
-    },
-    headerFilterButton: {
-      width: width * 0.1,
-      height: width * 0.1,
-      borderRadius: width * 0.05,
-      backgroundColor: 'rgb(52,52,52)',
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     searchContainer: {
       paddingHorizontal: width * 0.04,
@@ -412,9 +434,6 @@ export default function RecentMatchesScreen() {
       <View style={styles.header}>
         <BackButton onPress={() => router.back()} />
         <Text style={styles.title}>Match History</Text>
-        <TouchableOpacity style={styles.headerFilterButton}>
-          <Ionicons name="filter" size={width * 0.06} color="white" />
-        </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
@@ -471,6 +490,7 @@ export default function RecentMatchesScreen() {
             setActiveFilter('Type');
             setShowTypeDropdown(!showTypeDropdown);
             setShowWinLossDropdown(false); // Close win/loss dropdown if open
+            setShowDateDropdown(false); // Close date dropdown if open
           }}
         >
           {(activeFilter === 'Type' || selectedType !== 'All') ? (
@@ -496,6 +516,7 @@ export default function RecentMatchesScreen() {
             setActiveFilter('Win/Loss');
             setShowWinLossDropdown(!showWinLossDropdown);
             setShowTypeDropdown(false); // Close type dropdown if open
+            setShowDateDropdown(false); // Close date dropdown if open
           }}
         >
           {(activeFilter === 'Win/Loss' || selectedWinLoss !== 'All') ? (
@@ -515,7 +536,7 @@ export default function RecentMatchesScreen() {
         <TouchableOpacity 
           style={[
             styles.filterButton,
-            (activeFilter === 'Date' || selectedDateRange !== 'All') && styles.filterButtonActive
+            (activeFilter === 'Date' || selectedDateRange !== 'All Time') && styles.filterButtonActive
           ]}
           onPress={() => {
             setActiveFilter('Date');
@@ -524,7 +545,7 @@ export default function RecentMatchesScreen() {
             setShowWinLossDropdown(false);
           }}
         >
-          {(activeFilter === 'Date' || selectedDateRange !== 'All') ? (
+          {(activeFilter === 'Date' || selectedDateRange !== 'All Time') ? (
             <LinearGradient
               colors={Colors.glassyGradient.colors}
               style={[styles.filterButton, { borderWidth: 1, borderColor: Colors.glassyGradient.borderColor }]}
@@ -532,7 +553,8 @@ export default function RecentMatchesScreen() {
               end={Colors.glassyGradient.end}
             >
               <Text style={styles.filterButtonTextActive}>
-                {selectedDateRange === 'All' ? 'Date' : selectedDateRange}
+                {selectedDateRange === 'All Time' ? 'Date' : 
+                 selectedDateRange === 'Last 3 Months' ? '3 Months' : selectedDateRange}
               </Text>
             </LinearGradient>
           ) : (
@@ -637,15 +659,15 @@ export default function RecentMatchesScreen() {
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('All');
+              setSelectedDateRange('All Time');
               setShowDateDropdown(false);
               setActiveFilter('All');
             }}
           >
             <Text style={[
               styles.dropdownOptionText,
-              selectedDateRange === 'All' && styles.dropdownOptionTextActive
-            ]}>All</Text>
+              selectedDateRange === 'All Time' && styles.dropdownOptionTextActive
+            ]}>All Time</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.dropdownOption}
@@ -663,19 +685,6 @@ export default function RecentMatchesScreen() {
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('Yesterday');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === 'Yesterday' && styles.dropdownOptionTextActive
-            ]}>Yesterday</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
               setSelectedDateRange('This Week');
               setShowDateDropdown(false);
               setActiveFilter('All');
@@ -685,19 +694,6 @@ export default function RecentMatchesScreen() {
               styles.dropdownOptionText,
               selectedDateRange === 'This Week' && styles.dropdownOptionTextActive
             ]}>This Week</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('Last Week');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === 'Last Week' && styles.dropdownOptionTextActive
-            ]}>Last Week</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.dropdownOption}
@@ -715,67 +711,15 @@ export default function RecentMatchesScreen() {
           <TouchableOpacity 
             style={styles.dropdownOption}
             onPress={() => {
-              setSelectedDateRange('Last Month');
+              setSelectedDateRange('Last 3 Months');
               setShowDateDropdown(false);
               setActiveFilter('All');
             }}
           >
             <Text style={[
               styles.dropdownOptionText,
-              selectedDateRange === 'Last Month' && styles.dropdownOptionTextActive
-            ]}>Last Month</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('3 Months');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === '3 Months' && styles.dropdownOptionTextActive
-            ]}>3 Months</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('6 Months');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === '6 Months' && styles.dropdownOptionTextActive
-            ]}>6 Months</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('This Year');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === 'This Year' && styles.dropdownOptionTextActive
-            ]}>This Year</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.dropdownOption}
-            onPress={() => {
-              setSelectedDateRange('Last Year');
-              setShowDateDropdown(false);
-              setActiveFilter('All');
-            }}
-          >
-            <Text style={[
-              styles.dropdownOptionText,
-              selectedDateRange === 'Last Year' && styles.dropdownOptionTextActive
-            ]}>Last Year</Text>
+              selectedDateRange === 'Last 3 Months' && styles.dropdownOptionTextActive
+            ]}>Last 3 Months</Text>
           </TouchableOpacity>
         </View>
       )}
