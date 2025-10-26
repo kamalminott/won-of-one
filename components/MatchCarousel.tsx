@@ -3,15 +3,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View
+    Animated,
+    Dimensions,
+    Image,
+    PanResponder,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 
 // Helper function to get initials from a name
