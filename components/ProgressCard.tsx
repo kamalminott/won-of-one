@@ -131,9 +131,9 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       return 7;
     }
     
-    // If it's a past week, return 0 days
+    // If it's a past week, return 1 day (never show 0 days)
     if (today > weekData.endDate) {
-      return 0;
+      return 1;
     }
     
     // For current week, count days from today to end of week (inclusive)
@@ -143,12 +143,17 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     // Simple calculation: days between today and end of week + 1 (to include today)
     const daysLeft = Math.ceil((endDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     
-    return Math.max(0, daysLeft);
+    return Math.max(1, daysLeft); // Never return 0, minimum is 1 day
   };
 
   // Calculate days left for selected week
   const calculateDaysLeft = () => {
     return calculateDaysLeftForWeek(selectedWeek);
+  };
+
+  // Format days text (singular vs plural)
+  const formatDaysText = (days: number) => {
+    return days === 1 ? 'day left' : 'days left';
   };
   
   // Session counter functions
@@ -433,6 +438,9 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         weekLabel: selectedWeekData.label
       });
       
+      // Add a small delay to ensure any previous deletion operations have completed
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const existingTarget = await weeklyTargetService.getWeeklyTarget(
         user.id,
         selectedActivity,
@@ -662,7 +670,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             console.log('🔮 Future week target deleted - no sessions to delete');
           }
           
-          // Reset all progress data
+          // Reset all progress data immediately
           setCurrent(0);
           setTotal(0);
           setDaysRemaining(0);
@@ -673,12 +681,17 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           setDaysUntilTarget(0);
           setWeeksUntilTarget(0);
           console.log('🔄 Reset local state - hasTarget set to false');
+          
           // Close modal
           setShowEditModal(false);
-          // Refresh data
-          await fetchProgress();
-          console.log('🔄 After fetchProgress - hasTarget:', hasTarget);
-          onDataUpdate?.();
+          
+          // Wait a moment for database operations to complete, then refresh
+          setTimeout(async () => {
+            console.log('🔄 Refreshing data after deletion...');
+            await fetchProgress();
+            console.log('🔄 After fetchProgress - hasTarget:', hasTarget);
+            onDataUpdate?.();
+          }, 500); // Small delay to ensure database operations complete
         } else {
           console.error('❌ Failed to delete target from database');
         }
@@ -690,8 +703,12 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         setDaysRemaining(0);
         setHasTarget(false);
         setShowEditModal(false);
-        await fetchProgress();
-        onDataUpdate?.();
+        
+        // Wait a moment then refresh
+        setTimeout(async () => {
+          await fetchProgress();
+          onDataUpdate?.();
+        }, 100);
       }
     } catch (error) {
       console.error('❌ Error deleting target:', error);
@@ -1802,7 +1819,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               <Ionicons name="arrow-back" size={width * 0.048} color="#FFFFFF" />
             </TouchableOpacity>
             
-            <Text style={styles.modalTitle}>Performance Preparation Target</Text>
+            <Text style={styles.modalTitle}>Performance Tracker</Text>
           </View>
 
           {/* Modal Content */}
@@ -1872,7 +1889,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                 onPress={() => setShowWeekDropdown(!showWeekDropdown)}
               >
                 <Text style={styles.weekDropdownText}>
-                  {weekOptions[selectedWeek].label} - {calculateDaysLeft()} days left
+                  {weekOptions[selectedWeek].label} - {calculateDaysLeft()} {formatDaysText(calculateDaysLeft())}
                 </Text>
                 <Ionicons 
                   name={showWeekDropdown ? "chevron-up" : "chevron-down"} 
@@ -1899,7 +1916,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                         styles.weekDropdownItemText,
                         selectedWeek === week.id && styles.selectedWeekDropdownItemText
                       ]}>
-                        {week.label} - {calculateDaysLeftForWeek(week.id)} days left
+                        {week.label} - {calculateDaysLeftForWeek(week.id)} {formatDaysText(calculateDaysLeftForWeek(week.id))}
                       </Text>
                     </TouchableOpacity>
                   ))}
