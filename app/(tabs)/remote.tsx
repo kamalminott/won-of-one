@@ -211,10 +211,10 @@ export default function RemoteScreen() {
   };
 
   // Helper function to render profile image or initials
-  const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isUser: boolean = false) => {
+  const renderProfileImage = (imageUri: string | null | undefined, name: string | undefined, isUser: boolean = false) => {
     const initials = getInitials(name);
 
-    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+    if (imageUri && isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
       return (
         <Image 
           source={{ uri: imageUri }} 
@@ -589,6 +589,7 @@ export default function RemoteScreen() {
   
   // Match period state
   const [currentMatchPeriod, setCurrentMatchPeriod] = useState<any>(null);
+  const [matchId, setMatchId] = useState<string | null>(null); // Store match ID safely
   
   // Event tracking state
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
@@ -813,6 +814,7 @@ export default function RemoteScreen() {
       if (period) {
         console.log('✅ Match period created successfully:', period);
         setCurrentMatchPeriod(period);
+        setMatchId(period.match_id); // Store match ID safely
         return period;
       } else {
         console.error('❌ Failed to create match period');
@@ -843,6 +845,100 @@ export default function RemoteScreen() {
     }
   };
 
+  // Helper function to track priority winner events
+  const trackPriorityWinner = async (winnerName: string) => {
+    if (!matchId) {
+      console.error('Cannot track priority winner: no match ID');
+      return;
+    }
+
+    try {
+      // Check if priority winner event already exists for this match
+      const { data: existingEvent } = await supabase
+        .from('match_event')
+        .select('event_id')
+        .eq('match_id', matchId)
+        .eq('event_type', 'priority_winner')
+        .single();
+
+      if (existingEvent) {
+        console.log('⚠️ Priority winner event already exists for this match, skipping creation');
+        return;
+      }
+
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_winner',
+        event_time: new Date().toISOString(),
+        scoring_user_name: winnerName,
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority winner event created:', winnerName);
+    } catch (error) {
+      console.error('❌ Error creating priority winner event:', error);
+    }
+  };
+
+  // Helper function to track priority round start
+  const trackPriorityRoundStart = async () => {
+    if (!matchId) {
+      console.error('Cannot track priority round start: no match ID');
+      return;
+    }
+
+    try {
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_round_start',
+        event_time: new Date().toISOString(),
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority round start event created');
+    } catch (error) {
+      console.error('❌ Error creating priority round start event:', error);
+    }
+  };
+
+  // Helper function to track priority round end
+  const trackPriorityRoundEnd = async (winnerName: string) => {
+    if (!matchId) {
+      console.error('Cannot track priority round end: no match ID');
+      return;
+    }
+
+    try {
+      // Check if priority round end event already exists for this match
+      const { data: existingEvent } = await supabase
+        .from('match_event')
+        .select('event_id')
+        .eq('match_id', matchId)
+        .eq('event_type', 'priority_round_end')
+        .single();
+
+      if (existingEvent) {
+        console.log('⚠️ Priority round end event already exists for this match, skipping creation');
+        return;
+      }
+
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_round_end',
+        event_time: new Date().toISOString(),
+        scoring_user_name: winnerName,
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority round end event created:', winnerName);
+    } catch (error) {
+      console.error('❌ Error creating priority round end event:', error);
+    }
+  };
+
   // Complete the current match
   const completeMatch = async () => {
     if (!currentMatchPeriod || !remoteSession) {
@@ -850,52 +946,20 @@ export default function RemoteScreen() {
       return;
     }
 
-    // If in priority round, show confirmation popup
+    // If in priority round, the priority score popup already handled completion
     if (isPriorityRound) {
-      const aliceDisplayName = showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0];
-      const bobDisplayName = fencerNames.bob.split(' ')[0];
-      const priorityDisplayName = priorityFencer === 'alice' ? aliceDisplayName : bobDisplayName;
-      
-      Alert.alert(
-        'Complete Match on Priority?',
-        `Current Score: ${aliceScore}-${bobScore}\nPriority: ${priorityDisplayName}\n\nWhich fencer won?`,
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => {
-              // Resume timer if needed
-              if (!isPlaying && timeRemaining > 0) {
-                togglePlay();
-              }
-            }
-          },
-          {
-            text: aliceDisplayName,
-            onPress: () => {
-              // Proceed with match completion (Alice wins)
-              proceedWithMatchCompletion();
-            }
-          },
-          {
-            text: bobDisplayName,
-            onPress: () => {
-              // Proceed with match completion (Bob wins)
-              proceedWithMatchCompletion();
-            }
-          }
-        ]
-      );
-      return; // Don't complete match yet, wait for user choice
+      console.log('⚠️ completeMatch called during priority round - this should not happen');
+      console.log('Priority completion should be handled by the priority score popup');
+      return;
     }
 
     // Not in priority round, proceed normally
     proceedWithMatchCompletion();
   };
 
-  const proceedWithMatchCompletion = async () => {
-    if (!currentMatchPeriod || !remoteSession) {
-      console.error('Cannot complete match: missing period or session');
+  const proceedWithMatchCompletion = async (finalAliceScore?: number, finalBobScore?: number) => {
+    if (!matchId || !remoteSession) {
+      console.error('Cannot complete match: missing match ID or session');
       return;
     }
 
@@ -923,10 +987,14 @@ export default function RemoteScreen() {
       let touchesAgainst: number;
       let scoreDiff: number | null;
 
+      // Use passed scores if provided, otherwise use current state scores
+      const actualAliceScore = finalAliceScore !== undefined ? finalAliceScore : aliceScore;
+      const actualBobScore = finalBobScore !== undefined ? finalBobScore : bobScore;
+
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their position and result
-        const userScore = toggleCardPosition === 'left' ? aliceScore : bobScore;
-        const opponentScore = toggleCardPosition === 'left' ? bobScore : aliceScore;
+        const userScore = toggleCardPosition === 'left' ? actualAliceScore : actualBobScore;
+        const opponentScore = toggleCardPosition === 'left' ? actualBobScore : actualAliceScore;
 
         finalScore = userScore;
         touchesAgainst = opponentScore;
@@ -934,8 +1002,8 @@ export default function RemoteScreen() {
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
         // User toggle is off OR no registered user - record as anonymous match
-        finalScore = aliceScore;
-        touchesAgainst = bobScore;
+        finalScore = actualAliceScore;
+        touchesAgainst = actualBobScore;
         scoreDiff = null; // No score_diff when no user is present
         result = null; // No win/loss determination
       }
@@ -1080,11 +1148,11 @@ export default function RemoteScreen() {
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - go to regular match summary
         const navParams: any = {
-          matchId: currentMatchPeriod.match_id,
+          matchId: matchId, // Use stored match ID
           remoteId: remoteSession.remote_id,
           // Pass current match state for display
-          aliceScore: aliceScore.toString(),
-          bobScore: bobScore.toString(),
+          aliceScore: actualAliceScore.toString(),
+          bobScore: actualBobScore.toString(),
           aliceCards: JSON.stringify(aliceCards),
           bobCards: JSON.stringify(bobCards),
           matchDuration: matchDuration.toString(),
@@ -1108,11 +1176,11 @@ export default function RemoteScreen() {
         router.push({
           pathname: '/neutral-match-summary',
           params: {
-            matchId: currentMatchPeriod.match_id,
+            matchId: matchId, // Use stored match ID
             remoteId: remoteSession.remote_id,
             // Pass current match state for display
-            aliceScore: aliceScore.toString(),
-            bobScore: bobScore.toString(),
+            aliceScore: actualAliceScore.toString(),
+            bobScore: actualBobScore.toString(),
             aliceCards: JSON.stringify(aliceCards),
             bobCards: JSON.stringify(bobCards),
             matchDuration: matchDuration.toString(),
@@ -1126,6 +1194,7 @@ export default function RemoteScreen() {
       // 5. Reset the remote to clean state after completion
       // The match data is now saved in the database and accessible elsewhere
       setCurrentMatchPeriod(null);
+      setMatchId(null); // Clear stored match ID
       setRemoteSession(null);
       setAliceScore(0);
       setBobScore(0);
@@ -1369,6 +1438,7 @@ export default function RemoteScreen() {
         if (newPeriodRecord) {
           console.log('✅ New period created successfully:', newPeriodRecord);
           setCurrentMatchPeriod(newPeriodRecord);
+          setMatchId(newPeriodRecord.match_id); // Store match ID safely
         }
       }
       
@@ -1479,7 +1549,7 @@ export default function RemoteScreen() {
         setHasShownPriorityScorePopup(true); // Prevent future popups
         
         // Show popup asking if Alice won on priority
-        const aliceDisplayName = showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0];
+        const aliceDisplayName = showUserProfile && toggleCardPosition === 'left' ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0];
         Alert.alert(
           'Priority Touch Scored!',
           `${aliceDisplayName} scored to make it ${newAliceScore}-${bobScore}\n\nDid ${aliceDisplayName} win on priority?`,
@@ -1496,8 +1566,11 @@ export default function RemoteScreen() {
             {
               text: `Yes, ${aliceDisplayName} Wins`,
               onPress: async () => {
-                // Complete match with Alice as winner
-                await completeMatch();
+                // Track priority winner
+                await trackPriorityWinner(aliceDisplayName);
+                await trackPriorityRoundEnd(aliceDisplayName);
+                // Complete match with Alice as winner - pass the updated score
+                await proceedWithMatchCompletion(newAliceScore, bobScore);
               }
             }
           ]
@@ -1662,8 +1735,7 @@ export default function RemoteScreen() {
         setHasShownPriorityScorePopup(true); // Prevent future popups
         
         // Show popup asking if Bob won on priority
-        // Bob is always the opponent, so use fencerNames.bob
-        const bobDisplayName = fencerNames.bob.split(' ')[0];
+        const bobDisplayName = showUserProfile && toggleCardPosition === 'right' ? userDisplayName.split(' ')[0] : fencerNames.bob.split(' ')[0];
         Alert.alert(
           'Priority Touch Scored!',
           `${bobDisplayName} scored to make it ${aliceScore}-${newBobScore}\n\nDid ${bobDisplayName} win on priority?`,
@@ -1680,8 +1752,11 @@ export default function RemoteScreen() {
             {
               text: `Yes, ${bobDisplayName} Wins`,
               onPress: async () => {
-                // Complete match with Bob as winner
-                await completeMatch();
+                // Track priority winner
+                await trackPriorityWinner(bobDisplayName);
+                await trackPriorityRoundEnd(bobDisplayName);
+                // Complete match with Bob as winner - pass the updated score
+                await proceedWithMatchCompletion(aliceScore, newBobScore);
               }
             }
           ]
@@ -1935,6 +2010,7 @@ export default function RemoteScreen() {
         
         // Clear the current match period and remote session state
         setCurrentMatchPeriod(null);
+        setMatchId(null); // Clear stored match ID
         setRemoteSession(null);
       } else {
         console.log('⚠️ No active match to clean up - currentMatchPeriod or remoteSession is null');
@@ -2360,7 +2436,9 @@ export default function RemoteScreen() {
           // Priority timer expired
           if (aliceScore === bobScore) {
             // Still tied - priority fencer wins
-            const winnerName = priorityFencer === 'alice' ? fencerNames.alice : fencerNames.bob;
+            const winnerName = priorityFencer === 'alice' 
+              ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+              : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
             Alert.alert(
               '⏱️ Time Expired',
               `Priority timer ended with score still tied at ${aliceScore}-${bobScore}.\n\n${winnerName} wins on priority!`,
@@ -2375,7 +2453,9 @@ export default function RemoteScreen() {
             );
           } else {
             // Score changed - higher score wins
-            const winnerName = aliceScore > bobScore ? fencerNames.alice : fencerNames.bob;
+            const winnerName = aliceScore > bobScore 
+              ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+              : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
             Alert.alert(
               '⏱️ Time Expired',
               `Priority timer ended with score ${aliceScore}-${bobScore}.\n\n${winnerName} wins!`,
@@ -2431,6 +2511,7 @@ export default function RemoteScreen() {
                     const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
                     if (newPeriodRecord) {
                       setCurrentMatchPeriod(newPeriodRecord);
+                      setMatchId(newPeriodRecord.match_id); // Store match ID safely
                     }
                   }
                   
@@ -2458,6 +2539,7 @@ export default function RemoteScreen() {
           );
         } else if (currentPeriodValue === 3) {
           // Period 3 - check if scores are tied
+          console.log(`🔍 Period 3 ended - checking tie: aliceScore=${aliceScore}, bobScore=${bobScore}, isTied=${aliceScore === bobScore}`);
           if (aliceScore === bobScore) {
             // Scores are tied - user must manually click priority button (no auto popup)
             console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
@@ -2466,10 +2548,10 @@ export default function RemoteScreen() {
             Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
               { 
                 text: 'OK', 
-                onPress: () => {
+                onPress: async () => {
                   setTimeRemaining(0);
-                  // Navigate to match summary
-                  router.push('/match-summary');
+                  // Complete the match properly - pass current scores
+                  await proceedWithMatchCompletion(aliceScore, bobScore);
                 }
               }
             ]);
@@ -2517,7 +2599,9 @@ export default function RemoteScreen() {
             // Priority timer expired
             if (aliceScore === bobScore) {
               // Still tied - priority fencer wins
-              const winnerName = priorityFencer === 'alice' ? fencerNames.alice : fencerNames.bob;
+              const winnerName = priorityFencer === 'alice' 
+                ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+                : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
               Alert.alert(
                 '⏱️ Time Expired',
                 `Priority timer ended with score still tied at ${aliceScore}-${bobScore}.\n\n${winnerName} wins on priority!`,
@@ -2532,7 +2616,9 @@ export default function RemoteScreen() {
               );
             } else {
               // Score changed - higher score wins
-              const winnerName = aliceScore > bobScore ? fencerNames.alice : fencerNames.bob;
+              const winnerName = aliceScore > bobScore 
+                ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+                : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
               Alert.alert(
                 '⏱️ Time Expired',
                 `Priority timer ended with score ${aliceScore}-${bobScore}.\n\n${winnerName} wins!`,
@@ -2588,6 +2674,7 @@ export default function RemoteScreen() {
                       const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
                       if (newPeriodRecord) {
                         setCurrentMatchPeriod(newPeriodRecord);
+                        setMatchId(newPeriodRecord.match_id); // Store match ID safely
                       }
                     }
                     
@@ -2615,6 +2702,7 @@ export default function RemoteScreen() {
             );
           } else if (currentPeriodValue === 3) {
             // Period 3 - check if scores are tied
+            console.log(`🔍 Period 3 ended (second check) - checking tie: aliceScore=${aliceScore}, bobScore=${bobScore}, isTied=${aliceScore === bobScore}`);
             if (aliceScore === bobScore) {
               // Scores are tied - user must manually click priority button (no auto popup)
               console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
@@ -2623,10 +2711,10 @@ export default function RemoteScreen() {
               Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
                 { 
                   text: 'OK', 
-                  onPress: () => {
+                  onPress: async () => {
                     setTimeRemaining(0);
-                    // Navigate to match summary
-                    router.push('/match-summary');
+                    // Complete the match properly - pass current scores
+                    await proceedWithMatchCompletion(aliceScore, bobScore);
                   }
                 }
               ]);
@@ -2715,6 +2803,7 @@ export default function RemoteScreen() {
               const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
               if (newPeriodRecord) {
                 setCurrentMatchPeriod(newPeriodRecord);
+                setMatchId(newPeriodRecord.match_id); // Store match ID safely
               }
             })();
           }
@@ -2783,6 +2872,7 @@ export default function RemoteScreen() {
         const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
         if (newPeriodRecord) {
           setCurrentMatchPeriod(newPeriodRecord);
+          setMatchId(newPeriodRecord.match_id); // Store match ID safely
         }
       })();
     }
@@ -2844,6 +2934,9 @@ export default function RemoteScreen() {
         setIsPriorityRound(true);
         setHasShownPriorityScorePopup(false); // Reset popup flag for new priority round
         
+        // Track priority round start
+        trackPriorityRoundStart();
+        
         // Reset timer to 1 minute for priority round
         setMatchTime(60); // 1 minute
         setTimeRemaining(60);
@@ -2851,9 +2944,13 @@ export default function RemoteScreen() {
         
         // Show priority result
         setTimeout(() => {
+          const priorityFencerName = finalFencer === 'alice' 
+            ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+            : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+            
           Alert.alert(
             'Priority Assigned!', 
-            `${finalFencer === 'alice' ? fencerNames.alice : fencerNames.bob} has priority!\n\nTimer reset to 1:00 for sudden death round.\n\nPress Play when ready.`,
+            `${priorityFencerName} has priority!\n\nTimer reset to 1:00 for sudden death round.\n\nPress Play when ready.`,
             [{ text: 'OK' }]
           );
         }, 500);

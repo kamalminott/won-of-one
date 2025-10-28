@@ -2735,3 +2735,247 @@ export const weeklyProgressService = {
     }
   }
 };
+
+// ============================================
+// PRIORITY ROUND ANALYTICS SERVICE
+// ============================================
+
+export const priorityAnalyticsService = {
+  // Get priority stats for a user
+  async getPriorityStats(userId: string) {
+    try {
+      // Get all match periods with priority data for the user
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, fencer_1_name, fencer_2_name, event_date)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          totalPriorityRounds: 0,
+          priorityWins: 0,
+          priorityLosses: 0,
+          priorityWinRate: 0
+        };
+      }
+
+      // Get priority winners from match events
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents, error: winnerError } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      if (winnerError) throw winnerError;
+
+      // Calculate stats
+      const totalPriorityRounds = data.length;
+      const priorityWins = data.filter(mp => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        return winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+      }).length;
+      
+      const priorityLosses = totalPriorityRounds - priorityWins;
+      const priorityWinRate = totalPriorityRounds > 0 ? (priorityWins / totalPriorityRounds) * 100 : 0;
+
+      return {
+        totalPriorityRounds,
+        priorityWins,
+        priorityLosses,
+        priorityWinRate: Math.round(priorityWinRate * 100) / 100
+      };
+    } catch (error) {
+      console.error('Error getting priority stats:', error);
+      return {
+        totalPriorityRounds: 0,
+        priorityWins: 0,
+        priorityLosses: 0,
+        priorityWinRate: 0
+      };
+    }
+  },
+
+  // Get priority performance over time
+  async getPriorityPerformanceOverTime(userId: string, days: number = 30) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .gte('match.event_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      // Group by date and calculate stats
+      const dailyStats: { [key: string]: { priorityRounds: number; priorityWins: number } } = {};
+      data.forEach((mp: any) => {
+        const date = mp.match.event_date;
+        if (!dailyStats[date]) {
+          dailyStats[date] = { priorityRounds: 0, priorityWins: 0 };
+        }
+        dailyStats[date].priorityRounds++;
+        
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        if (winnerEvent && winnerEvent.scoring_user_name === mp.priority_to) {
+          dailyStats[date].priorityWins++;
+        }
+      });
+
+      return Object.entries(dailyStats).map(([date, stats]) => ({
+        date,
+        priorityRounds: stats.priorityRounds,
+        priorityWins: stats.priorityWins,
+        priorityLosses: stats.priorityRounds - stats.priorityWins,
+        priorityWinRate: Math.round((stats.priorityWins / stats.priorityRounds) * 100 * 100) / 100
+      }));
+    } catch (error) {
+      console.error('Error getting priority performance over time:', error);
+      return [];
+    }
+  },
+
+  // Get priority duration stats
+  async getPriorityDurationStats(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('match_event')
+        .select(`
+          match_id,
+          event_time,
+          match!inner(user_id)
+        `)
+        .eq('match.user_id', userId)
+        .in('event_type', ['priority_round_start', 'priority_round_end'])
+        .order('event_time', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      // Calculate durations by pairing start/end events
+      const durations = [];
+      for (let i = 0; i < data.length - 1; i += 2) {
+        const start = new Date(data[i].event_time);
+        const end = new Date(data[i + 1].event_time);
+        const duration = Math.floor((end.getTime() - start.getTime()) / 1000);
+        durations.push(duration);
+      }
+
+      if (durations.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      const avgDuration = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+      const minDuration = Math.min(...durations);
+      const maxDuration = Math.max(...durations);
+
+      return {
+        avgDurationSeconds: Math.round(avgDuration),
+        minDurationSeconds: minDuration,
+        maxDurationSeconds: maxDuration,
+        totalPriorityRounds: durations.length
+      };
+    } catch (error) {
+      console.error('Error getting priority duration stats:', error);
+      return {
+        avgDurationSeconds: 0,
+        minDurationSeconds: 0,
+        maxDurationSeconds: 0,
+        totalPriorityRounds: 0
+      };
+    }
+  },
+
+  // Get recent priority rounds
+  async getRecentPriorityRounds(userId: string, limit: number = 10) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name, result)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .order('match.event_date', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      return data.map((mp: any) => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        const priorityWon = winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+        
+        return {
+          matchId: mp.match_id,
+          eventDate: mp.match.event_date,
+          fencer1Name: mp.match.fencer_1_name,
+          fencer2Name: mp.match.fencer_2_name,
+          priorityFencer: mp.priority_to,
+          priorityWinner: winnerEvent?.scoring_user_name || null,
+          priorityWon,
+          result: mp.match.result
+        };
+      });
+    } catch (error) {
+      console.error('Error getting recent priority rounds:', error);
+      return [];
+    }
+  }
+};
