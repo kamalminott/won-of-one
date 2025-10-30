@@ -471,11 +471,32 @@ export default function MatchSummaryScreen() {
 
   if (!match || !matchData) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ color: 'white', fontSize: 18 }}>Match not found</Text>
-        <TouchableOpacity onPress={handleBack} style={{ marginTop: 20, padding: 10, backgroundColor: '#2e2e2e', borderRadius: 8 }}>
-          <Text style={{ color: 'white' }}>Go Back</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <View style={{ alignItems: 'center' }}>
+          <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+            Match Not Found
+          </Text>
+          <Text style={{ color: '#9D9D9D', fontSize: 16, textAlign: 'center', marginBottom: 30, lineHeight: 22 }}>
+            The match you're looking for couldn't be found.{'\n'}
+            This might happen if the match was deleted or if there was an error during completion.
+          </Text>
+          <TouchableOpacity 
+            onPress={handleBack} 
+            style={{ 
+              backgroundColor: '#6250F2', 
+              paddingHorizontal: 30, 
+              paddingVertical: 15, 
+              borderRadius: 25,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10
+            }}
+          >
+            <Ionicons name="arrow-back" size={20} color="white" />
+            <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }

@@ -391,7 +391,7 @@ export default function HomeScreen() {
           <View style={styles.contentContainer}>
             <View style={styles.progressCardContainer}>
               <ProgressCard
-                activityType="Conditioning"
+                activityType="Footwork"
               />
             </View>
             
@@ -614,6 +614,7 @@ export default function HomeScreen() {
                 onSwipeRight={handleSwipeRight}
                 userName={userName}
                 userProfileImage={profileImage}
+                hasActiveGoals={goals.length > 0}
               />
             </View>
           </View>

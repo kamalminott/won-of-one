@@ -37,6 +37,8 @@ interface CarouselItem {
   youScore: number;
   opponentScore: number;
   opponentName: string;
+  source?: string; // Source of the match: 'manual', 'remote', etc.
+  notes?: string; // Match notes
 }
 
 interface MatchCarouselProps {
@@ -64,6 +66,8 @@ interface MatchCarouselProps {
   userName?: string;
   /** User's profile image */
   userProfileImage?: string | null;
+  /** Whether user has active goals (affects splash screen positioning) */
+  hasActiveGoals?: boolean;
 }
 
 export const MatchCarousel: React.FC<MatchCarouselProps> = ({
@@ -79,6 +83,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   customItemRenderer,
   userName,
   userProfileImage,
+  hasActiveGoals = true,
 }) => {
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -174,25 +179,53 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   };
 
   const handleItemPress = (item: CarouselItem) => {
+    console.log('🎯 Carousel item pressed:', { 
+      id: item.id, 
+      source: item.source, 
+      opponentName: item.opponentName 
+    });
+    
     if (onItemPress) {
       onItemPress(item);
     } else {
-      // Default behavior for matches - pass all match data
-      router.push({
-        pathname: '/match-history-details',
-        params: { 
-          matchId: item.id,
-          opponentName: item.opponentName,
-          opponentImage: '', // No default image - will use initials fallback
-          youScore: item.youScore.toString(),
-          opponentScore: item.opponentScore.toString(),
-          matchType: 'Competition', // Default match type for carousel items
-          date: item.date,
-          duration: '02:30', // Default duration
-          location: 'Metro Field House', // Default location
-          isWin: item.isWin.toString() // Pass the win status from carousel data
-        }
-      });
+      // Check if this is a manual match
+      const isManualMatch = item.source === 'manual';
+      console.log('🔍 Is manual match?', isManualMatch, 'Source:', item.source);
+      
+      if (isManualMatch) {
+        // Navigate to manual match summary for manual matches
+        router.push({
+          pathname: '/manual-match-summary',
+          params: {
+            matchId: item.id,
+            yourScore: item.youScore.toString(),
+            opponentScore: item.opponentScore.toString(),
+            opponentName: item.opponentName,
+            matchType: 'Competition', // Default match type for carousel items
+            date: item.date,
+            time: '12:00PM', // Default time
+            isWin: item.isWin.toString(),
+            notes: item.notes || '', // Pass through notes
+          }
+        });
+      } else {
+        // Navigate to regular match details for remote matches
+        router.push({
+          pathname: '/match-history-details',
+          params: { 
+            matchId: item.id,
+            opponentName: item.opponentName,
+            opponentImage: '', // No default image - will use initials fallback
+            youScore: item.youScore.toString(),
+            opponentScore: item.opponentScore.toString(),
+            matchType: 'Competition', // Default match type for carousel items
+            date: item.date,
+            duration: '02:30', // Default duration
+            location: 'Metro Field House', // Default location
+            isWin: item.isWin.toString() // Pass the win status from carousel data
+          }
+        });
+      }
     }
   };
 
@@ -471,8 +504,9 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     emptyState: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: height * 0.04,
+      paddingVertical: height * 0.02, // Reduced from 0.04
       paddingHorizontal: width * 0.08,
+      marginTop: hasActiveGoals ? -height * 0.01 : height * 0.02, // Move up when goals exist, down when no goals
     },
     emptyIcon: {
       marginBottom: height * 0.015,

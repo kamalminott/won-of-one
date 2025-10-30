@@ -185,6 +185,7 @@ export interface WeeklyTarget {
   week_start_date: string;
   week_end_date: string;
   target_sessions: number;
+  is_complete: boolean;
   created_at: string;
   updated_at: string;
 }
