@@ -360,6 +360,56 @@ export default function NeutralMatchSummary() {
     const loadMatchData = async () => {
       try {
         if (matchId) {
+          // Check if this is an offline match
+          const isOffline = params.isOffline === 'true' || (matchId as string).startsWith('offline_');
+          
+          if (isOffline) {
+            // Use params data directly for offline matches
+            console.log('📱 Loading offline match from params');
+            
+            const matchFromParams = {
+              match_id: matchId as string,
+              fencer_1_name: params.fencer1Name as string || 'Fencer 1',
+              fencer_2_name: params.fencer2Name as string || 'Fencer 2',
+              final_score: parseInt(params.aliceScore as string || '0'),
+              touches_against: parseInt(params.bobScore as string || '0'),
+              bout_length_s: parseInt(params.matchDuration as string || '0'),
+              yellow_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').yellow + 
+                           JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').yellow,
+              red_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').red + 
+                         JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').red,
+              period_number: parseInt(params.periodNumber as string || '1'),
+              score_spp: parseInt(params.scoreSpp as string || '0'),
+              score_by_period: params.scoreByPeriod ? JSON.parse(params.scoreByPeriod as string) : undefined,
+              is_complete: true,
+              source: 'remote',
+              event_date: new Date().toISOString().split('T')[0],
+            };
+            
+            setMatchData(matchFromParams);
+            
+            // Set touches by period from params
+            if (params.scoreByPeriod) {
+              const scoreByPeriod = JSON.parse(params.scoreByPeriod as string);
+              setTouchesByPeriod({
+                period1: { user: scoreByPeriod.period1?.user || 0, opponent: scoreByPeriod.period1?.opponent || 0 },
+                period2: { user: scoreByPeriod.period2?.user || 0, opponent: scoreByPeriod.period2?.opponent || 0 },
+                period3: { user: scoreByPeriod.period3?.user || 0, opponent: scoreByPeriod.period3?.opponent || 0 },
+              });
+            }
+            
+            // Simplified stats for offline matches (no event data available)
+            setScoreProgression({ userData: [], opponentData: [] });
+            setLeadChanges(0);
+            setTimeLeading({ fencer1: 0, fencer2: 0, tied: 100 });
+            setBounceBackTimes({ fencer1: 0, fencer2: 0 });
+            setLongestRuns({ fencer1: 0, fencer2: 0 });
+            
+            setLoading(false);
+            return;
+          }
+          
+          // Online match - fetch from database
           const data = await matchService.getMatchById(matchId as string);
           setMatchData(data);
           
@@ -564,7 +614,7 @@ export default function NeutralMatchSummary() {
     };
 
     loadMatchData();
-  }, [matchId]);
+  }, [matchId, params.isOffline]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -658,6 +708,16 @@ export default function NeutralMatchSummary() {
           <Ionicons name="create-outline" size={20} color="white" />
         </TouchableOpacity>
       </View>
+
+      {/* Offline Match Indicator */}
+      {(params.isOffline === 'true' || (matchId as string)?.startsWith('offline_')) && (
+        <View style={styles.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={18} color="white" />
+          <Text style={styles.offlineBannerText}>
+            Saved offline - Will sync when you're online
+          </Text>
+        </View>
+      )}
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Match Result Card with Gradient Border */}
@@ -929,6 +989,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#343434',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4ECDC4',
+    paddingVertical: height * 0.015,
+    paddingHorizontal: width * 0.04,
+    gap: width * 0.025,
+    marginHorizontal: width * 0.04,
+    marginTop: height * 0.01,
+    marginBottom: height * 0.015,
+    borderRadius: width * 0.02,
+  },
+  offlineBannerText: {
+    color: 'white',
+    fontSize: width * 0.035,
+    fontWeight: '600',
   },
   resultCardContainer: {
     marginHorizontal: 0,

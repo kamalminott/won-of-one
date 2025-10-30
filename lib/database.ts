@@ -1049,6 +1049,27 @@ export const userService = {
 
     return data;
   },
+
+  // Update user profile
+  async updateUser(userId: string, updates: {
+    name?: string;
+    preferred_weapon?: string;
+    handedness?: string;
+  }): Promise<AppUser | null> {
+    const { data, error } = await supabase
+      .from('app_user')
+      .update(updates)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating user:', error);
+      return null;
+    }
+
+    return data;
+  },
 };
 
 // Goal-related functions

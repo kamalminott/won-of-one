@@ -1,67 +1,17 @@
 /**
  * Offline Remote Service
  * Handles remote fencing sessions in offline mode
+ * NOW WITH REAL IMPLEMENTATION (not stubs!)
  */
 
-import { fencingRemoteService, matchEventService } from './database';
-// Note: networkService and offlineCache modules are not available
-// import { networkService } from './networkService';
-// import { ActiveRemoteSession, offlineCache } from './offlineCache';
-
-// Stub implementations for missing modules
-const networkService = {
-  isOnline: () => true, // Assume online for now
-};
-
-// Define stub types
-interface StubRemoteSession {
-  remote_id: string;
-  referee_id: string;
-  fencer_1_id: string;
-  fencer_2_id: string;
-  fencer_1_name: string;
-  fencer_2_name: string;
-  score_1: number;
-  score_2: number;
-  status: string;
-  current_period: number;
-  match_time: number;
-  period_1_time: number;
-  period_2_time: number;
-  period_3_time: number;
-  cached_at: number;
-}
-
-const offlineCache = {
-  cacheActiveRemoteSession: async (session: StubRemoteSession) => {
-    console.log('Stub: cacheActiveRemoteSession', session);
-  },
-  getActiveRemoteSession: async (): Promise<StubRemoteSession | null> => {
-    console.log('Stub: getActiveRemoteSession');
-    return null;
-  },
-  addPendingRemoteEvent: async (event: any) => {
-    console.log('Stub: addPendingRemoteEvent', event);
-  },
-  clearActiveRemoteSession: async () => {
-    console.log('Stub: clearActiveRemoteSession');
-  },
-  clearPendingRemoteEvents: async () => {
-    console.log('Stub: clearPendingRemoteEvents');
-  },
-  getPendingRemoteEvents: async () => {
-    console.log('Stub: getPendingRemoteEvents');
-    return [];
-  },
-  addPendingMatch: async (match: any) => {
-    console.log('Stub: addPendingMatch', match);
-    return 'stub-match-id';
-  },
-};
+import { fencingRemoteService, matchEventService, matchService } from './database';
+import { networkService } from './networkService';
+import { offlineCache, RemoteSession, PendingEvent } from './offlineCache';
 
 export const offlineRemoteService = {
   /**
    * Create a new remote session (offline-first)
+   * Tries online first, falls back to offline if network fails
    */
   async createRemoteSession(remoteData: {
     referee_id: string;
@@ -70,30 +20,66 @@ export const offlineRemoteService = {
     fencer_2_name: string;
     weapon?: string;
     competition?: string;
+    scoring_mode?: string;
+    device_serial?: string;
   }): Promise<{ remote_id: string; is_offline: boolean }> {
-    const remoteId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const isOnline = await networkService.isOnline();
     
-    const session: StubRemoteSession = {
+    // Try online first if available
+    if (isOnline) {
+      try {
+        const session = await fencingRemoteService.createRemoteSession(remoteData);
+        if (session) {
+          // Also cache locally for offline access
+          const cachedSession: RemoteSession = {
+            remote_id: session.remote_id,
+            referee_id: session.referee_id || remoteData.referee_id,
+            fencer_1_id: session.fencer_1_id || remoteData.fencer_1_id,
+            fencer_2_id: session.fencer_2_id,
+            fencer_1_name: session.fencer_1_name || remoteData.fencer_1_name,
+            fencer_2_name: session.fencer_2_name || remoteData.fencer_2_name,
+            score_1: session.score_1 || 0,
+            score_2: session.score_2 || 0,
+            status: session.status || 'active',
+            current_period: 1,
+            match_time: 180,
+            period_1_time: 0,
+            period_2_time: 0,
+            period_3_time: 0,
+            cached_at: Date.now(),
+          };
+          await offlineCache.cacheActiveRemoteSession(cachedSession);
+          console.log('✅ Created online remote session and cached:', session.remote_id);
+          return { remote_id: session.remote_id, is_offline: false };
+        }
+      } catch (error) {
+        console.log('⚠️ Online creation failed, falling back to offline:', error);
+        // Fall through to offline creation
+      }
+    }
+    
+    // Create offline session (network unavailable or online creation failed)
+    const remoteId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const session: RemoteSession = {
       remote_id: remoteId,
       referee_id: remoteData.referee_id,
       fencer_1_id: remoteData.fencer_1_id || '',
-      fencer_1_name: remoteData.fencer_1_name,
       fencer_2_id: '',
+      fencer_1_name: remoteData.fencer_1_name,
       fencer_2_name: remoteData.fencer_2_name,
       score_1: 0,
       score_2: 0,
       status: 'active',
       current_period: 1,
-      match_time: 0,
+      match_time: 180,
       period_1_time: 0,
       period_2_time: 0,
       period_3_time: 0,
       cached_at: Date.now(),
-      // created_at: new Date().toISOString(), // Remove invalid property
     };
-
-    await offlineCache.cacheActiveRemoteSession(session);
     
+    // Save to local cache
+    await offlineCache.cacheActiveRemoteSession(session);
     console.log('✅ Created offline remote session:', remoteId);
     return { remote_id: remoteId, is_offline: true };
   },
@@ -109,18 +95,30 @@ export const offlineRemoteService = {
         return false;
       }
 
-      // Update scores
-      const updatedSession = {
+      // Update scores in local cache
+      const updatedSession: RemoteSession = {
         ...session,
         score_1: score1,
         score_2: score2,
+        cached_at: Date.now(),
       };
-
       await offlineCache.cacheActiveRemoteSession(updatedSession);
-      console.log(`✅ Updated scores: ${score1}-${score2}`);
+
+      // Try to sync to server if online and session exists online
+      const isOnline = await networkService.isOnline();
+      if (isOnline && !remoteId.startsWith('offline_')) {
+        try {
+          await fencingRemoteService.updateRemoteScores(remoteId, score1, score2);
+          console.log('✅ Scores synced to server:', `${score1}-${score2}`);
+        } catch (error) {
+          console.log('⚠️ Failed to sync scores, saved locally:', error);
+        }
+      }
+      
+      console.log(`✅ Updated scores locally: ${score1}-${score2}`);
       return true;
     } catch (error) {
-      console.error('Error updating remote scores:', error);
+      console.error('❌ Error updating remote scores:', error);
       return false;
     }
   },
@@ -128,8 +126,8 @@ export const offlineRemoteService = {
   /**
    * Create or update remote session (works offline)
    */
-  async saveRemoteSession(sessionData: Partial<StubRemoteSession>): Promise<StubRemoteSession> {
-    const isOnline = networkService.isOnline();
+  async saveRemoteSession(sessionData: Partial<RemoteSession>): Promise<RemoteSession> {
+    const isOnline = await networkService.isOnline();
     
     // Get existing session or create new
     let session = await offlineCache.getActiveRemoteSession();
@@ -163,36 +161,35 @@ export const offlineRemoteService = {
     }
 
     // Save to cache
-    if (session) {
-      await offlineCache.cacheActiveRemoteSession(session);
+    await offlineCache.cacheActiveRemoteSession(session);
 
-      // If online, try to sync to server
-      if (isOnline && !session.remote_id.startsWith('offline_')) {
-        try {
-          await fencingRemoteService.updateRemoteScores(
-            session.remote_id,
-            session.score_1,
-            session.score_2
-          );
-          console.log('✅ Remote session synced to server');
-        } catch (error) {
-          console.log('⚠️ Failed to sync remote session, will retry later');
-        }
+    // If online, try to sync to server (only if not offline-generated session)
+    if (isOnline && !session.remote_id.startsWith('offline_')) {
+      try {
+        await fencingRemoteService.updateRemoteScores(
+          session.remote_id,
+          session.score_1,
+          session.score_2
+        );
+        console.log('✅ Remote session synced to server');
+      } catch (error) {
+        console.log('⚠️ Failed to sync remote session, will retry later');
       }
     }
 
-    return session!;
+    return session;
   },
 
   /**
-   * Get active remote session
+   * Get active remote session (from cache)
    */
-  async getActiveSession(): Promise<StubRemoteSession | null> {
+  async getActiveSession(): Promise<RemoteSession | null> {
     return await offlineCache.getActiveRemoteSession();
   },
 
   /**
    * Record event (works offline)
+   * Always saves to queue for reliability, even when online
    */
   async recordEvent(eventData: {
     remote_id: string;
@@ -201,7 +198,7 @@ export const offlineRemoteService = {
     match_time_elapsed?: number;
     metadata?: any;
   }): Promise<void> {
-    const isOnline = networkService.isOnline();
+    const isOnline = await networkService.isOnline();
 
     // Always save to pending queue (even if online, for reliability)
     await offlineCache.addPendingRemoteEvent({
@@ -213,7 +210,17 @@ export const offlineRemoteService = {
       metadata: eventData.metadata,
     });
 
-    console.log(`✅ Event recorded: ${eventData.event_type} (${isOnline ? 'will sync' : 'queued'})`);
+    console.log(`✅ Event recorded: ${eventData.event_type} (${isOnline ? 'online, will sync' : 'offline, queued'})`);
+    
+    // If online, try immediate sync (but don't remove from queue until successful)
+    if (isOnline && !eventData.remote_id.startsWith('offline_')) {
+      try {
+        // This would attempt immediate sync - but keeping it simple for now
+        // Full sync happens via syncPendingData
+      } catch (error) {
+        console.log('⚠️ Immediate sync failed, will retry later');
+      }
+    }
   },
 
   /**
@@ -228,11 +235,11 @@ export const offlineRemoteService = {
     const session = await offlineCache.getActiveRemoteSession();
     
     if (!session) {
-      console.error('No active remote session found');
+      console.error('❌ No active remote session found');
       return { success: false };
     }
 
-    const isOnline = networkService.isOnline();
+    const isOnline = await networkService.isOnline();
 
     // If user toggle is OFF (anonymous match), just clear cache and don't save
     if (!isUserMatch) {
@@ -243,27 +250,27 @@ export const offlineRemoteService = {
     }
 
     // User match - save it
-    if (isOnline && userId) {
+    if (isOnline && userId && !remoteId.startsWith('offline_')) {
       // Try to save online (only if session exists in database)
       try {
-        // Check if this is an offline-generated session
-        if (remoteId.startsWith('offline_')) {
-          console.log('📱 Offline session detected, saving as pending match');
-          // Skip online sync for offline sessions, go straight to offline save
-        } else {
-          // This is a real online session, try to complete it
-          const match = await fencingRemoteService.completeRemoteSession(remoteId, userId);
-          
-          if (match) {
-            // Clear cache
-            await offlineCache.clearActiveRemoteSession();
-            await offlineCache.clearPendingRemoteEvents();
-            console.log('✅ Remote session completed and synced');
-            return { success: true, matchId: match.match_id };
+        const match = await fencingRemoteService.completeRemoteSession(remoteId, userId);
+        
+        if (match) {
+          // Clear cache
+          await offlineCache.clearActiveRemoteSession();
+          // Clear events for this session
+          const events = await offlineCache.getPendingRemoteEvents();
+          const filteredEvents = events.filter(e => e.remote_id !== remoteId);
+          await offlineCache.clearPendingRemoteEvents();
+          // Re-add events not for this session
+          for (const event of filteredEvents) {
+            await offlineCache.addPendingRemoteEvent(event);
           }
+          console.log('✅ Remote session completed and synced online');
+          return { success: true, matchId: match.match_id };
         }
       } catch (error) {
-        console.error('Error completing remote session online, saving offline:', error);
+        console.error('❌ Error completing remote session online, saving offline:', error);
       }
     }
 
@@ -271,7 +278,7 @@ export const offlineRemoteService = {
     if (userId) {
       // Get all pending events for this session to calculate stats
       const events = await offlineCache.getPendingRemoteEvents();
-      const sessionEvents = events.filter((e: any) => e.remote_id === remoteId);
+      const sessionEvents = events.filter((e) => e.remote_id === remoteId);
 
       // Calculate total duration
       const totalDuration = session.period_1_time + session.period_2_time + session.period_3_time;
@@ -313,11 +320,10 @@ export const offlineRemoteService = {
         date: new Date().toISOString().split('T')[0],
         isWin: session.score_1 > session.score_2,
         notes: `Remote session (offline): ${session.fencer_1_name} vs ${session.fencer_2_name}`,
-        // Extended data for match summary
         duration_sec: totalDuration,
         total_touches: session.score_1 + session.score_2,
         periods,
-        events: sessionEvents.map((e: any) => ({
+        events: sessionEvents.map((e) => ({
           event_type: e.event_type,
           event_time: e.event_time,
           scoring_user_name: e.scoring_user_name,
@@ -326,21 +332,22 @@ export const offlineRemoteService = {
         is_offline: true,
       };
 
-        const matchId = await offlineCache.addPendingMatch({
-          ...matchData,
-          date: matchData.date || new Date().toISOString().split('T')[0], // ensure string, never undefined
-        });
-        if (!matchId) {
-          console.error('❌ Failed to create pending match');
-          return { success: false };
-        }
+      const matchId = await offlineCache.addPendingMatch({
+        ...matchData,
+        date: matchData.date || new Date().toISOString().split('T')[0],
+      });
+      
+      if (!matchId) {
+        console.error('❌ Failed to create pending match');
+        return { success: false };
+      }
 
-        console.log('✅ Pending match created with ID:', matchId);
+      console.log('✅ Pending match created with ID:', matchId);
       
       // Clear session cache
       await offlineCache.clearActiveRemoteSession();
       
-      console.log('✅ Remote session saved offline with complete stats, will sync when online');
+      console.log('✅ Remote session saved offline, will sync when online');
       return { success: true, matchId };
     }
 
@@ -352,61 +359,112 @@ export const offlineRemoteService = {
 
   /**
    * Sync pending remote data when online
+   * Syncs both pending matches and pending events
    */
   async syncPendingData(userId: string): Promise<boolean> {
-    if (!networkService.isOnline()) {
-      console.log('Cannot sync remote data: offline');
+    const isOnline = await networkService.isOnline();
+    if (!isOnline) {
+      console.log('⚠️ Cannot sync: device is offline');
       return false;
     }
 
     try {
-      const pendingEvents = await offlineCache.getPendingRemoteEvents();
-      
-      if (pendingEvents.length === 0) {
-        console.log('No pending remote events to sync');
-        return true;
+      console.log('🔄 Starting sync of pending data...');
+
+      // Sync pending matches first
+      const pendingMatches = await offlineCache.getPendingMatches();
+      console.log(`📦 Found ${pendingMatches.length} pending matches to sync`);
+
+      for (const match of pendingMatches) {
+        try {
+          const matchResult = await matchService.createManualMatch({
+            userId,
+            opponentName: match.opponentName,
+            yourScore: match.youScore,
+            opponentScore: match.opponentScore,
+            matchType: 'practice', // Default to practice
+            date: match.date,
+            time: new Date(match.queuedAt).toTimeString().split(' ')[0],
+            notes: match.notes,
+          });
+
+          if (matchResult) {
+            // Remove from queue after successful sync
+            await offlineCache.removePendingMatch(match.matchId);
+            console.log(`✅ Synced match: ${match.matchId} → ${matchResult.match_id}`);
+          } else {
+            console.log(`⚠️ Failed to sync match: ${match.matchId} (will retry later)`);
+          }
+        } catch (error) {
+          console.error(`❌ Error syncing match ${match.matchId}:`, error);
+          // Keep in queue for retry
+        }
       }
 
-      console.log(`🔄 Syncing ${pendingEvents.length} remote events...`);
+      // Sync pending events
+      const pendingEvents = await offlineCache.getPendingRemoteEvents();
+      console.log(`📦 Found ${pendingEvents.length} pending events to sync`);
 
       // Group events by remote_id
-      const eventsBySession = pendingEvents.reduce((acc: any, event: any) => {
+      const eventsBySession = pendingEvents.reduce((acc: Record<string, PendingEvent[]>, event) => {
         if (!acc[event.remote_id]) {
           acc[event.remote_id] = [];
         }
         acc[event.remote_id].push(event);
         return acc;
-      }, {} as Record<string, typeof pendingEvents>);
+      }, {});
+
+      const syncedEventIds: string[] = [];
 
       // Sync each session's events
       for (const [remoteId, events] of Object.entries(eventsBySession)) {
-        for (const event of (events as any[])) {
-          try {
-            // Only sync if remote_id is not offline-generated
-            if (!remoteId.startsWith('offline_')) {
+        // Only sync if remote_id is not offline-generated (skip offline sessions)
+        if (!remoteId.startsWith('offline_')) {
+          for (const event of events) {
+            try {
               await matchEventService.createMatchEvent({
-                match_id: event.metadata?.match_id,
-                // user_id: userId,
-                // type: event.event_type,
-                // timestamp: event.event_time, // Remove invalid property
-                // meta: event.metadata || {}, // Remove invalid property
+                match_id: event.metadata?.match_id || null,
+                fencing_remote_id: event.remote_id,
+                event_type: event.event_type,
+                event_time: event.event_time,
+                scoring_user_name: event.scoring_user_name,
+                match_time_elapsed: event.match_time_elapsed,
               });
+              
+              if (event.id) {
+                syncedEventIds.push(event.id);
+              }
+              console.log(`✅ Synced event: ${event.event_type}`);
+            } catch (error) {
+              console.error(`❌ Error syncing event:`, error);
+              // Keep in queue for retry
             }
-          } catch (error) {
-            console.error('Error syncing event:', error);
           }
+        } else {
+          console.log(`⚠️ Skipping events for offline session: ${remoteId} (no remote_id in database)`);
         }
       }
 
-      // Clear synced events
-      await offlineCache.clearPendingRemoteEvents();
-      console.log('✅ Remote events synced');
+      // Remove synced events from queue
+      if (syncedEventIds.length > 0) {
+        const remainingEvents = pendingEvents.filter(e => !syncedEventIds.includes(e.id || ''));
+        await offlineCache.clearPendingRemoteEvents();
+        // Re-add unsynced events
+        for (const event of remainingEvents) {
+          await offlineCache.addPendingRemoteEvent(event);
+        }
+        console.log(`✅ Removed ${syncedEventIds.length} synced events from queue`);
+      }
+
+      const remainingMatches = await offlineCache.getPendingMatches();
+      const remainingEvents = await offlineCache.getPendingRemoteEvents();
+      
+      console.log(`✅ Sync complete. Remaining: ${remainingMatches.length} matches, ${remainingEvents.length} events`);
       
       return true;
     } catch (error) {
-      console.error('Error syncing remote data:', error);
+      console.error('❌ Error syncing remote data:', error);
       return false;
     }
   },
 };
-

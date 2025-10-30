@@ -64,10 +64,60 @@ export default function MatchSummaryScreen() {
   };
 
 
-  // Fetch match data from database
+  // Fetch match data from database or use params for offline matches
   useEffect(() => {
     const fetchMatchData = async () => {
       if (params.matchId) {
+        // Check if this is an offline match
+        const isOffline = params.isOffline === 'true' || (params.matchId as string).startsWith('offline_');
+        
+        if (isOffline) {
+          // Use params data directly for offline matches
+          console.log('📱 Loading offline match from params');
+          
+          const matchFromParams: Match = {
+            match_id: params.matchId as string,
+            user_id: user?.id || '',
+            fencer_1_name: params.fencer1Name as string || 'Fencer 1',
+            fencer_2_name: params.fencer2Name as string || 'Fencer 2',
+            final_score: parseInt(params.finalScore as string || params.aliceScore as string || '0'),
+            touches_against: parseInt(params.touchesAgainst as string || params.bobScore as string || '0'),
+            result: params.result as string || null,
+            score_diff: params.scoreDiff ? parseInt(params.scoreDiff as string) : null,
+            bout_length_s: parseInt(params.matchDuration as string || '0'),
+            yellow_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').yellow + 
+                         JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').yellow,
+            red_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').red + 
+                       JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').red,
+            period_number: parseInt(params.periodNumber as string || '1'),
+            score_spp: parseInt(params.scoreSpp as string || '0'),
+            score_by_period: params.scoreByPeriod ? JSON.parse(params.scoreByPeriod as string) : undefined,
+            is_complete: true,
+            source: 'remote',
+            event_date: new Date().toISOString().split('T')[0],
+          };
+          
+          setMatch(matchFromParams);
+          
+          // Set touches by period from params
+          if (params.scoreByPeriod) {
+            const scoreByPeriod = JSON.parse(params.scoreByPeriod as string);
+            setTouchesByPeriod({
+              period1: { user: scoreByPeriod.period1?.user || 0, opponent: scoreByPeriod.period1?.opponent || 0 },
+              period2: { user: scoreByPeriod.period2?.user || 0, opponent: scoreByPeriod.period2?.opponent || 0 },
+              period3: { user: scoreByPeriod.period3?.user || 0, opponent: scoreByPeriod.period3?.opponent || 0 },
+            });
+          }
+          
+          // Simplified stats for offline matches (no event data available)
+          setBestRun(0);
+          setScoreProgression({ userData: [], opponentData: [] });
+          
+          setLoading(false);
+          return;
+        }
+        
+        // Online match - fetch from database
         try {
           const matchData = await matchService.getMatchById(params.matchId as string);
           console.log('📊 Fetched match data for summary:', matchData);
@@ -117,7 +167,7 @@ export default function MatchSummaryScreen() {
     };
 
     fetchMatchData();
-  }, [params.matchId]);
+  }, [params.matchId, params.isOffline]);
 
   const handleBack = () => {
     router.back();
@@ -368,6 +418,23 @@ export default function MatchSummaryScreen() {
       paddingTop: height * 0.02, // Add space for the pill to show
       paddingBottom: height * 0.05,
     },
+    offlineBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#4ECDC4',
+      paddingVertical: height * 0.015,
+      paddingHorizontal: width * 0.04,
+      gap: width * 0.025,
+      marginHorizontal: width * 0.04,
+      marginBottom: height * 0.015,
+      borderRadius: width * 0.02,
+    },
+    offlineBannerText: {
+      color: 'white',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+    },
     modalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0, 0, 0, 0.95)',
@@ -507,6 +574,16 @@ export default function MatchSummaryScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Match Summary</Text>
       </View>
+
+      {/* Offline Match Indicator */}
+      {(params.isOffline === 'true' || (params.matchId as string)?.startsWith('offline_')) && (
+        <View style={styles.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={18} color="white" />
+          <Text style={styles.offlineBannerText}>
+            Saved offline - Will sync when you're online
+          </Text>
+        </View>
+      )}
 
       <KeyboardAvoidingView 
         style={styles.scrollContainer}

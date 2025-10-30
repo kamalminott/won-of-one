@@ -2,7 +2,11 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import { networkService } from '@/lib/networkService';
+import { offlineCache } from '@/lib/offlineCache';
+import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { supabase } from '@/lib/supabase';
+import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -69,6 +73,19 @@ export default function RemoteScreen() {
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [selectedFencer, setSelectedFencer] = useState<'alice' | 'bob' | null>(null);
   const [isCompletingMatch, setIsCompletingMatch] = useState(false);
+  
+  // Offline status indicators
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingMatchesCount, setPendingMatchesCount] = useState(0);
+  const [pendingEventsCount, setPendingEventsCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [showOfflineBanner, setShowOfflineBanner] = useState(false); // Controls offline banner visibility
+  const [showPendingBanner, setShowPendingBanner] = useState(false); // Controls pending items banner visibility
+  const wasOfflineRef = useRef(false); // Track previous offline state
+  const pendingBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Track pending banner timeout
+  const lastPendingCountRef = useRef(0); // Track previous pending count to detect increases
+  const bannerShownForPendingRef = useRef(false); // Track if we've shown banner for current pending items
+  const hasShownPendingBannerRef = useRef(false); // Track if we've already shown pending banner for current session
 
   // Get user display name from context
   const userDisplayName = userName || 'You';
@@ -92,6 +109,164 @@ export default function RemoteScreen() {
     testImageLoading(); // Test function to verify AsyncStorage
     // Removed loadPersistedMatchState() - now handled only on focus
   }, []);
+
+  // Monitor network status and pending data
+  useEffect(() => {
+    // Check initial network status
+    networkService.isOnline().then(online => {
+      const initiallyOffline = !online;
+      setIsOffline(initiallyOffline);
+      wasOfflineRef.current = initiallyOffline;
+      if (initiallyOffline) {
+        // Show offline banner briefly when initially offline
+        setShowOfflineBanner(true);
+        setTimeout(() => setShowOfflineBanner(false), 1500); // Show for 1.5 seconds
+      }
+    });
+    
+    // Subscribe to network changes
+    const unsubscribe = networkService.subscribe((isConnected) => {
+      const wasOffline = wasOfflineRef.current;
+      const nowOffline = !isConnected;
+      wasOfflineRef.current = nowOffline;
+      setIsOffline(nowOffline);
+      console.log(`🌐 Network status: ${isConnected ? 'ONLINE' : 'OFFLINE'}`);
+      
+      if (nowOffline && !wasOffline) {
+        // Just went offline - show offline banner for 1.5 seconds
+        // Also hide pending banner if it was showing
+        setShowPendingBanner(false);
+        if (pendingBannerTimeoutRef.current) {
+          clearTimeout(pendingBannerTimeoutRef.current);
+          pendingBannerTimeoutRef.current = null;
+        }
+        setShowOfflineBanner(true);
+        setTimeout(() => setShowOfflineBanner(false), 1500); // Auto-dismiss after 1.5 seconds
+      } else if (isConnected && wasOffline) {
+        // Just came online from offline - check for pending items and show banner if any
+        setShowOfflineBanner(false);
+        // Reset the "has shown" flag when coming online so we can show banner for pending items
+        hasShownPendingBannerRef.current = false;
+        // Refresh pending counts (sync manager will handle actual sync)
+        checkPendingData().then(() => {
+          // After checking, if there are pending items, show banner once
+          setTimeout(() => {
+            const getPendingCount = async () => {
+              const matches = await offlineCache.getPendingMatches();
+              const events = await offlineCache.getPendingRemoteEvents();
+              const totalPending = matches.length + events.length;
+              if (totalPending > 0 && !hasShownPendingBannerRef.current) {
+                setShowPendingBanner(true);
+                hasShownPendingBannerRef.current = true;
+                if (pendingBannerTimeoutRef.current) {
+                  clearTimeout(pendingBannerTimeoutRef.current);
+                }
+                pendingBannerTimeoutRef.current = setTimeout(() => {
+                  setShowPendingBanner(false);
+                  pendingBannerTimeoutRef.current = null;
+                }, 1500);
+              }
+            };
+            getPendingCount();
+          }, 500); // Small delay to ensure counts are updated
+        });
+      } else if (isConnected) {
+        // Already online - just refresh counts silently
+        checkPendingData();
+      }
+    });
+
+    // Periodically check pending data count
+    const checkPendingData = async () => {
+      try {
+        const matches = await offlineCache.getPendingMatches();
+        const events = await offlineCache.getPendingRemoteEvents();
+        const newMatchesCount = matches.length;
+        const newEventsCount = events.length;
+        const totalPending = newMatchesCount + newEventsCount;
+        
+        setPendingMatchesCount(newMatchesCount);
+        setPendingEventsCount(newEventsCount);
+        
+        // Update tracking first
+        const previousCount = lastPendingCountRef.current;
+        lastPendingCountRef.current = totalPending;
+        
+        // IMPORTANT: Only show pending banner when coming online, NOT during active offline use
+        // During offline use, we don't want to show banner every time user scores
+        if (isOffline) {
+          // User is offline - update counts but don't show pending banner
+          // They'll see it when they come back online
+          return;
+        }
+        
+        // When online, only clear banner if no pending items
+        // Don't show banner based on count changes - that's handled in network state handler
+        if (totalPending === 0) {
+          // No pending items - reset tracking and clear banner
+          hasShownPendingBannerRef.current = false;
+          bannerShownForPendingRef.current = false;
+          setShowPendingBanner(false);
+          if (pendingBannerTimeoutRef.current) {
+            clearTimeout(pendingBannerTimeoutRef.current);
+            pendingBannerTimeoutRef.current = null;
+          }
+        }
+        // Banner visibility is controlled by the network state change handler when coming online
+        // We don't show banner just because count changed during normal online use
+      } catch (error) {
+        console.error('Error checking pending data:', error);
+      }
+    };
+
+    // Initial check - initialize the tracking
+    checkPendingData().then(() => {
+      // After initial check, set up the initial count tracking
+      const getInitialCount = async () => {
+        const matches = await offlineCache.getPendingMatches();
+        const events = await offlineCache.getPendingRemoteEvents();
+        lastPendingCountRef.current = matches.length + events.length;
+      };
+      getInitialCount();
+    });
+    
+    // Check every 5 seconds - but banner won't show unless count increases
+    const interval = setInterval(checkPendingData, 5000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+      // Clean up pending banner timeout
+      if (pendingBannerTimeoutRef.current) {
+        clearTimeout(pendingBannerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Setup auto-sync when user is available
+  useEffect(() => {
+    if (user?.id) {
+      console.log('✅ Setting up auto-sync for user:', user.id);
+      const cleanup = setupAutoSync(user.id);
+      
+      return () => {
+        console.log('🧹 Cleaning up auto-sync');
+        cleanup();
+      };
+    }
+  }, [user?.id]);
+  
+  // Monitor sync status - simplified, banner handles its own visibility
+  // This effect just tracks sync state for display purposes
+  useEffect(() => {
+    if (!isOffline && (pendingMatchesCount > 0 || pendingEventsCount > 0)) {
+      // Online with pending items - sync should be happening
+      setIsSyncing(true);
+    } else if (pendingMatchesCount === 0 && pendingEventsCount === 0) {
+      // No pending items - sync complete
+      setIsSyncing(false);
+    }
+  }, [isOffline, pendingMatchesCount, pendingEventsCount]);
 
   // Save match state when scores or other important state changes
   useEffect(() => {
@@ -616,23 +791,32 @@ export default function RemoteScreen() {
     return Math.max(0, actualMatchTime);
   }, [matchStartTime, totalPausedTime]);
 
-  // Helper function to create match events with all required fields
+  // Helper function to create match events with all required fields (now offline-capable)
   const createMatchEvent = async (scorer: 'user' | 'opponent', cardGiven?: string, newAliceScore?: number, newBobScore?: number) => {
     if (!remoteSession) {
       console.log('❌ No remote session - cannot create match event');
       return;
     }
     
-    // Verify the remote session still exists in the database
-    const { data: sessionCheck, error: sessionError } = await supabase
-      .from('fencing_remote')
-      .select('remote_id')
-      .eq('remote_id', remoteSession.remote_id)
-      .single();
+    // Check if we're offline or if this is an offline session
+    const isOnline = await networkService.isOnline();
+    const isOfflineSession = remoteSession.remote_id.startsWith('offline_');
     
-    if (sessionError || !sessionCheck) {
-      console.error('❌ Remote session no longer exists in database:', sessionError);
-      return;
+    // Skip database check for offline sessions or when offline
+    if (!isOfflineSession && isOnline) {
+      // Only verify session exists in database if we're online and it's an online session
+      const { data: sessionCheck, error: sessionError } = await supabase
+        .from('fencing_remote')
+        .select('remote_id')
+        .eq('remote_id', remoteSession.remote_id)
+        .single();
+      
+      if (sessionError || !sessionCheck) {
+        console.log('⚠️ Remote session not in database (may be offline), will queue event');
+        // Fall through to queue the event anyway
+      }
+    } else {
+      console.log('📱 Offline mode or offline session - will queue event');
     }
 
     const now = new Date();
@@ -720,27 +904,53 @@ export default function RemoteScreen() {
     console.log(`🎯 SCORING DEBUG: fencer1Name="${fencer1Name}", fencer2Name="${fencer2Name}"`);
     console.log(`🎯 SCORING DEBUG: newAliceScore=${newAliceScore}, newBobScore=${newBobScore}, fencerNames.alice="${fencerNames.alice}", fencerNames.bob="${fencerNames.bob}"`);
 
-    const eventData = {
-      match_id: currentMatchPeriod?.match_id || null, // Add match_id to link event to match
-      fencing_remote_id: remoteSession.remote_id,
-      match_period_id: currentMatchPeriod?.match_period_id || null,
-      event_time: now.toISOString(),
+    // Use offline service to record event (works online and offline)
+    await offlineRemoteService.recordEvent({
+      remote_id: remoteSession.remote_id,
       event_type: "touch",
-      scoring_user_id: scorer === 'user' ? user?.id : null,
-      scoring_user_name: scoringUserName, // Use the determined scorer name
-      fencer_1_name: fencer1Name,
-      fencer_2_name: fencer2Name,
-      card_given: cardGiven || null, // Only tracks actual cards: 'yellow', 'red', or null
-      score_diff: scoreDiff,
-      seconds_since_last_event: secondsSinceLastEvent,
-      match_time_elapsed: matchTimeElapsed // Store actual match timer time
-    };
-
-    await matchEventService.createMatchEvent(eventData);
+      scoring_user_name: scoringUserName,
+      match_time_elapsed: matchTimeElapsed,
+      metadata: {
+        match_id: currentMatchPeriod?.match_id || null,
+        match_period_id: currentMatchPeriod?.match_period_id || null,
+        scoring_user_id: scorer === 'user' ? user?.id : null,
+        fencer_1_name: fencer1Name,
+        fencer_2_name: fencer2Name,
+        card_given: cardGiven || null,
+        score_diff: scoreDiff,
+        seconds_since_last_event: secondsSinceLastEvent,
+      }
+    });
+    
+    // Also try to create via matchEventService if online and match exists (for immediate sync)
+    if (isOnline && !isOfflineSession && currentMatchPeriod?.match_id) {
+      try {
+        const eventData = {
+          match_id: currentMatchPeriod.match_id,
+          fencing_remote_id: remoteSession.remote_id,
+          match_period_id: currentMatchPeriod.match_period_id || null,
+          event_time: now.toISOString(),
+          event_type: "touch",
+          scoring_user_id: scorer === 'user' ? user?.id : null,
+          scoring_user_name: scoringUserName,
+          fencer_1_name: fencer1Name,
+          fencer_2_name: fencer2Name,
+          card_given: cardGiven || null,
+          score_diff: scoreDiff,
+          seconds_since_last_event: secondsSinceLastEvent,
+          match_time_elapsed: matchTimeElapsed
+        };
+        await matchEventService.createMatchEvent(eventData);
+        console.log('✅ Event created immediately (online)');
+      } catch (error) {
+        console.log('⚠️ Immediate event creation failed, event already queued:', error);
+      }
+    }
+    
     setLastEventTime(now);
   };
 
-  // Create remote session if it doesn't exist
+  // Create remote session if it doesn't exist (now uses offline service)
   const ensureRemoteSession = async () => {
     if (remoteSession) return remoteSession;
     
@@ -750,8 +960,8 @@ export default function RemoteScreen() {
     }
 
     try {
-      console.log('Creating remote session...');
-      const session = await fencingRemoteService.createRemoteSession({
+      console.log('Creating remote session (offline-capable)...');
+      const result = await offlineRemoteService.createRemoteSession({
         referee_id: user.id,
         fencer_1_id: showUserProfile ? user.id : undefined, // Only set fencer_1_id if user toggle is on
         fencer_1_name: showUserProfile ? userDisplayName : fencerNames.alice, // Use Alice when user toggle is off
@@ -760,16 +970,35 @@ export default function RemoteScreen() {
         device_serial: "REMOTE_001"
       });
       
-      console.log('Remote session created:', session);
-      setRemoteSession(session);
-      return session;
+      // Get the full session from cache (offlineRemoteService returns minimal object)
+      const session = await offlineRemoteService.getActiveSession();
+      if (session) {
+        // Convert to format expected by rest of the code
+        const sessionForState = {
+          remote_id: session.remote_id,
+          referee_id: session.referee_id,
+          fencer_1_id: session.fencer_1_id,
+          fencer_2_id: session.fencer_2_id,
+          fencer_1_name: session.fencer_1_name,
+          fencer_2_name: session.fencer_2_name,
+          score_1: session.score_1,
+          score_2: session.score_2,
+          status: session.status,
+        };
+        
+        console.log(`Remote session created: ${session.remote_id} (${result.is_offline ? 'OFFLINE' : 'ONLINE'})`);
+        setRemoteSession(sessionForState);
+        return sessionForState;
+      }
+      
+      return null;
     } catch (error) {
       console.error('Error creating remote session:', error);
       return null;
     }
   };
 
-  // Create a new match period
+  // Create a new match period (now offline-capable)
   const createMatchPeriod = async (session?: any, playClickTime?: string) => {
     const activeSession = session || remoteSession;
     if (!activeSession) {
@@ -780,6 +1009,32 @@ export default function RemoteScreen() {
     try {
       console.log('🔄 Creating match period...', { currentPeriod, aliceScore, bobScore });
       
+      const isOnline = await networkService.isOnline();
+      const isOfflineSession = activeSession.remote_id?.startsWith('offline_');
+      
+      // For offline sessions or when offline, we'll create match later on sync
+      if (isOfflineSession || !isOnline) {
+        console.log('📱 Offline mode - match will be created on sync. Continuing with local state...');
+        
+        // Create a mock period object for local state (won't be saved to DB until sync)
+        const mockPeriod = {
+          match_period_id: `offline_period_${Date.now()}`,
+          match_id: `offline_match_${Date.now()}`,
+          period_number: currentPeriod,
+          start_time: playClickTime || new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+        };
+        
+        console.log('✅ Mock period created for offline match:', mockPeriod.match_period_id);
+        setCurrentMatchPeriod(mockPeriod);
+        setMatchId(mockPeriod.match_id);
+        return mockPeriod;
+      }
+      
+      // Online mode - create match in database
       // First, create a match record from the remote session
       // Only pass user.id if showUserProfile is true (user toggle is on)
       const userId = showUserProfile && user ? user.id : null;
@@ -822,7 +1077,21 @@ export default function RemoteScreen() {
       }
     } catch (error) {
       console.error('❌ Error creating match period:', error);
-      return null;
+      // If online creation fails, fall back to offline mode
+      console.log('⚠️ Falling back to offline mode...');
+      const mockPeriod = {
+        match_period_id: `offline_period_${Date.now()}`,
+        match_id: `offline_match_${Date.now()}`,
+        period_number: currentPeriod,
+        start_time: playClickTime || new Date().toISOString(),
+        fencer_1_score: aliceScore,
+        fencer_2_score: bobScore,
+        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+        fencer_2_cards: bobCards.yellow + bobCards.red,
+      };
+      setCurrentMatchPeriod(mockPeriod);
+      setMatchId(mockPeriod.match_id);
+      return mockPeriod;
     }
   };
 
@@ -966,6 +1235,16 @@ export default function RemoteScreen() {
     try {
       console.log('Completing match...');
       setIsCompletingMatch(true); // Prevent further score changes
+      
+      // Check if this is an offline match
+      const isOfflineMatch = matchId.startsWith('offline_') || remoteSession.remote_id.startsWith('offline_');
+      const isCurrentlyOffline = await networkService.isOnline().then(online => !online);
+      
+      if (isOfflineMatch || isCurrentlyOffline) {
+        console.log('📱 Offline match completion detected - saving locally');
+        await handleOfflineMatchCompletion(finalAliceScore, finalBobScore);
+        return;
+      }
       
       // Calculate total match duration: (completed periods * full period time) + current period elapsed
       const completedPeriods = currentPeriod - 1;
@@ -1236,6 +1515,149 @@ export default function RemoteScreen() {
       
     } catch (error) {
       console.error('Error completing match:', error);
+    }
+  };
+
+  // Handle offline match completion
+  const handleOfflineMatchCompletion = async (finalAliceScore?: number, finalBobScore?: number) => {
+    if (!remoteSession) {
+      console.error('Cannot complete offline match: no remote session');
+      setIsCompletingMatch(false);
+      return;
+    }
+
+    try {
+      // Calculate total match duration
+      const completedPeriods = currentPeriod - 1;
+      const currentPeriodElapsed = matchTime - timeRemaining;
+      const matchDuration = (completedPeriods * matchTime) + currentPeriodElapsed;
+
+      // Use passed scores if provided, otherwise use current state scores
+      const actualAliceScore = finalAliceScore !== undefined ? finalAliceScore : aliceScore;
+      const actualBobScore = finalBobScore !== undefined ? finalBobScore : bobScore;
+
+      // Determine result based on user_id presence
+      let result: string | null = null;
+      let finalScore: number;
+      let touchesAgainst: number;
+      let scoreDiff: number | null;
+
+      if (user?.id && showUserProfile) {
+        // User is registered AND toggle is on - determine their position and result
+        const userScore = toggleCardPosition === 'left' ? actualAliceScore : actualBobScore;
+        const opponentScore = toggleCardPosition === 'left' ? actualBobScore : actualAliceScore;
+
+        finalScore = userScore;
+        touchesAgainst = opponentScore;
+        scoreDiff = userScore - opponentScore;
+        result = userScore > opponentScore ? 'win' : 'loss';
+      } else {
+        // User toggle is off OR no registered user - record as anonymous match
+        finalScore = actualAliceScore;
+        touchesAgainst = actualBobScore;
+        scoreDiff = null;
+        result = null;
+      }
+
+      // Calculate period data from local state (simplified for offline)
+      const periodNumber = Math.max(1, currentPeriod);
+      const scoreSpp = periodNumber > 0 ? Math.round(finalScore / periodNumber) : 0;
+      
+      // Use current scores for period data
+      const scoreByPeriod = {
+        period1: { 
+          user: toggleCardPosition === 'left' ? actualAliceScore : actualBobScore, 
+          opponent: toggleCardPosition === 'left' ? actualBobScore : actualAliceScore 
+        },
+        period2: { user: 0, opponent: 0 },
+        period3: { user: 0, opponent: 0 }
+      };
+
+      // Save offline using offlineRemoteService
+      const userId = showUserProfile && user ? user.id : null;
+      const completionResult = await offlineRemoteService.completeSession(
+        remoteSession.remote_id,
+        userId,
+        showUserProfile && !!user?.id
+      );
+
+      if (!completionResult.success) {
+        console.error('❌ Failed to save offline match');
+        Alert.alert(
+          'Save Failed',
+          'Failed to save match offline. Your match data may be lost.',
+          [{ text: 'OK' }]
+        );
+        setIsCompletingMatch(false);
+        return;
+      }
+
+      console.log('✅ Offline match saved successfully');
+
+      // Navigate to match summary with offline flag and all data
+      const navParams: any = {
+        matchId: completionResult.matchId || matchId, // Use returned matchId from offline cache
+        remoteId: remoteSession.remote_id,
+        isOffline: 'true', // Flag to indicate offline match
+        // Pass all match state for display
+        aliceScore: actualAliceScore.toString(),
+        bobScore: actualBobScore.toString(),
+        aliceCards: JSON.stringify(aliceCards),
+        bobCards: JSON.stringify(bobCards),
+        matchDuration: matchDuration.toString(),
+        result: result || '',
+        fencer1Name: fencerNames.alice,
+        fencer2Name: fencerNames.bob,
+        periodNumber: periodNumber.toString(),
+        scoreSpp: scoreSpp.toString(),
+        scoreByPeriod: JSON.stringify(scoreByPeriod),
+        finalScore: finalScore.toString(),
+        touchesAgainst: touchesAgainst.toString(),
+        scoreDiff: scoreDiff?.toString() || '',
+      };
+
+      if (user?.id && showUserProfile) {
+        // User match - go to regular match summary
+        router.push({
+          pathname: '/match-summary',
+          params: navParams
+        });
+      } else {
+        // Anonymous match - go to neutral match summary
+        router.push({
+          pathname: '/neutral-match-summary',
+          params: navParams
+        });
+      }
+
+      // Reset the remote to clean state after completion
+      setCurrentMatchPeriod(null);
+      setMatchId(null);
+      setRemoteSession(null);
+      setAliceScore(0);
+      setBobScore(0);
+      setAliceCards({ yellow: 0, red: 0 });
+      setBobCards({ yellow: 0, red: 0 });
+      setCurrentPeriod(1);
+      setTimeRemaining(matchTime);
+      setIsPlaying(false);
+      setPriorityFencer(null);
+      setPriorityLightPosition(null);
+      setIsAssigningPriority(false);
+      setIsPriorityRound(false);
+      setHasShownPriorityScorePopup(false);
+      setIsInjuryTimer(false);
+      setIsBreakTime(false);
+      setScoreChangeCount(0);
+      setShowScoreWarning(false);
+
+    } catch (error) {
+      console.error('❌ Error completing offline match:', error);
+      Alert.alert(
+        'Error',
+        'An error occurred while saving your match. Please try again when online.',
+        [{ text: 'OK', onPress: () => setIsCompletingMatch(false) }]
+      );
     }
   };
 
@@ -1522,9 +1944,9 @@ export default function RemoteScreen() {
       const newAliceScore = aliceScore + 1;
       setAliceScore(newAliceScore);
       
-      // Update remote session scores
+      // Update remote session scores (offline-capable)
       if (remoteSession) {
-        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
+        await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
       }
       
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
@@ -1583,9 +2005,9 @@ export default function RemoteScreen() {
       const newAliceScore = aliceScore + 1;
       setAliceScore(newAliceScore);
       
-      // Update remote session scores
+      // Update remote session scores (offline-capable)
       if (remoteSession) {
-        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
+        await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, newAliceScore, bobScore);
       }
       
       logMatchEvent('score', 'alice', 'increase'); // Log the score increase
@@ -1708,9 +2130,9 @@ export default function RemoteScreen() {
       const newBobScore = bobScore + 1;
       setBobScore(newBobScore);
       
-      // Update remote session scores
+      // Update remote session scores (offline-capable)
       if (remoteSession) {
-        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
+        await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
       }
       
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
@@ -1769,9 +2191,9 @@ export default function RemoteScreen() {
       const newBobScore = bobScore + 1;
       setBobScore(newBobScore);
       
-      // Update remote session scores
+      // Update remote session scores (offline-capable)
       if (remoteSession) {
-        await fencingRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
+        await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, aliceScore, newBobScore);
       }
       
       logMatchEvent('score', 'bob', 'increase'); // Log the score increase
@@ -3320,6 +3742,31 @@ export default function RemoteScreen() {
     completeMatchFlag: {
       fontSize: width * 0.06,
     },
+    offlineBanner: {
+      marginBottom: layout.adjustMargin(height * 0.015, 'bottom'),
+      borderRadius: width * 0.02,
+      overflow: 'hidden',
+      marginHorizontal: width * 0.01,
+    },
+    offlineBannerOffline: {
+      backgroundColor: '#FF6B6B',
+    },
+    offlineBannerPending: {
+      backgroundColor: '#4ECDC4',
+    },
+    offlineBannerContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: layout.adjustPadding(height * 0.015, 'bottom'),
+      paddingHorizontal: width * 0.04,
+      gap: width * 0.025,
+    },
+    offlineBannerText: {
+      color: 'white',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+    },
     periodControl: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -4321,6 +4768,31 @@ export default function RemoteScreen() {
         {/* Content with bottom safe area */}
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
+          
+          {/* Offline Status Banner - Shows for 1.5 seconds then auto-dismisses */}
+          {/* Only show offline banner when offline, or pending banner when online with pending items */}
+          {((isOffline && showOfflineBanner) || (!isOffline && showPendingBanner && (pendingMatchesCount > 0 || pendingEventsCount > 0))) && (
+            <View style={[
+              styles.offlineBanner,
+              isOffline ? styles.offlineBannerOffline : styles.offlineBannerPending
+            ]}>
+              <View style={styles.offlineBannerContent}>
+                <Ionicons 
+                  name={isOffline ? "cloud-offline-outline" : isSyncing ? "sync" : "cloud-upload-outline"} 
+                  size={18} 
+                  color="white"
+                />
+                <Text style={styles.offlineBannerText}>
+                  {isSyncing 
+                    ? "Syncing..." 
+                    : isOffline 
+                      ? "Offline - Data will sync when online"
+                      : `${pendingMatchesCount + pendingEventsCount} item${pendingMatchesCount + pendingEventsCount === 1 ? '' : 's'} pending sync`}
+                </Text>
+              </View>
+            </View>
+          )}
+          
           {/* Match Timer Section */}
       <View style={{ overflow: 'visible', position: 'relative' }}>
         {/* Period Label - Positioned outside card */}
