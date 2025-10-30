@@ -32,6 +32,8 @@ interface Match {
   outcome: 'Victory' | 'Defeat';
   playerScore: number;
   opponentScore: number;
+  source?: string; // Source of the match (manual, remote, etc.)
+  notes?: string; // Match notes
 }
 
 interface RecentMatchCardProps {
@@ -59,9 +61,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
 
   // Helper function to render profile image or initials
   const renderProfileImage = (imageUri: string | undefined, name: string | undefined) => {
-    const initials = getInitials(name);
+    const initials = getInitials(name || '');
 
-    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+    if (imageUri && isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
       return (
         <Image
           source={{ uri: imageUri }}
@@ -69,7 +71,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
           contentFit="cover"
           onError={(error) => {
             console.log('❌ Image failed to load, will show initials instead:', error);
-            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+            if (imageUri) {
+              setImageLoadErrors(prev => new Set(prev).add(imageUri));
+            }
           }}
           onLoad={() => {
             console.log('✅ Image loaded successfully');
@@ -86,21 +90,42 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   };
 
   const handleCardPress = () => {
-    router.push({
-      pathname: '/match-history-details',
-      params: { 
-        matchId: match.id,
-        opponentName: match.opponentName,
-        opponentImage: match.opponentImage,
-        youScore: match.playerScore.toString(),
-        opponentScore: match.opponentScore.toString(),
-        matchType: match.matchType,
-        date: match.date,
-        duration: '02:30', // This would come from match data in real app
-        location: 'Metro Field House', // This would come from match data in real app
-        isWin: (match.outcome === 'Victory').toString() // Pass win status based on outcome
-      }
-    });
+    const isManualMatch = match.source === 'manual';
+    
+    if (isManualMatch) {
+      // Navigate to manual match summary for manual matches
+      router.push({
+        pathname: '/manual-match-summary',
+        params: {
+          matchId: match.id,
+          yourScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          opponentName: match.opponentName,
+          matchType: match.matchType,
+          date: match.date,
+          time: match.time || '12:00PM',
+          isWin: (match.outcome === 'Victory').toString(),
+          notes: match.notes || '', // Pass actual notes from the match
+        }
+      });
+    } else {
+      // Navigate to regular match details for remote matches
+      router.push({
+        pathname: '/match-history-details',
+        params: { 
+          matchId: match.id,
+          opponentName: match.opponentName,
+          opponentImage: match.opponentImage,
+          youScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          matchType: match.matchType,
+          date: match.date,
+          duration: '02:30', // This would come from match data in real app
+          location: 'Metro Field House', // This would come from match data in real app
+          isWin: (match.outcome === 'Victory').toString() // Pass win status based on outcome
+        }
+      });
+    }
   };
 
   const styles = StyleSheet.create({

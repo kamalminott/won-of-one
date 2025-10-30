@@ -1,8 +1,8 @@
 import {
-  AppUser, DiaryEntry, Drill, Equipment,
-  FencingRemote, Goal, Match,
-  MatchApproval, MatchEvent,
-  SimpleGoal, SimpleMatch
+    AppUser, DiaryEntry, Drill, Equipment,
+    FencingRemote, Goal, Match,
+    MatchApproval, MatchEvent,
+    SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -10,11 +10,13 @@ import { supabase } from './supabase';
 export const matchService = {
   // Get recent matches for a user
   async getRecentMatches(userId: string, limit: number = 10): Promise<SimpleMatch[]> {
+    console.log('🔍 getRecentMatches called with userId:', userId, 'limit:', limit);
+    
     const { data, error } = await supabase
       .from('match')
       .select(`
         *,
-        match_period!inner(end_time)
+        match_period(end_time)
       `)
       .eq('user_id', userId)
       .order('event_date', { ascending: false })
@@ -25,6 +27,14 @@ export const matchService = {
       console.error('Error fetching matches:', error);
       return [];
     }
+
+    console.log('📊 Raw matches data from database:', data?.length, 'matches found');
+    console.log('📊 Match details:', data?.map(m => ({ 
+      id: m.match_id, 
+      opponent: m.fencer_2_name, 
+      source: m.source, 
+      hasPeriods: m.match_period?.length > 0 
+    })));
 
     const matches = data?.map(match => {
       // Get the latest period end time as the match completion time
@@ -48,6 +58,16 @@ export const matchService = {
           const minutes = endTime.getMinutes().toString().padStart(2, '0');
           completionTime = `${hours}:${minutes}`;
         }
+      } else {
+        // For manual matches without match_period, use event_date and event_time
+        if (match.event_date) {
+          const eventDateTime = new Date(match.event_date);
+          completionTimestamp = eventDateTime.getTime();
+          // Format as HH:MM
+          const hours = eventDateTime.getHours().toString().padStart(2, '0');
+          const minutes = eventDateTime.getMinutes().toString().padStart(2, '0');
+          completionTime = `${hours}:${minutes}`;
+        }
       }
       
       return {
@@ -58,13 +78,15 @@ export const matchService = {
         time: completionTime,
         opponentName: match.fencer_2_name || 'Unknown',
         isWin: match.is_win || false,
+        source: match.source || 'unknown', // Include source field
+        notes: match.notes || '', // Include notes field
         _completionTimestamp: completionTimestamp, // Internal field for sorting
       };
     }) || [];
 
     // Sort by completion timestamp (most recent first)
     // Matches with timestamps come first, then by date
-    return matches.sort((a, b) => {
+    const sortedMatches = matches.sort((a, b) => {
       if (a._completionTimestamp && b._completionTimestamp) {
         return b._completionTimestamp - a._completionTimestamp;
       }
@@ -73,6 +95,17 @@ export const matchService = {
       // Fallback to date comparison
       return b.date.localeCompare(a.date);
     }).map(({ _completionTimestamp, ...match }) => match); // Remove internal field
+
+    console.log('✅ Final processed matches:', sortedMatches.length, 'matches');
+    console.log('✅ Match summary:', sortedMatches.map(m => ({ 
+      id: m.id, 
+      opponent: m.opponentName, 
+      source: m.source, 
+      date: m.date,
+      time: m.time 
+    })));
+
+    return sortedMatches;
   },
 
   // Get all matches for training time calculation
@@ -2276,6 +2309,7 @@ export const weeklyTargetService = {
           week_start_date: weekStartDate.toISOString().split('T')[0],
           week_end_date: weekEndDate.toISOString().split('T')[0],
           target_sessions: targetSessions,
+          status: 'active', // Set as active target
           updated_at: new Date().toISOString()
         }, {
           onConflict: 'user_id,activity_type,week_start_date'
@@ -2310,16 +2344,21 @@ export const weeklyTargetService = {
         .eq('user_id', userId)
         .eq('activity_type', activityType)
         .eq('week_start_date', dateString)
+        .eq('status', 'active') // Only get active targets
         .single();
       
       console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
 
       if (error) {
-        if (error.code === 'PGRST116') return null; // No rows found
+        if (error.code === 'PGRST116') {
+          console.log('🔍 No active target found for this week');
+          return null; // No rows found
+        }
         console.error('Error getting weekly target:', error);
         return null;
       }
 
+      console.log('🔍 Found active target:', data);
       return data;
     } catch (error) {
       console.error('Error in getWeeklyTarget:', error);
@@ -2330,6 +2369,84 @@ export const weeklyTargetService = {
   // Delete a weekly target
   async deleteWeeklyTarget(targetId: string): Promise<boolean> {
     try {
+      // First, get the target details to create history record
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for deletion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Check if there are any history records that reference this target
+      const { data: existingHistory } = await supabase
+        .from('weekly_completion_history')
+        .select('id')
+        .eq('original_target_id', targetId);
+
+      // Only delete history records if they exist
+      if (existingHistory && existingHistory.length > 0) {
+        const { error: deleteHistoryError } = await supabase
+          .from('weekly_completion_history')
+          .delete()
+          .eq('original_target_id', targetId);
+
+        if (deleteHistoryError) {
+          console.error('Error deleting existing history records:', deleteHistoryError);
+        } else {
+          console.log('✅ Existing history records deleted');
+        }
+      } else {
+        console.log('ℹ️ No existing history records to delete (this is normal for new targets)');
+      }
+
+      // Create history record for deleted target
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'abandoned', // Mark as abandoned since user manually deleted
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating deletion history:', historyError);
+        // Continue with deletion even if history creation fails
+      }
+
+      // Clear session logs for the deleted target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for deleted target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+      }
+
+      // Now delete the target
       const { error } = await supabase
         .from('weekly_target')
         .delete()
@@ -2340,9 +2457,111 @@ export const weeklyTargetService = {
         return false;
       }
 
+      console.log('✅ Target deleted and history record created');
       return true;
     } catch (error) {
       console.error('Error in deleteWeeklyTarget:', error);
+      return false;
+    }
+  },
+
+  // Get all targets for a specific activity
+  async getAllTargetsForActivity(userId: string, activityType: string): Promise<WeeklyTarget[]> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('status', 'active') // Only get active targets
+        .order('week_start_date', { ascending: true });
+
+      if (error) {
+        console.error('Error getting all targets for activity:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getAllTargetsForActivity:', error);
+      return [];
+    }
+  },
+
+  // Mark a target as complete and create history record
+  async markTargetComplete(targetId: string): Promise<boolean> {
+    try {
+      // First, get the target details
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for completion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count before clearing them
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Clear the session logs for the completed target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for completed target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+        console.log('✅ Session logs cleared for completed target');
+      }
+
+      // Create history record (without foreign key reference)
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'completed',
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating completion history:', historyError);
+        return false;
+      }
+
+      // Delete the target completely after creating history record
+      const { error: deleteError } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('target_id', targetId);
+
+      if (deleteError) {
+        console.error('Error deleting completed target:', deleteError);
+        return false;
+      }
+
+      console.log('✅ Target deleted and history record created');
+      return true;
+    } catch (error) {
+      console.error('Error in markTargetComplete:', error);
       return false;
     }
   }
@@ -2513,6 +2732,250 @@ export const weeklyProgressService = {
     } catch (error) {
       console.error('Error in getCurrentWeekProgress:', error);
       return null;
+    }
+  }
+};
+
+// ============================================
+// PRIORITY ROUND ANALYTICS SERVICE
+// ============================================
+
+export const priorityAnalyticsService = {
+  // Get priority stats for a user
+  async getPriorityStats(userId: string) {
+    try {
+      // Get all match periods with priority data for the user
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, fencer_1_name, fencer_2_name, event_date)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          totalPriorityRounds: 0,
+          priorityWins: 0,
+          priorityLosses: 0,
+          priorityWinRate: 0
+        };
+      }
+
+      // Get priority winners from match events
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents, error: winnerError } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      if (winnerError) throw winnerError;
+
+      // Calculate stats
+      const totalPriorityRounds = data.length;
+      const priorityWins = data.filter(mp => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        return winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+      }).length;
+      
+      const priorityLosses = totalPriorityRounds - priorityWins;
+      const priorityWinRate = totalPriorityRounds > 0 ? (priorityWins / totalPriorityRounds) * 100 : 0;
+
+      return {
+        totalPriorityRounds,
+        priorityWins,
+        priorityLosses,
+        priorityWinRate: Math.round(priorityWinRate * 100) / 100
+      };
+    } catch (error) {
+      console.error('Error getting priority stats:', error);
+      return {
+        totalPriorityRounds: 0,
+        priorityWins: 0,
+        priorityLosses: 0,
+        priorityWinRate: 0
+      };
+    }
+  },
+
+  // Get priority performance over time
+  async getPriorityPerformanceOverTime(userId: string, days: number = 30) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .gte('match.event_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      // Group by date and calculate stats
+      const dailyStats: { [key: string]: { priorityRounds: number; priorityWins: number } } = {};
+      data.forEach((mp: any) => {
+        const date = mp.match.event_date;
+        if (!dailyStats[date]) {
+          dailyStats[date] = { priorityRounds: 0, priorityWins: 0 };
+        }
+        dailyStats[date].priorityRounds++;
+        
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        if (winnerEvent && winnerEvent.scoring_user_name === mp.priority_to) {
+          dailyStats[date].priorityWins++;
+        }
+      });
+
+      return Object.entries(dailyStats).map(([date, stats]) => ({
+        date,
+        priorityRounds: stats.priorityRounds,
+        priorityWins: stats.priorityWins,
+        priorityLosses: stats.priorityRounds - stats.priorityWins,
+        priorityWinRate: Math.round((stats.priorityWins / stats.priorityRounds) * 100 * 100) / 100
+      }));
+    } catch (error) {
+      console.error('Error getting priority performance over time:', error);
+      return [];
+    }
+  },
+
+  // Get priority duration stats
+  async getPriorityDurationStats(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('match_event')
+        .select(`
+          match_id,
+          event_time,
+          match!inner(user_id)
+        `)
+        .eq('match.user_id', userId)
+        .in('event_type', ['priority_round_start', 'priority_round_end'])
+        .order('event_time', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      // Calculate durations by pairing start/end events
+      const durations = [];
+      for (let i = 0; i < data.length - 1; i += 2) {
+        const start = new Date(data[i].event_time);
+        const end = new Date(data[i + 1].event_time);
+        const duration = Math.floor((end.getTime() - start.getTime()) / 1000);
+        durations.push(duration);
+      }
+
+      if (durations.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      const avgDuration = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+      const minDuration = Math.min(...durations);
+      const maxDuration = Math.max(...durations);
+
+      return {
+        avgDurationSeconds: Math.round(avgDuration),
+        minDurationSeconds: minDuration,
+        maxDurationSeconds: maxDuration,
+        totalPriorityRounds: durations.length
+      };
+    } catch (error) {
+      console.error('Error getting priority duration stats:', error);
+      return {
+        avgDurationSeconds: 0,
+        minDurationSeconds: 0,
+        maxDurationSeconds: 0,
+        totalPriorityRounds: 0
+      };
+    }
+  },
+
+  // Get recent priority rounds
+  async getRecentPriorityRounds(userId: string, limit: number = 10) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name, result)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .order('match.event_date', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      return data.map((mp: any) => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        const priorityWon = winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+        
+        return {
+          matchId: mp.match_id,
+          eventDate: mp.match.event_date,
+          fencer1Name: mp.match.fencer_1_name,
+          fencer2Name: mp.match.fencer_2_name,
+          priorityFencer: mp.priority_to,
+          priorityWinner: winnerEvent?.scoring_user_name || null,
+          priorityWon,
+          result: mp.match.result
+        };
+      });
+    } catch (error) {
+      console.error('Error getting recent priority rounds:', error);
+      return [];
     }
   }
 };

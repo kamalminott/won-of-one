@@ -391,22 +391,24 @@ export default function HomeScreen() {
           <View style={styles.contentContainer}>
             <View style={styles.progressCardContainer}>
               <ProgressCard
-                activityType="Conditioning"
+                activityType="Footwork"
               />
             </View>
             
             <View style={styles.summaryRow}>
               <SummaryCard
-                icon={<Text style={styles.icon}>🕐</Text>}
+                icon={<Text style={[styles.icon, { fontSize: goals.length === 0 ? width * 0.055 : width * 0.05 }]}>🕐</Text>}
                 value={trainingTime.value}
                 label={trainingTime.label}
                 backgroundColor={Colors.pink.light}
+                isTall={goals.length === 0} // Smaller when no active goals
               />
               <SummaryCard
-                icon={<Text style={styles.icon}>🏆</Text>}
+                icon={<Text style={[styles.icon, { fontSize: goals.length === 0 ? width * 0.055 : width * 0.05 }]}>🏆</Text>}
                 value={`${winRate}%`}
                 label="Win Rate"
                 backgroundColor={Colors.blue.light}
+                isTall={goals.length === 0} // Smaller when no active goals
               />
             </View>
             
@@ -612,6 +614,7 @@ export default function HomeScreen() {
                 onSwipeRight={handleSwipeRight}
                 userName={userName}
                 userProfileImage={profileImage}
+                hasActiveGoals={goals.length > 0}
               />
             </View>
           </View>
