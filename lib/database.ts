@@ -1,8 +1,8 @@
 import {
-  AppUser, DiaryEntry, Drill, Equipment,
-  FencingRemote, Goal, Match,
-  MatchApproval, MatchEvent,
-  SimpleGoal, SimpleMatch
+    AppUser, DiaryEntry, Drill, Equipment,
+    FencingRemote, Goal, Match,
+    MatchApproval, MatchEvent,
+    SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -10,11 +10,17 @@ import { supabase } from './supabase';
 export const matchService = {
   // Get recent matches for a user
   async getRecentMatches(userId: string, limit: number = 10): Promise<SimpleMatch[]> {
+    console.log('🔍 getRecentMatches called with userId:', userId, 'limit:', limit);
+    
     const { data, error } = await supabase
       .from('match')
-      .select('*')
+      .select(`
+        *,
+        match_period(end_time)
+      `)
       .eq('user_id', userId)
       .order('event_date', { ascending: false })
+      .order('match_id', { ascending: false }) // Secondary sort by match_id for same-day matches
       .limit(limit);
 
     if (error) {
@@ -22,14 +28,84 @@ export const matchService = {
       return [];
     }
 
-    return data?.map(match => ({
-      id: match.match_id,
-      youScore: match.final_score || 0,
-      opponentScore: match.touches_against || 0,
-      date: match.event_date || new Date().toISOString().split('T')[0],
-      opponentName: match.fencer_2_name || 'Unknown',
-      isWin: match.is_win || false,
-    })) || [];
+    console.log('📊 Raw matches data from database:', data?.length, 'matches found');
+    console.log('📊 Match details:', data?.map(m => ({ 
+      id: m.match_id, 
+      opponent: m.fencer_2_name, 
+      source: m.source, 
+      hasPeriods: m.match_period?.length > 0 
+    })));
+
+    const matches = data?.map(match => {
+      // Get the latest period end time as the match completion time
+      const matchPeriods = match.match_period as any[];
+      let completionTime: string | undefined;
+      let completionTimestamp: number | undefined;
+      
+      if (matchPeriods && matchPeriods.length > 0) {
+        // Find the period with the latest end_time
+        const sortedPeriods = [...matchPeriods].sort((a, b) => {
+          if (!a.end_time) return 1;
+          if (!b.end_time) return -1;
+          return new Date(b.end_time).getTime() - new Date(a.end_time).getTime();
+        });
+        
+        if (sortedPeriods[0]?.end_time) {
+          const endTime = new Date(sortedPeriods[0].end_time);
+          completionTimestamp = endTime.getTime();
+          // Format as HH:MM
+          const hours = endTime.getHours().toString().padStart(2, '0');
+          const minutes = endTime.getMinutes().toString().padStart(2, '0');
+          completionTime = `${hours}:${minutes}`;
+        }
+      } else {
+        // For manual matches without match_period, use event_date and event_time
+        if (match.event_date) {
+          const eventDateTime = new Date(match.event_date);
+          completionTimestamp = eventDateTime.getTime();
+          // Format as HH:MM
+          const hours = eventDateTime.getHours().toString().padStart(2, '0');
+          const minutes = eventDateTime.getMinutes().toString().padStart(2, '0');
+          completionTime = `${hours}:${minutes}`;
+        }
+      }
+      
+      return {
+        id: match.match_id,
+        youScore: match.final_score || 0,
+        opponentScore: match.touches_against || 0,
+        date: match.event_date || new Date().toISOString().split('T')[0],
+        time: completionTime,
+        opponentName: match.fencer_2_name || 'Unknown',
+        isWin: match.is_win || false,
+        source: match.source || 'unknown', // Include source field
+        notes: match.notes || '', // Include notes field
+        _completionTimestamp: completionTimestamp, // Internal field for sorting
+      };
+    }) || [];
+
+    // Sort by completion timestamp (most recent first)
+    // Matches with timestamps come first, then by date
+    const sortedMatches = matches.sort((a, b) => {
+      if (a._completionTimestamp && b._completionTimestamp) {
+        return b._completionTimestamp - a._completionTimestamp;
+      }
+      if (a._completionTimestamp && !b._completionTimestamp) return -1;
+      if (!a._completionTimestamp && b._completionTimestamp) return 1;
+      // Fallback to date comparison
+      return b.date.localeCompare(a.date);
+    }).map(({ _completionTimestamp, ...match }) => match); // Remove internal field
+
+    console.log('✅ Final processed matches:', sortedMatches.length, 'matches');
+    console.log('✅ Match summary:', sortedMatches.map(m => ({ 
+      id: m.id, 
+      opponent: m.opponentName, 
+      source: m.source, 
+      date: m.date,
+      time: m.time 
+    })));
+
+    return sortedMatches;
   },
 
   // Get all matches for training time calculation
@@ -46,6 +122,64 @@ export const matchService = {
     }
 
     return data || [];
+  },
+
+  // Create a manual match
+  async createManualMatch(matchData: {
+    userId: string;
+    opponentName: string;
+    yourScore: number;
+    opponentScore: number;
+    matchType: 'training' | 'competition';
+    date: string;
+    time: string;
+    notes?: string;
+    weaponType?: string;
+  }): Promise<Match | null> {
+    const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
+    
+    // Parse date and time
+    const [day, month, year] = date.split('/');
+    const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
+    const isPM = time.toUpperCase().includes('PM');
+    
+    let hour24 = parseInt(hour);
+    if (isPM && hour24 !== 12) hour24 += 12;
+    if (!isPM && hour24 === 12) hour24 = 0;
+    
+    const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+    
+    const insertData = {
+      user_id: userId,
+      fencer_1_name: 'You', // User is always fencer 1 in manual matches
+      fencer_2_name: opponentName,
+      final_score: yourScore,
+      // touches_against: opponentScore, // This is a generated column - will be calculated automatically
+      event_date: eventDateTime.toISOString().split('T')[0],
+      result: yourScore > opponentScore ? 'win' : 'loss',
+      score_diff: yourScore - opponentScore,
+      match_type: matchType,
+      weapon_type: weaponType || 'foil',
+      notes: notes || null,
+      source: 'manual',
+      is_complete: true,
+    };
+
+    console.log('🔄 Creating manual match with data:', insertData);
+
+    const { data, error } = await supabase
+      .from('match')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Error creating manual match:', error);
+      return null;
+    }
+
+    console.log('✅ Manual match created successfully:', data);
+    return data;
   },
 
   // Create a new match from fencing remote data
@@ -662,6 +796,23 @@ $$;
     try {
       console.log('🗑️ Starting deleteMatch:', { matchId, fencingRemoteId });
       
+      // Get match data before deletion for goal recalculation
+      const { data: matchData, error: matchFetchError } = await supabase
+        .from('match')
+        .select('user_id, is_win, final_score, touches_against')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchFetchError) {
+        console.error('❌ Error fetching match data:', matchFetchError);
+        return false;
+      }
+
+      const userId = matchData?.user_id;
+      const wasWin = matchData?.is_win;
+      const finalScore = matchData?.final_score;
+      const opponentScore = matchData?.touches_against;
+      
       // Delete in order: events -> periods -> match
       // 1. Delete all match events (by match_id OR fencing_remote_id)
       let eventsError = null;
@@ -727,7 +878,7 @@ $$;
 
       // 3. Delete the match itself
       console.log('🗑️ Deleting match by match_id:', matchId);
-      const { data: matchData, error: matchError } = await supabase
+      const { data: deletedMatchData, error: matchError } = await supabase
         .from('match')
         .delete()
         .eq('match_id', matchId)
@@ -737,7 +888,21 @@ $$;
         console.error('❌ Error deleting match:', matchError);
         return false;
       } else {
-        console.log('✅ Match deleted successfully:', matchData);
+        console.log('✅ Match deleted successfully:', deletedMatchData);
+      }
+
+      // 4. Recalculate goals after deletion (reverse the match impact)
+      if (userId && wasWin !== undefined && finalScore !== undefined && opponentScore !== undefined) {
+        console.log('🔄 Recalculating goals after match deletion...');
+        try {
+          // Reverse the match result for goal recalculation
+          const reverseResult = wasWin ? 'loss' : 'win';
+          await goalService.updateGoalsAfterMatch(userId, reverseResult as 'win' | 'loss', opponentScore, finalScore);
+          console.log('✅ Goals recalculated after match deletion');
+        } catch (goalError) {
+          console.error('❌ Error recalculating goals after deletion:', goalError);
+          // Don't fail the deletion if goal recalculation fails
+        }
       }
 
       console.log('Successfully deleted match and all related records:', matchId);
@@ -774,10 +939,10 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
-      // 2. Get match data to get fencer names
+      // 2. Get match data to get fencer names and final scores
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name')
+        .select('fencer_1_name, fencer_2_name, final_score, touches_against')
         .eq('match_id', matchId)
         .single();
 
@@ -786,7 +951,12 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
+      // Get authoritative final scores to cap the count
+      const maxFencer1Score = matchData.final_score || 15;
+      const maxFencer2Score = matchData.touches_against || 15;
+
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
+      console.log('📈 ANONYMOUS - Final scores (max cap):', maxFencer1Score, '-', maxFencer2Score);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
       // 3. Process events using stored match_time_elapsed
@@ -804,17 +974,21 @@ $$;
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-        if (event.scoring_user_name === matchData.fencer_1_name) {
-          // Fencer 1 scored
+        if (event.scoring_user_name === matchData.fencer_1_name && fencer1Score < maxFencer1Score) {
+          // Fencer 1 scored (only count if below final score - handles accidental score adds/removes)
           fencer1Score++;
           const dataPoint = { x: timeString, y: fencer1Score };
           fencer1Data.push(dataPoint);
-        } else if (event.scoring_user_name === matchData.fencer_2_name) {
-          // Fencer 2 scored
+          console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score}/${maxFencer1Score} at ${timeString}`);
+        } else if (event.scoring_user_name === matchData.fencer_2_name && fencer2Score < maxFencer2Score) {
+          // Fencer 2 scored (only count if below final score - handles accidental score adds/removes)
           fencer2Score++;
           const dataPoint = { x: timeString, y: fencer2Score };
           fencer2Data.push(dataPoint);
+          console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score}/${maxFencer2Score} at ${timeString}`);
         } else {
+          // Log skipped events to help diagnose issues
+          console.log(`📈 ⏭️  Event skipped - Scorer: "${event.scoring_user_name}", F1: ${fencer1Score}/${maxFencer1Score}, F2: ${fencer2Score}/${maxFencer2Score}`);
         }
       }
 
@@ -881,17 +1055,19 @@ export const userService = {
 export const goalService = {
   // Get active goals for a user
   async getActiveGoals(userId: string): Promise<SimpleGoal[]> {
-    console.log('getActiveGoals called with userId:', userId);
+    console.log('📊 getActiveGoals called with userId:', userId);
     
     const { data, error } = await supabase
       .from('goal')
       .select('*')
       .eq('user_id', userId)
       .eq('is_active', true)
+      .eq('is_failed', false)  // Exclude failed goals
       .order('created_at', { ascending: false });
 
-    console.log('Raw goal data from database:', data);
-    console.log('Goal query error:', error);
+    console.log('📊 Raw goal data from database:', data);
+    console.log('📊 Number of active goals found:', data?.length || 0);
+    console.log('📊 Goal query error:', error);
 
     if (error) {
       console.error('Error fetching goals:', error);
@@ -901,14 +1077,16 @@ export const goalService = {
     const mappedGoals = data?.map(goal => {
       const currentValue = goal.current_value || 0;
       const targetValue = goal.target_value || 1;
-      const calculatedProgress = targetValue > 0 ? Math.round((currentValue / targetValue) * 100) : 0;
+      const rawProgress = targetValue > 0 ? Math.round((currentValue / targetValue) * 100) : 0;
+      // Cap progress between 0% and 100% for display
+      const calculatedProgress = Math.max(0, Math.min(rawProgress, 100));
       
       console.log('🎯 Goal progress calculation:', {
         title: goal.category,
         currentValue,
         targetValue,
-        calculatedProgress,
-        rawProgress: (currentValue / targetValue) * 100
+        rawProgress,
+        displayProgress: calculatedProgress
       });
       
       return {
@@ -919,7 +1097,10 @@ export const goalService = {
         currentValue: currentValue,
         deadline: goal.deadline,
         isCompleted: goal.is_completed || false,
+        isFailed: goal.is_failed || false,
         progress: calculatedProgress,
+        match_window: goal.match_window,
+        starting_match_count: goal.starting_match_count,
       };
     }) || [];
     
@@ -957,38 +1138,189 @@ export const goalService = {
     return data;
   },
 
+  // Update an existing goal
+  async updateGoal(goalId: string, updates: Partial<Goal>): Promise<Goal | null> {
+    console.log('🔄 Updating goal:', goalId, 'with updates:', updates);
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating goal:', error);
+      return null;
+    }
+
+    console.log('✅ Goal updated successfully:', data);
+    return data;
+  },
+
+  // Recalculate goal progress after update (for windowed goals or target changes)
+  async recalculateGoalProgress(goalId: string, userId: string): Promise<boolean> {
+    console.log('🔄 Recalculating progress for goal:', goalId);
+    
+    try {
+      // Get the updated goal
+      const { data: goal, error: goalError } = await supabase
+        .from('goal')
+        .select('*')
+        .eq('goal_id', goalId)
+        .single();
+      
+      if (goalError || !goal) {
+        console.error('Error fetching goal for recalculation:', goalError);
+        return false;
+      }
+      
+      // Get user's match history
+      const userMatches = await matchService.getRecentMatches(userId, 10000);
+      const totalMatches = userMatches.length;
+      
+      let newCurrentValue = goal.current_value;
+      const category = goal.category;
+      
+      // Recalculate based on goal type
+      switch (category) {
+        case 'Total Matches Played':
+          newCurrentValue = totalMatches;
+          break;
+          
+        case 'Wins':
+          if (goal.match_window && goal.starting_match_count !== undefined) {
+            // Windowed wins
+            const matchesSinceGoalCreation = Math.max(0, totalMatches - goal.starting_match_count);
+            const matchesSinceGoal = userMatches.slice(0, matchesSinceGoalCreation);
+            const windowMatches = matchesSinceGoal.slice(0, goal.match_window);
+            newCurrentValue = windowMatches.filter(m => m.isWin).length;
+          } else {
+            // Career wins
+            newCurrentValue = userMatches.filter(m => m.isWin).length;
+          }
+          break;
+          
+        case 'Average Margin of Victory':
+          if (goal.match_window && goal.starting_match_count !== undefined) {
+            // Windowed average
+            const matchesSinceGoalCreated = userMatches.slice(0, totalMatches - goal.starting_match_count);
+            const windowMatches = matchesSinceGoalCreated.slice(0, goal.match_window);
+            
+            if (windowMatches.length > 0) {
+              let totalMargin = 0;
+              for (const match of windowMatches) {
+                const userScore = match.youScore || 0;
+                const opponentScore = match.opponentScore || 0;
+                const margin = userScore - opponentScore;
+                totalMargin += margin;
+              }
+              const averageMargin = totalMargin / windowMatches.length;
+              newCurrentValue = Math.round(averageMargin * 100) / 100;
+            }
+          }
+          break;
+          
+        case 'Streaks':
+          // Calculate current win streak
+          let currentStreak = 0;
+          for (const match of userMatches) {
+            if (match.isWin) {
+              currentStreak++;
+            } else {
+              break;
+            }
+          }
+          newCurrentValue = currentStreak;
+          break;
+      }
+      
+      // Check if goal is now complete
+      const isComplete = newCurrentValue >= goal.target_value;
+      
+      // Update the goal with recalculated progress
+      const { error: updateError } = await supabase
+        .from('goal')
+        .update({
+          current_value: newCurrentValue,
+          is_completed: isComplete,
+          updated_at: new Date().toISOString()
+        })
+        .eq('goal_id', goalId);
+      
+      if (updateError) {
+        console.error('Error updating recalculated progress:', updateError);
+        return false;
+      }
+      
+      console.log('✅ Progress recalculated:', {
+        goalId,
+        category,
+        newCurrentValue,
+        targetValue: goal.target_value,
+        isComplete
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Error in recalculateGoalProgress:', error);
+      return false;
+    }
+  },
+
   // Update goal progress
-  async updateGoalProgress(goalId: string, currentValue: number): Promise<boolean> {
-    // First get the goal to check target value
+  async updateGoalProgress(goalId: string, currentValue: number): Promise<{ success: boolean; justCompleted: boolean; goalData?: any }> {
+    // First get the goal to check target value and current completion status
     const { data: goal, error: fetchError } = await supabase
       .from('goal')
-      .select('target_value')
+      .select('*')
       .eq('goal_id', goalId)
       .single();
 
     if (fetchError) {
       console.error('Error fetching goal for progress update:', fetchError);
-      return false;
+      return { success: false, justCompleted: false };
     }
 
-    const isCompleted = currentValue >= (goal?.target_value || 0);
+    const wasCompletedBefore = goal?.is_completed || false;
+    const isCompletedNow = currentValue >= (goal?.target_value || 0);
+    const justCompleted = !wasCompletedBefore && isCompletedNow;
 
     const { error } = await supabase
       .from('goal')
       .update({ 
         current_value: currentValue,
         updated_at: new Date().toISOString(),
-        is_completed: isCompleted
+        is_completed: isCompletedNow
       })
       .eq('goal_id', goalId);
 
     if (error) {
       console.error('Error updating goal:', error);
-      return false;
+      return { success: false, justCompleted: false };
     }
 
-    console.log('✅ Goal progress updated:', { goalId, currentValue, targetValue: goal?.target_value, isCompleted });
-    return true;
+    console.log('✅ Goal progress updated:', { 
+      goalId, 
+      currentValue, 
+      targetValue: goal?.target_value, 
+      isCompleted: isCompletedNow,
+      justCompleted 
+    });
+    
+    return { 
+      success: true, 
+      justCompleted,
+      goalData: justCompleted ? {
+        title: goal.category,
+        description: goal.description,
+        targetValue: goal.target_value,
+        currentValue: currentValue
+      } : undefined
+    };
   },
 
   // Get goal target value
@@ -1007,8 +1339,159 @@ export const goalService = {
     return data?.target_value || 0;
   },
 
+  // Deactivate a completed goal
+  async deactivateGoal(goalId: string): Promise<boolean> {
+    console.log('🔒 Deactivating completed goal:', goalId);
+    
+    const { error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId);
+
+    if (error) {
+      console.error('Error deactivating goal:', error);
+      return false;
+    }
+
+    console.log('✅ Goal deactivated successfully');
+    return true;
+  },
+
+  // Delete a goal (soft delete by marking inactive)
+  async deleteGoal(goalId: string): Promise<boolean> {
+    console.log('🗑️ Deleting goal:', goalId);
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId)
+      .select();
+
+    if (error) {
+      console.error('❌ Error deleting goal:', error);
+      return false;
+    }
+
+    console.log('✅ Goal deleted successfully (deactivated):', data);
+    return true;
+  },
+
+  // Deactivate all completed goals for a user
+  async deactivateAllCompletedGoals(userId: string): Promise<number> {
+    console.log('🧹 Deactivating all completed goals for user:', userId);
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('is_completed', true)
+      .eq('is_active', true)
+      .select();
+
+    if (error) {
+      console.error('❌ Error deactivating completed goals:', error);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    console.log(`✅ Deactivated ${count} completed goals`);
+    return count;
+  },
+
+  // Deactivate expired goals (past deadline and not completed)
+  async deactivateExpiredGoals(userId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    console.log('⏰ Checking for expired goals (deadline before:', today, ')');
+    
+    const { data, error } = await supabase
+      .from('goal')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .eq('is_completed', false)  // Only incomplete goals
+      .lt('deadline', today)       // deadline < today
+      .select();
+
+    if (error) {
+      console.error('❌ Error deactivating expired goals:', error);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    if (count > 0) {
+      console.log(`⏰ Auto-deactivated ${count} expired goal(s)`);
+    }
+    return count;
+  },
+
+  // Mark a goal as failed (impossible to achieve)
+  async markGoalAsFailed(goalId: string): Promise<boolean> {
+    console.log('💥 Marking goal as failed:', goalId);
+    
+    const { error } = await supabase
+      .from('goal')
+      .update({ 
+        is_failed: true,
+        is_active: false,  // Also deactivate failed goals
+        updated_at: new Date().toISOString()
+      })
+      .eq('goal_id', goalId);
+
+    if (error) {
+      console.error('❌ Error marking goal as failed:', error);
+      return false;
+    }
+
+    console.log('✅ Goal marked as failed successfully');
+    return true;
+  },
+
+  // Get failed goals for cleanup or display
+  async getFailedGoals(userId: string): Promise<SimpleGoal[]> {
+    const { data, error } = await supabase
+      .from('goal')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_failed', true)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching failed goals:', error);
+      return [];
+    }
+
+    return data?.map(goal => ({
+      id: goal.goal_id,
+      title: goal.category,
+      description: goal.description || '',
+      targetValue: goal.target_value,
+      currentValue: goal.current_value || 0,
+      deadline: goal.deadline,
+      isCompleted: false, // Failed goals are not completed
+      isFailed: true,
+      progress: 0, // Failed goals show 0% progress
+      match_window: goal.match_window,
+      starting_match_count: goal.starting_match_count,
+    })) || [];
+  },
+
   // Update goals based on match completion with precise tracking
-  async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<void> {
+  async updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss', finalScore: number, opponentScore: number = 0): Promise<{ completedGoals: any[]; failedGoals: any[] }> {
+    const completedGoals: any[] = [];
+    const failedGoals: any[] = [];
+    
     try {
       console.log('🎯 Updating goals after match completion:', { userId, matchResult, finalScore, opponentScore });
       
@@ -1016,8 +1499,8 @@ export const goalService = {
       const activeGoals = await this.getActiveGoals(userId);
       console.log('📋 Found active goals:', activeGoals.map(g => ({ title: g.title, current: g.currentValue, target: g.targetValue })));
       
-      // Get user's match statistics for context
-      const userMatches = await matchService.getRecentMatches(userId, 1000);
+      // Get ALL user's match statistics for windowed calculations (increased limit)
+      const userMatches = await matchService.getRecentMatches(userId, 10000);
       const totalMatches = userMatches.length;
       const totalWins = userMatches.filter(m => m.isWin).length;
       const currentWinRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
@@ -1049,34 +1532,206 @@ export const goalService = {
             
           case 'Wins':
             // Track only wins
-            if (matchResult === 'win') {
-              newCurrentValue = goal.currentValue + 1;
-              shouldUpdate = true;
-              console.log('🏆 Updating Wins goal:', goal.currentValue, '→', newCurrentValue);
+            console.log('🎯 Processing Wins goal:', {
+              goalId: goal.id,
+              hasMatchWindow: !!goal.match_window,
+              matchWindow: goal.match_window,
+              startingMatchCount: goal.starting_match_count,
+              matchResult
+            });
+            
+            if (goal.match_window && goal.starting_match_count !== undefined) {
+              // NEW: Windowed wins - "Win X out of next Y matches"
+              console.log('✅ Using WINDOWED wins logic');
+              
+              // Calculate how many matches have been played since goal was created
+              const matchesSinceGoalCreation = Math.max(0, totalMatches - (goal.starting_match_count || 0));
+              console.log('📊 Matches since goal creation:', {
+                totalMatches,
+                startingMatchCount: goal.starting_match_count,
+                matchesSinceGoalCreation
+              });
+              
+              // Get only the matches played after the goal was created
+              const matchesSinceGoalCreated = userMatches.slice(0, matchesSinceGoalCreation);
+              const windowMatches = matchesSinceGoalCreated.slice(0, goal.match_window);
+              
+              console.log('📊 Window matches:', {
+                matchesSinceGoalCreatedCount: matchesSinceGoalCreated.length,
+                windowMatchesCount: windowMatches.length,
+                matchWindow: goal.match_window
+              });
+              
+              if (windowMatches.length > 0) {
+                const winsInWindow = windowMatches.filter(m => m.isWin).length;
+                const lossesInWindow = windowMatches.filter(m => !m.isWin).length;
+                const remainingMatches = goal.match_window - windowMatches.length;
+                const maxPossibleWins = winsInWindow + remainingMatches;
+                
+                console.log('🏆 Updating Wins goal (Windowed):', {
+                  previousValue: goal.currentValue,
+                  newValue: winsInWindow,
+                  matchesInWindow: windowMatches.length,
+                  winsInWindow,
+                  lossesInWindow,
+                  remainingMatches,
+                  maxPossibleWins,
+                  targetValue: goal.targetValue,
+                  windowSize: goal.match_window,
+                  matchesPlayed: windowMatches.length + '/' + goal.match_window
+                });
+                
+                // ✅ NEW: Check if goal is impossible to achieve
+                if (maxPossibleWins < goal.targetValue) {
+                  console.log('💥 Goal failed - impossible to achieve:', {
+                    goalTitle: goal.title,
+                    currentWins: winsInWindow,
+                    maxPossibleWins,
+                    targetValue: goal.targetValue,
+                    remainingMatches
+                  });
+                  
+                  // Mark goal as failed
+                  await this.markGoalAsFailed(goal.id);
+                  
+                  // Add to failed goals for notification
+                  failedGoals.push({
+                    title: goal.title,
+                    description: goal.description,
+                    targetValue: goal.targetValue,
+                    currentValue: winsInWindow,
+                    reason: `Unable to win ${goal.targetValue} matches - only ${maxPossibleWins} possible wins remaining`
+                  });
+                  
+                  // Don't update the goal value since it's failed
+                  continue; // Skip to next goal
+                }
+                
+                newCurrentValue = winsInWindow;
+                shouldUpdate = true;
+              }
             } else {
-              console.log('🔸 Wins goal not updated - match was not a win');
+              // ORIGINAL: Simple wins goal (no window)
+              console.log('⚠️ Using SIMPLE wins logic (no window) - only tracks wins');
+              if (matchResult === 'win') {
+                newCurrentValue = goal.currentValue + 1;
+                shouldUpdate = true;
+                console.log('🏆 Updating Wins goal (Simple):', goal.currentValue, '→', newCurrentValue);
+              } else {
+                console.log('🔸 Wins goal not updated - match was a loss (simple wins only tracks wins)');
+              }
             }
             break;
             
           case 'Win Rate %':
-            // Track win rate percentage - this is calculated, not incremental
+            // Legacy support for old "Win Rate %" goals
+            // New goals should use "Wins" with match_window instead
             newCurrentValue = currentWinRate;
             shouldUpdate = true;
-            console.log('📈 Updating Win Rate goal:', goal.currentValue, '→', newCurrentValue, '%');
+            console.log('📈 Updating Win Rate goal (Legacy - Career %):', goal.currentValue, '→', newCurrentValue, '%');
             break;
             
-          case 'Points Scored':
-            // Track total points scored
-            newCurrentValue = goal.currentValue + finalScore;
-            shouldUpdate = true;
-            console.log('🎯 Updating Points Scored goal:', goal.currentValue, '→', newCurrentValue);
-            break;
-            
-          case 'Point Differential':
-            // Track cumulative point differential
-            newCurrentValue = goal.currentValue + pointDifferential;
-            shouldUpdate = true;
-            console.log('➕ Updating Point Differential goal:', goal.currentValue, '→', newCurrentValue);
+          case 'Average Margin of Victory':
+            // Track average margin of victory over window
+            if (goal.match_window && goal.starting_match_count !== undefined) {
+              // Windowed: "Win by average X+ points over next Y matches"
+              const matchesSinceGoalCreated = userMatches.slice(0, totalMatches - (goal.starting_match_count || 0));
+              const windowMatches = matchesSinceGoalCreated.slice(0, goal.match_window);
+              
+              if (windowMatches.length > 0) {
+                // Calculate average margin for ALL matches in this window (wins AND losses)
+                let totalMargin = 0;
+                
+                // ✅ Calculate actual margin from all matches (wins are positive, losses are negative)
+                for (const match of windowMatches) {
+                  // Margin is positive for wins, negative for losses
+                  const margin = match.youScore - match.opponentScore;
+                  totalMargin += margin;
+                }
+                
+                const averageMargin = windowMatches.length > 0 ? totalMargin / windowMatches.length : 0;
+                newCurrentValue = Math.round(averageMargin * 100) / 100; // Round to 2 decimals
+                
+                const winCount = windowMatches.filter(m => m.isWin).length;
+                const lossCount = windowMatches.filter(m => !m.isWin).length;
+                
+                console.log('🏆 Updating Average Margin of Victory goal (Windowed - All Matches):', {
+                  previousValue: goal.currentValue,
+                  newValue: newCurrentValue,
+                  matchesInWindow: windowMatches.length,
+                  winsInWindow: winCount,
+                  lossesInWindow: lossCount,
+                  totalMargin,
+                  averageMargin,
+                  targetValue: goal.targetValue,
+                  windowSize: goal.match_window
+                });
+                
+                // ✅ Improved failure detection
+                // Goal fails if: even with perfect 15-0 wins remaining, average can't reach target
+                const remainingMatches = goal.match_window - windowMatches.length;
+                
+                // Best case: all remaining matches are 15-0 victories
+                const bestCaseTotalMargin = totalMargin + (remainingMatches * 15);
+                const maxPossibleAverage = goal.match_window > 0 ? bestCaseTotalMargin / goal.match_window : 0;
+                
+                if (remainingMatches === 0 && averageMargin < goal.targetValue) {
+                  // Window complete but target not reached
+                  console.log('💥 Average Margin goal failed - window complete, target not reached:', {
+                    goalTitle: goal.title,
+                    currentAverage: newCurrentValue,
+                    targetValue: goal.targetValue,
+                    matchesPlayed: windowMatches.length,
+                    windowSize: goal.match_window
+                  });
+                  
+                  await this.markGoalAsFailed(goal.id);
+                  
+                  // Add to failed goals for notification
+                  failedGoals.push({
+                    title: goal.title,
+                    description: goal.description,
+                    targetValue: goal.targetValue,
+                    currentValue: Math.round(averageMargin * 100) / 100,
+                    reason: `Window complete: ${windowMatches.length}/${goal.match_window} matches. Average margin: ${Math.round(averageMargin * 100) / 100} (target: ${goal.targetValue})`
+                  });
+                  
+                  continue; // Skip to next goal
+                } else if (maxPossibleAverage < goal.targetValue) {
+                  // Mathematically impossible even with perfect remaining matches
+                  console.log('💥 Average Margin goal failed - mathematically impossible:', {
+                    goalTitle: goal.title,
+                    currentAverage: newCurrentValue,
+                    maxPossibleAverage,
+                    targetValue: goal.targetValue,
+                    remainingMatches,
+                    matchesPlayed: windowMatches.length,
+                    totalMargin
+                  });
+                  
+                  await this.markGoalAsFailed(goal.id);
+                  
+                  // Add to failed goals for notification
+                  failedGoals.push({
+                    title: goal.title,
+                    description: goal.description,
+                    targetValue: goal.targetValue,
+                    currentValue: Math.round(averageMargin * 100) / 100,
+                    reason: `Mathematically impossible to reach ${goal.targetValue} point average - max possible: ${Math.round(maxPossibleAverage * 100) / 100}`
+                  });
+                  
+                  continue; // Skip to next goal
+                }
+                
+                shouldUpdate = true;
+              }
+            } else {
+              // Simple/Legacy: Cumulative - not a true average
+              // This adds point differential to a running total (deprecated approach)
+              newCurrentValue = goal.currentValue + pointDifferential;
+              shouldUpdate = true;
+              console.log('🏆 Updating Average Margin goal (Simple/Legacy):', goal.currentValue, '→', newCurrentValue);
+            }
             break;
             
           case 'Streaks':
@@ -1126,9 +1781,14 @@ export const goalService = {
         }
         
         if (shouldUpdate) {
-          const updateSuccess = await this.updateGoalProgress(goal.id, newCurrentValue);
-          if (updateSuccess) {
+          const result = await this.updateGoalProgress(goal.id, newCurrentValue);
+          if (result.success) {
             console.log('✅ Goal successfully updated:', goal.title, 'to', newCurrentValue);
+            
+            if (result.justCompleted && result.goalData) {
+              console.log('🎉 GOAL JUST COMPLETED!', result.goalData);
+              completedGoals.push(result.goalData);
+            }
           } else {
             console.log('❌ Failed to update goal:', goal.title);
           }
@@ -1137,6 +1797,8 @@ export const goalService = {
     } catch (error) {
       console.error('Error updating goals after match:', error);
     }
+    
+    return { completedGoals, failedGoals };
   },
 };
 
@@ -1589,4 +2251,731 @@ export const matchPeriodService = {
   },
 
   // Note: Removed duplicate calculateScoreProgression function that was causing score inconsistencies
+};
+
+// ============================================
+// WEEKLY TARGETS & SESSION LOGGING
+// ============================================
+
+// Types for Weekly Targets
+export interface WeeklyTarget {
+  target_id: string;
+  user_id: string;
+  activity_type: string;
+  week_start_date: string; // ISO date string
+  week_end_date: string;
+  target_sessions: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeeklySessionLog {
+  session_id: string;
+  user_id: string;
+  activity_type: string;
+  session_date: string; // ISO date string
+  duration_minutes?: number;
+  notes?: string;
+  created_at: string;
+}
+
+export interface WeeklyProgress {
+  activity_type: string;
+  target_sessions: number;
+  completed_sessions: number;
+  week_start_date: string;
+  week_end_date: string;
+  days_left: number;
+  completion_rate: number; // 0-100
+}
+
+// Weekly Target Service
+export const weeklyTargetService = {
+  
+  // Create or update a weekly target
+  async setWeeklyTarget(
+    userId: string,
+    activityType: string,
+    weekStartDate: Date,
+    weekEndDate: Date,
+    targetSessions: number
+  ): Promise<WeeklyTarget | null> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .upsert({
+          user_id: userId,
+          activity_type: activityType,
+          week_start_date: weekStartDate.toISOString().split('T')[0],
+          week_end_date: weekEndDate.toISOString().split('T')[0],
+          target_sessions: targetSessions,
+          status: 'active', // Set as active target
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,activity_type,week_start_date'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error setting weekly target:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in setWeeklyTarget:', error);
+      return null;
+    }
+  },
+
+  // Get target for a specific week
+  async getWeeklyTarget(
+    userId: string,
+    activityType: string,
+    weekStartDate: Date
+  ): Promise<WeeklyTarget | null> {
+    try {
+      const dateString = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getDate()).padStart(2, '0')}`;
+      
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('week_start_date', dateString)
+        .eq('status', 'active') // Only get active targets
+        .single();
+      
+      console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          console.log('🔍 No active target found for this week');
+          return null; // No rows found
+        }
+        console.error('Error getting weekly target:', error);
+        return null;
+      }
+
+      console.log('🔍 Found active target:', data);
+      return data;
+    } catch (error) {
+      console.error('Error in getWeeklyTarget:', error);
+      return null;
+    }
+  },
+
+  // Delete a weekly target
+  async deleteWeeklyTarget(targetId: string): Promise<boolean> {
+    try {
+      // First, get the target details to create history record
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for deletion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Check if there are any history records that reference this target
+      const { data: existingHistory } = await supabase
+        .from('weekly_completion_history')
+        .select('id')
+        .eq('original_target_id', targetId);
+
+      // Only delete history records if they exist
+      if (existingHistory && existingHistory.length > 0) {
+        const { error: deleteHistoryError } = await supabase
+          .from('weekly_completion_history')
+          .delete()
+          .eq('original_target_id', targetId);
+
+        if (deleteHistoryError) {
+          console.error('Error deleting existing history records:', deleteHistoryError);
+        } else {
+          console.log('✅ Existing history records deleted');
+        }
+      } else {
+        console.log('ℹ️ No existing history records to delete (this is normal for new targets)');
+      }
+
+      // Create history record for deleted target
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'abandoned', // Mark as abandoned since user manually deleted
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating deletion history:', historyError);
+        // Continue with deletion even if history creation fails
+      }
+
+      // Clear session logs for the deleted target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for deleted target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+      }
+
+      // Now delete the target
+      const { error } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('target_id', targetId);
+
+      if (error) {
+        console.error('Error deleting weekly target:', error);
+        return false;
+      }
+
+      console.log('✅ Target deleted and history record created');
+      return true;
+    } catch (error) {
+      console.error('Error in deleteWeeklyTarget:', error);
+      return false;
+    }
+  },
+
+  // Get all targets for a specific activity
+  async getAllTargetsForActivity(userId: string, activityType: string): Promise<WeeklyTarget[]> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('status', 'active') // Only get active targets
+        .order('week_start_date', { ascending: true });
+
+      if (error) {
+        console.error('Error getting all targets for activity:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getAllTargetsForActivity:', error);
+      return [];
+    }
+  },
+
+  // Mark a target as complete and create history record
+  async markTargetComplete(targetId: string): Promise<boolean> {
+    try {
+      // First, get the target details
+      const { data: target, error: fetchError } = await supabase
+        .from('weekly_target')
+        .select('*')
+        .eq('target_id', targetId)
+        .single();
+
+      if (fetchError || !target) {
+        console.error('Error fetching target for completion:', fetchError);
+        return false;
+      }
+
+      // Get completed sessions count before clearing them
+      const { data: sessions } = await supabase
+        .from('weekly_session_log')
+        .select('session_id')
+        .eq('user_id', target.user_id)
+        .eq('activity_type', target.activity_type)
+        .gte('session_date', target.week_start_date)
+        .lte('session_date', target.week_end_date);
+
+      const completedSessions = sessions?.length || 0;
+      const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
+
+      // Clear the session logs for the completed target
+      if (sessions && sessions.length > 0) {
+        console.log('🗑️ Clearing', sessions.length, 'session logs for completed target');
+        for (const session of sessions) {
+          await supabase
+            .from('weekly_session_log')
+            .delete()
+            .eq('session_id', session.session_id);
+        }
+        console.log('✅ Session logs cleared for completed target');
+      }
+
+      // Create history record (without foreign key reference)
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .insert({
+          user_id: target.user_id,
+          activity_type: target.activity_type,
+          week_start_date: target.week_start_date,
+          week_end_date: target.week_end_date,
+          target_sessions: target.target_sessions,
+          completed_sessions: completedSessions,
+          completion_rate: completionRate,
+          status: 'completed',
+          completion_date: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error creating completion history:', historyError);
+        return false;
+      }
+
+      // Delete the target completely after creating history record
+      const { error: deleteError } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('target_id', targetId);
+
+      if (deleteError) {
+        console.error('Error deleting completed target:', deleteError);
+        return false;
+      }
+
+      console.log('✅ Target deleted and history record created');
+      return true;
+    } catch (error) {
+      console.error('Error in markTargetComplete:', error);
+      return false;
+    }
+  }
+};
+
+// Weekly Session Log Service
+export const weeklySessionLogService = {
+  
+  // Log a new session
+  async logSession(
+    userId: string,
+    activityType: string,
+    sessionDate?: Date,
+    durationMinutes?: number,
+    notes?: string
+  ): Promise<WeeklySessionLog | null> {
+    try {
+      const { data, error } = await supabase
+        .from('weekly_session_log')
+        .insert({
+          user_id: userId,
+          activity_type: activityType,
+          session_date: sessionDate 
+            ? sessionDate.toISOString().split('T')[0] 
+            : new Date().toISOString().split('T')[0],
+          duration_minutes: durationMinutes,
+          notes: notes
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error logging session:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in logSession:', error);
+      return null;
+    }
+  },
+
+  // Delete a session
+  async deleteSession(sessionId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('weekly_session_log')
+        .delete()
+        .eq('session_id', sessionId);
+
+      if (error) {
+        console.error('Error deleting session:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error in deleteSession:', error);
+      return false;
+    }
+  },
+
+  // Get sessions for a specific week
+  async getSessionsForWeek(
+    userId: string,
+    weekStartDate: Date,
+    weekEndDate: Date,
+    activityType?: string
+  ): Promise<WeeklySessionLog[]> {
+    try {
+      let query = supabase
+        .from('weekly_session_log')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('session_date', weekStartDate.toISOString().split('T')[0])
+        .lte('session_date', weekEndDate.toISOString().split('T')[0])
+        .order('session_date', { ascending: false });
+
+      if (activityType) {
+        query = query.eq('activity_type', activityType);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error getting sessions for week:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getSessionsForWeek:', error);
+      return [];
+    }
+  }
+};
+
+// Weekly Progress Service
+export const weeklyProgressService = {
+  
+  // Get current week progress
+  async getCurrentWeekProgress(
+    userId: string,
+    activityType: string
+  ): Promise<WeeklyProgress | null> {
+    try {
+      // Calculate current week boundaries (Monday to Sunday) in local time
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Local date only
+      
+      const dayOfWeek = today.getDay();
+      const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() + daysToMonday);
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      console.log('📅 Week calculation:', {
+        today: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+        dayOfWeek,
+        daysToMonday,
+        weekStart: `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`,
+        weekEnd: `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`
+      });
+
+      // Get target
+      const target = await weeklyTargetService.getWeeklyTarget(
+        userId,
+        activityType,
+        weekStart
+      );
+      
+      console.log('🎯 Target fetched:', target);
+
+      // Get completed sessions
+      const sessions = await weeklySessionLogService.getSessionsForWeek(
+        userId,
+        weekStart,
+        weekEnd,
+        activityType
+      );
+
+      // Calculate days left
+      const daysLeft = Math.floor(
+        (weekEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Calculate completion rate
+      const targetSessions = target?.target_sessions || 0;
+      const completedSessions = sessions.length;
+      const completionRate = targetSessions > 0 
+        ? Math.round((completedSessions / targetSessions) * 100) 
+        : 0;
+
+      return {
+        activity_type: activityType,
+        target_sessions: targetSessions,
+        completed_sessions: completedSessions,
+        week_start_date: `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`,
+        week_end_date: `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`,
+        days_left: Math.max(0, daysLeft),
+        completion_rate: Math.min(100, completionRate)
+      };
+    } catch (error) {
+      console.error('Error in getCurrentWeekProgress:', error);
+      return null;
+    }
+  }
+};
+
+// ============================================
+// PRIORITY ROUND ANALYTICS SERVICE
+// ============================================
+
+export const priorityAnalyticsService = {
+  // Get priority stats for a user
+  async getPriorityStats(userId: string) {
+    try {
+      // Get all match periods with priority data for the user
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, fencer_1_name, fencer_2_name, event_date)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          totalPriorityRounds: 0,
+          priorityWins: 0,
+          priorityLosses: 0,
+          priorityWinRate: 0
+        };
+      }
+
+      // Get priority winners from match events
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents, error: winnerError } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      if (winnerError) throw winnerError;
+
+      // Calculate stats
+      const totalPriorityRounds = data.length;
+      const priorityWins = data.filter(mp => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        return winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+      }).length;
+      
+      const priorityLosses = totalPriorityRounds - priorityWins;
+      const priorityWinRate = totalPriorityRounds > 0 ? (priorityWins / totalPriorityRounds) * 100 : 0;
+
+      return {
+        totalPriorityRounds,
+        priorityWins,
+        priorityLosses,
+        priorityWinRate: Math.round(priorityWinRate * 100) / 100
+      };
+    } catch (error) {
+      console.error('Error getting priority stats:', error);
+      return {
+        totalPriorityRounds: 0,
+        priorityWins: 0,
+        priorityLosses: 0,
+        priorityWinRate: 0
+      };
+    }
+  },
+
+  // Get priority performance over time
+  async getPriorityPerformanceOverTime(userId: string, days: number = 30) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .gte('match.event_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      // Group by date and calculate stats
+      const dailyStats: { [key: string]: { priorityRounds: number; priorityWins: number } } = {};
+      data.forEach((mp: any) => {
+        const date = mp.match.event_date;
+        if (!dailyStats[date]) {
+          dailyStats[date] = { priorityRounds: 0, priorityWins: 0 };
+        }
+        dailyStats[date].priorityRounds++;
+        
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        if (winnerEvent && winnerEvent.scoring_user_name === mp.priority_to) {
+          dailyStats[date].priorityWins++;
+        }
+      });
+
+      return Object.entries(dailyStats).map(([date, stats]) => ({
+        date,
+        priorityRounds: stats.priorityRounds,
+        priorityWins: stats.priorityWins,
+        priorityLosses: stats.priorityRounds - stats.priorityWins,
+        priorityWinRate: Math.round((stats.priorityWins / stats.priorityRounds) * 100 * 100) / 100
+      }));
+    } catch (error) {
+      console.error('Error getting priority performance over time:', error);
+      return [];
+    }
+  },
+
+  // Get priority duration stats
+  async getPriorityDurationStats(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('match_event')
+        .select(`
+          match_id,
+          event_time,
+          match!inner(user_id)
+        `)
+        .eq('match.user_id', userId)
+        .in('event_type', ['priority_round_start', 'priority_round_end'])
+        .order('event_time', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      // Calculate durations by pairing start/end events
+      const durations = [];
+      for (let i = 0; i < data.length - 1; i += 2) {
+        const start = new Date(data[i].event_time);
+        const end = new Date(data[i + 1].event_time);
+        const duration = Math.floor((end.getTime() - start.getTime()) / 1000);
+        durations.push(duration);
+      }
+
+      if (durations.length === 0) {
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      const avgDuration = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+      const minDuration = Math.min(...durations);
+      const maxDuration = Math.max(...durations);
+
+      return {
+        avgDurationSeconds: Math.round(avgDuration),
+        minDurationSeconds: minDuration,
+        maxDurationSeconds: maxDuration,
+        totalPriorityRounds: durations.length
+      };
+    } catch (error) {
+      console.error('Error getting priority duration stats:', error);
+      return {
+        avgDurationSeconds: 0,
+        minDurationSeconds: 0,
+        maxDurationSeconds: 0,
+        totalPriorityRounds: 0
+      };
+    }
+  },
+
+  // Get recent priority rounds
+  async getRecentPriorityRounds(userId: string, limit: number = 10) {
+    try {
+      const { data, error } = await supabase
+        .from('match_period')
+        .select(`
+          match_id,
+          priority_assigned,
+          priority_to,
+          match!inner(user_id, event_date, fencer_1_name, fencer_2_name, result)
+        `)
+        .eq('match.user_id', userId)
+        .not('priority_assigned', 'is', null)
+        .eq('match.is_complete', true)
+        .order('match.event_date', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get priority winners
+      const matchIds = data.map(mp => mp.match_id);
+      const { data: winnerEvents } = await supabase
+        .from('match_event')
+        .select('match_id, scoring_user_name, event_time')
+        .in('match_id', matchIds)
+        .eq('event_type', 'priority_winner');
+
+      return data.map((mp: any) => {
+        const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
+        const priorityWon = winnerEvent && winnerEvent.scoring_user_name === mp.priority_to;
+        
+        return {
+          matchId: mp.match_id,
+          eventDate: mp.match.event_date,
+          fencer1Name: mp.match.fencer_1_name,
+          fencer2Name: mp.match.fencer_2_name,
+          priorityFencer: mp.priority_to,
+          priorityWinner: winnerEvent?.scoring_user_name || null,
+          priorityWon,
+          result: mp.match.result
+        };
+      });
+    } catch (error) {
+      console.error('Error getting recent priority rounds:', error);
+      return [];
+    }
+  }
 };

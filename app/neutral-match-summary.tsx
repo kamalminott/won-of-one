@@ -1,3 +1,4 @@
+import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, TimeLeadingCard } from '@/components';
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
@@ -31,6 +32,20 @@ export default function NeutralMatchSummary() {
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }>({ userData: [], opponentData: [] });
+  const [leadChanges, setLeadChanges] = useState<number>(0);
+  const [timeLeading, setTimeLeading] = useState<{
+    fencer1: number;
+    fencer2: number;
+    tied: number;
+  }>({ fencer1: 0, fencer2: 0, tied: 100 });
+  const [bounceBackTimes, setBounceBackTimes] = useState<{
+    fencer1: number;
+    fencer2: number;
+  }>({ fencer1: 0, fencer2: 0 });
+  const [longestRuns, setLongestRuns] = useState<{
+    fencer1: number;
+    fencer2: number;
+  }>({ fencer1: 0, fencer2: 0 });
 
   // Extract match data from params
   const {
@@ -43,6 +58,303 @@ export default function NeutralMatchSummary() {
     fencer1Name,
     fencer2Name,
   } = params;
+
+  // Function to calculate longest runs from match events
+  const calculateLongestRuns = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for longest runs:', error);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      let fencer1CurrentRun = 0;
+      let fencer2CurrentRun = 0;
+      let fencer1LongestRun = 0;
+      let fencer2LongestRun = 0;
+
+      // Process events chronologically to find consecutive scoring streaks
+      for (const event of matchEvents) {
+        if (event.scoring_user_name === fencer1Name) {
+          // Fencer 1 scored - increment their run, reset fencer 2's run
+          fencer1CurrentRun++;
+          fencer2CurrentRun = 0;
+          
+          // Update longest run if current run is longer
+          if (fencer1CurrentRun > fencer1LongestRun) {
+            fencer1LongestRun = fencer1CurrentRun;
+          }
+        } else if (event.scoring_user_name === fencer2Name) {
+          // Fencer 2 scored - increment their run, reset fencer 1's run
+          fencer2CurrentRun++;
+          fencer1CurrentRun = 0;
+          
+          // Update longest run if current run is longer
+          if (fencer2CurrentRun > fencer2LongestRun) {
+            fencer2LongestRun = fencer2CurrentRun;
+          }
+        }
+      }
+
+      console.log('📊 Calculated longest runs:', {
+        fencer1: fencer1LongestRun,
+        fencer2: fencer2LongestRun,
+        totalEvents: matchEvents.length
+      });
+
+      return {
+        fencer1: fencer1LongestRun,
+        fencer2: fencer2LongestRun
+      };
+    } catch (error) {
+      console.error('Error calculating longest runs:', error);
+      return { fencer1: 0, fencer2: 0 };
+    }
+  };
+
+  // Function to calculate bounce back times from match events
+  const calculateBounceBackTimes = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for bounce back times:', error);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      if (!matchEvents || matchEvents.length < 2) {
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      const fencer1BounceBackTimes: number[] = [];
+      const fencer2BounceBackTimes: number[] = [];
+
+      // Track the last time each fencer was scored against
+      let lastFencer1ScoredAgainst: number | null = null;
+      let lastFencer2ScoredAgainst: number | null = null;
+
+      // Process events chronologically
+      for (const event of matchEvents) {
+        const currentTime = event.match_time_elapsed || 0;
+
+        if (event.scoring_user_name === fencer1Name) {
+          // Fencer 1 scored - check if fencer 2 was scored against recently
+          if (lastFencer2ScoredAgainst !== null) {
+            const bounceBackTime = currentTime - lastFencer2ScoredAgainst;
+            fencer2BounceBackTimes.push(bounceBackTime);
+          }
+          lastFencer2ScoredAgainst = currentTime;
+        } else if (event.scoring_user_name === fencer2Name) {
+          // Fencer 2 scored - check if fencer 1 was scored against recently
+          if (lastFencer1ScoredAgainst !== null) {
+            const bounceBackTime = currentTime - lastFencer1ScoredAgainst;
+            fencer1BounceBackTimes.push(bounceBackTime);
+          }
+          lastFencer1ScoredAgainst = currentTime;
+        }
+      }
+
+      // Calculate average bounce back times
+      const fencer1AvgBounceBack = fencer1BounceBackTimes.length > 0 
+        ? Math.round(fencer1BounceBackTimes.reduce((sum, time) => sum + time, 0) / fencer1BounceBackTimes.length)
+        : 0;
+      
+      const fencer2AvgBounceBack = fencer2BounceBackTimes.length > 0 
+        ? Math.round(fencer2BounceBackTimes.reduce((sum, time) => sum + time, 0) / fencer2BounceBackTimes.length)
+        : 0;
+
+      console.log('📊 Calculated bounce back times:', {
+        fencer1: fencer1AvgBounceBack,
+        fencer2: fencer2AvgBounceBack,
+        fencer1BounceBackTimes,
+        fencer2BounceBackTimes
+      });
+
+      return {
+        fencer1: fencer1AvgBounceBack,
+        fencer2: fencer2AvgBounceBack
+      };
+    } catch (error) {
+      console.error('Error calculating bounce back times:', error);
+      return { fencer1: 0, fencer2: 0 };
+    }
+  };
+
+  // Function to calculate time leading percentages from match events
+  const calculateTimeLeading = async (matchId: string) => {
+    try {
+      console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
+      console.log('🔍 TIME LEADING DEBUG - Fencer names:', { fencer1Name, fencer2Name });
+      
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for time leading:', error);
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
+      if (matchEvents && matchEvents.length > 0) {
+        console.log('🔍 TIME LEADING DEBUG - Sample events:', matchEvents.slice(0, 3));
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        console.log('🔍 TIME LEADING DEBUG - No events found, returning default values');
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      let aliceScore = 0;
+      let bobScore = 0;
+      let fencer1LeadingTime = 0;
+      let fencer2LeadingTime = 0;
+      let tiedTime = 0;
+      let lastTime = 0;
+
+      // Process each scoring event chronologically
+      for (let i = 0; i < matchEvents.length; i++) {
+        const event = matchEvents[i];
+        const currentTime = event.match_time_elapsed || 0;
+        
+        // Calculate time leading BEFORE this event (based on current scores)
+        const timeDiff = currentTime - lastTime;
+        
+        console.log(`🔍 TIME LEADING DEBUG - Event ${i}: scorer="${event.scoring_user_name}", time=${currentTime}`);
+        console.log(`🔍 TIME LEADING DEBUG - Before event: aliceScore=${aliceScore}, bobScore=${bobScore}, timeDiff=${timeDiff}`);
+        
+        // Determine who was leading during this time period (BEFORE the event)
+        if (aliceScore > bobScore) {
+          fencer1LeadingTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer1 was leading for ${timeDiff}s`);
+        } else if (bobScore > aliceScore) {
+          fencer2LeadingTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer2 was leading for ${timeDiff}s`);
+        } else {
+          tiedTime += timeDiff;
+          console.log(`🔍 TIME LEADING DEBUG - Tied for ${timeDiff}s`);
+        }
+
+        // Update scores AFTER calculating time leading
+        if (event.scoring_user_name === fencer1Name) {
+          aliceScore++;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer1 scored! New aliceScore: ${aliceScore}`);
+        } else if (event.scoring_user_name === fencer2Name) {
+          bobScore++;
+          console.log(`🔍 TIME LEADING DEBUG - Fencer2 scored! New bobScore: ${bobScore}`);
+        } else {
+          console.log(`🔍 TIME LEADING DEBUG - Unknown scorer: ${event.scoring_user_name}`);
+        }
+
+        lastTime = currentTime;
+      }
+
+      // Handle time from last event to actual match end (not remaining time)
+      // The match ended at the last event time, so no additional time should be added
+      console.log(`🔍 TIME LEADING DEBUG - Final calculation: match ended at ${lastTime}s, aliceScore=${aliceScore}, bobScore=${bobScore}`);
+      console.log(`🔍 TIME LEADING DEBUG - No additional time added - match ended at last event`);
+
+      // Calculate percentages
+      const totalTime = fencer1LeadingTime + fencer2LeadingTime + tiedTime;
+      const fencer1Percentage = totalTime > 0 ? Math.round((fencer1LeadingTime / totalTime) * 100) : 0;
+      const fencer2Percentage = totalTime > 0 ? Math.round((fencer2LeadingTime / totalTime) * 100) : 0;
+      const tiedPercentage = 100 - fencer1Percentage - fencer2Percentage;
+
+      console.log('📊 Calculated time leading:', {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage,
+        totalTime,
+        fencer1LeadingTime,
+        fencer2LeadingTime,
+        tiedTime,
+        finalAliceScore: aliceScore,
+        finalBobScore: bobScore
+      });
+
+      return {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage
+      };
+    } catch (error) {
+      console.error('Error calculating time leading:', error);
+      return { fencer1: 0, fencer2: 0, tied: 100 };
+    }
+  };
+
+  // Function to calculate lead changes from match events
+  const calculateLeadChanges = async (matchId: string) => {
+    try {
+      const { data: matchEvents, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, match_time_elapsed')
+        .eq('match_id', matchId)
+        .order('match_time_elapsed', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for lead changes:', error);
+        return 0;
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
+        return 0;
+      }
+
+      let leadChanges = 0;
+      let currentLeader: string | null = null;
+      let aliceScore = 0;
+      let bobScore = 0;
+
+      // Process each scoring event chronologically
+      for (const event of matchEvents) {
+        if (event.scoring_user_name === fencer1Name) {
+          aliceScore++;
+        } else if (event.scoring_user_name === fencer2Name) {
+          bobScore++;
+        }
+
+        // Check if lead has changed
+        let newLeader: string | null = null;
+        if (aliceScore > bobScore) {
+          newLeader = fencer1Name as string;
+        } else if (bobScore > aliceScore) {
+          newLeader = fencer2Name as string;
+        } else {
+          newLeader = null; // Tied
+        }
+
+        // If leader changed (and we're not at 0-0), count as lead change
+        if (newLeader !== currentLeader && (aliceScore > 0 || bobScore > 0)) {
+          if (currentLeader !== null) { // Don't count the first score as a lead change
+            leadChanges++;
+          }
+          currentLeader = newLeader;
+        }
+      }
+
+      console.log('📊 Calculated lead changes:', leadChanges);
+      return leadChanges;
+    } catch (error) {
+      console.error('Error calculating lead changes:', error);
+      return 0;
+    }
+  };
 
   useEffect(() => {
     const loadMatchData = async () => {
@@ -74,18 +386,32 @@ export default function NeutralMatchSummary() {
                 period3: { user: 0, opponent: 0 }
               };
 
-              // Fill in actual period scores
-              matchPeriods.forEach(period => {
+              // Sort periods by period_number to ensure correct order
+              const sortedPeriods = matchPeriods.sort((a, b) => (a.period_number || 0) - (b.period_number || 0));
+              
+              // Fill in actual period scores (touches scored PER period, not cumulative)
+              sortedPeriods.forEach((period, index) => {
                 const periodNum = period.period_number || 1;
+                const currentFencer1Score = period.fencer_1_score || 0;
+                const currentFencer2Score = period.fencer_2_score || 0;
+                
+                // Get previous period's cumulative scores (0 if first period)
+                const previousFencer1Score = index > 0 ? (sortedPeriods[index - 1].fencer_1_score || 0) : 0;
+                const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
+                
+                // Calculate touches scored DURING this period
+                const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
+                const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+                
                 if (periodNum === 1) {
-                  touchesByPeriodData.period1.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period1.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod;
                 } else if (periodNum === 2) {
-                  touchesByPeriodData.period2.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period2.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod;
                 } else if (periodNum === 3) {
-                  touchesByPeriodData.period3.user = period.fencer_1_score || 0;
-                  touchesByPeriodData.period3.opponent = period.fencer_2_score || 0;
+                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod;
+                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod;
                 }
               });
 
@@ -209,6 +535,27 @@ export default function NeutralMatchSummary() {
             setTouchesByPeriod(touchesByPeriodData);
           }
         }
+
+        // Calculate lead changes, time leading, bounce back times, and longest runs
+        if (matchId) {
+          try {
+            const calculatedLeadChanges = await calculateLeadChanges(matchId as string);
+            setLeadChanges(calculatedLeadChanges);
+            
+            const calculatedTimeLeading = await calculateTimeLeading(matchId as string);
+            console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
+            setTimeLeading(calculatedTimeLeading);
+            
+            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string);
+            setBounceBackTimes(calculatedBounceBackTimes);
+            
+            const calculatedLongestRuns = await calculateLongestRuns(matchId as string);
+            setLongestRuns(calculatedLongestRuns);
+          } catch (error) {
+            console.error('Error calculating match statistics:', error);
+          }
+        }
+
         setLoading(false);
       } catch (error) {
         console.error('Error loading match data:', error);
@@ -234,6 +581,34 @@ export default function NeutralMatchSummary() {
     });
   };
 
+  // Helper function to get initials from a name
+  const getInitials = (name: string | undefined): string => {
+    if (!name || name.trim() === '') {
+      return '?';
+    }
+    
+    const trimmedName = name.trim();
+    const words = trimmedName.split(' ').filter(word => word.length > 0);
+    
+    if (words.length === 0) {
+      return '?';
+    } else if (words.length === 1) {
+      return words[0].charAt(0).toUpperCase();
+    } else {
+      return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+    }
+  };
+
+  // Debug logging
+  console.log('🔍 TIME LEADING DEBUG - Component render with timeLeading state:', timeLeading);
+  console.log('🔍 TIME LEADING DEBUG - Fencer names from params:', { fencer1Name, fencer2Name });
+  
+  // Temporary test values to verify UI is working
+  const testTimeLeading = {
+    fencer1: 45,
+    fencer2: 35,
+    tied: 20
+  };
 
   if (loading) {
     return (
@@ -254,8 +629,12 @@ export default function NeutralMatchSummary() {
   const aliceCardsData = aliceCards ? JSON.parse(aliceCards as string) : { yellow: 0, red: 0 };
   const bobCardsData = bobCards ? JSON.parse(bobCards as string) : { yellow: 0, red: 0 };
 
+  // Extract first names only
+  const fencer1FirstName = (fencer1Name as string).split(' ')[0];
+  const fencer2FirstName = (fencer2Name as string).split(' ')[0];
+
   // Calculate winner
-  const winner = aliceScoreNum > bobScoreNum ? fencer1Name : bobScoreNum > aliceScoreNum ? fencer2Name : 'Tied';
+  const winner = aliceScoreNum > bobScoreNum ? fencer1FirstName : bobScoreNum > aliceScoreNum ? fencer2FirstName : 'Tied';
   const scoreDiff = Math.abs(aliceScoreNum - bobScoreNum);
 
   return (
@@ -285,7 +664,7 @@ export default function NeutralMatchSummary() {
         <View style={styles.resultCardContainer}>
           {/* Win Badge */}
           <View style={styles.winBadge}>
-            <Text style={styles.winText}>Result</Text>
+            <Text style={styles.winText}>Results</Text>
           </View>
           
           {/* Card with Gradient Border */}
@@ -299,22 +678,48 @@ export default function NeutralMatchSummary() {
               <View style={styles.resultCard}>
                 {/* Left Player */}
                 <View style={styles.leftPlayerContainer}>
-                  <View style={styles.playerAvatar} />
-                  <Text style={styles.playerName}>{fencer1Name}</Text>
+                  <View style={styles.playerAvatar}>
+                    <Text style={styles.playerInitials}>{getInitials(fencer1Name as string)}</Text>
+                  </View>
+                  <Text 
+                    style={styles.playerName}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {fencer1FirstName}
+                  </Text>
                 </View>
 
                 {/* Right Player */}
                 <View style={styles.rightPlayerContainer}>
-                  <View style={styles.playerAvatar} />
-                  <Text style={styles.playerName}>{fencer2Name}</Text>
+                  <View style={styles.playerAvatar}>
+                    <Text style={styles.playerInitials}>{getInitials(fencer2Name as string)}</Text>
+                  </View>
+                  <Text 
+                    style={styles.playerName}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {fencer2FirstName}
+                  </Text>
                 </View>
 
                 {/* Score Container */}
                 <View style={styles.scoreContainer}>
                   <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
                   <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
-                  <View style={styles.matchTypeBadge}>
-                    <Text style={styles.matchTypeText}>Training</Text>
+                  <View style={styles.trophyPill}>
+                    <Ionicons name="trophy-outline" size={16} color="#FFFFFF" />
+                    <Text 
+                      style={styles.trophyPillText}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {aliceScoreNum > bobScoreNum 
+                        ? `${fencer1FirstName} win by ${aliceScoreNum - bobScoreNum} point${aliceScoreNum - bobScoreNum !== 1 ? 's' : ''}`
+                        : `${fencer2FirstName} win by ${bobScoreNum - aliceScoreNum} point${bobScoreNum - aliceScoreNum !== 1 ? 's' : ''}`
+                      }
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -387,83 +792,31 @@ export default function NeutralMatchSummary() {
         {/* Two Column Layout for Lead Changes and Time Leading */}
         <View style={styles.twoColumnContainer}>
           {/* Lead Changes Card */}
-          <View style={styles.statCard}>
-            <Text style={styles.statTitle}>Lead Changes</Text>
-            <View style={styles.statContent}>
-              <View style={styles.statItem}>
-                <View style={styles.statCircle}>
-                  <Text style={styles.statValue}>4</Text>
-                </View>
-                <Text style={styles.statLabel}>Total</Text>
-              </View>
-            </View>
-          </View>
+          <LeadChangesCard leadChanges={leadChanges} />
 
           {/* Time Leading Card */}
-          <View style={styles.statCard}>
-            <Text style={styles.statTitle}>Time Leading</Text>
-            <View style={styles.statContent}>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.statValue}>65%</Text>
-                </View>
-                <Text style={styles.statLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.statValue}>25%</Text>
-                </View>
-                <Text style={styles.statLabel}>{fencer2Name}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <View style={[styles.statCircle, { backgroundColor: 'white' }]}>
-                  <Text style={[styles.statValue, { color: '#171717' }]}>10%</Text>
-                </View>
-                <Text style={styles.statLabel}>Tied</Text>
-              </View>
-            </View>
-          </View>
+          <TimeLeadingCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            timeLeading={timeLeading}
+          />
         </View>
 
         {/* Two Column Layout for Bounce Back and Longest Run */}
         <View style={styles.twoColumnContainer}>
           {/* Bounce Back Time Card */}
-          <View style={styles.bounceBackCard}>
-            <Text style={styles.statTitle}>Bounce Back Time</Text>
-            <View style={styles.bounceBackContent}>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>10s</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>14s</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
-              </View>
-            </View>
-          </View>
+          <BounceBackTimeCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            bounceBackTimes={bounceBackTimes}
+          />
 
           {/* Longest Run Card */}
-          <View style={styles.longestRunCard}>
-            <Text style={styles.statTitle}>Longest Run</Text>
-            <View style={styles.bounceBackContent}>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#FF7675' }]}>
-                  <Text style={styles.bounceBackValue}>3x</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer1Name}</Text>
-              </View>
-              <View style={styles.bounceBackItem}>
-                <View style={[styles.bounceBackCircle, { backgroundColor: '#00B894' }]}>
-                  <Text style={styles.bounceBackValue}>2x</Text>
-                </View>
-                <Text style={styles.bounceBackLabel}>{fencer2Name}</Text>
-              </View>
-            </View>
-          </View>
+          <LongestRunCard 
+            fencer1Name={fencer1Name as string}
+            fencer2Name={fencer2Name as string}
+            longestRuns={longestRuns}
+          />
         </View>
 
         {/* Cards Section */}
@@ -471,8 +824,16 @@ export default function NeutralMatchSummary() {
           <Text style={styles.cardsTitle}>Cards</Text>
           <View style={styles.cardsContent}>
             <View style={styles.cardItem}>
-              <View style={styles.cardAvatar} />
-              <Text style={styles.cardName}>{fencer1Name}</Text>
+              <View style={styles.cardAvatar}>
+                <Text style={styles.cardInitials}>{getInitials(fencer1Name as string)}</Text>
+              </View>
+              <Text 
+                style={styles.cardName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer1FirstName}
+              </Text>
             </View>
             
             <View style={styles.cardsScore}>
@@ -484,10 +845,37 @@ export default function NeutralMatchSummary() {
             </View>
             
             <View style={styles.cardItem}>
-              <Text style={styles.cardName}>{fencer2Name}</Text>
-              <View style={styles.cardAvatar} />
+              <Text 
+                style={styles.cardName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer2FirstName}
+              </Text>
+              <View style={styles.cardAvatar}>
+                <Text style={styles.cardInitials}>{getInitials(fencer2Name as string)}</Text>
+              </View>
             </View>
           </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity 
+            style={styles.startNewMatchButton}
+            onPress={() => router.push('/(tabs)/remote')}
+          >
+            <Ionicons name="add-circle-outline" size={24} color="white" />
+            <Text style={styles.startNewMatchButtonText}>Start New Match</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.backToHomeButton}
+            onPress={() => router.push('/(tabs)')}
+          >
+            <Ionicons name="home-outline" size={24} color="white" />
+            <Text style={styles.backToHomeButtonText}>Back to Home</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -530,7 +918,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 20,
+    fontSize: width * 0.05,
     fontWeight: '700',
     color: 'white',
   },
@@ -551,8 +939,7 @@ const styles = StyleSheet.create({
   winBadge: {
     position: 'absolute',
     top: -10,
-    left: '50%',
-    marginLeft: -37.5,
+    alignSelf: 'center',
     zIndex: 10,
     backgroundColor: '#4D4159',
     borderWidth: 2,
@@ -561,26 +948,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    width: 75,
-    height: 34,
+    paddingHorizontal: width * 0.03,
+    paddingVertical: height * 0.007,
+    minWidth: width * 0.16,
   },
   winIcon: {
     color: 'white',
-    fontSize: 14,
+    fontSize: width * 0.035,
     fontWeight: '600',
-    marginRight: 7,
-    lineHeight: 22,
-    marginTop: -2,
+    marginRight: width * 0.0175,
+    lineHeight: width * 0.055,
+    marginTop: -width * 0.005,
   },
   winText: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '600',
-    lineHeight: 22,
+    lineHeight: width * 0.055,
     color: '#FFFFFF',
-    marginTop: -2,
+    marginTop: -width * 0.005,
   },
   resultCardBorder: {
     width: '92%',
@@ -626,8 +1012,18 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#343434',
+    backgroundColor: '#393939',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
     marginBottom: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playerInitials: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   playerName: {
     position: 'absolute',
@@ -635,61 +1031,66 @@ const styles = StyleSheet.create({
     height: 22,
     left: 0,
     top: 68,
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
   },
   scoreContainer: {
     position: 'absolute',
-    width: 150,
-    height: 95,
+    width: '80%', // Responsive width
+    height: height * 0.12, // Responsive height
     left: '50%',
-    marginLeft: -75,
-    top: 32,
+    marginLeft: '-40%', // Half of 80% to center
+    top: height * 0.04, // Responsive top position
     alignItems: 'center',
   },
   scoreText: {
     position: 'absolute',
-    width: 80,
-    height: 41,
-    left: 35,
+    width: '90%', // Responsive width within container
+    height: height * 0.05, // Responsive height
+    left: '5%', // Center within the 90% width
     top: 0,
-    fontSize: 30,
+    fontSize: width * 0.075,
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
   },
   durationText: {
     position: 'absolute',
-    width: 150,
-    height: 19,
-    left: 0,
-    top: 44,
-    fontSize: 14,
+    width: '80%', // Match the score container width
+    height: height * 0.025, // Responsive height
+    left: '10%', // Center within the 80% width
+    top: height * 0.042, // Moved up further - Responsive top position
+    fontSize: width * 0.035,
     fontWeight: '500',
     color: '#9D9D9D',
     textAlign: 'center',
   },
-  matchTypeBadge: {
-    position: 'absolute',
-    width: 80,
-    height: 24,
-    left: 35,
-    top: 71,
+  trophyPill: {
     backgroundColor: '#625971',
     borderRadius: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: width * 0.01,
+    paddingVertical: height * 0.0,
+    gap: 0,
+    alignSelf: 'center',
+    marginTop: height * 0.066, // Moved up further - Responsive
+    minHeight: height * 0.035,
+    minWidth: width * 0.35,
+    marginHorizontal: 0,
   },
-  matchTypeText: {
-    fontSize: 12,
+  trophyPillText: {
+    fontSize: width * 0.028,
     fontWeight: '500',
-    color: 'white',
+    color: '#FFFFFF',
     textAlign: 'center',
+    fontFamily: 'System',
+    flex: 1,
+    flexWrap: 'wrap',
+    textAlignVertical: 'center',
   },
   twoColumnContainer: {
     flexDirection: 'row',
@@ -710,10 +1111,10 @@ const styles = StyleSheet.create({
   },
   metaTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 28,
+    marginBottom: width * 0.07,
   },
   metaItem: {
     flexDirection: 'row',
@@ -735,14 +1136,14 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 4,
+    marginBottom: width * 0.01,
   },
   metaLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },
@@ -771,10 +1172,10 @@ const styles = StyleSheet.create({
   },
   chartTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 18,
+    fontSize: width * 0.045,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: width * 0.04,
   },
   statCard: {
     flex: 1,
@@ -789,10 +1190,10 @@ const styles = StyleSheet.create({
   },
   statTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: 16,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: width * 0.04,
   },
   statContent: {
     flexDirection: 'row',
@@ -802,9 +1203,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#393939',
     alignItems: 'center',
     justifyContent: 'center',
@@ -812,13 +1213,13 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.04,
     fontWeight: '500',
     color: 'white',
   },
   statLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },
@@ -861,13 +1262,13 @@ const styles = StyleSheet.create({
   },
   bounceBackValue: {
     fontFamily: 'Articulat CF',
-    fontSize: 18,
+    fontSize: width * 0.045,
     fontWeight: '700',
     color: 'white',
   },
   bounceBackLabel: {
     fontFamily: 'Articulat CF',
-    fontSize: 12,
+    fontSize: width * 0.03,
     fontWeight: '400',
     color: 'white',
   },
@@ -901,10 +1302,18 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#343434',
+    backgroundColor: '#393939',
     borderWidth: 1,
     borderColor: 'white',
     marginBottom: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardInitials: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   cardName: {
     fontFamily: 'Articulat CF',
@@ -934,5 +1343,52 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: 'white',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'column', // Changed from 'row' to 'column'
+    gap: height * 0.02, // Changed to height-based gap for vertical spacing
+    paddingHorizontal: width * 0.05,
+    paddingVertical: height * 0.03,
+    paddingBottom: height * 0.05,
+  },
+  startNewMatchButton: {
+    width: '100%', // Changed from flex: 1 to full width
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: height * 0.018,
+    borderRadius: width * 0.03,
+    gap: width * 0.02,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  startNewMatchButtonText: {
+    color: 'white',
+    fontSize: width * 0.04,
+    fontWeight: '600',
+  },
+  backToHomeButton: {
+    width: '100%', // Changed from flex: 1 to full width
+    backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: height * 0.018,
+    borderRadius: width * 0.03,
+    gap: width * 0.02,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  backToHomeButtonText: {
+    color: 'white',
+    fontSize: width * 0.04,
+    fontWeight: '600',
   },
 });

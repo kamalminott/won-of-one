@@ -353,20 +353,18 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         
         // Create user data array aligned with time points - ensure no duplicate Y values
         const userData = sortedTimePoints.map(time => {
-          // Find the last user score at or before this time point
-          const lastUserPoint = chartData.userSeries
-            .filter(p => p.x <= time)
-            .sort((a, b) => b.x - a.x)[0];
-          return lastUserPoint ? lastUserPoint.y : 0;
+          // Find the highest user score at or before this time point
+          const userPointsAtOrBefore = chartData.userSeries.filter(p => p.x <= time);
+          const maxUserScore = userPointsAtOrBefore.length > 0 ? Math.max(...userPointsAtOrBefore.map(p => p.y)) : 0;
+          return maxUserScore;
         });
         
         // Create opponent data array aligned with time points - ensure no duplicate Y values
         const opponentData = sortedTimePoints.map(time => {
-          // Find the last opponent score at or before this time point
-          const lastOppPoint = chartData.oppSeries
-            .filter(p => p.x <= time)
-            .sort((a, b) => b.x - a.x)[0];
-          return lastOppPoint ? lastOppPoint.y : 0;
+          // Find the highest opponent score at or before this time point
+          const oppPointsAtOrBefore = chartData.oppSeries.filter(p => p.x <= time);
+          const maxOppScore = oppPointsAtOrBefore.length > 0 ? Math.max(...oppPointsAtOrBefore.map(p => p.y)) : 0;
+          return maxOppScore;
         });
         
         // Use the original data without padding to prevent extending beyond X-axis
@@ -384,20 +382,22 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log('📊 Opponent Data:', opponentData);
         console.log('📊 User Data length:', userData.length);
         console.log('📊 Opponent Data length:', opponentData.length);
-        console.log('📊 Unique User Y values:', [...new Set(userData)]);
-        console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)]);
+        console.log('📊 Unique User Y values:', [...new Set(userData)].sort((a, b) => a - b));
+        console.log('📊 Unique Opponent Y values:', [...new Set(opponentData)].sort((a, b) => a - b));
+        console.log('📊 User Y values (sorted):', userData);
+        console.log('📊 Opponent Y values (sorted):', opponentData);
         
         const chartData_kit = {
           labels: displayLabels,
           datasets: [
             {
               data: paddedUserData,
-              color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, // Green for user
+              color: (opacity = 1) => `rgba(255, 118, 117, ${opacity})`, // Red for user
               strokeWidth: 3,
             },
             {
               data: paddedOpponentData,
-              color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`, // Red for opponent
+              color: (opacity = 1) => `rgba(0, 184, 148, ${opacity})`, // Green for opponent
               strokeWidth: 3,
             }
           ]
@@ -505,9 +505,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               data={userChartData}
               height={stackedHeights.top}
               width={width * 0.8}
-              color="#10B981"
+              color="#FF7675"
               thickness={3}
-              dataPointsColor="#10B981"
+              dataPointsColor="#FF7675"
               dataPointsRadius={4}
               curved
               showVerticalLines
@@ -522,9 +522,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               data={opponentChartData}
               height={stackedHeights.bottom}
               width={width * 0.8}
-              color="#EF4444"
+              color="#00B894"
               thickness={3}
-              dataPointsColor="#EF4444"
+              dataPointsColor="#00B894"
               dataPointsRadius={4}
               curved
               showVerticalLines
@@ -543,9 +543,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             data={gapChartData}
             height={chartHeight}
             width={width * 0.8}
-            color="#10B981"
+            color="#FF7675"
             thickness={3}
-            dataPointsColor="#10B981"
+            dataPointsColor="#FF7675"
             dataPointsRadius={4}
             curved
             showVerticalLines
@@ -565,9 +565,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             data={userChartData}
             height={chartHeight}
             width={width * 0.8}
-            color="#10B981"
+            color="#FF7675"
             thickness={3}
-            dataPointsColor="#10B981"
+            dataPointsColor="#FF7675"
             dataPointsRadius={4}
             curved
             showVerticalLines
@@ -606,11 +606,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={legendStyle}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
               <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>
@@ -620,7 +620,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>Score Gap ({userLabel} − {opponentLabel})</Text>
             </View>
           </View>
@@ -630,11 +630,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         return (
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
               <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
               <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
             </View>
           </View>

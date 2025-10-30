@@ -3,6 +3,7 @@ import { PlatformPressable } from '@react-navigation/elements';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Entypo from 'react-native-vector-icons/Entypo';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -26,9 +27,13 @@ const iconNames = {
 
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { height, width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.tabBar, { height: height * 0.12 }]}>
+    <View style={[styles.tabBar, { 
+      height: height * 0.08 + insets.bottom,
+      paddingBottom: insets.bottom,
+    }]}>
       {state.routes
         .filter((route) => route.name !== 'diary') // Hide diary tab
         .map((route, index) => {
@@ -85,13 +90,14 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
                   width: width * 0.05, // 20px equivalent
                   height: height * 0.004, // 3px equivalent
                   borderRadius: width * 0.025, // 60px equivalent
+                  top: -height * 0.020, // Dynamic positioning based on screen height
                 }]} />
               )}
               
               {/* Icon */}
               <Component
                 name={name}
-                size={height * 0.025}
+                size={height * 0.023}
                 color={iconColor}
               />
               
@@ -116,7 +122,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: 0,
     paddingTop: 0,
   },
   tabButton: {
@@ -131,12 +136,12 @@ const styles = StyleSheet.create({
   },
   indicator: {
     backgroundColor: '#FF7675',
-    marginBottom: 4,
+    position: 'absolute',
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
-    marginTop: 2,
+    marginTop: 1,
     textAlign: 'center',
   },
 });

@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
     Animated,
     Dimensions,
@@ -14,6 +14,22 @@ import {
     View
 } from 'react-native';
 
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
+
 interface CarouselItem {
   id: string;
   date: string;
@@ -21,6 +37,8 @@ interface CarouselItem {
   youScore: number;
   opponentScore: number;
   opponentName: string;
+  source?: string; // Source of the match: 'manual', 'remote', etc.
+  notes?: string; // Match notes
 }
 
 interface MatchCarouselProps {
@@ -48,6 +66,8 @@ interface MatchCarouselProps {
   userName?: string;
   /** User's profile image */
   userProfileImage?: string | null;
+  /** Whether user has active goals (affects splash screen positioning) */
+  hasActiveGoals?: boolean;
 }
 
 export const MatchCarousel: React.FC<MatchCarouselProps> = ({
@@ -63,11 +83,18 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   customItemRenderer,
   userName,
   userProfileImage,
+  hasActiveGoals = true,
 }) => {
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isLayoutReady, setIsLayoutReady] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
+
+  // Ensure layout is ready before rendering
+  useLayoutEffect(() => {
+    setIsLayoutReady(true);
+  }, [width, height]);
 
   // Limit to maxItems maximum
   const displayItems = items.slice(0, maxItems);
@@ -152,25 +179,53 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
   };
 
   const handleItemPress = (item: CarouselItem) => {
+    console.log('🎯 Carousel item pressed:', { 
+      id: item.id, 
+      source: item.source, 
+      opponentName: item.opponentName 
+    });
+    
     if (onItemPress) {
       onItemPress(item);
     } else {
-      // Default behavior for matches - pass all match data
-      router.push({
-        pathname: '/match-history-details',
-        params: { 
-          matchId: item.id,
-          opponentName: item.opponentName,
-          opponentImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face', // Default opponent image
-          youScore: item.youScore.toString(),
-          opponentScore: item.opponentScore.toString(),
-          matchType: 'Competition', // Default match type for carousel items
-          date: item.date,
-          duration: '02:30', // Default duration
-          location: 'Metro Field House', // Default location
-          isWin: item.isWin.toString() // Pass the win status from carousel data
-        }
-      });
+      // Check if this is a manual match
+      const isManualMatch = item.source === 'manual';
+      console.log('🔍 Is manual match?', isManualMatch, 'Source:', item.source);
+      
+      if (isManualMatch) {
+        // Navigate to manual match summary for manual matches
+        router.push({
+          pathname: '/manual-match-summary',
+          params: {
+            matchId: item.id,
+            yourScore: item.youScore.toString(),
+            opponentScore: item.opponentScore.toString(),
+            opponentName: item.opponentName,
+            matchType: 'Competition', // Default match type for carousel items
+            date: item.date,
+            time: '12:00PM', // Default time
+            isWin: item.isWin.toString(),
+            notes: item.notes || '', // Pass through notes
+          }
+        });
+      } else {
+        // Navigate to regular match details for remote matches
+        router.push({
+          pathname: '/match-history-details',
+          params: { 
+            matchId: item.id,
+            opponentName: item.opponentName,
+            opponentImage: '', // No default image - will use initials fallback
+            youScore: item.youScore.toString(),
+            opponentScore: item.opponentScore.toString(),
+            matchType: 'Competition', // Default match type for carousel items
+            date: item.date,
+            duration: '02:30', // Default duration
+            location: 'Metro Field House', // Default location
+            isWin: item.isWin.toString() // Pass the win status from carousel data
+          }
+        });
+      }
     }
   };
 
@@ -193,7 +248,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.02,
+      marginBottom: height * 0.01,
     },
     headerTitle: {
       fontSize: width * 0.05,
@@ -282,16 +337,17 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       width: width * 0.1,
       height: width * 0.1,
       borderRadius: width * 0.05,
-      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      backgroundColor: '#393939',
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
       borderColor: '#FFFFFF',
     },
     profileInitial: {
-      color: 'white',
+      color: '#FFFFFF',
       fontSize: width * 0.04,
-      fontWeight: '700',
+      fontWeight: '500',
+      textAlign: 'center',
     },
     scoreInfo: {
       alignItems: 'center',
@@ -363,10 +419,10 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       lineHeight: height * 0.02,
       textAlign: 'center',
       position: 'absolute',
-      left: '50%',
+      left: 0,
+      right: 0,
       top: height * 0.06,
-      width: width * 0.25,
-      transform: [{ translateX: -width * 0.125 }],
+      marginHorizontal: 'auto',
     },
     scoreGroup: {
       position: 'absolute',
@@ -448,8 +504,9 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     emptyState: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: height * 0.04,
+      paddingVertical: height * 0.02, // Reduced from 0.04
       paddingHorizontal: width * 0.08,
+      marginTop: hasActiveGoals ? -height * 0.01 : height * 0.02, // Move up when goals exist, down when no goals
     },
     emptyIcon: {
       marginBottom: height * 0.015,
@@ -518,81 +575,87 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       </View>
 
       {/* Carousel */}
-      <View {...panResponder.panHandlers}>
-        <Animated.View
-          style={[
-            styles.carouselContainer,
-            { transform: [{ translateX }] }
-          ]}
-        >
-          {customItemRenderer ? (
-            customItemRenderer(displayItems[currentIndex], currentIndex)
-          ) : (
-            <TouchableOpacity
-              key={displayItems[currentIndex]?.id}
-              style={styles.matchCard}
-              onPress={() => handleItemPress(displayItems[currentIndex])}
-            >
-              {/* Left Profile Container */}
-              <View style={styles.profileContainerLeft}>
-                <View style={styles.profileCircle}>
-                  {userProfileImage ? (
-                    <Image
-                      source={{ uri: userProfileImage }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        borderRadius: width * 0.05,
-                      }}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Text style={styles.profileInitial}>
-                      {userName?.charAt(0)?.toUpperCase() || 'Y'}
-                    </Text>
-                  )}
-                </View>
-                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                  {userName || 'You'}
-                </Text>
-              </View>
-              
-              {/* Right Profile Container */}
-              <View style={styles.profileContainerRight}>
-                <View style={styles.profileCircle}>
-                  <Text style={styles.profileInitial}>
-                    {displayItems[currentIndex]?.opponentName?.charAt(0)?.toUpperCase() || 'O'}
+      {isLayoutReady && (
+        <View {...panResponder.panHandlers}>
+          <Animated.View
+            style={[
+              styles.carouselContainer,
+              { transform: [{ translateX }] }
+            ]}
+          >
+            {customItemRenderer ? (
+              customItemRenderer(displayItems[currentIndex], currentIndex)
+            ) : (
+              <TouchableOpacity
+                key={displayItems[currentIndex]?.id}
+                style={styles.matchCard}
+                onPress={() => handleItemPress(displayItems[currentIndex])}
+              >
+                {/* Left Profile Container */}
+                <View style={styles.profileContainerLeft}>
+                  <View style={styles.profileCircle}>
+                    {userProfileImage && 
+                     userProfileImage !== 'https://via.placeholder.com/60x60' &&
+                     !userProfileImage.includes('example.com') &&
+                     !userProfileImage.includes('placeholder') &&
+                     (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
+                      <Image
+                        source={{ uri: userProfileImage }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: width * 0.05,
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.profileInitial}>
+                        {getInitials(userName)}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                    {userName || 'You'}
                   </Text>
                 </View>
-                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                  {displayItems[currentIndex]?.opponentName}
-                </Text>
-              </View>
-              
-              {/* Score Group with Equal Spacing */}
-              <View style={styles.scoreGroup}>
-                <View style={styles.scoreContainer}>
-                  <View style={styles.scoreDotLeft} />
-                  <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                
+                {/* Right Profile Container */}
+                <View style={styles.profileContainerRight}>
+                  <View style={styles.profileCircle}>
+                    <Text style={styles.profileInitial}>
+                      {getInitials(displayItems[currentIndex]?.opponentName)}
+                    </Text>
+                  </View>
+                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                    {displayItems[currentIndex]?.opponentName}
+                  </Text>
                 </View>
                 
-                <Text style={styles.dash}>-</Text>
-                
-                <View style={styles.scoreContainer}>
-                  <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
-                  <View style={styles.scoreDotRight} />
+                {/* Score Group with Equal Spacing */}
+                <View style={styles.scoreGroup}>
+                  <View style={styles.scoreContainer}>
+                    <View style={styles.scoreDotLeft} />
+                    <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                  </View>
+                  
+                  <Text style={styles.dash}>-</Text>
+                  
+                  <View style={styles.scoreContainer}>
+                    <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
+                    <View style={styles.scoreDotRight} />
+                  </View>
                 </View>
-              </View>
-              
-              {/* Date */}
-              <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-      </View>
+                
+                {/* Date */}
+                <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
+              </TouchableOpacity>
+            )}
+          </Animated.View>
+        </View>
+      )}
 
       {/* Dot Indicators */}
-      {showDots && displayItems.length > 1 && (
+      {showDots && displayItems.length > 1 && isLayoutReady && (
         <View style={styles.dotsContainer}>
           {displayItems.map((_, index) => (
             <View

@@ -33,7 +33,7 @@ export default function MatchDetailsScreen() {
     youScore: parseInt(params.youScore as string) || 5,
     opponentScore: parseInt(params.opponentScore as string) || 3,
     opponentName: params.opponentName as string || 'Alex',
-    opponentImage: params.opponentImage as string || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+    opponentImage: params.opponentImage as string,
     date: params.date as string || 'Today',
     duration: params.duration as string || '02:30',
     matchType: params.matchType as string || 'Training',
@@ -198,9 +198,9 @@ export default function MatchDetailsScreen() {
           {/* Match Summary Card with Gradient Border */}
           <MatchSummaryCardWithBorder
             leftPlayerName={userName || "You"}
-            leftPlayerImage={profileImage || "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face"}
+            leftPlayerImage={profileImage}
             rightPlayerName={matchData.opponentName}
-            rightPlayerImage={matchData.opponentImage || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face"}
+            rightPlayerImage={matchData.opponentImage}
             youScore={matchData.youScore}
             opponentScore={matchData.opponentScore}
             duration={matchData.duration}

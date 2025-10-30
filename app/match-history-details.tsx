@@ -51,7 +51,7 @@ export default function MatchDetailsScreen() {
     youScore: params.youScore ? parseInt(params.youScore as string) : 0,  // Fixed: Check if param exists first
     opponentScore: params.opponentScore ? parseInt(params.opponentScore as string) : 0,  // Fixed: Check if param exists first
     opponentName: params.opponentName as string || 'Alex',
-    opponentImage: params.opponentImage as string || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+    opponentImage: params.opponentImage as string,
     date: params.date as string || 'Today',
     duration: params.duration as string || '02:30',
     matchType: params.matchType as string || 'Training',
@@ -222,10 +222,6 @@ export default function MatchDetailsScreen() {
     router.back();
   };
 
-  const handleEdit = () => {
-    console.log('Edit match details');
-  };
-
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -271,20 +267,6 @@ export default function MatchDetailsScreen() {
       color: 'white',
       flex: 1,
       textAlign: 'center',
-      marginLeft: width * 0.06, // Offset for back button
-    },
-    editButton: {
-      width: width * 0.055,
-      height: width * 0.055,
-      borderRadius: width * 0.0275,
-      backgroundColor: '#343434',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    editButtonText: {
-      color: 'white',
-      fontSize: width * 0.035,
-      fontWeight: '600',
     },
     content: {
       flex: 1,
@@ -349,20 +331,15 @@ export default function MatchDetailsScreen() {
       textTransform: 'capitalize',
     },
     notesContainer: {
-      width: width * 0.92, // 358px equivalent - keeping same width
-      height: height * 0.09, // Further reduced to ~75px equivalent
-      backgroundColor: '#2A2A2A',
-      borderRadius: width * 0.05, // 20px equivalent
-      shadowColor: 'rgba(108, 92, 231, 0.04)',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 1,
-      shadowRadius: 8,
-      elevation: 8, // Android shadow
-      padding: width * 0.08, // 32px equivalent
-      paddingTop: width * 0.03, // Reduced top padding to move text up
-      marginTop: height * 0.015,
-      alignSelf: 'center',
-      justifyContent: 'flex-start', // Changed from 'center' to 'flex-start'
+      width: '100%', // Fit the parent section container
+      minHeight: height * 0.09,
+      backgroundColor: '#1F1F1F',
+      borderRadius: width * 0.03,
+      borderWidth: 1,
+      borderColor: '#3A3A3A',
+      padding: width * 0.04,
+      marginTop: height * 0.01,
+      justifyContent: 'flex-start',
     },
     notesText: {
       fontSize: width * 0.035, // 14px equivalent
@@ -393,9 +370,6 @@ export default function MatchDetailsScreen() {
               <Text style={styles.backButtonText}>←</Text>
             </TouchableOpacity>
             <Text style={styles.title}>Match History Details</Text>
-            <TouchableOpacity onPress={handleEdit} style={styles.editButton}>
-              <Text style={styles.editButtonText}>✏️</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -408,9 +382,9 @@ export default function MatchDetailsScreen() {
           {/* Match Summary Card with Gradient Border */}
           <MatchSummaryCardWithBorder
             leftPlayerName={userName || "You"}
-            leftPlayerImage={profileImage || "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face"}
+            leftPlayerImage={profileImage}
             rightPlayerName={matchData.opponentName}
-            rightPlayerImage={matchData.opponentImage || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face"}
+            rightPlayerImage={matchData.opponentImage}
             youScore={matchData.youScore}
             opponentScore={matchData.opponentScore}
             duration={matchData.duration}

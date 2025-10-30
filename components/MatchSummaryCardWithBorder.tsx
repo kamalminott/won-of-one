@@ -1,6 +1,22 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
 
 interface MatchSummaryCardProps {
   leftPlayerName: string;
@@ -28,6 +44,47 @@ export default function MatchSummaryCardWithBorder({
   style,
 }: MatchSummaryCardProps) {
   const { width, height } = useWindowDimensions();
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isLeftPlayer: boolean = true) => {
+    const initials = getInitials(name);
+    const imageStyle = isLeftPlayer ? styles.leftPlayerImage : styles.rightPlayerImage;
+    const initialsStyle = isLeftPlayer ? styles.leftPlayerInitials : styles.rightPlayerInitials;
+
+    if (isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image
+          source={{ uri: imageUri }}
+          style={imageStyle}
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error.nativeEvent.error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[imageStyle, { backgroundColor: '#393939', justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={initialsStyle}>{initials}</Text>
+      </View>
+    );
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -131,6 +188,12 @@ export default function MatchSummaryCardWithBorder({
       borderWidth: 2,
       borderColor: 'white',
     },
+    leftPlayerInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     leftPlayerName: {
       position: 'absolute',
       width: width * 0.15, // Dynamic width
@@ -157,6 +220,12 @@ export default function MatchSummaryCardWithBorder({
       borderWidth: 2,
       borderColor: 'white',
     },
+    rightPlayerInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     rightPlayerName: {
       position: 'absolute',
       width: width * 0.15, // Dynamic width
@@ -170,18 +239,18 @@ export default function MatchSummaryCardWithBorder({
     },
     scoreContainer: {
       position: 'absolute',
-      width: width * 0.24, // Dynamic width
+      width: width * 0.35, // Increased width for larger scores
       height: height * 0.12, // Dynamic height
       left: '50%', // Center horizontally
-      marginLeft: -(width * 0.24) / 2, // Half of width to center properly
+      marginLeft: -(width * 0.35) / 2, // Half of width to center properly
       top: height * 0.043, // Dynamic top position
       alignItems: 'center',
     },
     score: {
       position: 'absolute',
-      width: width * 0.2, // Dynamic width
+      width: width * 0.3, // Increased width for larger scores
       height: height * 0.051, // Dynamic height
-      left: width * 0.02, // Dynamic left position
+      left: width * 0.025, // Adjusted left position
       top: 0,
       fontSize: width * 0.07, // Dynamic font size
       fontWeight: '600',
@@ -190,7 +259,7 @@ export default function MatchSummaryCardWithBorder({
     },
     duration: {
       position: 'absolute',
-      width: width * 0.24, // Dynamic width
+      width: width * 0.35, // Match the score container width
       height: height * 0.024, // Dynamic height
       left: 0,
       top: height * 0.05, // Dynamic top position
@@ -201,9 +270,9 @@ export default function MatchSummaryCardWithBorder({
     },
     matchTypeBadge: {
       position: 'absolute',
-      width: width * 0.25, // Increased width to accommodate longer text
+      width: width * 0.25, // Match the score container width
       height: height * 0.03, // Dynamic height
-      left: width * 0.015, // Adjusted left position to center better
+      left: width * 0.05, // Center within the score container (35% - 25%) / 2 = 5%
       top: height * 0.08, // Dynamic top position
       backgroundColor: '#625971',
       borderRadius: width * 0.15, // Dynamic border radius
@@ -247,19 +316,13 @@ export default function MatchSummaryCardWithBorder({
           <View style={styles.matchSummaryCard}>
             {/* Left Player */}
             <View style={styles.leftPlayerContainer}>
-              <Image
-                source={{ uri: leftPlayerImage }}
-                style={styles.leftPlayerImage}
-              />
+              {renderProfileImage(leftPlayerImage, leftPlayerName, true)}
               <Text style={styles.leftPlayerName}>{leftPlayerName}</Text>
             </View>
 
             {/* Right Player */}
             <View style={styles.rightPlayerContainer}>
-              <Image
-                source={{ uri: rightPlayerImage }}
-                style={styles.rightPlayerImage}
-              />
+              {renderProfileImage(rightPlayerImage, rightPlayerName, false)}
               <Text style={styles.rightPlayerName}>{rightPlayerName}</Text>
             </View>
 

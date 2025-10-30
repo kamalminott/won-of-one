@@ -1,7 +1,7 @@
-import { SwipeToCompleteButton } from '@/components/SwipeToCompleteButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import useDynamicLayout from '@/hooks/useDynamicLayout';
+import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,16 +15,30 @@ import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, Style
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
+
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const layout = useDynamicLayout();
   const router = useRouter();
   const { user, userName } = useAuth();
   
-  // Responsive breakpoints for small screens
-  const isSmallScreen = width < 400;
-  const isTinyScreen = width < 360;
-  const isNexusS = width <= 360; // Nexus S specific optimization
+  // Responsive breakpoints for small screens - simplified for consistency across devices
   
   const [currentPeriod, setCurrentPeriod] = useState(1);
   const [aliceScore, setAliceScore] = useState(0);
@@ -51,6 +65,7 @@ export default function RemoteScreen() {
     bob: null as string | null,
   });
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [selectedFencer, setSelectedFencer] = useState<'alice' | 'bob' | null>(null);
   const [isCompletingMatch, setIsCompletingMatch] = useState(false);
@@ -180,9 +195,48 @@ export default function RemoteScreen() {
         console.error('Error loading user profile image:', error);
       }
     };
-    
+
     loadUserProfileImage();
   }, []);
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | null | undefined, name: string | undefined, isUser: boolean = false) => {
+    const initials = getInitials(name);
+
+    if (imageUri && isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image 
+          source={{ uri: imageUri }} 
+          style={styles.profileImage}
+          resizeMode="cover"
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error);
+            setImageLoadErrors(prev => new Set(prev).add(imageUri));
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.profileImageContainer, { backgroundColor: '#393939', borderWidth: 1, borderColor: '#FFFFFF' }]}>
+        <Text style={styles.profileInitials}>{initials}</Text>
+      </View>
+    );
+  };
 
   const saveImage = async (key: string, imageUri: string) => {
     try {
@@ -450,6 +504,14 @@ export default function RemoteScreen() {
     setFencerPositions({ alice: 'left', bob: 'right' });
     setShowUserProfile(true);
     
+    // Reset priority states
+    setIsPriorityRound(false);
+    setHasShownPriorityScorePopup(false);
+    setPriorityFencer(null);
+    setPriorityLightPosition(null);
+    setShowPriorityPopup(false);
+    setIsAssigningPriority(false);
+    
     // Reset time tracking
     setMatchStartTime(null);
     setLastEventTime(null);
@@ -527,6 +589,7 @@ export default function RemoteScreen() {
   
   // Match period state
   const [currentMatchPeriod, setCurrentMatchPeriod] = useState<any>(null);
+  const [matchId, setMatchId] = useState<string | null>(null); // Store match ID safely
   
   // Event tracking state
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
@@ -751,6 +814,7 @@ export default function RemoteScreen() {
       if (period) {
         console.log('✅ Match period created successfully:', period);
         setCurrentMatchPeriod(period);
+        setMatchId(period.match_id); // Store match ID safely
         return period;
       } else {
         console.error('❌ Failed to create match period');
@@ -781,10 +845,121 @@ export default function RemoteScreen() {
     }
   };
 
+  // Helper function to track priority winner events
+  const trackPriorityWinner = async (winnerName: string) => {
+    if (!matchId) {
+      console.error('Cannot track priority winner: no match ID');
+      return;
+    }
+
+    try {
+      // Check if priority winner event already exists for this match
+      const { data: existingEvent } = await supabase
+        .from('match_event')
+        .select('event_id')
+        .eq('match_id', matchId)
+        .eq('event_type', 'priority_winner')
+        .single();
+
+      if (existingEvent) {
+        console.log('⚠️ Priority winner event already exists for this match, skipping creation');
+        return;
+      }
+
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_winner',
+        event_time: new Date().toISOString(),
+        scoring_user_name: winnerName,
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority winner event created:', winnerName);
+    } catch (error) {
+      console.error('❌ Error creating priority winner event:', error);
+    }
+  };
+
+  // Helper function to track priority round start
+  const trackPriorityRoundStart = async () => {
+    if (!matchId) {
+      console.error('Cannot track priority round start: no match ID');
+      return;
+    }
+
+    try {
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_round_start',
+        event_time: new Date().toISOString(),
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority round start event created');
+    } catch (error) {
+      console.error('❌ Error creating priority round start event:', error);
+    }
+  };
+
+  // Helper function to track priority round end
+  const trackPriorityRoundEnd = async (winnerName: string) => {
+    if (!matchId) {
+      console.error('Cannot track priority round end: no match ID');
+      return;
+    }
+
+    try {
+      // Check if priority round end event already exists for this match
+      const { data: existingEvent } = await supabase
+        .from('match_event')
+        .select('event_id')
+        .eq('match_id', matchId)
+        .eq('event_type', 'priority_round_end')
+        .single();
+
+      if (existingEvent) {
+        console.log('⚠️ Priority round end event already exists for this match, skipping creation');
+        return;
+      }
+
+      await matchEventService.createMatchEvent({
+        match_id: matchId,
+        event_type: 'priority_round_end',
+        event_time: new Date().toISOString(),
+        scoring_user_name: winnerName,
+        fencer_1_name: fencerNames.alice,
+        fencer_2_name: fencerNames.bob,
+      });
+      
+      console.log('✅ Priority round end event created:', winnerName);
+    } catch (error) {
+      console.error('❌ Error creating priority round end event:', error);
+    }
+  };
+
   // Complete the current match
   const completeMatch = async () => {
     if (!currentMatchPeriod || !remoteSession) {
       console.error('Cannot complete match: missing period or session');
+      return;
+    }
+
+    // If in priority round, the priority score popup already handled completion
+    if (isPriorityRound) {
+      console.log('⚠️ completeMatch called during priority round - this should not happen');
+      console.log('Priority completion should be handled by the priority score popup');
+      return;
+    }
+
+    // Not in priority round, proceed normally
+    proceedWithMatchCompletion();
+  };
+
+  const proceedWithMatchCompletion = async (finalAliceScore?: number, finalBobScore?: number) => {
+    if (!matchId || !remoteSession) {
+      console.error('Cannot complete match: missing match ID or session');
       return;
     }
 
@@ -812,10 +987,14 @@ export default function RemoteScreen() {
       let touchesAgainst: number;
       let scoreDiff: number | null;
 
+      // Use passed scores if provided, otherwise use current state scores
+      const actualAliceScore = finalAliceScore !== undefined ? finalAliceScore : aliceScore;
+      const actualBobScore = finalBobScore !== undefined ? finalBobScore : bobScore;
+
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their position and result
-        const userScore = toggleCardPosition === 'left' ? aliceScore : bobScore;
-        const opponentScore = toggleCardPosition === 'left' ? bobScore : aliceScore;
+        const userScore = toggleCardPosition === 'left' ? actualAliceScore : actualBobScore;
+        const opponentScore = toggleCardPosition === 'left' ? actualBobScore : actualAliceScore;
 
         finalScore = userScore;
         touchesAgainst = opponentScore;
@@ -823,8 +1002,8 @@ export default function RemoteScreen() {
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
         // User toggle is off OR no registered user - record as anonymous match
-        finalScore = aliceScore;
-        touchesAgainst = bobScore;
+        finalScore = actualAliceScore;
+        touchesAgainst = actualBobScore;
         scoreDiff = null; // No score_diff when no user is present
         result = null; // No win/loss determination
       }
@@ -844,8 +1023,8 @@ export default function RemoteScreen() {
         periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
           .filter(period => period.user > 0 || period.opponent > 0).length;
         
-        // Calculate score per period (user only)
-        scoreSpp = periodNumber > 0 ? finalScore / periodNumber : 0;
+        // Calculate score per period (user only) - round to integer
+        scoreSpp = periodNumber > 0 ? Math.round(finalScore / periodNumber) : 0;
         
         // Structure score by period data
         scoreByPeriod = {
@@ -869,7 +1048,7 @@ export default function RemoteScreen() {
           
           // For anonymous matches, both fencers are equal participants
           periodNumber = 1; // All touches in first period for now
-          scoreSpp = (period.fencer_1_score + period.fencer_2_score) / periodNumber;
+          scoreSpp = Math.round((period.fencer_1_score + period.fencer_2_score) / periodNumber);
           
           // Structure score by period data using actual fencer scores
           scoreByPeriod = {
@@ -886,7 +1065,7 @@ export default function RemoteScreen() {
         } else {
           // Fallback if no period data
           periodNumber = 1;
-          scoreSpp = (aliceScore + bobScore) / periodNumber;
+          scoreSpp = Math.round((aliceScore + bobScore) / periodNumber);
           
           scoreByPeriod = {
             period1: { user: aliceScore, opponent: bobScore },
@@ -924,8 +1103,31 @@ export default function RemoteScreen() {
         score_by_period: scoreByPeriod,
       });
 
+      let failedGoalData: any = null; // Declare in outer scope
+      
       if (updatedMatch) {
         console.log('Match completed successfully:', updatedMatch);
+        
+        // Update goals if user is registered and match has a result
+        if (user?.id && result) {
+          console.log('🎯 Updating goals after match completion...');
+          try {
+            const goalResult = await goalService.updateGoalsAfterMatch(
+              user.id,
+              result as 'win' | 'loss',
+              finalScore,
+              touchesAgainst
+            );
+            console.log('✅ Goals updated successfully:', goalResult);
+            
+            // Store failed goal info to pass through navigation
+            if (goalResult.failedGoals && goalResult.failedGoals.length > 0) {
+              failedGoalData = goalResult.failedGoals[0];
+            }
+          } catch (goalError) {
+            console.error('❌ Error updating goals:', goalError);
+          }
+        }
       }
 
       // 2. End the current period
@@ -945,32 +1147,40 @@ export default function RemoteScreen() {
       // 4. Navigate to appropriate match summary based on user toggle
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - go to regular match summary
+        const navParams: any = {
+          matchId: matchId, // Use stored match ID
+          remoteId: remoteSession.remote_id,
+          // Pass current match state for display
+          aliceScore: actualAliceScore.toString(),
+          bobScore: actualBobScore.toString(),
+          aliceCards: JSON.stringify(aliceCards),
+          bobCards: JSON.stringify(bobCards),
+          matchDuration: matchDuration.toString(),
+          result: result || '',
+          fencer1Name: fencerNames.alice,
+          fencer2Name: fencerNames.bob,
+        };
+        
+        // Pass failed goal info if any
+        if (failedGoalData) {
+          navParams.failedGoalTitle = failedGoalData.title;
+          navParams.failedGoalReason = failedGoalData.reason;
+        }
+        
         router.push({
           pathname: '/match-summary',
-          params: {
-            matchId: currentMatchPeriod.match_id,
-            remoteId: remoteSession.remote_id,
-            // Pass current match state for display
-            aliceScore: aliceScore.toString(),
-            bobScore: bobScore.toString(),
-            aliceCards: JSON.stringify(aliceCards),
-            bobCards: JSON.stringify(bobCards),
-            matchDuration: matchDuration.toString(),
-            result: result || '',
-            fencer1Name: fencerNames.alice,
-            fencer2Name: fencerNames.bob,
-          }
+          params: navParams
         });
       } else {
         // User toggle is off OR no registered user - go to neutral match summary
         router.push({
           pathname: '/neutral-match-summary',
           params: {
-            matchId: currentMatchPeriod.match_id,
+            matchId: matchId, // Use stored match ID
             remoteId: remoteSession.remote_id,
             // Pass current match state for display
-            aliceScore: aliceScore.toString(),
-            bobScore: bobScore.toString(),
+            aliceScore: actualAliceScore.toString(),
+            bobScore: actualBobScore.toString(),
             aliceCards: JSON.stringify(aliceCards),
             bobCards: JSON.stringify(bobCards),
             matchDuration: matchDuration.toString(),
@@ -984,6 +1194,7 @@ export default function RemoteScreen() {
       // 5. Reset the remote to clean state after completion
       // The match data is now saved in the database and accessible elsewhere
       setCurrentMatchPeriod(null);
+      setMatchId(null); // Clear stored match ID
       setRemoteSession(null);
       setAliceScore(0);
       setBobScore(0);
@@ -995,6 +1206,8 @@ export default function RemoteScreen() {
     setPriorityFencer(null);
     setPriorityLightPosition(null);
       setIsAssigningPriority(false);
+      setIsPriorityRound(false); // Reset priority round
+      setHasShownPriorityScorePopup(false); // Reset priority popup flag
       setIsInjuryTimer(false);
       setIsBreakTime(false);
       setScoreChangeCount(0);
@@ -1056,6 +1269,8 @@ export default function RemoteScreen() {
   // Track if user is actively using the app (to prevent resume prompts during normal interaction)
   const isActivelyUsingAppRef = useRef(false);
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
+  const [isPriorityRound, setIsPriorityRound] = useState(false); // Track if currently in priority round
+  const [hasShownPriorityScorePopup, setHasShownPriorityScorePopup] = useState(false); // Track if priority score popup has been shown
   const [aliceYellowCards, setAliceYellowCards] = useState<number[]>([]); // Track Alice's yellow cards
   const [bobYellowCards, setBobYellowCards] = useState<number[]>([]); // Track Bob's yellow cards
   const [aliceRedCards, setAliceRedCards] = useState<number[]>([]); // Track Alice's red cards
@@ -1190,17 +1405,67 @@ export default function RemoteScreen() {
 
   // Note: Removed conflicting useFocusEffect that was resetting all state
 
-  const incrementPeriod = () => {
+  const incrementPeriod = async () => {
     if (currentPeriod < 3) {
       const newPeriod = currentPeriod + 1;
+      
+      // End the current period if it exists
+      if (currentMatchPeriod) {
+        console.log('🏁 Ending current period:', currentPeriod);
+        await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+          end_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+        });
+        
+        // Create new period record for the next period
+        console.log('🆕 Creating new period:', newPeriod);
+        const periodData = {
+          match_id: currentMatchPeriod.match_id,
+          period_number: newPeriod,
+          start_time: new Date().toISOString(),
+          fencer_1_score: aliceScore, // Carry over current scores
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+          priority_assigned: priorityFencer || undefined,
+          priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+        };
+        
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        if (newPeriodRecord) {
+          console.log('✅ New period created successfully:', newPeriodRecord);
+          setCurrentMatchPeriod(newPeriodRecord);
+          setMatchId(newPeriodRecord.match_id); // Store match ID safely
+        }
+      }
+      
       setCurrentPeriod(newPeriod);
       currentPeriodRef.current = newPeriod; // Update ref
     }
   };
 
-  const decrementPeriod = () => {
+  const decrementPeriod = async () => {
     if (currentPeriod > 1) {
       const newPeriod = currentPeriod - 1;
+      
+      // Note: Decrementing period is unusual in a real match, but we'll support it
+      // We need to find the previous period record
+      if (currentMatchPeriod) {
+        const { data: previousPeriod } = await supabase
+          .from('match_period')
+          .select('*')
+          .eq('match_id', currentMatchPeriod.match_id)
+          .eq('period_number', newPeriod)
+          .single();
+        
+        if (previousPeriod) {
+          setCurrentMatchPeriod(previousPeriod);
+        }
+      }
+      
       setCurrentPeriod(newPeriod);
       currentPeriodRef.current = newPeriod; // Update ref
     }
@@ -1277,6 +1542,39 @@ export default function RemoteScreen() {
       // Pause timer if it's currently running
       if (isPlaying) {
         pauseTimer();
+      }
+      
+      // Check if this is the first score during priority round
+      if (isPriorityRound && !hasShownPriorityScorePopup) {
+        setHasShownPriorityScorePopup(true); // Prevent future popups
+        
+        // Show popup asking if Alice won on priority
+        const aliceDisplayName = showUserProfile && toggleCardPosition === 'left' ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0];
+        Alert.alert(
+          'Priority Touch Scored!',
+          `${aliceDisplayName} scored to make it ${newAliceScore}-${bobScore}\n\nDid ${aliceDisplayName} win on priority?`,
+          [
+            {
+              text: 'No, Continue',
+              onPress: () => {
+                // Resume timer if it was paused
+                if (!isPlaying && timeRemaining > 0) {
+                  togglePlay();
+                }
+              }
+            },
+            {
+              text: `Yes, ${aliceDisplayName} Wins`,
+              onPress: async () => {
+                // Track priority winner
+                await trackPriorityWinner(aliceDisplayName);
+                await trackPriorityRoundEnd(aliceDisplayName);
+                // Complete match with Alice as winner - pass the updated score
+                await proceedWithMatchCompletion(newAliceScore, bobScore);
+              }
+            }
+          ]
+        );
       }
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1430,6 +1728,39 @@ export default function RemoteScreen() {
       // Pause timer if it's currently running
       if (isPlaying) {
         pauseTimer();
+      }
+      
+      // Check if this is the first score during priority round
+      if (isPriorityRound && !hasShownPriorityScorePopup) {
+        setHasShownPriorityScorePopup(true); // Prevent future popups
+        
+        // Show popup asking if Bob won on priority
+        const bobDisplayName = showUserProfile && toggleCardPosition === 'right' ? userDisplayName.split(' ')[0] : fencerNames.bob.split(' ')[0];
+        Alert.alert(
+          'Priority Touch Scored!',
+          `${bobDisplayName} scored to make it ${aliceScore}-${newBobScore}\n\nDid ${bobDisplayName} win on priority?`,
+          [
+            {
+              text: 'No, Continue',
+              onPress: () => {
+                // Resume timer if it was paused
+                if (!isPlaying && timeRemaining > 0) {
+                  togglePlay();
+                }
+              }
+            },
+            {
+              text: `Yes, ${bobDisplayName} Wins`,
+              onPress: async () => {
+                // Track priority winner
+                await trackPriorityWinner(bobDisplayName);
+                await trackPriorityRoundEnd(bobDisplayName);
+                // Complete match with Bob as winner - pass the updated score
+                await proceedWithMatchCompletion(aliceScore, newBobScore);
+              }
+            }
+          ]
+        );
       }
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1597,6 +1928,10 @@ export default function RemoteScreen() {
 
   const resetPeriod = useCallback(() => {
     setCurrentPeriod(1);
+    setIsPriorityRound(false); // Reset priority round
+    setHasShownPriorityScorePopup(false); // Reset priority popup flag
+    setPriorityFencer(null); // Reset priority fencer
+    setPriorityLightPosition(null); // Reset priority light
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
@@ -1614,6 +1949,8 @@ export default function RemoteScreen() {
     setPriorityLightPosition(null); // Reset priority light
     setPriorityFencer(null); // Reset priority fencer
     setShowPriorityPopup(false); // Reset priority popup
+    setIsPriorityRound(false); // Reset priority round
+    setHasShownPriorityScorePopup(false); // Reset priority score popup flag
     setAliceYellowCards([]); // Reset Alice's yellow cards
     setBobYellowCards([]); // Reset Bob's yellow cards
     setAliceRedCards([]); // Reset Alice's red cards
@@ -1673,6 +2010,7 @@ export default function RemoteScreen() {
         
         // Clear the current match period and remote session state
         setCurrentMatchPeriod(null);
+        setMatchId(null); // Clear stored match ID
         setRemoteSession(null);
       } else {
         console.log('⚠️ No active match to clean up - currentMatchPeriod or remoteSession is null');
@@ -1855,6 +2193,9 @@ export default function RemoteScreen() {
     setPriorityLightPosition(null); // Reset priority light
     setPriorityFencer(null); // Reset priority fencer
     setShowPriorityPopup(false); // Reset priority popup
+    setIsPriorityRound(false); // Reset priority round
+    setHasShownPriorityScorePopup(false); // Reset priority score popup flag
+    setIsAssigningPriority(false); // Reset priority assignment state
     setAliceYellowCards([]); // Reset Alice's yellow cards
     setBobYellowCards([]); // Reset Bob's yellow cards
     setAliceRedCards([]); // Reset Alice's red cards
@@ -1964,6 +2305,20 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [fencerNames, showUserProfile, userDisplayName, toggleCardPosition]);
 
+  const handleFencerNameClick = useCallback((fencer: 'alice' | 'bob') => {
+    // Don't allow editing if user profile is shown and this is the user's position
+    if (showUserProfile) {
+      if ((fencer === 'alice' && toggleCardPosition === 'left') || 
+          (fencer === 'bob' && toggleCardPosition === 'right')) {
+        // This is the user's name, don't allow editing
+        return;
+      }
+    }
+    
+    // Open the edit names popup
+    openEditNamesPopup();
+  }, [showUserProfile, toggleCardPosition, openEditNamesPopup]);
+
   const saveFencerName = useCallback(() => {
     if (editAliceName.trim() && editBobName.trim()) {
       // Preserve user's name when toggle is on, based on card position
@@ -1999,9 +2354,13 @@ export default function RemoteScreen() {
   }, []);
 
   const resetTimer = useCallback(() => {
+    // If timer is running, pause it first
+    if (isPlaying) {
+      pauseTimer();
+    }
     // Show custom reset options popup
     setShowResetPopup(true);
-  }, []);
+  }, [isPlaying]);
 
   const resetToOriginalTime = useCallback(() => {
     // Reset timer to original match time
@@ -2072,6 +2431,47 @@ export default function RemoteScreen() {
         // Get the current period value to avoid stale closure
         const currentPeriodValue = currentPeriodRef.current;
         
+        // CHECK FOR PRIORITY ROUND TIMER EXPIRY
+        if (isPriorityRound) {
+          // Priority timer expired
+          if (aliceScore === bobScore) {
+            // Still tied - priority fencer wins
+            const winnerName = priorityFencer === 'alice' 
+              ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+              : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+            Alert.alert(
+              '⏱️ Time Expired',
+              `Priority timer ended with score still tied at ${aliceScore}-${bobScore}.\n\n${winnerName} wins on priority!`,
+              [
+                {
+                  text: 'OK',
+                  onPress: async () => {
+                    await proceedWithMatchCompletion();
+                  }
+                }
+              ]
+            );
+          } else {
+            // Score changed - higher score wins
+            const winnerName = aliceScore > bobScore 
+              ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+              : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+            Alert.alert(
+              '⏱️ Time Expired',
+              `Priority timer ended with score ${aliceScore}-${bobScore}.\n\n${winnerName} wins!`,
+              [
+                {
+                  text: 'OK',
+                  onPress: async () => {
+                    await proceedWithMatchCompletion();
+                  }
+                }
+              ]
+            );
+          }
+          return; // Don't continue to regular period logic
+        }
+        
         // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
         if (currentPeriodValue === 1 || currentPeriodValue === 2) {
           // Period 1 or 2 - show break popup
@@ -2082,9 +2482,39 @@ export default function RemoteScreen() {
               { 
                 text: 'No', 
                 style: 'cancel',
-                onPress: () => {
+                onPress: async () => {
                   // Go to next period
                   const nextPeriod = currentPeriodValue + 1;
+                  
+                  // End current period and create new one
+                  if (currentMatchPeriod) {
+                    await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                      end_time: new Date().toISOString(),
+                      fencer_1_score: aliceScore,
+                      fencer_2_score: bobScore,
+                      fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                      fencer_2_cards: bobCards.yellow + bobCards.red,
+                    });
+                    
+                    const periodData = {
+                      match_id: currentMatchPeriod.match_id,
+                      period_number: nextPeriod,
+                      start_time: new Date().toISOString(),
+                      fencer_1_score: aliceScore,
+                      fencer_2_score: bobScore,
+                      fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                      fencer_2_cards: bobCards.yellow + bobCards.red,
+                      priority_assigned: priorityFencer || undefined,
+                      priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+                    };
+                    
+                    const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                    if (newPeriodRecord) {
+                      setCurrentMatchPeriod(newPeriodRecord);
+                      setMatchId(newPeriodRecord.match_id); // Store match ID safely
+                    }
+                  }
+                  
                   setCurrentPeriod(nextPeriod);
                   currentPeriodRef.current = nextPeriod; // Update ref
                   setTimeRemaining(matchTime);
@@ -2109,18 +2539,19 @@ export default function RemoteScreen() {
           );
         } else if (currentPeriodValue === 3) {
           // Period 3 - check if scores are tied
+          console.log(`🔍 Period 3 ended - checking tie: aliceScore=${aliceScore}, bobScore=${bobScore}, isTied=${aliceScore === bobScore}`);
           if (aliceScore === bobScore) {
-            // Scores are tied - show priority assignment popup
-            setShowPriorityPopup(true);
+            // Scores are tied - user must manually click priority button (no auto popup)
+            console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
           } else {
             // Scores are not tied - show match completion
             Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
               { 
                 text: 'OK', 
-                onPress: () => {
+                onPress: async () => {
                   setTimeRemaining(0);
-                  // Navigate to match summary
-                  router.push('/match-summary');
+                  // Complete the match properly - pass current scores
+                  await proceedWithMatchCompletion(aliceScore, bobScore);
                 }
               }
             ]);
@@ -2163,6 +2594,47 @@ export default function RemoteScreen() {
           // Get the current period value to avoid stale closure
           const currentPeriodValue = currentPeriodRef.current;
           
+          // CHECK FOR PRIORITY ROUND TIMER EXPIRY
+          if (isPriorityRound) {
+            // Priority timer expired
+            if (aliceScore === bobScore) {
+              // Still tied - priority fencer wins
+              const winnerName = priorityFencer === 'alice' 
+                ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+                : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score still tied at ${aliceScore}-${bobScore}.\n\n${winnerName} wins on priority!`,
+                [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await proceedWithMatchCompletion();
+                    }
+                  }
+                ]
+              );
+            } else {
+              // Score changed - higher score wins
+              const winnerName = aliceScore > bobScore 
+                ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+                : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score ${aliceScore}-${bobScore}.\n\n${winnerName} wins!`,
+                [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await proceedWithMatchCompletion();
+                    }
+                  }
+                ]
+              );
+            }
+            return; // Don't continue to regular period logic
+          }
+          
           // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
           if (currentPeriodValue === 1 || currentPeriodValue === 2) {
             // Period 1 or 2 - show break popup
@@ -2173,9 +2645,39 @@ export default function RemoteScreen() {
                 { 
                   text: 'No', 
                   style: 'cancel',
-                  onPress: () => {
+                  onPress: async () => {
                     // Go to next period
                     const nextPeriod = currentPeriodValue + 1;
+                    
+                    // End current period and create new one
+                    if (currentMatchPeriod) {
+                      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                        end_time: new Date().toISOString(),
+                        fencer_1_score: aliceScore,
+                        fencer_2_score: bobScore,
+                        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                        fencer_2_cards: bobCards.yellow + bobCards.red,
+                      });
+                      
+                      const periodData = {
+                        match_id: currentMatchPeriod.match_id,
+                        period_number: nextPeriod,
+                        start_time: new Date().toISOString(),
+                        fencer_1_score: aliceScore,
+                        fencer_2_score: bobScore,
+                        fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                        fencer_2_cards: bobCards.yellow + bobCards.red,
+                        priority_assigned: priorityFencer || undefined,
+                        priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+                      };
+                      
+                      const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                      if (newPeriodRecord) {
+                        setCurrentMatchPeriod(newPeriodRecord);
+                        setMatchId(newPeriodRecord.match_id); // Store match ID safely
+                      }
+                    }
+                    
                     setCurrentPeriod(nextPeriod);
                     currentPeriodRef.current = nextPeriod; // Update ref
                     setTimeRemaining(matchTime);
@@ -2200,18 +2702,19 @@ export default function RemoteScreen() {
             );
           } else if (currentPeriodValue === 3) {
             // Period 3 - check if scores are tied
+            console.log(`🔍 Period 3 ended (second check) - checking tie: aliceScore=${aliceScore}, bobScore=${bobScore}, isTied=${aliceScore === bobScore}`);
             if (aliceScore === bobScore) {
-              // Scores are tied - show priority assignment popup
-              setShowPriorityPopup(true);
+              // Scores are tied - user must manually click priority button (no auto popup)
+              console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
             } else {
               // Scores are not tied - show match completion
               Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
                 { 
                   text: 'OK', 
-                  onPress: () => {
+                  onPress: async () => {
                     setTimeRemaining(0);
-                    // Navigate to match summary
-                    router.push('/match-summary');
+                    // Complete the match properly - pass current scores
+                    await proceedWithMatchCompletion(aliceScore, bobScore);
                   }
                 }
               ]);
@@ -2271,12 +2774,42 @@ export default function RemoteScreen() {
           setIsBreakTime(false);
           setBreakTimeRemaining(60);
           
-          // Increment period
-          setCurrentPeriod(prev => {
-            const newPeriod = Math.min(prev + 1, 3);
-            currentPeriodRef.current = newPeriod; // Update ref
-            return newPeriod;
-          });
+          // Increment period and create new period record
+          const nextPeriod = Math.min(currentPeriod + 1, 3);
+          
+          // End current period and create new one
+          if (currentMatchPeriod && nextPeriod > currentPeriod) {
+            (async () => {
+              await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                end_time: new Date().toISOString(),
+                fencer_1_score: aliceScore,
+                fencer_2_score: bobScore,
+                fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                fencer_2_cards: bobCards.yellow + bobCards.red,
+              });
+              
+              const periodData = {
+                match_id: currentMatchPeriod.match_id,
+                period_number: nextPeriod,
+                start_time: new Date().toISOString(),
+                fencer_1_score: aliceScore,
+                fencer_2_score: bobScore,
+                fencer_1_cards: aliceCards.yellow + aliceCards.red,
+                fencer_2_cards: bobCards.yellow + bobCards.red,
+                priority_assigned: priorityFencer || undefined,
+                priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+              };
+              
+              const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+              if (newPeriodRecord) {
+                setCurrentMatchPeriod(newPeriodRecord);
+                setMatchId(newPeriodRecord.match_id); // Store match ID safely
+              }
+            })();
+          }
+          
+          setCurrentPeriod(nextPeriod);
+          currentPeriodRef.current = nextPeriod; // Update ref
           
           
           // Restart main timer from where it was paused
@@ -2310,8 +2843,40 @@ export default function RemoteScreen() {
     setIsBreakTime(false);
     setBreakTimeRemaining(60);
     
-    // Increment period
+    // Increment period and create new period record
     const nextPeriod = Math.min(currentPeriod + 1, 3);
+    
+    // End current period and create new one
+    if (currentMatchPeriod && nextPeriod > currentPeriod) {
+      (async () => {
+        await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+          end_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+        });
+        
+        const periodData = {
+          match_id: currentMatchPeriod.match_id,
+          period_number: nextPeriod,
+          start_time: new Date().toISOString(),
+          fencer_1_score: aliceScore,
+          fencer_2_score: bobScore,
+          fencer_1_cards: aliceCards.yellow + aliceCards.red,
+          fencer_2_cards: bobCards.yellow + bobCards.red,
+          priority_assigned: priorityFencer || undefined,
+          priority_to: priorityFencer === 'alice' ? fencerNames.alice : priorityFencer === 'bob' ? fencerNames.bob : undefined,
+        };
+        
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        if (newPeriodRecord) {
+          setCurrentMatchPeriod(newPeriodRecord);
+          setMatchId(newPeriodRecord.match_id); // Store match ID safely
+        }
+      })();
+    }
+    
     setCurrentPeriod(nextPeriod);
     currentPeriodRef.current = nextPeriod; // Update ref
     
@@ -2365,11 +2930,27 @@ export default function RemoteScreen() {
         setPriorityFencer(finalFencer);
         setIsAssigningPriority(false);
         
+        // Enter priority round mode
+        setIsPriorityRound(true);
+        setHasShownPriorityScorePopup(false); // Reset popup flag for new priority round
+        
+        // Track priority round start
+        trackPriorityRoundStart();
+        
+        // Reset timer to 1 minute for priority round
+        setMatchTime(60); // 1 minute
+        setTimeRemaining(60);
+        setIsPlaying(false); // User must press play to start priority timer
+        
         // Show priority result
         setTimeout(() => {
+          const priorityFencerName = finalFencer === 'alice' 
+            ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.alice)
+            : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.bob);
+            
           Alert.alert(
             'Priority Assigned!', 
-            `${finalFencer === 'alice' ? fencerNames.alice : fencerNames.bob} has priority!`,
+            `${priorityFencerName} has priority!\n\nTimer reset to 1:00 for sudden death round.\n\nPress Play when ready.`,
             [{ text: 'OK' }]
           );
         }, 500);
@@ -2546,27 +3127,27 @@ export default function RemoteScreen() {
     // Timer Ready State (never started, can edit)
     if (!hasMatchStarted && !isPlaying && timeRemaining === matchTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.015 : height * 0.02, // Less margin for ready state
+        timerDisplayMargin: height * 0.02, // Consistent margin for ready state
       };
     }
     
     // Match Active State (running or paused)
     if (hasMatchStarted && !isBreakTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.03 : height * 0.04, // More margin for active state
+        timerDisplayMargin: height * 0.04, // Consistent margin for active state
       };
     }
     
     // Break State
     if (isBreakTime) {
       return {
-        timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03, // Medium margin for break state
+        timerDisplayMargin: height * 0.03, // Consistent margin for break state
       };
     }
     
     // Default state
     return {
-      timerDisplayMargin: isNexusS ? height * 0.02 : height * 0.03,
+      timerDisplayMargin: height * 0.03,
     };
   };
 
@@ -2576,22 +3157,42 @@ export default function RemoteScreen() {
     container: {
       flex: 1,
       backgroundColor: Colors.dark.background,
-      padding: isNexusS ? width * 0.005 : width * 0.01,
-      paddingTop: isNexusS ? height * 0.002 : height * 0.005,
-      paddingBottom: isNexusS ? height * 0.001 : height * 0.002,
-      overflow: 'hidden',
+    },
+    headerSafeArea: {
+      backgroundColor: Colors.dark.background,
+    },
+    safeArea: {
+      flex: 1,
+      backgroundColor: Colors.dark.background,
+    },
+    stickyHeader: {
+      backgroundColor: Colors.dark.background,
+      paddingHorizontal: '5%',
+      paddingVertical: height * 0.02,
+      zIndex: 10,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    contentContainer: {
+      flex: 1,
+      paddingHorizontal: '5%',
+      paddingTop: layout.adjustPadding(height * -0.025, 'top'), // Reverted back from -0.06
+      paddingBottom: layout.adjustPadding(height * 0.02, 'bottom'),
+      overflow: 'visible', // Allow pill to show outside bounds
     },
     
     // Match Timer Section
     matchTimerCard: {
       // Background will be handled by LinearGradient
-      borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+      borderWidth: width * 0.005,
       borderColor: Colors.timerBackground.borderColors[0],
-      borderRadius: isNexusS ? width * 0.03 : width * 0.04,
-      padding: isNexusS ? width * 0.005 : width * 0.01,
-      marginTop: 0,
-      marginBottom: isNexusS ? height * 0.0005 : height * 0.001,
+      borderRadius: width * 0.03,
+      padding: width * 0.008,
+      marginTop: layout.adjustMargin(-height * 0.015, 'top'), // Reverted back from -0.035
+      marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
       position: 'relative',
+      overflow: 'visible', // Allow pill to show outside card bounds
       // Shadow effects
       shadowColor: Colors.timerBackground.shadowColor,
       shadowOffset: Colors.timerBackground.shadowOffset,
@@ -2600,18 +3201,20 @@ export default function RemoteScreen() {
       elevation: Colors.timerBackground.elevation,
     },
     timerLabel: {
-      backgroundColor: Colors.yellow.accent,
-      paddingHorizontal: width * 0.02,
-      paddingVertical: height * 0.004,
-      borderRadius: width * 0.04,
       position: 'absolute',
-      top: height * 0.001, // Changed from negative to positive to move down in the card
-      left: '50%',
-      transform: [{ translateX: -width * 0.08 }], // Moved more to the left
+      width: width * 0.20, // Reduced from 0.24 to make smaller
+      height: height * 0.025, // Reduced from 0.03 to make smaller
+      left: '50%', // Center horizontally
+      marginLeft: -(width * 0.20) / 2, // Half of new width to center properly
+      top: -height * 0.028, // Moved pill higher up, more outside card
+      backgroundColor: Colors.yellow.accent,
+      borderRadius: width * 0.035, // Reduced from 0.04 to match smaller size
+      alignItems: 'center',
+      justifyContent: 'center',
       zIndex: 10,
     },
     timerLabelText: {
-      fontSize: width * 0.025,
+      fontSize: width * 0.022, // Reduced from 0.025 to match smaller pill
       fontWeight: '600',
       color: Colors.gray.dark,
     },
@@ -2625,57 +3228,67 @@ export default function RemoteScreen() {
     countdownDisplay: {
       alignItems: 'center',
       justifyContent: 'center',
-      height: isNexusS ? height * 0.06 : height * 0.08, // Smaller height on Nexus S
+      height: height * 0.035, // Much smaller height for injury timer
       width: '100%',
       // Timer background styling removed - now handled by main container
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      borderRadius: width * 0.02,
     },
     countdownText: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
+      fontSize: width * 0.085, // Slightly reduced from 0.09 when warning text shows
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
-      textShadowOffset: { width: 0, height: height * 0.002 },
-      textShadowRadius: width * 0.005,
-      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
+      textShadowOffset: { width: 0, height: height * 0.001 },
+      textShadowRadius: width * 0.002,
+      marginTop: -(height * 0.03), // Moved up from -0.008
+    },
+    countdownTextLarge: {
+      fontSize: width * 0.12, // Larger font size when match hasn't started
+      color: 'white',
+      fontWeight: '700',
+      textAlign: 'center',
+      textShadowColor: 'rgba(0, 0, 0, 0.3)',
+      textShadowOffset: { width: 0, height: height * 0.001 },
+      textShadowRadius: width * 0.002,
+      marginTop: -(height * 0.03), // Moved up from -0.008
     },
     countdownTextWarning: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 28) : width * 0.12, // Smaller font on Nexus S, minimum 28px
+      fontSize: width * 0.085, // Slightly reduced from 0.09 when warning text shows
       color: Colors.yellow.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: height * 0.002 },
       textShadowRadius: width * 0.005,
-      marginTop: isNexusS ? -(height * 0.01) : -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDanger: {
-      fontSize: width * 0.12,
+      fontSize: width * 0.105, // Slightly reduced from 0.11 when warning text shows
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDangerPulse: {
-      fontSize: width * 0.12,
+      fontSize: width * 0.105, // Slightly reduced from 0.11 when warning text shows
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
       textShadowColor: 'rgba(0, 0, 0, 0.3)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 2,
-      marginTop: -(height * 0.015),
+      marginTop: -(height * 0.03), // Moved up from -0.015
     },
 
     timerHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.005,
     },
     editButton: {
       width: width * 0.06,
@@ -2688,21 +3301,51 @@ export default function RemoteScreen() {
     editButtonText: {
       fontSize: width * 0.04,
     },
+    completeMatchCircle: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      width: width * 0.12,
+      height: width * 0.12,
+      borderRadius: width * 0.06,
+      backgroundColor: Colors.green.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 5,
+    },
+    completeMatchFlag: {
+      fontSize: width * 0.06,
+    },
     periodControl: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       backgroundColor: '#E6DDFF',
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
-      padding: isNexusS ? width * 0.015 : width * 0.025, // Smaller padding on Nexus S
-      marginTop: isNexusS ? height * 0.001 : height * 0.002, // Smaller margin on Nexus S
-      borderWidth: isNexusS ? width * 0.002 : width * 0.0025,
+      borderRadius: width * 0.03,
+      padding: width * 0.025,
+      marginTop: -(height * 0.01), // Increased negative margin to move period card up more
+      borderWidth: width * 0.0025,
+      borderColor: 'rgba(168, 85, 247, 0.3)',
+    },
+    periodControlMatchStarted: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: '#E6DDFF',
+      borderRadius: width * 0.03,
+      padding: width * 0.025,
+      marginTop: height * 0.025, // Increased margin when match has started
+      borderWidth: width * 0.0025,
       borderColor: 'rgba(168, 85, 247, 0.3)',
     },
     periodButton: {
-      width: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
-      height: isNexusS ? width * 0.06 : width * 0.07, // Smaller buttons on Nexus S
-      borderRadius: isNexusS ? width * 0.03 : width * 0.035,
+      width: width * 0.07,
+      height: width * 0.07,
+      borderRadius: width * 0.035,
       backgroundColor: 'rgb(98,80,242)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -2711,7 +3354,7 @@ export default function RemoteScreen() {
       shadowOpacity: 0.3,
       shadowRadius: width * 0.01,
       elevation: 6,
-      borderWidth: isNexusS ? width * 0.003 : width * 0.005, // Thinner border on Nexus S
+      borderWidth: width * 0.005,
       borderColor: 'rgba(255,255,255,0.2)',
     },
     periodButtonText: {
@@ -2735,43 +3378,43 @@ export default function RemoteScreen() {
 
     // Fencers Section
     fencersHeading: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 16) : width * 0.05, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginTop: isNexusS ? height * -0.008 : height * -0.01, // Smaller margin on Nexus S
+      marginBottom: height * 0.005, // Smaller margin on Nexus S
+      marginTop: height * -0.01, // Smaller margin on Nexus S
     },
     fencersHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginLeft: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
+      marginBottom: height * 0.005, // Smaller margin on Nexus S
+      marginLeft: width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButton: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
+      width: width * 0.06, // Smaller button on Nexus S
+      height: width * 0.06, // Smaller button on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: isNexusS ? width * 0.03 : width * 0.05, // Smaller margin on Nexus S
+      marginRight: width * 0.05, // Smaller margin on Nexus S
     },
     editNamesButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
     },
     fencersContainer: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginBottom: isNexusS ? height * 0.01 : height * 0.015, // Smaller margin on Nexus S
-      gap: isNexusS ? width * 0.02 : width * 0.03, // Smaller gap on Nexus S
+      marginBottom: height * 0.015, // Smaller margin on Nexus S
+      gap: width * 0.03, // Smaller gap on Nexus S
     },
     fencerCard: {
-      width: isNexusS ? width * 0.44 : width * 0.42, // Slightly wider on Nexus S for better fit
-      padding: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
-      minHeight: isNexusS ? height * 0.2 : height * 0.25, // Smaller height on Nexus S
+      width: width * 0.42, // Slightly wider on Nexus S for better fit
+      padding: width * 0.04, // Smaller padding on Nexus S
+      minHeight: height * 0.25, // Smaller height on Nexus S
       backgroundColor: Colors.purple.primary,
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      borderRadius: width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
@@ -2788,23 +3431,23 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     profilePicture: {
-      width: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
-      height: isNexusS ? width * 0.14 : width * 0.16, // Smaller profile on Nexus S
-      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
+      width: width * 0.16, // Smaller profile on Nexus S
+      height: width * 0.16, // Smaller profile on Nexus S
+      borderRadius: width * 0.08,
       backgroundColor: Colors.gray.medium,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
     },
     profileInitial: {
-      fontSize: isNexusS ? Math.max(width * 0.065, 20) : width * 0.075, // Smaller font on Nexus S, minimum 20px
+      fontSize: width * 0.075, // Smaller font on Nexus S, minimum 20px
       fontWeight: '700',
       color: 'white',
     },
     profileImage: {
       width: '100%',
       height: '100%',
-      borderRadius: isNexusS ? width * 0.07 : width * 0.08,
+      borderRadius: width * 0.08,
       backgroundColor: 'transparent',
     },
     cameraIcon: {
@@ -2833,48 +3476,59 @@ export default function RemoteScreen() {
       fontSize: width * 0.045,
     },
     fencerName: {
-      fontSize: isNexusS ? Math.max(width * 0.05, 14) : width * 0.055, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.055, // Smaller font on Nexus S, minimum 14px
       fontWeight: '600',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.004 : height * 0.006, // Smaller margin on Nexus S
+      marginBottom: height * 0.006, // Smaller margin on Nexus S
+      textAlign: 'center',
+    },
+    fencerNameContainer: {
+      // Container for clickable fencer names
+      paddingVertical: height * 0.005,
+      paddingHorizontal: width * 0.01,
+      borderRadius: width * 0.01,
+      maxWidth: '100%',
+      minHeight: height * 0.03, // Fixed minimum height to prevent layout shifts
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     fencerScore: {
-      fontSize: isNexusS ? Math.max(width * 0.08, 32) : width * 0.105, // Smaller font on Nexus S, minimum 32px
+      fontSize: width * 0.105, // Smaller font on Nexus S, minimum 32px
       fontWeight: '700',
       color: 'white',
-      marginBottom: isNexusS ? height * 0.01 : height * 0.015,
+      marginBottom: height * 0.015,
     },
     scoreControls: {
       flexDirection: 'row',
       gap: width * 0.035,
     },
     scoreButton: {
-      width: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
-      height: isNexusS ? width * 0.1 : width * 0.12, // Smaller buttons on Nexus S
-      borderRadius: isNexusS ? width * 0.05 : width * 0.06,
+      width: width * 0.12, // Smaller buttons on Nexus S
+      height: width * 0.12, // Smaller buttons on Nexus S
+      borderRadius: width * 0.06,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: isNexusS ? 1 : 2, // Thinner border on Nexus S
+      borderWidth: 2, // Thinner border on Nexus S
       borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     scoreButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.065, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
     },
     swapButton: {
-      width: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.11 : width * 0.13, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.055 : width * 0.065,
+      width: width * 0.13, // Smaller button on Nexus S
+      height: width * 0.13, // Smaller button on Nexus S
+      borderRadius: width * 0.065,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
-      borderWidth: isNexusS ? 0.5 : 1, // Thinner border on Nexus S
+      borderWidth: 1, // Thinner border on Nexus S
       borderColor: '#FFFFFF',
     },
     swapIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.055, 16) : width * 0.065, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.065, // Smaller font on Nexus S, minimum 16px
       color: 'white',
     },
 
@@ -2884,16 +3538,16 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 0,
-      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
+      gap: width * 0.05, // Smaller gap on Nexus S
     },
     decorativeCards: {
       flexDirection: 'row',
       gap: width * 0.03,
     },
     decorativeCard: {
-      width: isNexusS ? width * 0.06 : width * 0.08, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.09 : width * 0.12, // Smaller height on Nexus S
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      width: width * 0.08, // Smaller cards on Nexus S
+      height: width * 0.12, // Smaller height on Nexus S
+      borderRadius: width * 0.015,
     },
     cardRed: {
       backgroundColor: Colors.red.accent,
@@ -2911,42 +3565,42 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     yellowCard: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.035, // Much smaller cards
+      height: width * 0.035, // Much smaller cards
       backgroundColor: Colors.yellow.accent,
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      borderRadius: width * 0.01,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: height * 0.003 },
-      shadowOpacity: 0.3,
-      shadowRadius: width * 0.01,
-      elevation: 5,
+      shadowOffset: { width: 0, height: height * 0.001 },
+      shadowOpacity: 0.2,
+      shadowRadius: width * 0.006,
+      elevation: 3,
     },
     yellowCardText: {
-      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.022, // Much smaller font
       color: 'white',
       fontWeight: '700',
     },
     redCardText: {
-      fontSize: isNexusS ? Math.max(width * 0.03, 10) : width * 0.035, // Smaller font on Nexus S, minimum 10px
+      fontSize: width * 0.022, // Much smaller font
       color: 'white',
       fontWeight: '700',
     },
     assignPriorityButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
+      gap: width * 0.02, // Smaller gap on Nexus S
       backgroundColor: Colors.purple.primary,
-      paddingHorizontal: isNexusS ? width * 0.02 : width * 0.03, // Smaller padding on Nexus S
-      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      paddingHorizontal: width * 0.03, // Smaller padding on Nexus S
+      paddingVertical: height * 0.012, // Smaller padding on Nexus S
+      borderRadius: width * 0.03,
     },
     assignPriorityIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     assignPriorityText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -2957,38 +3611,39 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: 0,
-      gap: isNexusS ? width * 0.025 : width * 0.04, // Smaller gap on Nexus S
+      marginTop: height * 0.005, // Reduced top margin for more compact card
+      gap: width * 0.04, // Smaller gap on Nexus S
       width: '100%',
     },
     playButton: {
       flex: 1,
-      marginRight: isNexusS ? width * 0.025 : width * 0.04, // Smaller margin on Nexus S
+      marginRight: width * 0.04, // Smaller margin on Nexus S
       backgroundColor: Colors.green.accent,
-      paddingVertical: isNexusS ? height * 0.008 : height * 0.012, // Smaller padding on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      paddingVertical: height * 0.012, // Smaller padding on Nexus S
+      borderRadius: width * 0.03,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
-      gap: isNexusS ? width * 0.015 : width * 0.02, // Smaller gap on Nexus S
+      gap: width * 0.02, // Smaller gap on Nexus S
     },
     playIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
     playText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
     resetButton: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller button on Nexus S
-      borderRadius: isNexusS ? width * 0.025 : width * 0.03,
+      width: width * 0.06, // Smaller button on Nexus S
+      height: width * 0.06, // Smaller button on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       alignItems: 'center',
       justifyContent: 'center',
     },
     resetIcon: {
-      fontSize: isNexusS ? Math.max(width * 0.045, 14) : width * 0.05, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 14px
     },
 
 
@@ -3087,20 +3742,20 @@ export default function RemoteScreen() {
     addTimeControls: {
       flexDirection: 'row',
       justifyContent: 'space-around',
-      marginTop: isNexusS ? height * 0.003 : height * 0.005, // Smaller margin on Nexus S
-      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
+      marginTop: height * 0.02, // Increased from 0.005 to move buttons down
+      marginBottom: height * 0.01, // Smaller margin on Nexus S
       width: '100%',
     },
     addTimeButton: {
       backgroundColor: Colors.purple.primary,
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
-      paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04, // Smaller padding on Nexus S
-      paddingVertical: isNexusS ? height * 0.005 : height * 0.008, // Smaller padding on Nexus S
-      minWidth: isNexusS ? width * 0.15 : width * 0.18, // Smaller width on Nexus S
+      borderRadius: width * 0.03,
+      paddingHorizontal: width * 0.04, // Smaller padding on Nexus S
+      paddingVertical: height * 0.008, // Smaller padding on Nexus S
+      minWidth: width * 0.18, // Smaller width on Nexus S
       alignItems: 'center',
     },
     addTimeButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -3111,7 +3766,8 @@ export default function RemoteScreen() {
       color: Colors.yellow.accent,
       fontWeight: '600',
       textAlign: 'center',
-      marginTop: height * 0.001, // Increased from 0.003 to 0.008 for better separation from period card
+      marginTop: height * 0.008, // Reduced from 0.015 to bring closer to countdown
+      marginBottom: height * 0.002, // Reduced from 0.005 to bring closer to next warning
     },
 
     // Match Status Display
@@ -3226,17 +3882,17 @@ export default function RemoteScreen() {
       marginLeft: width * 0.02,
     },
     redCard: {
-      width: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller cards on Nexus S
+      width: width * 0.035, // Much smaller cards
+      height: width * 0.035, // Much smaller cards
       backgroundColor: Colors.red.accent,
-      borderRadius: isNexusS ? width * 0.01 : width * 0.015,
+      borderRadius: width * 0.01,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: height * 0.003 },
-      shadowOpacity: 0.3,
-      shadowRadius: width * 0.01,
-      elevation: 5,
+      shadowOffset: { width: 0, height: height * 0.001 },
+      shadowOpacity: 0.2,
+      shadowRadius: width * 0.006,
+      elevation: 3,
     },
     cardCountContainer: {
       flexDirection: 'row',
@@ -3271,6 +3927,12 @@ export default function RemoteScreen() {
       fontSize: width * 0.075,
       fontWeight: '700',
       color: 'white',
+    },
+    profileInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.06,
+      fontWeight: '500',
+      textAlign: 'center',
     },
     fencerDetails: {
       alignItems: 'center',
@@ -3312,19 +3974,19 @@ export default function RemoteScreen() {
     completeMatchButton: {
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: isNexusS ? height * 0.006 : height * 0.01, // Smaller margin on Nexus S
-      gap: isNexusS ? width * 0.03 : width * 0.05, // Smaller gap on Nexus S
+      marginBottom: height * 0.01, // Smaller margin on Nexus S
+      gap: width * 0.05, // Smaller gap on Nexus S
     },
     completeButton: {
-      width: isNexusS ? width * 0.4 : width * 0.35, // Slightly wider on Nexus S for better fit
-      height: isNexusS ? width * 0.05 : width * 0.06, // Smaller height on Nexus S
-      borderRadius: isNexusS ? width * 0.02 : width * 0.03,
+      width: width * 0.35, // Slightly wider on Nexus S for better fit
+      height: width * 0.06, // Smaller height on Nexus S
+      borderRadius: width * 0.03,
       backgroundColor: Colors.green.accent,
       alignItems: 'center',
       justifyContent: 'center',
     },
     completeButtonText: {
-      fontSize: isNexusS ? Math.max(width * 0.035, 12) : width * 0.04, // Smaller font on Nexus S, minimum 12px
+      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
       fontWeight: '600',
       color: 'white',
     },
@@ -3648,34 +4310,42 @@ export default function RemoteScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-            <SafeAreaView style={[styles.container, { 
-        paddingTop: insets.top * 0.1, 
-        paddingBottom: insets.bottom,
-        backgroundColor: Colors.dark.background 
-      }]}>
-        <View style={styles.container}>
-          {/* Match Timer Section */}
-      <LinearGradient
-        colors={Colors.timerBackground.colors}
-        style={[
-          styles.matchTimerCard,
-          // Make match timer card smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (aliceYellowCards.length > 0 || aliceRedCards.length > 0 || bobYellowCards.length > 0 || bobRedCards.length > 0)) ? {
-            padding: isNexusS ? width * 0.002 : width * 0.004, // Reduce padding even more
-            marginTop: isNexusS ? height * 0.0005 : height * 0.001, // Reduce top margin even more
-            marginBottom: isNexusS ? height * 0.0002 : height * 0.0005, // Reduce bottom margin even more
-          } : {}
-        ]}
-        start={Colors.timerBackground.start}
-        end={Colors.timerBackground.end}
-      >
-        <View style={styles.timerHeader}>
-          <View style={styles.timerLabel}>
-            <Text style={styles.timerLabelText}>Match Timer</Text>
+      <View style={styles.container}>
+        {/* Header with top safe area */}
+        <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
+          <View style={styles.stickyHeader}>
+            {/* Empty header for now, but keeps structure consistent */}
           </View>
+        </SafeAreaView>
+        
+        {/* Content with bottom safe area */}
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+          <View style={styles.contentContainer}>
+          {/* Match Timer Section */}
+      <View style={{ overflow: 'visible', position: 'relative' }}>
+        {/* Period Label - Positioned outside card */}
+        <View style={styles.timerLabel}>
+          <Text style={styles.timerLabelText}>Match Timer</Text>
+        </View>
+        
+        <LinearGradient
+          colors={Colors.timerBackground.colors}
+          style={styles.matchTimerCard}
+          start={Colors.timerBackground.start}
+          end={Colors.timerBackground.end}
+        >
+          <View style={styles.timerHeader}>
           {!isPlaying && !hasMatchStarted && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
               <Ionicons name="pencil" size={16} color="white" />
+            </TouchableOpacity>
+          )}
+          {hasMatchStarted && (
+            <TouchableOpacity 
+              style={styles.completeMatchCircle} 
+              onPress={completeMatch}
+            >
+              <Text style={styles.completeMatchFlag}>🏁</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -3703,31 +4373,31 @@ export default function RemoteScreen() {
           {!isBreakTime && isInjuryTimer && (
             <View style={[styles.countdownDisplay, { 
               backgroundColor: hasMatchStarted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)',
-              borderWidth: width * 0.005,
+              borderWidth: width * 0.003,
               borderColor: hasMatchStarted ? '#EF4444' : '#6B7280',
-              borderRadius: width * 0.03,
-              paddingVertical: height * 0.02,
-              paddingHorizontal: width * 0.04,
-              minHeight: height * 0.12,
-              marginBottom: height * 0.02,
+              borderRadius: width * 0.02,
+              paddingVertical: height * 0.01,
+              paddingHorizontal: width * 0.025,
+              minHeight: height * 0.06,
+              marginBottom: height * 0.01,
               opacity: hasMatchStarted ? 1 : 0.6
             }]}>
               <Text style={[styles.countdownText, { 
                 color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.08 
+                fontSize: width * 0.045 
               }]}>
                 {formatTime(injuryTimeRemaining)}
               </Text>
               <Text style={[styles.countdownWarningText, { 
                 color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.035 
+                fontSize: width * 0.022 
               }]}>
                 🏥 INJURY TIME - 5:00
               </Text>
               {previousMatchState && (
                 <Text style={[styles.countdownWarningText, { 
                   color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                  fontSize: width * 0.03 
+                  fontSize: width * 0.018 
                 }]}>
                   Match paused at {formatTime(previousMatchState.timeRemaining)}
                 </Text>
@@ -3757,14 +4427,14 @@ export default function RemoteScreen() {
                   
                   {/* Countdown warning */}
                   {timeRemaining <= 30 && timeRemaining > 0 && (
-                    <Text style={[styles.countdownWarningText, { marginTop: height * -0.005 }]}>
+                    <Text style={[styles.countdownWarningText, { marginTop: height * 0.005, marginBottom: height * 0.002 }]}>
                       ⚠️ Time is running out!
                     </Text>
                   )}
                   
                   {/* Final countdown warning */}
                   {timeRemaining <= 10 && timeRemaining > 0 && (
-                    <Text style={[styles.countdownWarningText, { color: Colors.red.accent, fontSize: width * 0.035 }]}>
+                    <Text style={[styles.countdownWarningText, { color: Colors.red.accent, fontSize: width * 0.035, marginTop: height * 0.002, marginBottom: height * 0.002 }]}>
                       🚨 FINAL COUNTDOWN!
                     </Text>
                   )}
@@ -3798,7 +4468,7 @@ export default function RemoteScreen() {
               {/* Timer Picker - shows when not playing and not paused (allows time editing) */}
               {!isPlaying && timeRemaining === matchTime && (
                 <View style={styles.countdownDisplay}>
-                  <Text style={styles.countdownText}>
+                  <Text style={!hasMatchStarted ? styles.countdownTextLarge : styles.countdownText}>
                     {formatTime(matchTime)}
                   </Text>
                 </View>
@@ -3847,13 +4517,13 @@ export default function RemoteScreen() {
         </View>
         
         {/* Period Control - moved to bottom of card */}
-        <View style={styles.periodControl}>
+        <View style={hasMatchStarted ? styles.periodControlMatchStarted : styles.periodControl}>
           <TouchableOpacity style={styles.periodButton} onPress={decrementPeriod}>
             <Ionicons name="remove" size={16} color="white" />
           </TouchableOpacity>
           <View style={styles.periodDisplay}>
             <Text style={styles.periodText}>Period</Text>
-            <Text style={styles.periodNumber}>{currentPeriod}/3</Text>
+            <Text style={styles.periodNumber}>{isPriorityRound ? 'P' : `${currentPeriod}/3`}</Text>
           </View>
           <TouchableOpacity style={styles.periodButton} onPress={incrementPeriod}>
             <Ionicons name="add" size={16} color="white" />
@@ -3861,6 +4531,7 @@ export default function RemoteScreen() {
         </View>
         
       </LinearGradient>
+      </View>
 
       {/* Match Status Display */}
       <View style={styles.matchStatusContainer}>
@@ -3954,30 +4625,10 @@ export default function RemoteScreen() {
             >
               {toggleCardPosition === 'left' && showUserProfile ? (
                 // User profile - show user image or initials
-                userProfileImage ? (
-                  <Image 
-                    source={{ uri: userProfileImage }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('User image error:', error)}
-                    onLoad={() => console.log('User image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>👤</Text>
-                )
+                renderProfileImage(userProfileImage, userDisplayName, true)
               ) : (
-                // Opponent profile - show opponent image or emoji
-                opponentImages.alice ? (
-                  <Image 
-                    source={{ uri: opponentImages.alice }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('Alice image error:', error)}
-                    onLoad={() => console.log('Alice image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>{aliceProfileEmoji}</Text>
-                )
+                // Opponent profile - show opponent image or initials
+                renderProfileImage(opponentImages.alice, fencerNames.alice, false)
               )}
               {!(toggleCardPosition === 'left' && showUserProfile) && (
               <View style={styles.cameraIcon}>
@@ -4020,9 +4671,19 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'left' && showUserProfile ? userDisplayName : fencerNames.alice}
-          </Text>
+          <TouchableOpacity 
+            onPress={() => handleFencerNameClick('alice')}
+            activeOpacity={0.7}
+            style={styles.fencerNameContainer}
+          >
+            <Text 
+              style={[styles.fencerName, {color: 'black'}]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {toggleCardPosition === 'left' && showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.alice.split(' ')[0]}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{aliceScore.toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
@@ -4058,7 +4719,7 @@ export default function RemoteScreen() {
           colors={['#D6A4F0', '#969DFA']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[styles.swapButton, { position: 'absolute', zIndex: 10, left: width * 0.5 - width * 0.075 }]}
+          style={[styles.swapButton, { position: 'absolute', zIndex: 10, alignSelf: 'center' }]}
         >
           <TouchableOpacity 
             style={{ 
@@ -4131,30 +4792,10 @@ export default function RemoteScreen() {
             >
               {toggleCardPosition === 'right' && showUserProfile ? (
                 // User profile - show user image or initials
-                userProfileImage ? (
-                  <Image 
-                    source={{ uri: userProfileImage }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('User image error:', error)}
-                    onLoad={() => console.log('User image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>👤</Text>
-                )
+                renderProfileImage(userProfileImage, userDisplayName, true)
               ) : (
-                // Opponent profile - show opponent image or emoji
-                opponentImages.bob ? (
-                  <Image 
-                    source={{ uri: opponentImages.bob }} 
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                    onError={(error) => console.log('Bob image error:', error)}
-                    onLoad={() => console.log('Bob image loaded successfully')}
-                  />
-                ) : (
-                  <Text style={styles.profileInitial}>{bobProfileEmoji}</Text>
-                )
+                // Opponent profile - show opponent image or initials
+                renderProfileImage(opponentImages.bob, fencerNames.bob, false)
               )}
               {!(toggleCardPosition === 'right' && showUserProfile) && (
               <View style={styles.cameraIcon}>
@@ -4197,9 +4838,19 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <Text style={[styles.fencerName, {color: 'black'}]}>
-            {toggleCardPosition === 'right' && showUserProfile ? userDisplayName : fencerNames.bob}
-          </Text>
+          <TouchableOpacity 
+            onPress={() => handleFencerNameClick('bob')}
+            activeOpacity={0.7}
+            style={styles.fencerNameContainer}
+          >
+            <Text 
+              style={[styles.fencerName, {color: 'black'}]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {toggleCardPosition === 'right' && showUserProfile ? userDisplayName.split(' ')[0] : fencerNames.bob.split(' ')[0]}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.fencerScore, {color: 'black'}]}>{bobScore.toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
@@ -4361,44 +5012,38 @@ export default function RemoteScreen() {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-          marginVertical: isNexusS ? height * 0.008 : height * 0.012,
-          marginTop: isNexusS ? height * 0.004 : height * 0.006,
-          paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
+          marginVertical: height * 0.012,
+          marginTop: height * 0.006,
+          paddingHorizontal: width * 0.04,
             backgroundColor: 'transparent',
-          borderRadius: isNexusS ? width * 0.015 : width * 0.02,
-          gap: isNexusS ? height * 0.008 : height * 0.012, // Reduced gap between elements
-          marginBottom: isNexusS ? height * 0.015 : height * 0.02 // Bottom margin from tab bar
+          borderRadius: width * 0.02,
+          gap: height * 0.012, // Reduced gap between elements
+          marginBottom: layout.adjustMargin(height * 0.02, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset
           }
         ]}>
         
         {/* Play and Reset Row */}
-        <View style={[
-          {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            width: '100%'
-          },
-          // Move buttons down when match hasn't started (no swipe to complete button)
-          !hasMatchStarted && {
-            marginTop: height * 0.03, // Add extra margin to move buttons down
-          }
-        ]}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%'
+        }}>
           {/* Play Button / Skip Button */}
           <TouchableOpacity 
             style={{
               flex: 1,
               backgroundColor: '#2A2A2A',
-              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
-              paddingHorizontal: isNexusS ? width * 0.025 : width * 0.04,
-              borderRadius: isNexusS ? width * 0.015 : width * 0.02,
+              paddingVertical: layout.adjustPadding(height * 0.045, 'bottom'), // Increased from 0.035
+              paddingHorizontal: width * 0.05,
+              borderRadius: width * 0.02,
               alignItems: 'center',
               justifyContent: 'center',
               flexDirection: 'row',
-              marginRight: isNexusS ? width * 0.015 : width * 0.02,
-              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              marginRight: width * 0.025,
+              borderWidth: width * 0.005,
               borderColor: 'white',
-              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              minHeight: layout.adjustPadding(height * 0.14, 'bottom'), // Increased from 0.12
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
             onPress={async () => {
@@ -4442,11 +5087,11 @@ export default function RemoteScreen() {
                 isPlaying ? 'pause' : 
                 'play'
               }
-              size={isNexusS ? Math.max(width * 0.04, 16) : width * 0.045} 
+              size={width * 0.045} 
               color="white" 
-              style={{marginRight: isNexusS ? width * 0.01 : width * 0.015}}
+              style={{marginRight: width * 0.015}}
             />
-            <Text style={{fontSize: isNexusS ? Math.max(width * 0.03, 12) : width * 0.035, fontWeight: '600', color: 'white'}}>
+            <Text style={{fontSize: width * 0.035, fontWeight: '600', color: 'white'}}>
               {isInjuryTimer ? 'Skip Injury' : 
                isBreakTime ? 'Skip Break' : 
                isPlaying ? 'Pause' : 
@@ -4457,15 +5102,15 @@ export default function RemoteScreen() {
           {/* Reset Button */}
                       <TouchableOpacity 
               style={{
-              width: isNexusS ? width * 0.13 : width * 0.15,
+              width: width * 0.15,
                 backgroundColor: '#FB5D5C',
-              paddingVertical: isNexusS ? height * 0.008 : height * 0.012,
-              borderRadius: isNexusS ? width * 0.04 : width * 0.05,
+              paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
+              borderRadius: width * 0.05,
                 alignItems: 'center',
                 justifyContent: 'center',
-              borderWidth: isNexusS ? width * 0.003 : width * 0.005,
+              borderWidth: width * 0.005,
                 borderColor: 'transparent',
-              minHeight: isNexusS ? height * 0.045 : height * 0.055,
+              minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
               shadowColor: '#6C5CE7',
               shadowOffset: { width: 0, height: height * 0.005 },
               shadowOpacity: 0.25,
@@ -4474,24 +5119,10 @@ export default function RemoteScreen() {
             }} 
             onPress={resetTimer}
           >
-            <Ionicons name="refresh" size={isNexusS ? 20 : 24} color="white" />
+            <Ionicons name="refresh" size={24} color="white" />
           </TouchableOpacity>
         </View>
 
-        {/* Complete Match Slider - Only show when match has started */}
-        {hasMatchStarted && (
-          <SwipeToCompleteButton
-            title="Swipe To Complete The Match"
-            customStyle={{
-              position: 'relative',
-              width: '100%',
-              alignSelf: 'stretch', // Makes it stretch to fill the container width
-              flex: 1, // Takes up available space
-              minWidth: '100%' // Ensures minimum width matches container
-            }}
-            onSwipeSuccess={completeMatch}
-          />
-        )}
       </View>
 
       {/* Edit Time Popup */}
@@ -4727,8 +5358,9 @@ export default function RemoteScreen() {
           </View>
         </View>
       )}
-        </View>
-    </SafeAreaView>
-  </GestureHandlerRootView>
+          </View>
+        </SafeAreaView>
+      </View>
+    </GestureHandlerRootView>
   );
 }

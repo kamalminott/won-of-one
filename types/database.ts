@@ -36,6 +36,7 @@ export interface Match {
   touches_against?: number;
   is_win?: boolean;
   is_complete?: boolean; // NEW: Track completion status
+  notes?: string; // Match notes
 }
 
 export interface FencingRemote {
@@ -66,8 +67,11 @@ export interface Goal {
   tracking_mode?: string;
   linked_session_id?: string;
   is_active?: boolean;
+  is_failed?: boolean;                // New: Goal became impossible to achieve
   created_at?: string;
   updated_at?: string;
+  match_window?: number;              // For windowed goals (e.g., next 20 matches)
+  starting_match_count?: number;      // Total matches when goal was created
 }
 
 export interface AppUser {
@@ -155,6 +159,7 @@ export interface SimpleMatch {
   youScore: number;
   opponentScore: number;
   date: string;
+  time?: string; // Time when match was completed
   opponentName: string;
   isWin: boolean;
 }
@@ -167,5 +172,30 @@ export interface SimpleGoal {
   currentValue: number;
   deadline: string;
   isCompleted: boolean;
+  isFailed?: boolean;                 // New: Goal became impossible to achieve
   progress: number;
+  match_window?: number;              // For windowed goals
+  starting_match_count?: number;      // Starting point for window
+}
+
+export interface WeeklyTarget {
+  target_id: string;
+  user_id: string;
+  activity_type: string;
+  week_start_date: string;
+  week_end_date: string;
+  target_sessions: number;
+  is_complete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeeklySessionLog {
+  session_id: string;
+  user_id: string;
+  activity_type: string;
+  session_date: string;
+  duration_minutes?: number;
+  notes?: string;
+  created_at: string;
 }

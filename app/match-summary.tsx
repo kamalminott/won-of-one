@@ -1,6 +1,7 @@
-import { BackButton } from '@/components/BackButton';
+import { GoalCelebrationModal } from '@/components/GoalCelebrationModal';
 import { MatchSummaryCard } from '@/components/MatchSummaryCard';
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
+import { SetNewGoalPrompt } from '@/components/SetNewGoalPrompt';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService } from '@/lib/database';
@@ -10,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MatchSummaryScreen() {
@@ -36,6 +37,10 @@ export default function MatchSummaryScreen() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notes, setNotes] = useState('');
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [completedGoal, setCompletedGoal] = useState<any>(null);
+  const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
+  const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
 
   // Load user profile data
   useEffect(() => {
@@ -69,6 +74,12 @@ export default function MatchSummaryScreen() {
           console.log('⏱️ ACTUAL MATCH DURATION (bout_length_s):', matchData?.bout_length_s, 'seconds');
           console.log('⏱️ MATCH DURATION FORMATTED:', matchData?.bout_length_s ? `${Math.floor(matchData.bout_length_s / 60)}:${(matchData.bout_length_s % 60).toString().padStart(2, '0')}` : 'N/A');
           setMatch(matchData);
+          
+          // Load existing notes if available
+          if (matchData?.notes) {
+            console.log('📝 Loading existing notes:', matchData.notes);
+            setNotes(matchData.notes);
+          }
           
           // Calculate best run and score progression if we have match data and user info
           if (matchData && matchData.fencer_1_name) {
@@ -122,9 +133,48 @@ export default function MatchSummaryScreen() {
     console.log('See full summary');
   };
 
-  const handleCancelMatch = () => {
-    // TODO: Implement cancel match
-    console.log('Cancel match');
+  const handleCancelMatch = async () => {
+    if (!match?.match_id) {
+      console.log('No match ID available for deletion');
+      return;
+    }
+
+    // Show confirmation dialog
+    Alert.alert(
+      'Cancel Match',
+      'Are you sure you want to cancel this match? This will permanently delete the match from your history.',
+      [
+        {
+          text: 'Keep Match',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete Match',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🗑️ Canceling and deleting match:', match.match_id);
+              
+              // Delete the match from the database
+              const success = await matchService.deleteMatch(match.match_id);
+              
+              if (success) {
+                console.log('✅ Match deleted successfully');
+                
+                // Navigate back to home screen
+                router.replace('/(tabs)');
+              } else {
+                console.error('❌ Failed to delete match');
+                Alert.alert('Error', 'Failed to cancel match. Please try again.');
+              }
+            } catch (error) {
+              console.error('Error canceling match:', error);
+              Alert.alert('Error', 'An error occurred while canceling the match.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSaveMatch = async () => {
@@ -136,17 +186,64 @@ export default function MatchSummaryScreen() {
     try {
       console.log('💾 Saving match and updating goals...');
       
-      // Update goals based on match result (only if user participated)
-      if (match.user_id && match.result) {
-        await goalService.updateGoalsAfterMatch(
+      // Check if failed goal info was passed from remote.tsx (for remote matches)
+      const hasFailedGoalFromRemote = params.failedGoalTitle && params.failedGoalReason;
+      
+      // Update goals based on match result (only if user participated AND match is not already complete)
+      // Remote matches are already complete and goals already updated
+      if (match.user_id && match.result && !match.is_complete) {
+        const result = await goalService.updateGoalsAfterMatch(
           user.id, 
           match.result as 'win' | 'loss', 
           match.final_score || 0,
           match.touches_against || 0
         );
         console.log('✅ Goals updated successfully');
+        
+        // Check if any goals were completed
+        if (result.completedGoals && result.completedGoals.length > 0) {
+          // Show celebration for the first completed goal
+          console.log('🎉 Showing celebration for completed goal:', result.completedGoals[0]);
+          const goalData = result.completedGoals[0];
+          setCompletedGoal(goalData);
+          // Store the goal ID from the activeGoals list
+          const activeGoals = await goalService.getActiveGoals(user.id);
+          const matchingGoal = activeGoals.find(g => g.title === goalData.title);
+          if (matchingGoal) {
+            setCompletedGoalId(matchingGoal.id);
+          }
+          setShowCelebration(true);
+          // Don't navigate yet - wait for user to close celebration
+          return;
+        }
+        
+        // Check if any goals failed - pass to home screen
+        if (result.failedGoals && result.failedGoals.length > 0) {
+          const failedGoal = result.failedGoals[0]; // Show first failed goal
+          router.push({
+            pathname: '/(tabs)',
+            params: {
+              showFailedGoalAlert: 'true',
+              failedGoalTitle: failedGoal.title,
+              failedGoalReason: failedGoal.reason,
+            }
+          });
+          return; // Don't navigate normally
+        }
+      } else if (hasFailedGoalFromRemote) {
+        // Remote match with failed goal - pass through to home screen
+        console.log('🔄 Passing failed goal from remote to home screen');
+        router.push({
+          pathname: '/(tabs)',
+          params: {
+            showFailedGoalAlert: 'true',
+            failedGoalTitle: params.failedGoalTitle as string,
+            failedGoalReason: params.failedGoalReason as string,
+          }
+        });
+        return; // Don't navigate normally
       } else {
-        console.log('ℹ️ Skipping goal update - anonymous match or no result');
+        console.log('ℹ️ Skipping goal update - match already complete or anonymous');
       }
       
       // Navigate back to home page
@@ -161,15 +258,66 @@ export default function MatchSummaryScreen() {
     setShowNotesModal(true);
   };
 
+  const handleCelebrationClose = () => {
+    setShowCelebration(false);
+    // Show the "Set New Goal?" prompt
+    setShowNewGoalPrompt(true);
+  };
+
+  const handleSetNewGoal = async () => {
+    setShowNewGoalPrompt(false);
+    
+    // Deactivate the completed goal
+    if (completedGoalId) {
+      console.log('🔒 Deactivating completed goal:', completedGoalId);
+      await goalService.deactivateGoal(completedGoalId);
+    }
+    
+    setCompletedGoal(null);
+    setCompletedGoalId(null);
+    
+    // Navigate to home with auto-open flag to trigger goal modal
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        autoOpenGoalModal: 'true',
+      }
+    });
+  };
+
+  const handleLater = async () => {
+    setShowNewGoalPrompt(false);
+    
+    // Deactivate the completed goal
+    if (completedGoalId) {
+      console.log('🔒 Deactivating completed goal:', completedGoalId);
+      await goalService.deactivateGoal(completedGoalId);
+    }
+    
+    setCompletedGoal(null);
+    setCompletedGoalId(null);
+    
+    // Navigate to home WITHOUT auto-open flag (user chose "Later")
+    router.push('/(tabs)');
+  };
+
   const handleNotesChange = (text: string) => {
     setNotes(text);
   };
 
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
+    if (match?.match_id) {
+      try {
+        console.log('💾 Saving notes to database:', notes);
+        await matchService.updateMatch(match.match_id, {
+          notes: notes
+        });
+        console.log('✅ Notes saved successfully');
+      } catch (error) {
+        console.error('❌ Error saving notes:', error);
+      }
+    }
     setShowNotesModal(false);
-    // Notes are already saved in state via handleNotesChange
-    // TODO: Save notes to database
-    console.log('Saving notes:', notes);
   };
 
   const handleCancelNotes = () => {
@@ -201,42 +349,23 @@ export default function MatchSummaryScreen() {
       flex: 1,
     },
     header: {
-      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingVertical: height * 0.02,
       paddingHorizontal: width * 0.04,
       marginBottom: height * 0.02,
-    },
-    backButton: {
-      width: width * 0.1,
-      height: width * 0.1,
-      borderRadius: width * 0.05,
-      backgroundColor: '#2e2e2e',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: '#E0E0E0',
     },
     title: {
       fontSize: Math.round(width * 0.06),
       fontWeight: '700',
       color: 'white',
-    },
-    editButton: {
-      width: width * 0.1,
-      height: width * 0.1,
-      borderRadius: width * 0.05,
-      backgroundColor: '#2e2e2e',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: '#E0E0E0',
+      textAlign: 'center',
     },
     scrollContainer: {
       flex: 1,
     },
     scrollContent: {
+      paddingTop: height * 0.02, // Add space for the pill to show
       paddingBottom: height * 0.05,
     },
     modalOverlay: {
@@ -342,11 +471,32 @@ export default function MatchSummaryScreen() {
 
   if (!match || !matchData) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ color: 'white', fontSize: 18 }}>Match not found</Text>
-        <TouchableOpacity onPress={handleBack} style={{ marginTop: 20, padding: 10, backgroundColor: '#2e2e2e', borderRadius: 8 }}>
-          <Text style={{ color: 'white' }}>Go Back</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <View style={{ alignItems: 'center' }}>
+          <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+            Match Not Found
+          </Text>
+          <Text style={{ color: '#9D9D9D', fontSize: 16, textAlign: 'center', marginBottom: 30, lineHeight: 22 }}>
+            The match you're looking for couldn't be found.{'\n'}
+            This might happen if the match was deleted or if there was an error during completion.
+          </Text>
+          <TouchableOpacity 
+            onPress={handleBack} 
+            style={{ 
+              backgroundColor: '#6250F2', 
+              paddingHorizontal: 30, 
+              paddingVertical: 15, 
+              borderRadius: 25,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10
+            }}
+          >
+            <Ionicons name="arrow-back" size={20} color="white" />
+            <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -355,11 +505,7 @@ export default function MatchSummaryScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
       {/* Header */}
       <View style={styles.header}>
-        <BackButton onPress={handleBack} />
         <Text style={styles.title}>Match Summary</Text>
-        <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-          <Ionicons name="pencil" size={24} color="white" />
-        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView 
@@ -454,6 +600,21 @@ export default function MatchSummaryScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Goal Celebration Modal */}
+      <GoalCelebrationModal
+        visible={showCelebration}
+        goalData={completedGoal}
+        onClose={handleCelebrationClose}
+      />
+
+      {/* Set New Goal Prompt Modal */}
+      <SetNewGoalPrompt
+        visible={showNewGoalPrompt}
+        completedGoal={completedGoal}
+        onSetGoal={handleSetNewGoal}
+        onLater={handleLater}
+      />
     </SafeAreaView>
   );
 }

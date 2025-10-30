@@ -1,4 +1,5 @@
 import { BackButton } from '@/components/BackButton';
+import { PriorityStatsCard } from '@/components/PriorityStatsCard';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
@@ -410,6 +411,9 @@ export default function ProfileScreen() {
           </View>
         </View>
       </View>
+
+      {/* Priority Round Performance Section */}
+      <PriorityStatsCard />
 
       {/* Account Information Section */}
       <View style={[styles.section, {

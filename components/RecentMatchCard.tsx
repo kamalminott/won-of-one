@@ -1,20 +1,39 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
 import { WinPill } from './WinPill';
+
+// Helper function to get initials from a name
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) {
+    return '?';
+  } else if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase();
+  } else {
+    return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+  }
+};
 
 interface Match {
   id: string;
   opponentName: string;
   opponentImage: string;
   date: string;
+  time?: string; // Time when match was completed
   matchType: 'Competition' | 'Training';
   outcome: 'Victory' | 'Defeat';
   playerScore: number;
   opponentScore: number;
+  source?: string; // Source of the match (manual, remote, etc.)
+  notes?: string; // Match notes
 }
 
 interface RecentMatchCardProps {
@@ -27,23 +46,86 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   customStyle = {} 
 }) => {
   const { width, height } = useWindowDimensions();
+  const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+
+  // Helper function to validate if an image URI is valid
+  const isValidImage = (imageUri: string | undefined): boolean => {
+    return !!(
+      imageUri &&
+      imageUri !== 'https://via.placeholder.com/60x60' &&
+      !imageUri.includes('example.com') &&
+      !imageUri.includes('placeholder') &&
+      (imageUri.startsWith('http') || imageUri.startsWith('file://'))
+    );
+  };
+
+  // Helper function to render profile image or initials
+  const renderProfileImage = (imageUri: string | undefined, name: string | undefined) => {
+    const initials = getInitials(name || '');
+
+    if (imageUri && isValidImage(imageUri) && !imageLoadErrors.has(imageUri)) {
+      return (
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.profileImage}
+          contentFit="cover"
+          onError={(error) => {
+            console.log('❌ Image failed to load, will show initials instead:', error);
+            if (imageUri) {
+              setImageLoadErrors(prev => new Set(prev).add(imageUri));
+            }
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully');
+          }}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.profileImage, { backgroundColor: '#393939', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFFFFF' }]}>
+        <Text style={styles.profileInitials}>{initials}</Text>
+      </View>
+    );
+  };
 
   const handleCardPress = () => {
-    router.push({
-      pathname: '/match-history-details',
-      params: { 
-        matchId: match.id,
-        opponentName: match.opponentName,
-        opponentImage: match.opponentImage,
-        youScore: match.playerScore.toString(),
-        opponentScore: match.opponentScore.toString(),
-        matchType: match.matchType,
-        date: match.date,
-        duration: '02:30', // This would come from match data in real app
-        location: 'Metro Field House', // This would come from match data in real app
-        isWin: (match.outcome === 'Victory').toString() // Pass win status based on outcome
-      }
-    });
+    const isManualMatch = match.source === 'manual';
+    
+    if (isManualMatch) {
+      // Navigate to manual match summary for manual matches
+      router.push({
+        pathname: '/manual-match-summary',
+        params: {
+          matchId: match.id,
+          yourScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          opponentName: match.opponentName,
+          matchType: match.matchType,
+          date: match.date,
+          time: match.time || '12:00PM',
+          isWin: (match.outcome === 'Victory').toString(),
+          notes: match.notes || '', // Pass actual notes from the match
+        }
+      });
+    } else {
+      // Navigate to regular match details for remote matches
+      router.push({
+        pathname: '/match-history-details',
+        params: { 
+          matchId: match.id,
+          opponentName: match.opponentName,
+          opponentImage: match.opponentImage,
+          youScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          matchType: match.matchType,
+          date: match.date,
+          duration: '02:30', // This would come from match data in real app
+          location: 'Metro Field House', // This would come from match data in real app
+          isWin: (match.outcome === 'Victory').toString() // Pass win status based on outcome
+        }
+      });
+    }
   };
 
   const styles = StyleSheet.create({
@@ -65,6 +147,12 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       borderRadius: width * 0.06,
       marginRight: width * 0.03,
     },
+    profileInitials: {
+      color: '#FFFFFF',
+      fontSize: width * 0.045,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     opponentInfo: {
       flex: 1,
     },
@@ -78,6 +166,11 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
     matchDate: {
       fontSize: width * 0.03,
       color: 'rgba(255, 255, 255, 0.6)',
+    },
+    matchTime: {
+      fontSize: width * 0.028,
+      color: 'rgba(255, 255, 255, 0.5)',
+      marginTop: height * 0.002,
     },
     outcomeBadgeContainer: {
       alignItems: 'flex-end',
@@ -135,16 +228,15 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
     >
       {/* Opponent Info */}
       <View style={styles.matchHeader}>
-        <Image
-          source={{ uri: match.opponentImage }}
-          style={styles.profileImage}
-          contentFit="cover"
-        />
+        {renderProfileImage(match.opponentImage, match.opponentName)}
         <View style={styles.opponentInfo}>
           <Text style={styles.opponentName} numberOfLines={2} ellipsizeMode="tail">
             {match.opponentName}
           </Text>
           <Text style={styles.matchDate}>{match.date}</Text>
+          {match.time && (
+            <Text style={styles.matchTime}>{match.time}</Text>
+          )}
         </View>
         <View style={styles.outcomeBadgeContainer}>
           {match.outcome === 'Victory' ? (

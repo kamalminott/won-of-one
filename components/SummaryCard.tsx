@@ -7,6 +7,7 @@ interface SummaryCardProps {
   value: string;
   label: string;
   backgroundColor: string;
+  isTall?: boolean; // Optional prop to make card taller
 }
 
 export const SummaryCard: React.FC<SummaryCardProps> = ({
@@ -14,6 +15,7 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
   value,
   label,
   backgroundColor,
+  isTall = false,
 }) => {
   const { width, height } = useWindowDimensions();
 
@@ -22,24 +24,25 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      padding: width * 0.03,
-      borderRadius: width * 0.035,
+      padding: width * 0.025,
+      paddingVertical: isTall ? height * 0.02 : height * 0.015, // Smaller when isTall is true
+      borderRadius: width * 0.03,
       marginHorizontal: width * 0.008,
     },
     iconContainer: {
-      marginRight: width * 0.025,
+      marginRight: width * 0.02,
     },
     content: {
       flex: 1,
     },
     value: {
-      fontSize: width * 0.045,
+      fontSize: isTall ? width * 0.045 : width * 0.04, // Slightly smaller when tall
       fontWeight: '700',
       color: Colors.gray.dark,
-      marginBottom: height * 0.004,
+      marginBottom: height * 0.003,
     },
     label: {
-      fontSize: width * 0.032,
+      fontSize: isTall ? width * 0.032 : width * 0.028, // Slightly smaller when tall
       color: Colors.gray.medium,
       fontWeight: '500',
     },
