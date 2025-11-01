@@ -1,8 +1,9 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
     Alert, KeyboardAvoidingView,
     Platform,
@@ -28,24 +29,41 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
 
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('Login');
+    }, [])
+  );
+
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
+    analytics.loginAttempt();
+    const loginStartTime = Date.now();
     setLoading(true);
 
     try {
       const { error } = await signIn(email, password);
       
       if (error) {
+        const errorType = error.message.includes('password') ? 'wrong_password' : 
+                         error.message.includes('email') ? 'invalid_email' :
+                         error.message.includes('network') || error.message.includes('connection') ? 'network_error' :
+                         'unknown_error';
+        analytics.loginFailure({ error_type: errorType });
         Alert.alert('Error', error.message);
       } else {
+        const timeToLogin = Date.now() - loginStartTime;
+        analytics.loginSuccess({ time_to_login_ms: timeToLogin });
         // Success - user will be automatically redirected by auth context
         router.push('/(tabs)');
       }
     } catch (error) {
+      analytics.loginFailure({ error_type: 'unexpected_error' });
       Alert.alert('Error', 'An unexpected error occurred');
     } finally {
       setLoading(false);
@@ -164,7 +182,10 @@ export default function LoginScreen() {
                 <Text style={[styles.rememberMeText, { fontSize: width * 0.035 }]}>Remember Me</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity onPress={() => router.push('/forgot-password')}>
+              <TouchableOpacity onPress={() => {
+                analytics.capture('forgot_password_click');
+                router.push('/forgot-password');
+              }}>
                 <Text style={[styles.forgotPasswordText, { fontSize: width * 0.035 }]}>Forgot Password?</Text>
               </TouchableOpacity>
             </View>
@@ -235,7 +256,10 @@ export default function LoginScreen() {
               marginBottom: height * 0.02,
               paddingVertical: height * 0.02
             }]}
-            onPress={() => router.push('/create-account')}
+            onPress={() => {
+              analytics.capture('create_account_click');
+              router.push('/create-account');
+            }}
           >
             <Text style={[styles.signUpText, { fontSize: width * 0.04 }]}>
               Don't have an account? <Text style={styles.signUpLink}>Sign Up</Text>

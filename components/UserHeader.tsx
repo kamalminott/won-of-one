@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
@@ -19,7 +20,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
   const { width, height } = useWindowDimensions();
 
   const handleProfilePress = () => {
-    router.push('/profile');
+    router.push('/(tabs)/profile');
   };
 
   const styles = StyleSheet.create({
@@ -27,7 +28,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: height * 0.015,
+      marginBottom: height * 0.005,
       paddingHorizontal: 0,
       width: '100%',
     },
@@ -118,7 +119,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
       </TouchableOpacity>
       
       <TouchableOpacity style={styles.settingsButton} onPress={onSettingsPress}>
-        <Text style={styles.settingsIcon}>⚙️</Text>
+        <Ionicons name="settings-outline" size={width * 0.045} color="white" />
       </TouchableOpacity>
     </View>
   );

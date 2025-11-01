@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
+import { analytics } from '@/lib/analytics';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
@@ -90,6 +91,9 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   };
 
   const handleCardPress = () => {
+    // Track match selection
+    analytics.matchSelected({ match_id: match.id });
+    
     const isManualMatch = match.source === 'manual';
     
     if (isManualMatch) {

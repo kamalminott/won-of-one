@@ -179,12 +179,12 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
           <Text style={styles.statNumber}>{pointsScored}</Text>
-          <Text style={styles.statLabel}>Points Scored</Text>
+          <Text style={styles.statLabel}>Points{`\n`}Scored</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
           <Text style={styles.statNumber}>{currentStreak}</Text>
-          <Text style={styles.statLabel}>Current Streak</Text>
+          <Text style={styles.statLabel}>Current{`\n`}Streak</Text>
         </View>
       </View>
     </View>

@@ -1,19 +1,22 @@
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
@@ -66,9 +69,37 @@ export default function AddMatchScreen() {
   const [yourScore, setYourScore] = useState(params.yourScore as string || '10');
   const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '12');
   const [isSaving, setIsSaving] = useState(false);
+  const [hasStartedForm, setHasStartedForm] = useState(false);
 
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
+
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('AddMatch');
+    }, [])
+  );
+
+  // Track form start when user begins filling
+  useEffect(() => {
+    if ((opponentName || event !== 'Training' || weaponType !== 'Foil' || notes) && !hasStartedForm) {
+      setHasStartedForm(true);
+      analytics.matchFormStarted();
+    }
+  }, [opponentName, event, weaponType, notes, hasStartedForm]);
+
+  // Track form abandonment on unmount if not saved
+  useEffect(() => {
+    return () => {
+      if (hasStartedForm && !isSaving) {
+        const hasData = opponentName || event !== 'Training' || weaponType !== 'Foil' || notes;
+        if (hasData) {
+          analytics.formAbandon({ form_type: 'match' });
+        }
+      }
+    };
+  }, [hasStartedForm, isSaving, opponentName, event, weaponType, notes]);
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('en-US', {
@@ -177,6 +208,12 @@ export default function AddMatchScreen() {
       if (savedMatch) {
         console.log('✅ Match saved successfully:', savedMatch);
         
+        // Track match save success
+        analytics.matchSave({ 
+          match_type: event === 'Training' ? 'training' : 'competition',
+          weapon_type: weaponType
+        });
+        
         // Navigate to manual match summary page
         router.push({
           pathname: '/manual-match-summary',
@@ -197,10 +234,12 @@ export default function AddMatchScreen() {
           }
         });
       } else {
+        analytics.matchSaveFailure({ error_type: 'database_save_failed' });
         Alert.alert('Error', 'Failed to save match. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error saving match:', error);
+      analytics.matchSaveFailure({ error_type: 'unexpected_error' });
       Alert.alert('Error', 'Failed to save match. Please try again.');
     } finally {
       setIsSaving(false);
@@ -250,6 +289,7 @@ export default function AddMatchScreen() {
       alignItems: 'center',
       paddingHorizontal: getDimension(0.04, width),
       paddingVertical: getDimension(0.01, height),
+      backgroundColor: 'rgba(33, 33, 33, 1)',
       borderBottomWidth: 1,
       borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
@@ -778,10 +818,18 @@ export default function AddMatchScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <ExpoStatusBar style="light" backgroundColor="rgba(33, 33, 33, 1)" translucent={false} />
+      {/* Color the OS status bar area without affecting layout */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: 'rgba(33, 33, 33, 1)' }} />
       {/* Header */}
       <View style={styles.header}>
-        <BackButton onPress={handleBack} />
-        <Text style={styles.headerTitle}>{isEditMode ? 'Edit Match' : 'Add New Match'}</Text>
+        <View style={{ width: getDimension(0.08, width), alignItems: 'flex-start' }}>
+          <BackButton onPress={handleBack} />
+        </View>
+        <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center' }]}>
+          {isEditMode ? 'Edit Match' : 'Add New Match'}
+        </Text>
+        <View style={{ width: getDimension(0.08, width) }} />
       </View>
 
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

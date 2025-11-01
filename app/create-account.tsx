@@ -1,9 +1,10 @@
 import { BackButton } from '@/components/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert, KeyboardAvoidingView,
   Platform,
@@ -32,8 +33,35 @@ export default function CreateAccountScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [hasStartedForm, setHasStartedForm] = useState(false);
 
-  // handleBack function removed - BackButton component handles navigation automatically
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('CreateAccount');
+    }, [])
+  );
+
+  // Track form start when user begins filling
+  useEffect(() => {
+    if ((firstName || lastName || email || password || confirmPassword) && !hasStartedForm) {
+      setHasStartedForm(true);
+      analytics.signupStart();
+    }
+  }, [firstName, lastName, email, password, confirmPassword, hasStartedForm]);
+
+  // Track form abandonment on unmount if not saved
+  useEffect(() => {
+    return () => {
+      if (hasStartedForm && !loading) {
+        // Check if user navigated away without completing
+        const hasData = firstName || lastName || email || password;
+        if (hasData) {
+          analytics.signupAbandon();
+        }
+      }
+    };
+  }, [hasStartedForm, loading, firstName, lastName, email, password]);
 
   const handleSignIn = () => {
     router.push('/login');
@@ -42,33 +70,44 @@ export default function CreateAccountScreen() {
   const handleCreateAccount = async () => {
     // Validation
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !password.trim()) {
+      analytics.capture('signup_validation_error', { field: 'required_fields', error_type: 'missing_fields' });
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
     if (password !== confirmPassword) {
+      analytics.capture('signup_validation_error', { field: 'password_confirm', error_type: 'password_mismatch' });
       Alert.alert('Error', 'Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
+      analytics.capture('signup_validation_error', { field: 'password', error_type: 'password_too_short' });
       Alert.alert('Error', 'Password must be at least 6 characters long');
       return;
     }
 
     if (!agreeToTerms) {
+      analytics.capture('signup_validation_error', { field: 'terms', error_type: 'terms_not_agreed' });
       Alert.alert('Error', 'Please agree to the Terms and Conditions');
       return;
     }
 
     setLoading(true);
+    analytics.capture('signup_submit');
 
     try {
       const { error } = await signUp(email, password);
       
       if (error) {
+        const errorType = error.message.includes('email') ? 'invalid_email' :
+                         error.message.includes('exists') || error.message.includes('already') ? 'email_exists' :
+                         error.message.includes('network') || error.message.includes('connection') ? 'network_error' :
+                         'unknown_error';
+        analytics.signupFailure({ error_type: errorType });
         Alert.alert('Error', error.message);
       } else {
+        analytics.signupSuccess();
         Alert.alert(
           'Success', 
           'Account created successfully! You can now log in.',
@@ -81,6 +120,7 @@ export default function CreateAccountScreen() {
         );
       }
     } catch (error) {
+      analytics.signupFailure({ error_type: 'unexpected_error' });
       Alert.alert('Error', 'An unexpected error occurred');
     } finally {
       setLoading(false);

@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { weeklyProgressService, weeklySessionLogService, weeklyTargetService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -485,6 +486,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       
       if (result) {
         console.log('✅ Target saved successfully:', result);
+        
+        // Track weekly training target creation
+        analytics.progressTargetSet({ 
+          activity_type: selectedActivity,
+          target_sessions: sessionCount
+        });
+        
         // Update the activity type in the component state
         setSelectedActivity(selectedActivity);
         // Close modal first for immediate feedback

@@ -1,0 +1,12 @@
+# Exclude large unnecessary files
+node_modules.bak/
+*.bak
+node_modules/
+.git/
+coverage/
+__tests__/
+*.log
+.DS_Store
+*.sql
+*.md
+

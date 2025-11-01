@@ -2,6 +2,7 @@ import { RecentMatchCard, SwipeToDeleteCard } from '@/components';
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { matchService } from '@/lib/database';
 import { SimpleMatch } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
@@ -197,6 +198,7 @@ export default function RecentMatchesScreen() {
   // Refresh matches when screen comes into focus (e.g., when returning from add-match)
   useFocusEffect(
     useCallback(() => {
+      analytics.screen('MatchHistory');
       if (user) {
         console.log('🎯 Match history screen focused - refreshing matches...');
         fetchMatches();
@@ -213,6 +215,9 @@ export default function RecentMatchesScreen() {
       const success = await matchService.deleteMatch(matchId);
       
       if (success) {
+        // Track match deletion
+        analytics.matchDeleted({ match_id: matchId });
+        
         // Remove the match from local state
         setAllMatches(prev => prev.filter(match => match.id !== matchId));
         setMatches(prev => prev.filter(match => match.id !== matchId));

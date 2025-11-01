@@ -1,12 +1,13 @@
 import { BackButton } from '@/components/BackButton';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { matchService, userService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -156,6 +157,13 @@ export default function ProfileScreen() {
     }
   }, [userName]);
 
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('Profile');
+    }, [])
+  );
+
   // No need to load profile data since it's handled by context
 
   const handleImagePicker = () => {
@@ -244,6 +252,11 @@ export default function ProfileScreen() {
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
     if (fullName) {
       await setUserName(fullName);
+      if (user?.id) {
+        await userService.updateUser(user.id, { name: fullName });
+        analytics.profileUpdate({ field: 'name' });
+        analytics.identify(user.id, { name: fullName });
+      }
       setShowNameEditModal(false);
     } else {
       Alert.alert('Error', 'Please enter at least a first name.');
@@ -266,6 +279,8 @@ export default function ProfileScreen() {
     if (user?.id) {
       try {
         await userService.updateUser(user.id, { handedness: value });
+        analytics.profileUpdate({ field: 'handedness' });
+        analytics.identify(user.id, { handedness: value });
         console.log('✅ Handedness updated:', value);
       } catch (error) {
         console.error('Error updating handedness:', error);
@@ -282,6 +297,8 @@ export default function ProfileScreen() {
     if (user?.id) {
       try {
         await userService.updateUser(user.id, { preferred_weapon: value });
+        analytics.profileUpdate({ field: 'preferred_weapon' });
+        analytics.identify(user.id, { preferred_weapon: value });
         console.log('✅ Preferred weapon updated:', value);
       } catch (error) {
         console.error('Error updating weapon:', error);
@@ -305,15 +322,17 @@ export default function ProfileScreen() {
       paddingBottom: insets.bottom,
       backgroundColor: '#171717'
     }]}>
+      {/* Overlay to color the OS status bar area without affecting layout */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: '#212121' }} />
       {/* Header */}
       <View style={[styles.header, {
         height: height * 0.08,
         paddingHorizontal: width * 0.04,
         paddingVertical: height * 0.005
-      }]}>
+      }]}> 
         <BackButton onPress={handleBack} />
         <Text style={[styles.headerTitle, { fontSize: width * 0.05 }]}>Profile</Text>
-        <TouchableOpacity style={styles.settingsButton}>
+        <TouchableOpacity style={styles.settingsButton} onPress={() => router.push('/settings')}>
           <Ionicons name="settings-outline" size={width * 0.06} color="white" />
         </TouchableOpacity>
       </View>
@@ -391,12 +410,12 @@ export default function ProfileScreen() {
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.totalPoints}</Text>
-            <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Points Scored</Text>
+            <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Points{`\n`}Scored</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={[styles.statNumber, { fontSize: width * 0.05 }]}>{matchStats.currentStreak}</Text>
-            <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Current Streak</Text>
+            <Text style={[styles.statLabel, { fontSize: width * 0.03 }]}>Current{`\n`}Streak</Text>
           </View>
         </View>
       </View>

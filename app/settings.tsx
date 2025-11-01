@@ -1,7 +1,8 @@
 import { BackButton } from '@/components/BackButton';
+import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,15 +11,24 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
 
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('Settings');
+    }, [])
+  );
+
   const handleBack = () => {
     router.back();
   };
 
   const handleEditProfile = () => {
-    router.push('/profile');
+    analytics.capture('profile_edit_accessed');
+    router.push('/(tabs)/profile');
   };
 
   const handleLogOut = () => {
+    analytics.logout();
     // TODO: Implement logout logic
     console.log('Log out pressed');
   };
@@ -29,6 +39,7 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteAccount = () => {
+    analytics.accountDeleted();
     // TODO: Implement delete account logic
     console.log('Delete account pressed');
   };
