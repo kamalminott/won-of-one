@@ -4,9 +4,10 @@
  * NOW WITH REAL IMPLEMENTATION (not stubs!)
  */
 
+import { analytics } from './analytics';
 import { fencingRemoteService, matchEventService, matchService } from './database';
 import { networkService } from './networkService';
-import { offlineCache, RemoteSession, PendingEvent } from './offlineCache';
+import { offlineCache, PendingEvent, RemoteSession } from './offlineCache';
 
 export const offlineRemoteService = {
   /**
@@ -368,12 +369,19 @@ export const offlineRemoteService = {
       return false;
     }
 
+    const startTime = Date.now();
+    let queuedOps = 0;
+
     try {
       console.log('🔄 Starting sync of pending data...');
+      
+      // Track sync attempt
+      analytics.syncAttempted();
 
       // Sync pending matches first
       const pendingMatches = await offlineCache.getPendingMatches();
       console.log(`📦 Found ${pendingMatches.length} pending matches to sync`);
+      queuedOps += pendingMatches.length;
 
       for (const match of pendingMatches) {
         try {
@@ -404,6 +412,7 @@ export const offlineRemoteService = {
       // Sync pending events
       const pendingEvents = await offlineCache.getPendingRemoteEvents();
       console.log(`📦 Found ${pendingEvents.length} pending events to sync`);
+      queuedOps += pendingEvents.length;
 
       // Group events by remote_id
       const eventsBySession = pendingEvents.reduce((acc: Record<string, PendingEvent[]>, event) => {
@@ -459,10 +468,28 @@ export const offlineRemoteService = {
       const remainingMatches = await offlineCache.getPendingMatches();
       const remainingEvents = await offlineCache.getPendingRemoteEvents();
       
+      const duration = Date.now() - startTime;
+      
+      // Track sync success
+      analytics.syncResult({ 
+        success: true, 
+        queued_ops: queuedOps, 
+        duration_ms: duration 
+      });
+      
       console.log(`✅ Sync complete. Remaining: ${remainingMatches.length} matches, ${remainingEvents.length} events`);
       
       return true;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      // Track sync failure
+      analytics.syncFailure({ 
+        error_code: (error as Error)?.message || 'unknown_error',
+        queued_ops: queuedOps,
+        duration_ms: duration 
+      });
+      
       console.error('❌ Error syncing remote data:', error);
       return false;
     }

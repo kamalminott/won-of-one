@@ -1,3 +1,4 @@
+import { analytics } from '@/lib/analytics';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -55,6 +56,15 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!user) {
       router.replace('/login');
+    }
+  }, [user]);
+
+  // Screen tracking and identify
+  useEffect(() => {
+    analytics.screen('Home');
+    analytics.dashboardImpression();
+    if (user) {
+      analytics.identify(user.id);
     }
   }, [user]);
 
@@ -195,6 +205,7 @@ export default function HomeScreen() {
   };
 
   const handleViewAllMatches = () => {
+    analytics.capture('recent_matches_view_all');
     router.push('/match-history');
   };
 
@@ -272,6 +283,7 @@ export default function HomeScreen() {
   };
 
   const handleAddNewMatch = () => {
+    analytics.quickActionClick({ action: 'log_match' });
     router.push('/add-match');
   };
 
@@ -294,16 +306,16 @@ export default function HomeScreen() {
       backgroundColor: Colors.dark.background,
     },
     headerSafeArea: {
-      backgroundColor: Colors.dark.background,
+      backgroundColor: 'rgba(33, 33, 33, 1)',
     },
     safeArea: {
       flex: 1,
       backgroundColor: Colors.dark.background,
     },
     stickyHeader: {
-      backgroundColor: Colors.dark.background,
+      backgroundColor: 'rgba(33, 33, 33, 1)',
       paddingHorizontal: '5%',
-      paddingVertical: height * 0.02,
+      paddingVertical: height * 0.008,
       zIndex: 10,
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -316,7 +328,7 @@ export default function HomeScreen() {
       width: '100%',
     },
     progressCardContainer: {
-      marginTop: -height * 0.02, // Move Performance Preparation card up
+      marginTop: height * 0.005,
     },
     addButtonContainer: {
       alignItems: 'flex-end',
@@ -481,6 +493,12 @@ export default function HomeScreen() {
                       const newGoal = await goalService.createGoal(goalData, user.id);
                       console.log('Goal saved result:', newGoal);
                       if (newGoal) {
+                        // Track goal creation
+                        analytics.goalSaved({ 
+                          goal_type: goalData.category || 'unknown',
+                          target: goalData.target_value
+                        });
+                        
                         Alert.alert('Success', 'Goal created successfully!');
                         fetchUserData(); // Refresh data after saving
                       } else {
@@ -506,6 +524,13 @@ export default function HomeScreen() {
                     console.log('Update result:', updatedGoal);
                     
                     if (updatedGoal && user) {
+                      // Get goal type for tracking
+                      const goal = goals.find(g => g.id === goalId);
+                      analytics.goalSaved({ 
+                        goal_type: goal?.title || 'unknown',
+                        target: updates.target_value
+                      });
+                      
                       console.log('✅ Goal updated, recalculating progress...');
                       
                       // Recalculate progress if target, window, or deadline changed
@@ -537,10 +562,15 @@ export default function HomeScreen() {
                 onGoalDeleted={async (goalId) => {
                   console.log('🗑️ onGoalDeleted callback triggered with goalId:', goalId);
                   try {
+                    // Get goal type before deletion for tracking
+                    const goal = goals.find(g => g.id === goalId);
+                    const goalType = goal?.title || 'unknown';
+                    
                     const success = await goalService.deleteGoal(goalId);
                     console.log('Delete result:', success);
                     
                     if (success) {
+                      analytics.goalDeleted({ goal_type: goalType });
                       console.log('✅ Goal deleted, refreshing home screen...');
                       
                       // Small delay to ensure database update propagates
@@ -588,6 +618,12 @@ export default function HomeScreen() {
                       const newGoal = await goalService.createGoal(goalData, user.id);
                       console.log('Goal saved result:', newGoal);
                       if (newGoal) {
+                        // Track goal creation
+                        analytics.goalSaved({ 
+                          goal_type: goalData.category || 'unknown',
+                          target: goalData.target_value
+                        });
+                        
                         Alert.alert('Success', 'Goal created successfully!');
                         fetchUserData(); // Refresh data after saving
                       } else {

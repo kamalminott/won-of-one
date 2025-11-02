@@ -4,13 +4,14 @@ import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { SetNewGoalPrompt } from '@/components/SetNewGoalPrompt';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { goalService, matchService } from '@/lib/database';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -41,6 +42,16 @@ export default function MatchSummaryScreen() {
   const [completedGoal, setCompletedGoal] = useState<any>(null);
   const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
   const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
+
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('MatchSummary');
+      if (params.matchId) {
+        analytics.matchSummaryViewed({ match_id: params.matchId as string });
+      }
+    }, [params.matchId])
+  );
 
   // Load user profile data
   useEffect(() => {

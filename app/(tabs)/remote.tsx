@@ -2,6 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import { analytics } from '@/lib/analytics';
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
@@ -133,6 +134,9 @@ export default function RemoteScreen() {
       console.log(`🌐 Network status: ${isConnected ? 'ONLINE' : 'OFFLINE'}`);
       
       if (nowOffline && !wasOffline) {
+        // Just went offline - track offline mode detection
+        analytics.offlineModeDetected();
+        
         // Just went offline - show offline banner for 1.5 seconds
         // Also hide pending banner if it was showing
         setShowPendingBanner(false);
@@ -177,7 +181,7 @@ export default function RemoteScreen() {
     });
 
     // Periodically check pending data count
-    const checkPendingData = async () => {
+    async function checkPendingData() {
       try {
         const matches = await offlineCache.getPendingMatches();
         const events = await offlineCache.getPendingRemoteEvents();
@@ -217,7 +221,7 @@ export default function RemoteScreen() {
       } catch (error) {
         console.error('Error checking pending data:', error);
       }
-    };
+    }
 
     // Initial check - initialize the tracking
     checkPendingData().then(() => {
@@ -282,6 +286,9 @@ export default function RemoteScreen() {
   // Handle focus/blur events for match persistence
   useFocusEffect(
     useCallback(() => {
+      // Track screen view
+      analytics.screen('Remote');
+      
       resumePromptShownRef.current = false; // reset for this focus
 
       let cancelled = false;
@@ -1387,6 +1394,15 @@ export default function RemoteScreen() {
       if (updatedMatch) {
         console.log('Match completed successfully:', updatedMatch);
         
+        // Track match completion
+        analytics.matchCompleted({
+          mode: 'remote',
+          duration_seconds: matchDuration,
+          your_score: user?.id && showUserProfile ? finalScore : actualAliceScore,
+          opponent_score: user?.id && showUserProfile ? touchesAgainst : actualBobScore,
+          is_offline: false
+        });
+        
         // Update goals if user is registered and match has a result
         if (user?.id && result) {
           console.log('🎯 Updating goals after match completion...');
@@ -1407,6 +1423,9 @@ export default function RemoteScreen() {
             console.error('❌ Error updating goals:', goalError);
           }
         }
+      } else {
+        // Track match completion failure
+        analytics.matchCompleteFailure({ error_type: 'database_update_failed' });
       }
 
       // 2. End the current period
@@ -1593,6 +1612,16 @@ export default function RemoteScreen() {
       }
 
       console.log('✅ Offline match saved successfully');
+      
+      // Track offline match saved
+      analytics.offlineMatchSaved();
+      analytics.matchCompleted({
+        mode: 'remote',
+        duration_seconds: matchDuration,
+        your_score: user?.id && showUserProfile ? finalScore : actualAliceScore,
+        opponent_score: user?.id && showUserProfile ? touchesAgainst : actualBobScore,
+        is_offline: true
+      });
 
       // Navigate to match summary with offline flag and all data
       const navParams: any = {
@@ -1866,6 +1895,9 @@ export default function RemoteScreen() {
       
       setCurrentPeriod(newPeriod);
       currentPeriodRef.current = newPeriod; // Update ref
+      
+      // Track period transition
+      analytics.periodTransition({ period: newPeriod });
     }
   };
 
@@ -2292,9 +2324,18 @@ export default function RemoteScreen() {
         return;
       }
       
+      // Track match start
+      const isOffline = await networkService.isOnline().then(online => !online);
+      analytics.matchStart({ 
+        mode: 'remote', 
+        is_offline: isOffline,
+        remote_id: session.remote_id
+      });
+      
       // Create match period only if one doesn't already exist (first time starting match)
       if (!currentMatchPeriod) {
         console.log('🆕 Creating new match period (first time starting match)');
+        analytics.matchSetupStart();
         await createMatchPeriod(session, playClickTime);
       } else {
         console.log('⏯️ Match period already exists, resuming match');
