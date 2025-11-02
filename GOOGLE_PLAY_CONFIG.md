@@ -21,9 +21,46 @@ This document outlines what you need to configure for Android beta testing in Go
    - App name: **Won Of One**
    - Default language: English
    - App or game: App
-   - Free or paid: Free
+   - Free or paid: **Free** ✅ (Choose this even if you have in-app subscriptions - subscriptions are configured separately)
    - Policies: Accept
 3. Click "Create app"
+
+**Note:** Choose "Free" even if you plan to have in-app subscriptions. The download is free, and subscriptions are configured separately in the Monetization section.
+
+### Setting Up In-App Subscriptions
+
+**After creating your app:**
+
+1. **Go to:** Play Console → Your App → **Monetization → Products → Subscriptions**
+
+2. **Create Subscription Products:**
+   - Click "+ Create subscription"
+   - Define subscription tiers (e.g., Monthly, Yearly, Premium)
+   - Set prices per country
+   - Configure billing periods
+   - Add free trials (optional)
+
+3. **Configure Subscription Details:**
+   - Name: "Won Of One Premium"
+   - Description: What users get with subscription
+   - Price: Set for each country
+   - Free trial period (if applicable)
+   - Grace period for payment failures
+
+4. **Activate Subscriptions:**
+   - Save subscription products
+   - Activate when ready
+   - Subscriptions work in beta and production
+
+**Integration in App:**
+- Use Expo's `expo-in-app-purchases` or `react-native-purchases`
+- Connect to Google Play Billing API
+- Handle subscription states in your app
+
+**For iOS (App Store):**
+- Same concept - choose "Free" app
+- Configure subscriptions in App Store Connect → Subscriptions
+- Use same purchase library for cross-platform
 
 ### 3. Package Name (Bundle ID)
 
