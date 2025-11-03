@@ -7,7 +7,6 @@ import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import React from 'react';
 import { Platform, StatusBar as RNStatusBar } from 'react-native';
-import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
