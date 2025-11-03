@@ -33,8 +33,10 @@ Before you start, make sure you have:
 
 ```bash
 cd /Users/kamalminott/Documents/Apps/won-of-one
-eas build --profile production --platform android --type apk
+eas build --profile production --platform android
 ```
+
+**Note:** The `buildType: "apk"` is configured in `eas.json`, so no `--type` flag needed.
 
 **What happens:**
 1. EAS Build starts
