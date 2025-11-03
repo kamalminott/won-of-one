@@ -16,6 +16,7 @@
       }
     },
     "android": {
+      "package": "com.kamalminott.wonofone",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
