@@ -4,11 +4,17 @@ This guide explains how to distribute your Won Of One app to Android beta tester
 
 ## Overview
 
-Google Play offers three testing tracks for Android apps:
+Google Play offers several ways to distribute your app for testing:
 
+**Quick Start (No Setup Required):**
+- **Internal App Sharing** - Share APK/AAB via link, instant, no store listing needed ⚡
+
+**Formal Testing Tracks (Requires Store Listing):**
 1. **Internal Testing** - Up to 100 testers, instant, no review (like iOS Internal)
 2. **Closed Testing** - Up to 75,000 testers, review required, organized groups (like iOS External)
 3. **Open Testing** - Unlimited testers, public beta, review required
+
+**Recommended Path:** Start with Internal App Sharing → Move to Internal Testing when ready
 
 **Your Setup:**
 - ✅ EAS Build configured for Android
@@ -76,6 +82,69 @@ Google Play offers three testing tracks for Android apps:
    - Release notes
 
 **Note:** You must create a Production release first (even if you never publish it) before you can create testing tracks.
+
+---
+
+## Quick Start: Internal App Sharing (FASTEST)
+
+**Best For:** Getting testers immediately without any store setup
+
+**Advantages:**
+- ✅ No store listing required
+- ✅ Instant sharing via link
+- ✅ No review needed
+- ✅ Works immediately after creating app
+- ✅ Perfect for initial testing
+
+**Steps:**
+
+1. **Build Your App:**
+   ```bash
+   eas build --profile production --platform android --type apk
+   ```
+   (Use APK for Internal App Sharing, not AAB)
+
+2. **Go to Play Console:**
+   - Play Console → Your App
+   - Click **"Testing"** → **"Internal app sharing"**
+   - If you don't see it, enable it in Settings
+
+3. **Upload APK:**
+   - Click "Upload new release"
+   - Drag and drop your APK file
+   - Or use "Choose file"
+   - Wait for upload (few seconds)
+
+4. **Share Link:**
+   - Copy the shareable link
+   - Send to testers via email, message, etc.
+   - Link looks like: `https://play.google.com/apps/internaltest/...`
+
+5. **Tester Experience:**
+   - Click link on Android device
+   - Browser opens Play Store
+   - "Install" button appears
+   - App installs directly
+   - No TestFlight equivalent needed!
+
+**Limitations:**
+- Links expire after 60 days
+- Max 100 testers per link
+- Not as organized as testing tracks
+- No analytics/crash reports in Play Console
+
+**When to Use:**
+- Quick initial testing
+- Before store listing is ready
+- Team testing
+- Fast iteration cycles
+
+**When to Move On:**
+- Use Internal Testing track when you want:
+  - Better organization
+  - Crash reports in Play Console
+  - Version management
+  - More professional setup
 
 ---
 
