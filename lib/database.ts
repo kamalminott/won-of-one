@@ -1009,10 +1009,44 @@ $$;
 // User-related functions
 export const userService = {
   // Create a new user in app_user table
-  async createUser(userId: string, email: string): Promise<AppUser | null> {
+  async createUser(userId: string, email: string, firstName?: string, lastName?: string): Promise<AppUser | null> {
+    // Helper function to capitalize first letter of each word
+    const capitalizeName = (name: string): string => {
+      if (!name || name.trim() === '') return '';
+      return name
+        .trim()
+        .toLowerCase()
+        .split(' ')
+        .filter(word => word.length > 0)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    };
+    
+    console.log('🔍 createUser called with:', { userId, email, firstName, lastName });
+    
+    // Combine firstName and lastName if provided, otherwise use email prefix
+    let fullName: string;
+    if (firstName && lastName) {
+      const capitalizedFirst = capitalizeName(firstName);
+      const capitalizedLast = capitalizeName(lastName);
+      fullName = `${capitalizedFirst} ${capitalizedLast}`.trim();
+      console.log('✅ Using firstName + lastName:', { capitalizedFirst, capitalizedLast, fullName });
+    } else if (firstName) {
+      fullName = capitalizeName(firstName);
+      console.log('✅ Using firstName only:', { firstName, fullName });
+    } else if (lastName) {
+      fullName = capitalizeName(lastName);
+      console.log('✅ Using lastName only:', { lastName, fullName });
+    } else {
+      // Fallback to email prefix, but capitalize it
+      const emailPrefix = email.split('@')[0];
+      fullName = capitalizeName(emailPrefix);
+      console.log('⚠️ Fallback to email prefix:', { emailPrefix, fullName });
+    }
+    
     const userData = {
       user_id: userId,
-      name: email.split('@')[0], // Use email prefix as name
+      name: fullName,
     };
 
     console.log('Creating user in app_user table:', userData);

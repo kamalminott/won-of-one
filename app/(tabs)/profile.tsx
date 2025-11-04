@@ -249,7 +249,20 @@ export default function ProfileScreen() {
   };
 
   const handleNameSave = async () => {
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+    // Helper function to capitalize first letter of each word
+    const capitalizeName = (name: string): string => {
+      return name
+        .trim()
+        .toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    };
+    
+    const capitalizedFirst = capitalizeName(firstName);
+    const capitalizedLast = capitalizeName(lastName);
+    const fullName = `${capitalizedFirst} ${capitalizedLast}`.trim();
+    
     if (fullName) {
       await setUserName(fullName);
       if (user?.id) {

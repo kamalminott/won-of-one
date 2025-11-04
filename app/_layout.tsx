@@ -119,33 +119,46 @@ export default function RootLayout() {
     return null;
   }
 
-  return (
-    <PostHogProvider apiKey={POSTHOG_CONFIG.apiKey} options={POSTHOG_CONFIG}>
-      <PostHogConnector />
-      <SafeAreaProvider>
-        <AuthProvider>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <Stack>
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="create-account" options={{ headerShown: false }} />
-            <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="add-match" options={{ headerShown: false }} />
-            <Stack.Screen name="match-history" options={{ headerShown: false }} />
-            <Stack.Screen name="match-history-details" options={{ headerShown: false }} />
-            <Stack.Screen name="match-summary" options={{ headerShown: false }} />
-            <Stack.Screen name="neutral-match-summary" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ headerShown: false }} />
-            <Stack.Screen name="profile" options={{ headerShown: false }} />
-            <Stack.Screen name="+not-found" />
-          </Stack>
-          <StatusBar 
-            style="auto" 
-            backgroundColor={Platform.OS === 'android' ? 'rgba(19, 19, 19, 1)' : undefined}
-          />
-        </ThemeProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
-    </PostHogProvider>
+  // Only initialize PostHog on native platforms (iOS/Android), not web
+  const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
+  
+  const appContent = (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack>
+          <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="create-account" options={{ headerShown: false }} />
+          <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="add-match" options={{ headerShown: false }} />
+          <Stack.Screen name="match-history" options={{ headerShown: false }} />
+          <Stack.Screen name="match-history-details" options={{ headerShown: false }} />
+          <Stack.Screen name="match-summary" options={{ headerShown: false }} />
+          <Stack.Screen name="neutral-match-summary" options={{ headerShown: false }} />
+          <Stack.Screen name="settings" options={{ headerShown: false }} />
+          <Stack.Screen name="profile" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar 
+          style="auto" 
+          backgroundColor={Platform.OS === 'android' ? 'rgba(19, 19, 19, 1)' : undefined}
+        />
+      </ThemeProvider>
+    </AuthProvider>
+  </SafeAreaProvider>
   );
+
+  // Wrap with PostHogProvider only on native platforms
+  if (isNative) {
+    return (
+      <PostHogProvider apiKey={POSTHOG_CONFIG.apiKey} options={POSTHOG_CONFIG}>
+        <PostHogConnector />
+        {appContent}
+      </PostHogProvider>
+    );
+  }
+
+  // Web platform: render without PostHog
+  return appContent;
 }

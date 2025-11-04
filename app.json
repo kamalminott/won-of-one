@@ -3,11 +3,12 @@
     "name": "Won Of One",
     "slug": "won-of-one",
     "version": "1.0.0",
+    "runtimeVersion": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kamalminott.wonofone",
@@ -49,6 +50,9 @@
       "eas": {
         "projectId": "84996da9-0bc1-44fe-82af-0623bc04e613"
       }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/84996da9-0bc1-44fe-82af-0623bc04e613"
     }
   }
 }

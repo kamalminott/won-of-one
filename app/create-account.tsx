@@ -97,7 +97,7 @@ export default function CreateAccountScreen() {
     analytics.capture('signup_submit');
 
     try {
-      const { error } = await signUp(email, password);
+      const { error } = await signUp(email, password, firstName.trim(), lastName.trim());
       
       if (error) {
         const errorType = error.message.includes('email') ? 'invalid_email' :

@@ -183,7 +183,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   // Sign up function
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, firstName?: string, lastName?: string) => {
+    console.log('🔍 signUp called with:', { email, firstName, lastName });
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -192,7 +194,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // If signup successful, create user in app_user table
     if (data.user && !error) {
       console.log('Creating user in app_user table for:', data.user.id);
-      await userService.createUser(data.user.id, email);
+      // Convert empty strings to undefined to avoid fallback to email prefix
+      const first = firstName && firstName.trim() ? firstName.trim() : undefined;
+      const last = lastName && lastName.trim() ? lastName.trim() : undefined;
+      console.log('🔍 Passing to createUser:', { first, last });
+      await userService.createUser(data.user.id, email, first, last);
     }
     
     return { error };
