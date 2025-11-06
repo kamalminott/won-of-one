@@ -20,18 +20,7 @@ import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, Style
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // Native module not working after rebuild - using View fallback
-const USE_GESTURE_HANDLER = false; // Disabled until build issue is resolved
 
-let GestureHandlerRootView: any = View; // Default fallback
-
-if (USE_GESTURE_HANDLER) {
-  try {
-    const gestureModule = require('react-native-gesture-handler');
-    GestureHandlerRootView = gestureModule.GestureHandlerRootView || View;
-  } catch (e) {
-    GestureHandlerRootView = View;
-  }
-}
 
 
 // Helper function to get initials from a name
