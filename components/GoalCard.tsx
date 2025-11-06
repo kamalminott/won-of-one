@@ -1,8 +1,65 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import React, { forwardRef, useImperativeHandle, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Alert, Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
-import CircularProgress from 'react-native-circular-progress-indicator';
+
+// CircularProgress with fallback - native module not working after rebuild
+// TODO: Investigate why native module isn't compiling in EAS build
+const USE_NATIVE_CIRCULAR_PROGRESS = false; // Disabled until build issue is resolved
+
+let CircularProgress: any;
+let useNative = USE_NATIVE_CIRCULAR_PROGRESS;
+
+if (useNative) {
+  try {
+    CircularProgress = require('react-native-circular-progress-indicator').default;
+    if (typeof CircularProgress !== 'function') {
+      throw new Error('CircularProgress is not a function');
+    }
+  } catch (error: any) {
+    console.warn('⚠️ CircularProgress native module error:', error?.message);
+    useNative = false;
+  }
+}
+
+// Fallback component (always used for now)
+if (!useNative || typeof CircularProgress !== 'function') {
+  CircularProgress = ({ value = 0, radius = 40, children, activeStrokeColor, inActiveStrokeColor, activeStrokeWidth = 4, ...props }: any) => {
+    const size = radius * 2;
+    const progress = Math.min(Math.max(value, 0), 100);
+    const strokeColor = activeStrokeColor || Colors.purple.primary;
+    const inactiveColor = inActiveStrokeColor || 'rgba(255,255,255,0.3)';
+    
+    return (
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+        <View style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: radius,
+          borderWidth: activeStrokeWidth,
+          borderColor: inactiveColor,
+        }} />
+        {progress > 0 && (
+          <View style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: radius,
+            borderWidth: activeStrokeWidth,
+            borderColor: 'transparent',
+            borderTopColor: progress > 0 ? strokeColor : 'transparent',
+            borderRightColor: progress > 25 ? strokeColor : 'transparent',
+            borderBottomColor: progress > 50 ? strokeColor : 'transparent',
+            borderLeftColor: progress > 75 ? strokeColor : 'transparent',
+            transform: [{ rotate: '-90deg' }],
+          }} />
+        )}
+        <View style={{ zIndex: 1 }}>{children}</View>
+      </View>
+    );
+  };
+}
 
 interface GoalCardProps {
   daysLeft: number;

@@ -36,7 +36,7 @@ export const MatchNotesCard: React.FC<MatchNotesCardProps> = ({
     container: {
       borderRadius: width * 0.02,
       padding: width * 0.04,
-      marginHorizontal: width * 0.02,
+      marginHorizontal: width * 0.04, // Match ScoreProgressionChart marginHorizontal
       marginTop: height * 0.002,
       marginBottom: height * 0.02,
       borderWidth: 1,

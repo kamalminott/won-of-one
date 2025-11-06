@@ -231,9 +231,11 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     container: {
       backgroundColor: '#2B2B2B',
       borderRadius: width * 0.03,
-      padding: width * 0.03,
+      paddingTop: width * 0.03,
+      paddingHorizontal: width * 0.03,
+      paddingBottom: width * 0.002, // Further reduced to bring legends closer to bottom
       marginBottom: screenHeight * 0.015,
-      marginHorizontal: width * 0.04,
+      marginHorizontal: width * 0.02, // Reduced from 0.04 to make graph wider
       left: 0,
       right: 0,
       overflow: 'visible',
@@ -242,7 +244,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       fontSize: Math.round(width * 0.035),
       fontWeight: '600',
       color: 'white',
-      marginBottom: screenHeight * 0.015,
+      marginBottom: screenHeight * 0.003, // Further reduced to bring graph closer to title
       textAlign: 'center',
       alignSelf: 'center',
     },

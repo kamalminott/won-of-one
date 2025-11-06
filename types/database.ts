@@ -76,6 +76,7 @@ export interface Goal {
 
 export interface AppUser {
   user_id: string;
+  email?: string;
   name?: string;
   preferred_weapon?: string;
   handedness?: string;

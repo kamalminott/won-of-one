@@ -10,6 +10,7 @@ import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 
 import { AuthProvider } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -102,6 +103,18 @@ function PostHogConnector() {
 }
 
 export default function RootLayout() {
+  console.log('🚀 RootLayout rendered - App starting!');
+  
+  // Check if this is a development build
+  const isDevBuild = __DEV__ || Constants.executionEnvironment === 'standalone';
+  console.log('🔍 Build Type Check:', {
+    __DEV__,
+    executionEnvironment: Constants.executionEnvironment,
+    isDevBuild,
+    appOwnership: Constants.appOwnership,
+    isDevice: Constants.isDevice,
+  });
+  
   const colorScheme = useColorScheme();
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -137,7 +150,6 @@ export default function RootLayout() {
           <Stack.Screen name="match-summary" options={{ headerShown: false }} />
           <Stack.Screen name="neutral-match-summary" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
-          <Stack.Screen name="profile" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </Stack>
         <StatusBar 

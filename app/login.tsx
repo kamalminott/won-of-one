@@ -3,11 +3,11 @@ import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useState } from 'react';
 import {
     Alert, KeyboardAvoidingView,
     Platform,
-    SafeAreaView,
     ScrollView,
     StyleSheet,
     Text,
@@ -16,7 +16,7 @@ import {
     useWindowDimensions,
     View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -71,15 +71,20 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
+    <>
+      <ExpoStatusBar style="light" translucent />
+      <SafeAreaView style={[styles.container, { paddingTop: 0, paddingBottom: 0 }]}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1 }}
+          contentContainerStyle={{ 
+            flexGrow: 1,
+            paddingBottom: insets.bottom + height * 0.02
+          }}
           showsVerticalScrollIndicator={false}
         >
           {/* Decorative Circles */}
@@ -88,7 +93,7 @@ export default function LoginScreen() {
 
           {/* Header */}
           <View style={[styles.header, { 
-            marginTop: Math.max(height * 0.04, insets.top + height * 0.015),
+            marginTop: Math.max(height * 0.04, insets.top + height * 0.02),
             marginBottom: height * 0.03
           }]}>
             <Text style={[styles.title, { fontSize: width * 0.075 }]}>Sign In</Text>
@@ -253,7 +258,7 @@ export default function LoginScreen() {
           <TouchableOpacity 
             style={[styles.signUpContainer, {
               marginTop: height * 0.02,
-              marginBottom: height * 0.02,
+              marginBottom: 0,
               paddingVertical: height * 0.02
             }]}
             onPress={() => {
@@ -268,6 +273,7 @@ export default function LoginScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </>
   );
 }
 

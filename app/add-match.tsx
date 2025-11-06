@@ -15,8 +15,16 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
-  const { user } = useAuth();
+  const { user, userName } = useAuth();
   const insets = useSafeAreaInsets();
+  
+  // Helper function to get first name from full name
+  const getFirstName = (fullName: string | undefined | null): string => {
+    if (!fullName || !fullName.trim()) return 'Your';
+    return fullName.trim().split(' ')[0];
+  };
+  
+  const userFirstName = getFirstName(userName) || 'Your';
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
@@ -66,8 +74,8 @@ export default function AddMatchScreen() {
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [editingScore, setEditingScore] = useState<'your' | 'opponent' | null>(null);
   const [tempScore, setTempScore] = useState('');
-  const [yourScore, setYourScore] = useState(params.yourScore as string || '10');
-  const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '12');
+  const [yourScore, setYourScore] = useState(params.yourScore as string || '0');
+  const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '0');
   const [isSaving, setIsSaving] = useState(false);
   const [hasStartedForm, setHasStartedForm] = useState(false);
 
@@ -1013,7 +1021,7 @@ export default function AddMatchScreen() {
               <View style={styles.scoreInputContainer}>
                 <Text style={styles.scoreInput}>{yourScore}</Text>
               </View>
-              <Text style={styles.scoreLabel}>Your Score</Text>
+              <Text style={styles.scoreLabel}>{userFirstName}'s Score</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -1404,7 +1412,7 @@ export default function AddMatchScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.modalTitle}>
-              {editingScore === 'your' ? 'Edit Your Score' : 'Edit Opponent Score'}
+              {editingScore === 'your' ? `Edit ${userFirstName}'s Score` : 'Edit Opponent Score'}
             </Text>
             
             <View style={styles.inputGroup}>

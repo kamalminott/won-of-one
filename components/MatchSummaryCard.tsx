@@ -76,6 +76,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
     },
     buttonContainer: {
       marginTop: height * 0.02,
+      marginHorizontal: width * 0.04, // Match ScoreProgressionChart marginHorizontal
     },
     saveButton: {
       backgroundColor: '#6C5CE7',
@@ -101,6 +102,9 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       marginTop: height * 0.02,
       width: '100%',
     },
+    cancelButtonContainer: {
+      marginHorizontal: width * 0.04, // Match ScoreProgressionChart marginHorizontal
+    },
     cancelButtonText: {
       color: '#EF4444',
       fontSize: Math.round(width * 0.04),
@@ -110,8 +114,8 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       flexDirection: 'row',
       justifyContent: 'space-between',
       marginTop: height * 0.002,
-      gap: width * 0.02,
-      marginHorizontal: width * 0.02,
+      gap: width * 0.015, // Small gap between cards (1.5% of screen width)
+      marginHorizontal: width * 0.04, // Match ScoreProgressionChart and MatchNotesCard margin
     },
   });
 
@@ -149,7 +153,6 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
         onNotesChange={onNotesChange}
         onPress={onNotesPress}
         isPreview={true}
-        customStyle={{ marginHorizontal: 0 }}
       />
       
       {/* Action Buttons */}
@@ -160,9 +163,11 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       </View>
       
       {/* Cancel Button */}
-      <TouchableOpacity style={styles.cancelButton} onPress={onCancelMatch}>
-        <Text style={styles.cancelButtonText}>Cancel Match</Text>
-      </TouchableOpacity>
+      <View style={styles.cancelButtonContainer}>
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancelMatch}>
+          <Text style={styles.cancelButtonText}>Cancel Match</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };

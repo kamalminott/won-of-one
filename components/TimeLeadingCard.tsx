@@ -1,6 +1,56 @@
 import React from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
-import { CircularProgressWithChild } from 'react-native-circular-progress-indicator';
+
+// CircularProgressWithChild with fallback
+const USE_NATIVE_CIRCULAR_PROGRESS = false; // Disabled until build issue is resolved
+
+let CircularProgressWithChild: any;
+
+if (USE_NATIVE_CIRCULAR_PROGRESS) {
+  try {
+    const module = require('react-native-circular-progress-indicator');
+    CircularProgressWithChild = module.CircularProgressWithChild || module.default;
+  } catch (e) {
+    CircularProgressWithChild = null;
+  }
+}
+
+// Fallback component
+if (!USE_NATIVE_CIRCULAR_PROGRESS || !CircularProgressWithChild) {
+  CircularProgressWithChild = ({ value = 0, radius = 40, children, activeStrokeColor, ...props }: any) => {
+    const size = radius * 2;
+    const progress = Math.min(Math.max(value, 0), 100);
+    
+    return (
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+        <View style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: radius,
+          borderWidth: props.activeStrokeWidth || 4,
+          borderColor: props.inActiveStrokeColor || '#393939',
+        }} />
+        {progress > 0 && (
+          <View style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: radius,
+            borderWidth: props.activeStrokeWidth || 4,
+            borderColor: 'transparent',
+            borderTopColor: progress > 0 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderRightColor: progress > 25 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderBottomColor: progress > 50 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderLeftColor: progress > 75 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            transform: [{ rotate: '-90deg' }],
+          }} />
+        )}
+        <View style={{ zIndex: 1 }}>{children}</View>
+      </View>
+    );
+  };
+}
 
 const { width } = Dimensions.get('window');
 

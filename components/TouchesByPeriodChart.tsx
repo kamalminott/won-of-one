@@ -101,7 +101,7 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       backgroundColor: '#2B2B2B',
       borderRadius: width * 0.02,
       padding: width * 0.04,
-      marginHorizontal: width * 0.01,
+      marginHorizontal: 0, // No margin - rowContainer handles alignment
       flex: 1,
       height: height * 0.22,
       marginBottom: height * 0.01,

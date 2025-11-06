@@ -3,6 +3,7 @@ import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { matchService, userService } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -264,11 +265,37 @@ export default function ProfileScreen() {
     const fullName = `${capitalizedFirst} ${capitalizedLast}`.trim();
     
     if (fullName) {
-      await setUserName(fullName);
       if (user?.id) {
-        await userService.updateUser(user.id, { name: fullName });
+        // Save to database first (source of truth)
+        const updatedUser = await userService.updateUser(user.id, { name: fullName });
+        if (updatedUser?.name) {
+          // Update Supabase Auth user metadata (display_name)
+          try {
+            const { error: updateError } = await supabase.auth.updateUser({
+              data: { display_name: fullName },
+            });
+            if (updateError) {
+              console.warn('⚠️ Failed to update auth display_name:', updateError);
+            } else {
+              console.log('✅ Auth display_name updated:', fullName);
+            }
+          } catch (error) {
+            console.warn('⚠️ Error updating auth display_name:', error);
+          }
+          
+          // Then sync to AsyncStorage
+          await setUserName(updatedUser.name);
+          console.log('✅ Name updated in database and synced to AsyncStorage:', updatedUser.name);
+        } else {
+          // Fallback: save to AsyncStorage even if DB update fails
+          await setUserName(fullName);
+          console.warn('⚠️ Database update may have failed, saved to AsyncStorage only');
+        }
         analytics.profileUpdate({ field: 'name' });
         analytics.identify(user.id, { name: fullName });
+      } else {
+        // No user ID, just save to AsyncStorage
+        await setUserName(fullName);
       }
       setShowNameEditModal(false);
     } else {
@@ -352,7 +379,7 @@ export default function ProfileScreen() {
 
       <ScrollView 
         style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: height * 0.025 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: height * 0.030 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         {/* User Profile Card */}

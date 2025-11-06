@@ -57,21 +57,55 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userName, setUserNameState] = useState<string>('');
   const [profileImage, setProfileImageState] = useState<string | null>(null);
 
-  // Load user name from AsyncStorage
+  // Load user name from database first, then AsyncStorage, then fallback
   const loadUserName = async () => {
     try {
+      if (!user?.id) {
+        setUserNameState('Guest User');
+        return;
+      }
+
+      // First, try to load from database
+      const dbUser = await userService.getUserById(user.id);
+      if (dbUser?.name) {
+        console.log('✅ Loaded name from database:', dbUser.name);
+        setUserNameState(dbUser.name);
+        // Also save to AsyncStorage for offline access
+        await AsyncStorage.setItem('user_name', dbUser.name);
+        return;
+      }
+
+      // Fallback to AsyncStorage
       const savedName = await AsyncStorage.getItem('user_name');
       if (savedName) {
+        console.log('✅ Loaded name from AsyncStorage:', savedName);
         setUserNameState(savedName);
-      } else if (user?.email) {
-        // Default to email username if no saved name
-        setUserNameState(user.email.split('@')[0]);
+        return;
+      }
+
+      // Final fallback to email prefix
+      if (user?.email) {
+        const emailPrefix = user.email.split('@')[0];
+        console.log('⚠️ Using email prefix as name:', emailPrefix);
+        setUserNameState(emailPrefix);
       } else {
         setUserNameState('Guest User');
       }
     } catch (error) {
       console.error('Error loading user name:', error);
-      setUserNameState(user?.email?.split('@')[0] || 'Guest User');
+      // Fallback to AsyncStorage or email prefix
+      try {
+        const savedName = await AsyncStorage.getItem('user_name');
+        if (savedName) {
+          setUserNameState(savedName);
+        } else if (user?.email) {
+          setUserNameState(user.email.split('@')[0]);
+        } else {
+          setUserNameState('Guest User');
+        }
+      } catch (e) {
+        setUserNameState(user?.email?.split('@')[0] || 'Guest User');
+      }
     }
   };
 
@@ -171,12 +205,51 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
     // If signin successful, ensure user exists in app_user table
     if (data.user && !error) {
-      console.log('Checking if user exists in app_user table for:', data.user.id);
+      console.log('✅ Auth signin successful, user ID:', data.user.id);
+      console.log('🔍 Checking if user exists in app_user table...');
       const existingUser = await userService.getUserById(data.user.id);
+      
       if (!existingUser) {
-        console.log('User not found in app_user table, creating...');
-        await userService.createUser(data.user.id, email);
+        console.log('⚠️ User not found in app_user table');
+        // Try to get display_name from auth metadata as fallback
+        const displayName = data.user.user_metadata?.display_name;
+        if (displayName) {
+          // Try to split display_name into first and last name
+          const nameParts = displayName.trim().split(' ');
+          const first = nameParts[0] || '';
+          const last = nameParts.slice(1).join(' ') || '';
+          
+          if (first && last) {
+            console.log('✅ Using display_name from auth metadata:', { first, last });
+            const createdUser = await userService.createUser(data.user.id, email, first, last);
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created from auth metadata and synced to AsyncStorage:', createdUser.name);
+            }
+          } else {
+            console.warn('⚠️ display_name in auth metadata is not in "FirstName LastName" format, cannot create user');
+          }
+        } else {
+          console.warn('⚠️ No display_name in auth metadata, user should sign up properly');
+        }
+      } else {
+        // User exists, sync name from database to AsyncStorage
+        console.log('✅ User found in database:', {
+          userId: existingUser.user_id,
+          name: existingUser.name,
+          hasSpace: existingUser.name?.includes(' '),
+          isCapitalized: existingUser.name !== existingUser.name?.toLowerCase()
+        });
+        
+        if (existingUser.name) {
+          await setUserName(existingUser.name);
+          console.log('✅ User name synced from database to AsyncStorage:', existingUser.name);
+        } else {
+          console.warn('⚠️ User exists in database but name is missing');
+        }
       }
+    } else {
+      console.error('❌ Auth signin failed:', error);
     }
     
     return { error };
@@ -186,19 +259,72 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const signUp = async (email: string, password: string, firstName?: string, lastName?: string) => {
     console.log('🔍 signUp called with:', { email, firstName, lastName });
     
+    // Require both firstName and lastName for signup
+    if (!firstName || !lastName || !firstName.trim() || !lastName.trim()) {
+      console.error('❌ signUp requires both firstName and lastName');
+      return { error: { message: 'First name and last name are required' } };
+    }
+    
+    // Helper function to capitalize first letter of each word (same as in createUser)
+    const capitalizeName = (name: string): string => {
+      if (!name || name.trim() === '') return '';
+      return name
+        .trim()
+        .toLowerCase()
+        .split(' ')
+        .filter(word => word.length > 0)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    };
+    
+    // Process names - both are guaranteed to exist at this point
+    const first = firstName.trim();
+    const last = lastName.trim();
+    const fullName = `${capitalizeName(first)} ${capitalizeName(last)}`.trim();
+    
+    console.log('🔍 Calculated display name:', fullName);
+    
+    // Sign up with user_metadata to set display_name in Supabase Auth
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          display_name: fullName,
+        },
+      },
     });
     
     // If signup successful, create user in app_user table
     if (data.user && !error) {
-      console.log('Creating user in app_user table for:', data.user.id);
-      // Convert empty strings to undefined to avoid fallback to email prefix
-      const first = firstName && firstName.trim() ? firstName.trim() : undefined;
-      const last = lastName && lastName.trim() ? lastName.trim() : undefined;
-      console.log('🔍 Passing to createUser:', { first, last });
-      await userService.createUser(data.user.id, email, first, last);
+      console.log('✅ Auth signup successful, user ID:', data.user.id);
+      console.log('🔍 Processed names:', { 
+        originalFirst: firstName, 
+        originalLast: lastName,
+        processedFirst: first, 
+        processedLast: last,
+        fullName
+      });
+      
+      const createdUser = await userService.createUser(data.user.id, email, first, last);
+      
+      // If user was created successfully, save name to AsyncStorage and load it
+      if (createdUser?.name) {
+        console.log('✅ User created in database with name:', createdUser.name);
+        await setUserName(createdUser.name);
+        console.log('✅ User name synced to AsyncStorage after signup:', createdUser.name);
+        console.log('📊 Final verification:', {
+          databaseName: createdUser.name,
+          asyncStorageWillHave: createdUser.name,
+          authDisplayName: data.user.user_metadata?.display_name,
+          hasSpace: createdUser.name.includes(' '),
+          isCapitalized: createdUser.name !== createdUser.name.toLowerCase()
+        });
+      } else {
+        console.error('❌ User created but name is missing:', createdUser);
+      }
+    } else {
+      console.error('❌ Auth signup failed:', error);
     }
     
     return { error };

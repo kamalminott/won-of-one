@@ -17,6 +17,7 @@ import { goalService, matchService, userService } from '@/lib/database';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 export default function HomeScreen() {
+  console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
   const { user, loading, signOut, userName, profileImage } = useAuth();
   const params = useLocalSearchParams();

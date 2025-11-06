@@ -6,8 +6,9 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -691,22 +692,17 @@ export default function NeutralMatchSummary() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#171717" />
+        <ExpoStatusBar style="light" />
+        
+        {/* Overlay to color the OS status bar area without affecting layout */}
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: '#212121', zIndex: 1 }} />
 
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Neutral Match Summary</Text>
-        
-        <TouchableOpacity style={styles.editButton}>
-          <Ionicons name="create-outline" size={20} color="white" />
-        </TouchableOpacity>
+      <View style={[styles.header, { paddingTop: insets.top * 0.3 }]}>
+        {/* Title - Centered */}
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={styles.headerTitle}>Neutral Match Summary</Text>
+        </View>
       </View>
 
       {/* Offline Match Indicator */}
@@ -846,6 +842,11 @@ export default function NeutralMatchSummary() {
             opponentScore={bobScoreNum}
             userLabel={fencer1Name as string}
             opponentLabel={fencer2Name as string}
+            styleOverrides={{
+              container: {
+                marginHorizontal: 0, // Remove chart's own margin - wrapper handles it
+              },
+            }}
           />
         </View>
 
@@ -879,8 +880,8 @@ export default function NeutralMatchSummary() {
           />
         </View>
 
-        {/* Cards Section */}
-        <View style={styles.cardsSection}>
+        {/* Cards Section - Hidden */}
+        {/* <View style={styles.cardsSection}>
           <Text style={styles.cardsTitle}>Cards</Text>
           <View style={styles.cardsContent}>
             <View style={styles.cardItem}>
@@ -917,7 +918,7 @@ export default function NeutralMatchSummary() {
               </View>
             </View>
           </View>
-        </View>
+        </View> */}
 
         {/* Action Buttons */}
         <View style={styles.actionButtonsContainer}>
@@ -967,28 +968,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     backgroundColor: '#212121',
-  },
-  backButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#343434',
-    alignItems: 'center',
-    justifyContent: 'center',
+    zIndex: 2,
   },
   headerTitle: {
     fontFamily: 'Articulat CF',
     fontSize: width * 0.05,
     fontWeight: '700',
     color: 'white',
-  },
-  editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#343434',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   offlineBanner: {
     flexDirection: 'row',
@@ -1172,7 +1158,7 @@ const styles = StyleSheet.create({
   },
   twoColumnContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    paddingHorizontal: width * 0.04,
     marginBottom: 20,
     gap: 8,
   },
@@ -1240,7 +1226,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2A2A2A',
     borderRadius: 20,
     padding: 20,
-    marginHorizontal: 16,
+    marginHorizontal: width * 0.04, // Match other cards' width (4% margin on each side = 92% width)
     marginBottom: 20,
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
@@ -1425,7 +1411,7 @@ const styles = StyleSheet.create({
   actionButtonsContainer: {
     flexDirection: 'column', // Changed from 'row' to 'column'
     gap: height * 0.02, // Changed to height-based gap for vertical spacing
-    paddingHorizontal: width * 0.05,
+    paddingHorizontal: width * 0.04,
     paddingVertical: height * 0.03,
     paddingBottom: height * 0.05,
   },

@@ -6,9 +6,28 @@ import {
     Dimensions,
     StyleSheet,
     Text,
+    TouchableOpacity,
     View,
 } from 'react-native';
-import { GestureHandlerRootView, PanGestureHandler, PanGestureHandlerGestureEvent, PanGestureHandlerStateChangeEvent, State } from 'react-native-gesture-handler';
+
+// Gesture handler with fallback - native module not working after rebuild
+const USE_GESTURE_HANDLER = false; // Disabled until build issue is resolved
+
+let GestureHandlerRootView: any = View;
+let PanGestureHandler: any = View;
+let State: any = { ACTIVE: 1, END: 2 };
+
+if (USE_GESTURE_HANDLER) {
+  try {
+    const gestureModule = require('react-native-gesture-handler');
+    GestureHandlerRootView = gestureModule.GestureHandlerRootView || View;
+    PanGestureHandler = gestureModule.PanGestureHandler || View;
+    State = gestureModule.State || { ACTIVE: 1, END: 2 };
+  } catch (e) {
+    GestureHandlerRootView = View;
+    PanGestureHandler = View;
+  }
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,32 +48,32 @@ const SwipeToDeleteCard: React.FC<SwipeToDeleteCardProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [swipeProgress, setSwipeProgress] = useState(0);
   const [currentPosition, setCurrentPosition] = useState(0);
-  const panRef = useRef<PanGestureHandler>(null);
+  const panRef = useRef<any>(null);
 
   const SWIPE_THRESHOLD_1 = width * 0.15; // 15% - Show red X
   const SWIPE_THRESHOLD_2 = width * 0.4; // 40% - Show delete confirmation
   const MAX_SWIPE = width * 0.9; // 90% - Maximum swipe distance
 
-  const handleSwipe = (event: PanGestureHandlerStateChangeEvent) => {
-    if (disabled || isDeleting) return;
-
-    const { translationX, state } = event.nativeEvent;
+  // Fallback handlers when gesture handler is disabled
+  const handleSwipe = (event: any) => {
+    if (!USE_GESTURE_HANDLER || disabled || isDeleting) return;
+    // Only process if gesture handler is enabled
+    const { translationX, state } = event?.nativeEvent || {};
+    if (!translationX && !state) return;
+    
     const totalTranslation = currentPosition + translationX;
     const progress = Math.abs(totalTranslation) / width;
     setSwipeProgress(progress);
 
     if (state === State.ACTIVE) {
-      // Limit swipe to left only and maximum distance
       const clampedTranslation = Math.max(-MAX_SWIPE, Math.min(0, totalTranslation));
       translateX.setValue(clampedTranslation);
     } else if (state === State.END) {
       const absTranslation = Math.abs(totalTranslation);
       
       if (absTranslation >= SWIPE_THRESHOLD_2) {
-        // Full swipe - trigger deletion
         handleDelete();
       } else if (absTranslation >= SWIPE_THRESHOLD_1) {
-        // Partial swipe - snap to threshold 1 and stay there
         const newPosition = -SWIPE_THRESHOLD_1;
         setCurrentPosition(newPosition);
         Animated.spring(translateX, {
@@ -65,7 +84,6 @@ const SwipeToDeleteCard: React.FC<SwipeToDeleteCardProps> = ({
         }).start();
         setSwipeProgress(SWIPE_THRESHOLD_1 / width);
       } else {
-        // Small swipe - snap back to original position
         setCurrentPosition(0);
         Animated.spring(translateX, {
           toValue: 0,
@@ -76,16 +94,15 @@ const SwipeToDeleteCard: React.FC<SwipeToDeleteCardProps> = ({
     }
   };
 
-  const handleGestureEvent = (event: PanGestureHandlerGestureEvent) => {
-    if (disabled || isDeleting) return;
+  const handleGestureEvent = (event: any) => {
+    if (!USE_GESTURE_HANDLER || disabled || isDeleting) return;
+    const { translationX } = event?.nativeEvent || {};
+    if (!translationX) return;
     
-    const { translationX } = event.nativeEvent;
-    // Add current position to the translation for continued swiping
     const totalTranslation = currentPosition + translationX;
     const progress = Math.abs(totalTranslation) / width;
     setSwipeProgress(progress);
     
-    // Limit swipe to left only and maximum distance
     const clampedTranslation = Math.max(-MAX_SWIPE, Math.min(0, totalTranslation));
     translateX.setValue(clampedTranslation);
   };
@@ -157,6 +174,29 @@ const SwipeToDeleteCard: React.FC<SwipeToDeleteCardProps> = ({
   };
 
   const deletePanelContent = getDeletePanelContent();
+
+  // If gesture handler is disabled, show card with long-press delete option
+  if (!USE_GESTURE_HANDLER) {
+    return (
+      <View style={styles.container}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onLongPress={() => handleDelete()}
+          disabled={disabled || isDeleting}
+        >
+          <View style={styles.card}>
+            {children}
+            {isDeleting && (
+              <View style={styles.deletingOverlay}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+                <Text style={styles.deletingText}>Deleting...</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={styles.container}>

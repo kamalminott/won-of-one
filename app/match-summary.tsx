@@ -385,6 +385,12 @@ export default function MatchSummaryScreen() {
     setShowNotesModal(false);
   };
 
+  // Helper function to get first name from full name
+  const getFirstName = (fullName: string | undefined | null): string => {
+    if (!fullName || !fullName.trim()) return '';
+    return fullName.trim().split(' ')[0];
+  };
+
   // Prepare match data for MatchSummaryStats
   const matchData = match ? {
     id: match.match_id,
@@ -627,8 +633,10 @@ export default function MatchSummaryScreen() {
           notes={notes}
           onNotesChange={handleNotesChange}
           onNotesPress={handleNotesPress}
-          userLabel={match?.user_id ? 'You' : match?.fencer_1_name || 'Fencer 1'}
-          opponentLabel={match?.user_id ? 'Opponent' : match?.fencer_2_name || 'Fencer 2'}
+          userLabel={match?.user_id 
+            ? getFirstName(userName || match?.fencer_1_name) || 'You'
+            : getFirstName(match?.fencer_1_name) || 'Fencer 1'}
+          opponentLabel={getFirstName(match?.fencer_2_name) || 'Opponent'}
         />
         </ScrollView>
       </KeyboardAvoidingView>

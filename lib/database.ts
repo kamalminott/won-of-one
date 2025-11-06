@@ -1009,7 +1009,7 @@ $$;
 // User-related functions
 export const userService = {
   // Create a new user in app_user table
-  async createUser(userId: string, email: string, firstName?: string, lastName?: string): Promise<AppUser | null> {
+  async createUser(userId: string, email: string, firstName: string, lastName: string): Promise<AppUser | null> {
     // Helper function to capitalize first letter of each word
     const capitalizeName = (name: string): string => {
       if (!name || name.trim() === '') return '';
@@ -1024,32 +1024,26 @@ export const userService = {
     
     console.log('🔍 createUser called with:', { userId, email, firstName, lastName });
     
-    // Combine firstName and lastName if provided, otherwise use email prefix
-    let fullName: string;
-    if (firstName && lastName) {
-      const capitalizedFirst = capitalizeName(firstName);
-      const capitalizedLast = capitalizeName(lastName);
-      fullName = `${capitalizedFirst} ${capitalizedLast}`.trim();
-      console.log('✅ Using firstName + lastName:', { capitalizedFirst, capitalizedLast, fullName });
-    } else if (firstName) {
-      fullName = capitalizeName(firstName);
-      console.log('✅ Using firstName only:', { firstName, fullName });
-    } else if (lastName) {
-      fullName = capitalizeName(lastName);
-      console.log('✅ Using lastName only:', { lastName, fullName });
-    } else {
-      // Fallback to email prefix, but capitalize it
-      const emailPrefix = email.split('@')[0];
-      fullName = capitalizeName(emailPrefix);
-      console.log('⚠️ Fallback to email prefix:', { emailPrefix, fullName });
+    // Require both firstName and lastName - no fallback to email prefix
+    if (!firstName || !lastName || !firstName.trim() || !lastName.trim()) {
+      console.error('❌ createUser requires both firstName and lastName');
+      return null;
     }
+    
+    const capitalizedFirst = capitalizeName(firstName);
+    const capitalizedLast = capitalizeName(lastName);
+    const fullName = `${capitalizedFirst} ${capitalizedLast}`.trim();
+    
+    console.log('✅ Using firstName + lastName:', { capitalizedFirst, capitalizedLast, fullName });
     
     const userData = {
       user_id: userId,
+      email: email, // Store email in app_user table
       name: fullName,
     };
 
-    console.log('Creating user in app_user table:', userData);
+    console.log('📝 Creating user in app_user table:', userData);
+    console.log('📝 Expected name format:', fullName);
 
     const { data, error } = await supabase
       .from('app_user')
@@ -1057,13 +1051,20 @@ export const userService = {
       .select()
       .single();
 
-    console.log('User creation result - data:', data);
-    console.log('User creation result - error:', error);
-
     if (error) {
-      console.error('Error creating user:', error);
+      console.error('❌ Error creating user:', error);
       return null;
     }
+
+    console.log('✅ User created successfully in database:');
+    console.log('   - User ID:', data.user_id);
+    console.log('   - Name saved:', data.name);
+    console.log('   - Name format check:', {
+      hasSpace: data.name?.includes(' '),
+      isCapitalized: data.name === fullName,
+      expected: fullName,
+      actual: data.name
+    });
 
     return data;
   },
@@ -1077,7 +1078,12 @@ export const userService = {
       .single();
 
     if (error) {
-      console.error('Error fetching user:', error);
+      // PGRST116 means "not found" (0 rows) - this is expected in some cases
+      if (error.code === 'PGRST116') {
+        return null; // User doesn't exist, return null silently
+      }
+      // Log actual errors (not "not found")
+      console.error('❌ Error fetching user:', error);
       return null;
     }
 
@@ -1090,6 +1096,8 @@ export const userService = {
     preferred_weapon?: string;
     handedness?: string;
   }): Promise<AppUser | null> {
+    console.log('📝 Updating user in database:', { userId, updates });
+    
     const { data, error } = await supabase
       .from('app_user')
       .update(updates)
@@ -1098,8 +1106,21 @@ export const userService = {
       .single();
 
     if (error) {
-      console.error('Error updating user:', error);
+      console.error('❌ Error updating user:', error);
       return null;
+    }
+
+    if (updates.name) {
+      console.log('✅ User name updated in database:');
+      console.log('   - User ID:', data.user_id);
+      console.log('   - Name saved:', data.name);
+      console.log('   - Name format check:', {
+        hasSpace: data.name?.includes(' '),
+        isCapitalized: data.name !== data.name?.toLowerCase(),
+        expected: updates.name,
+        actual: data.name,
+        matches: data.name === updates.name
+      });
     }
 
     return data;

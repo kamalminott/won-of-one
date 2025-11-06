@@ -4,13 +4,13 @@ import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert, KeyboardAvoidingView,
   Platform,
   SafeAreaView,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -129,33 +129,38 @@ export default function CreateAccountScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <ExpoStatusBar style="light" />
+      
+      {/* Overlay to color the OS status bar area without affecting layout */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: '#212121', zIndex: 1 }} />
       
       {/* Header Background */}
       <View style={[styles.headerBackground, { 
-        height: Platform.OS === 'ios' ? height * 0.0 + insets.top : height * 0.08 + insets.top,
         paddingHorizontal: width * 0.04,
-        paddingTop: Platform.OS === 'ios' ? insets.top * 0.0 : insets.top,
+        paddingTop: insets.top * 0.3,
+        paddingBottom: height * 0.015,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between'
+        justifyContent: 'space-between',
+        zIndex: 2
       }]}>
         {/* Back Button */}
-        <BackButton 
-          style={{
-            zIndex: 10
-          }}
-        />
+        <View style={{ width: width * 0.08, alignItems: 'flex-start' }}>
+          <BackButton 
+            style={{
+              zIndex: 10
+            }}
+          />
+        </View>
         
-        {/* Title */}
-        <Text style={[styles.headerTitle, { 
-          fontSize: width * 0.045,
-          fontWeight: '600',
-          color: '#FFFFFF',
-          flex: 1,
-          textAlign: 'center',
-          marginRight: width * 0.08 // Compensate for back button width
-        }]}>Create an Account</Text>
+        {/* Title - Absolutely centered */}
+        <View style={{ flex: 1, position: 'absolute', left: 0, right: 0, alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, { 
+            fontSize: width * 0.045,
+            fontWeight: '600',
+            color: '#FFFFFF',
+          }]}>Create an Account</Text>
+        </View>
         
         {/* Spacer to balance the layout */}
         <View style={{ width: width * 0.08 }} />
@@ -386,21 +391,21 @@ export default function CreateAccountScreen() {
         </View>
       </View>
 
+      {/* Sign In Link - Inside ScrollView below social buttons */}
+      <TouchableOpacity style={[styles.signInContainer, { 
+        marginTop: height * 0.02, 
+        marginBottom: height * 0.02,
+        paddingVertical: height * 0.0015,
+        alignSelf: 'center',
+        borderWidth: 0,
+        backgroundColor: 'transparent'
+      }]} onPress={handleSignIn}>
+        <Text style={[styles.signInText, { fontSize: width * 0.04 }]}>
+          Already have an account? <Text style={styles.signInLink}>Sign In</Text>
+        </Text>
+      </TouchableOpacity>
+
         </ScrollView>
-        
-        {/* Sign In Link - Outside ScrollView to ensure visibility */}
-        <TouchableOpacity style={[styles.signInContainer, { 
-          marginTop: height * 0.02, 
-          marginBottom: height * 0.02,
-          paddingVertical: height * 0.0015,
-          alignSelf: 'center',
-          borderWidth: 0,
-          backgroundColor: 'transparent'
-        }]} onPress={handleSignIn}>
-          <Text style={[styles.signInText, { fontSize: width * 0.04 }]}>
-            Already have an account? <Text style={styles.signInLink}>Sign In</Text>
-          </Text>
-        </TouchableOpacity>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
