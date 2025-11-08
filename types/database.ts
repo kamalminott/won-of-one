@@ -163,6 +163,9 @@ export interface SimpleMatch {
   time?: string; // Time when match was completed
   opponentName: string;
   isWin: boolean;
+  matchType?: string;
+  source?: string;
+  notes?: string;
 }
 
 export interface SimpleGoal {

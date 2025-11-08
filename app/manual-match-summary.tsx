@@ -6,15 +6,15 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
-    Alert,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
@@ -140,18 +140,28 @@ export default function ManualMatchSummaryScreen() {
       flex: 1,
       backgroundColor: '#171717',
     },
+    headerBackground: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: '#212121',
+      zIndex: 1,
+    },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingBottom: 12,
+      paddingHorizontal: width * 0.04,
+      paddingTop: height * 0.06,
+      paddingBottom: height * 0.01,
       backgroundColor: '#212121',
+      zIndex: 2,
     },
     backButton: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
+      width: width * 0.06,
+      height: width * 0.06,
+      borderRadius: width * 0.03,
       backgroundColor: '#343434',
       alignItems: 'center',
       justifyContent: 'center',
@@ -161,18 +171,20 @@ export default function ManualMatchSummaryScreen() {
       fontSize: width * 0.05,
       fontWeight: '700',
       color: 'white',
+      flex: 1,
+      textAlign: 'center',
     },
-    editButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: '#343434',
-      alignItems: 'center',
-      justifyContent: 'center',
+    headerSpacer: {
+      width: width * 0.06,
+      height: width * 0.06,
     },
     content: {
       flex: 1,
-      paddingHorizontal: width * 0.041, // 16px
+    },
+    scrollContent: {
+      paddingHorizontal: width * 0.041,
+      paddingTop: height * 0.02,
+      paddingBottom: height * 0.04,
     },
     notesCard: {
       backgroundColor: '#2A2A2A',
@@ -253,23 +265,27 @@ export default function ManualMatchSummaryScreen() {
           headerShown: false 
         }} 
       />
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <StatusBar style="light" />
-        
+        {/* Header background overlay */}
+        <View style={[styles.headerBackground, { height: height * 0.10 }]} />
+
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={20} color="white" />
           </TouchableOpacity>
-          
+
           <Text style={styles.headerTitle}>Match Summary</Text>
-          
-          <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-            <Ionicons name="create-outline" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+
+          <View style={styles.headerSpacer} />
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+        >
           {/* Match Summary Stats Component */}
           <MatchSummaryStats match={matchData} />
 

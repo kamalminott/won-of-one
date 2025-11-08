@@ -1,65 +1,112 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Alert, Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Alert, Keyboard, Modal, Animated as RNAnimated, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
-// CircularProgress with fallback - native module not working after rebuild
-// TODO: Investigate why native module isn't compiling in EAS build
-const USE_NATIVE_CIRCULAR_PROGRESS = false; // Disabled until build issue is resolved
-
-let CircularProgress: any;
-let useNative = USE_NATIVE_CIRCULAR_PROGRESS;
-
-if (useNative) {
-  try {
-    CircularProgress = require('react-native-circular-progress-indicator').default;
-    if (typeof CircularProgress !== 'function') {
-      throw new Error('CircularProgress is not a function');
+// SVG-based CircularProgressIndicator that works with Expo (using React Native Animated API)
+const CircularProgressIndicator = ({ 
+  value = 0, 
+  radius = 40, 
+  children, 
+  activeStrokeColor, 
+  inActiveStrokeColor, 
+  activeStrokeWidth = 4, 
+  progressValueColor, 
+  progressValueStyle, 
+  valueSuffix, 
+  showProgressValue = true,
+  duration = 1000,
+  ...props 
+}: any) => {
+  const size = radius * 2;
+  const progress = Math.min(Math.max(value, 0), 100);
+  const strokeColor = activeStrokeColor || Colors.purple.primary;
+  const inactiveColor = inActiveStrokeColor || 'rgba(255,255,255,0.3)';
+  
+  // Calculate SVG circle properties
+  // Add padding to SVG size to accommodate stroke width (stroke extends beyond radius)
+  const svgSize = size + activeStrokeWidth;
+  const center = svgSize / 2;
+  const svgRadius = radius - activeStrokeWidth / 2;
+  const circumference = 2 * Math.PI * svgRadius;
+  
+  // Animated progress value using React Native Animated
+  const animatedValue = useRef(new RNAnimated.Value(progress)).current;
+  const [displayProgress, setDisplayProgress] = useState(progress);
+  const previousProgress = useRef(progress);
+  
+  useEffect(() => {
+    // Only animate if progress actually changed
+    if (previousProgress.current !== progress) {
+      // Set initial value if this is the first update
+      if (previousProgress.current === progress && displayProgress === progress) {
+        animatedValue.setValue(progress);
+      }
+      
+      RNAnimated.timing(animatedValue, {
+        toValue: progress,
+        duration,
+        useNativeDriver: false, // SVG animations don't support native driver
+      }).start();
+      
+      previousProgress.current = progress;
     }
-  } catch (error: any) {
-    console.warn('⚠️ CircularProgress native module error:', error?.message);
-    useNative = false;
-  }
-}
-
-// Fallback component (always used for now)
-if (!useNative || typeof CircularProgress !== 'function') {
-  CircularProgress = ({ value = 0, radius = 40, children, activeStrokeColor, inActiveStrokeColor, activeStrokeWidth = 4, ...props }: any) => {
-    const size = radius * 2;
-    const progress = Math.min(Math.max(value, 0), 100);
-    const strokeColor = activeStrokeColor || Colors.purple.primary;
-    const inactiveColor = inActiveStrokeColor || 'rgba(255,255,255,0.3)';
     
-    return (
-      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-        <View style={{
-          position: 'absolute',
-          width: size,
-          height: size,
-          borderRadius: radius,
-          borderWidth: activeStrokeWidth,
-          borderColor: inactiveColor,
-        }} />
+    const listener = animatedValue.addListener(({ value: val }) => {
+      setDisplayProgress(val);
+    });
+    
+    return () => {
+      animatedValue.removeListener(listener);
+    };
+  }, [progress, duration]);
+  
+  const progressOffset = circumference - (displayProgress / 100) * circumference;
+  
+  return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'visible' }}>
+      <Svg width={svgSize} height={svgSize} style={{ position: 'absolute', marginLeft: -activeStrokeWidth / 2, marginTop: -activeStrokeWidth / 2 }}>
+        {/* Background circle */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={svgRadius}
+          stroke={inactiveColor}
+          strokeWidth={activeStrokeWidth}
+          fill="transparent"
+        />
+        {/* Progress circle */}
         {progress > 0 && (
-          <View style={{
-            position: 'absolute',
-            width: size,
-            height: size,
-            borderRadius: radius,
-            borderWidth: activeStrokeWidth,
-            borderColor: 'transparent',
-            borderTopColor: progress > 0 ? strokeColor : 'transparent',
-            borderRightColor: progress > 25 ? strokeColor : 'transparent',
-            borderBottomColor: progress > 50 ? strokeColor : 'transparent',
-            borderLeftColor: progress > 75 ? strokeColor : 'transparent',
-            transform: [{ rotate: '-90deg' }],
-          }} />
+          <Circle
+            cx={center}
+            cy={center}
+            r={svgRadius}
+            stroke={strokeColor}
+            strokeWidth={activeStrokeWidth}
+            fill="transparent"
+            strokeDasharray={circumference}
+            strokeDashoffset={progressOffset}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${center} ${center})`}
+          />
         )}
-        <View style={{ zIndex: 1 }}>{children}</View>
-      </View>
-    );
-  };
-}
+      </Svg>
+      {showProgressValue && (
+        <Text style={[{ 
+          fontSize: radius * 0.4, 
+          fontWeight: '700', 
+          color: progressValueColor || 'white',
+          zIndex: 1,
+          position: 'relative'
+        }, progressValueStyle]}>
+          {Math.round(progress)}{valueSuffix || ''}
+        </Text>
+      )}
+      {children}
+    </View>
+  );
+};
 
 interface GoalCardProps {
   daysLeft: number;
@@ -1271,22 +1318,20 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
         
         <View style={styles.progressSection}>
           <View style={styles.progressCircle}>
-            <CircularProgress
+            <CircularProgressIndicator
               value={progress}
               radius={width * 0.08}
               activeStrokeColor={Colors.purple.primary}
               inActiveStrokeColor="rgba(255,255,255,0.3)"
               activeStrokeWidth={width * 0.012}
               inActiveStrokeWidth={width * 0.012}
-              progressValueColor="transparent"
-              showProgressValue={false}
+              progressValueColor="white"
+              progressValueStyle={styles.progressValueText}
+              valueSuffix="%"
+              showProgressValue={true}
               duration={1000}
               clockwise={true}
             />
-            {/* Custom progress text overlay */}
-            <Text style={styles.progressText}>
-              {progress}%
-            </Text>
           </View>
         </View>
       </View>

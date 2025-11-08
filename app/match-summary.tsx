@@ -58,6 +58,7 @@ export default function MatchSummaryScreen() {
     loadUserProfileData();
   }, []);
 
+
   const loadUserProfileData = async () => {
     await loadUserProfileImage();
   };
@@ -93,8 +94,8 @@ export default function MatchSummaryScreen() {
             fencer_2_name: params.fencer2Name as string || 'Fencer 2',
             final_score: parseInt(params.finalScore as string || params.aliceScore as string || '0'),
             touches_against: parseInt(params.touchesAgainst as string || params.bobScore as string || '0'),
-            result: params.result as string || null,
-            score_diff: params.scoreDiff ? parseInt(params.scoreDiff as string) : null,
+            result: params.result !== null && params.result !== undefined ? (params.result as string) : undefined,
+            score_diff: params.scoreDiff ? parseInt(params.scoreDiff as string) : undefined,
             bout_length_s: parseInt(params.matchDuration as string || '0'),
             yellow_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').yellow + 
                          JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').yellow,
@@ -105,7 +106,7 @@ export default function MatchSummaryScreen() {
             score_by_period: params.scoreByPeriod ? JSON.parse(params.scoreByPeriod as string) : undefined,
             is_complete: true,
             source: 'remote',
-            event_date: new Date().toISOString().split('T')[0],
+            event_date: new Date().toISOString(),
           };
           
           setMatch(matchFromParams);

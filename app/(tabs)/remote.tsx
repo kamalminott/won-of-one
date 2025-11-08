@@ -17,11 +17,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // Native module not working after rebuild - using View fallback
+const USE_GESTURE_HANDLER = false; // Disabled until build issue is resolved
 
+// Default fallback
+let GestureHandlerRootView: typeof View = View;
 
+if (USE_GESTURE_HANDLER) {
+  if (USE_GESTURE_HANDLER) {
+    try {
+      const gestureModule = require('react-native-gesture-handler');
+      GestureHandlerRootView = gestureModule.GestureHandlerRootView || View;
+    } catch (e) {
+      GestureHandlerRootView = View;
+    }
+  }
+}
 
 // Helper function to get initials from a name
 const getInitials = (name: string | undefined): string => {
@@ -5150,7 +5162,7 @@ export default function RemoteScreen() {
               <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
           )}
-          {hasMatchStarted && (
+          {hasMatchStarted && !isInjuryTimer && (
             <TouchableOpacity 
               style={styles.completeMatchCircle} 
               onPress={completeMatch}
@@ -5186,32 +5198,36 @@ export default function RemoteScreen() {
               borderWidth: width * 0.003,
               borderColor: hasMatchStarted ? '#EF4444' : '#6B7280',
               borderRadius: width * 0.02,
-              paddingVertical: height * 0.01,
-              paddingHorizontal: width * 0.025,
-              minHeight: height * 0.06,
+              paddingVertical: height * 0.015,
+              paddingHorizontal: width * 0.04,
+              width: '96%',
+              minHeight: height * 0.10,
               marginBottom: height * 0.01,
-              opacity: hasMatchStarted ? 1 : 0.6
+              opacity: hasMatchStarted ? 1 : 0.6,
+              alignSelf: 'center'
             }]}>
               <Text style={[styles.countdownText, { 
                 color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.045 
+                fontSize: width * 0.055,
+                marginTop: height * 0.01
               }]}>
                 {formatTime(injuryTimeRemaining)}
-              </Text>
-              <Text style={[styles.countdownWarningText, { 
-                color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                fontSize: width * 0.022 
-              }]}>
-                🏥 INJURY TIME - 5:00
               </Text>
               {previousMatchState && (
                 <Text style={[styles.countdownWarningText, { 
                   color: hasMatchStarted ? '#EF4444' : '#6B7280', 
-                  fontSize: width * 0.018 
+                  fontSize: width * 0.025 
                 }]}>
                   Match paused at {formatTime(previousMatchState.timeRemaining)}
                 </Text>
               )}
+              <Text style={[styles.countdownWarningText, { 
+                color: hasMatchStarted ? '#EF4444' : '#6B7280', 
+                fontSize: width * 0.022,
+                marginTop: height * 0.015
+              }]}>
+                🏥 INJURY TIME
+              </Text>
             </View>
           )}
           

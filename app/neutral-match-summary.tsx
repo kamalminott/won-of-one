@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -384,7 +384,7 @@ export default function NeutralMatchSummary() {
               score_by_period: params.scoreByPeriod ? JSON.parse(params.scoreByPeriod as string) : undefined,
               is_complete: true,
               source: 'remote',
-              event_date: new Date().toISOString().split('T')[0],
+              event_date: new Date().toISOString(),
             };
             
             setMatchData(matchFromParams);
@@ -694,28 +694,28 @@ export default function NeutralMatchSummary() {
       <SafeAreaView style={styles.container}>
         <ExpoStatusBar style="light" />
         
-        {/* Overlay to color the OS status bar area without affecting layout */}
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: '#212121', zIndex: 1 }} />
+        {/* Header background overlay */}
+        <View style={[styles.headerBackground, { height: insets.top + height * 0.09 }]} />
 
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top * 0.3 }]}>
-        {/* Title - Centered */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={styles.headerTitle}>Neutral Match Summary</Text>
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: insets.top + height * 0.02 }]}>
+          {/* Title - Centered */}
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={styles.headerTitle}>Neutral Match Summary</Text>
+          </View>
         </View>
-      </View>
 
-      {/* Offline Match Indicator */}
-      {(params.isOffline === 'true' || (matchId as string)?.startsWith('offline_')) && (
-        <View style={styles.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={18} color="white" />
-          <Text style={styles.offlineBannerText}>
-            Saved offline - Will sync when you're online
-          </Text>
-        </View>
-      )}
+        {/* Offline Match Indicator */}
+        {(params.isOffline === 'true' || (matchId as string)?.startsWith('offline_')) && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline-outline" size={18} color="white" />
+            <Text style={styles.offlineBannerText}>
+              Saved offline - Will sync when you're online
+            </Text>
+          </View>
+        )}
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Match Result Card with Gradient Border */}
         <View style={styles.resultCardContainer}>
           {/* Win Badge */}
@@ -938,8 +938,8 @@ export default function NeutralMatchSummary() {
             <Text style={styles.backToHomeButtonText}>Back to Home</Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
     </>
   );
 }
@@ -961,13 +961,21 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
+  headerBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#212121',
+    zIndex: 1,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 12,
-    backgroundColor: '#212121',
+    backgroundColor: 'transparent',
     zIndex: 2,
   },
   headerTitle: {

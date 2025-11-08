@@ -10,15 +10,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -127,18 +127,27 @@ export default function RecentMatchesScreen() {
   };
 
   // Convert SimpleMatch to Match format for the card
+  const toDisplayMatchType = (rawType?: string): 'Competition' | 'Training' => {
+    if (!rawType) return 'Competition';
+    const normalized = rawType.toLowerCase();
+    if (normalized === 'training' || normalized === 'practice' || normalized === 'sparring') {
+      return 'Training';
+    }
+    return 'Competition';
+  };
+
   const convertToMatch = (simpleMatch: SimpleMatch): Match => ({
     id: simpleMatch.id,
     opponentName: simpleMatch.opponentName,
     opponentImage: '', // No default image - will use initials fallback
     date: formatDate(simpleMatch.date),
     time: simpleMatch.time, // Pass through the completion time
-    matchType: 'Competition', // Default to Competition, could be made dynamic
+    matchType: toDisplayMatchType(simpleMatch.matchType),
     outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',
     playerScore: simpleMatch.youScore,
     opponentScore: simpleMatch.opponentScore,
-    source: (simpleMatch as any).source || 'unknown', // Pass through source field
-    notes: simpleMatch.notes || '', // Pass through notes field
+    source: simpleMatch.source ?? 'unknown',
+    notes: simpleMatch.notes ?? '',
   });
 
   // Filter matches based on search query, selected type, win/loss, and date range

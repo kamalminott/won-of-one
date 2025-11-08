@@ -461,6 +461,20 @@ export default function HomeScreen() {
                   totalWindowMatches: windowMatches.length
                 });
                 
+                // For windowed goals, calculate progress from actual window wins
+                // For non-windowed goals, use the progress from backend
+                let calculatedProgress = goal.progress;
+                if (goal.match_window && goal.title === 'Wins') {
+                  const rawProgress = goal.targetValue > 0 ? Math.round((windowWins / goal.targetValue) * 100) : 0;
+                  calculatedProgress = Math.max(0, Math.min(rawProgress, 100));
+                  console.log('🎯 Windowed goal progress calculation:', {
+                    windowWins,
+                    targetValue: goal.targetValue,
+                    rawProgress,
+                    calculatedProgress
+                  });
+                }
+                
                 return (
                   <GoalCard
                     ref={goalCardRef}
@@ -468,7 +482,7 @@ export default function HomeScreen() {
                     daysLeft={calculateDaysLeft(goal.deadline)}
                     title={goal.title}
                     description={goal.description}
-                    progress={goal.progress}
+                    progress={calculatedProgress}
                     targetValue={goal.targetValue}
                     currentValue={goal.currentValue}
                     matchWindow={goal.match_window}
