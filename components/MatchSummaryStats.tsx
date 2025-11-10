@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 interface Match {
   id: string;
@@ -23,11 +23,21 @@ interface Match {
 interface MatchSummaryStatsProps {
   match: Match;
   customStyle?: object;
+  matchType?: 'training' | 'competition';
+  onMatchTypeChange?: (type: 'training' | 'competition') => void;
+  showMatchTypeSelector?: boolean;
 }
 
-export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, customStyle = {} }) => {
+export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ 
+  match, 
+  customStyle = {}, 
+  matchType = 'training',
+  onMatchTypeChange,
+  showMatchTypeSelector = false 
+}) => {
   const { width, height } = useWindowDimensions();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   // Debug the match data
   console.log('🔍 MatchSummaryStats - Full match data:', {
@@ -117,7 +127,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
   const styles = StyleSheet.create({
     container: {
       width: width * 0.9, // 358px equivalent
-      height: height * 0.28, // 227px equivalent
+      height: showMatchTypeSelector ? height * 0.30 : height * 0.28, // Slightly increased height when dropdown is shown
       alignSelf: 'center',
       marginTop: height * 0.02,
       marginBottom: height * 0.025,
@@ -168,8 +178,9 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     playerContainer: {
       position: 'absolute',
       top: 42, // 198px - 156px
-      width: 60,
-      height: 89,
+      width: 80,
+      height: 95,
+      alignItems: 'center',
     },
     leftPlayer: {
       left: 36,
@@ -196,10 +207,10 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     playerName: {
       position: 'absolute',
       bottom: 0,
-      left: 0,
-      right: 0,
+      left: -10,
+      right: -10,
       color: '#FFFFFF',
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
       textAlign: 'center',
       fontFamily: 'System',
@@ -223,7 +234,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     },
     horizontalDivider: {
       position: 'absolute',
-      top: 147, // 303px - 156px
+      top: showMatchTypeSelector ? 187 : 147, // Push down when dropdown is shown
       left: 16,
       right: 16,
       height: 1,
@@ -231,7 +242,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     },
     statsContainer: {
       position: 'absolute',
-      top: 163, // 319px - 156px
+      top: showMatchTypeSelector ? 203 : 163, // Push down when dropdown is shown
       left: 0,
       right: 0,
       height: 48,
@@ -259,7 +270,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     },
     verticalDivider: {
       position: 'absolute',
-      top:178, // Center between the numbers and labels
+      top: showMatchTypeSelector ? 218 : 178, // Push down when dropdown is shown
       width: 1,
       height: 36,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -269,6 +280,66 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
     },
     rightDivider: {
       right: 102, // 279px - 200px (right side)
+    },
+    dropdownContainer: {
+      position: 'absolute',
+      top: 115, // Below the score
+      left: '50%',
+      marginLeft: -width * 0.15, // Center the dropdown
+      width: width * 0.30,
+      zIndex: 100,
+    },
+    dropdownButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: 'rgba(77, 65, 89, 0.6)',
+      borderWidth: 1,
+      borderColor: 'rgba(209, 163, 240, 0.5)',
+      borderRadius: 12,
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.012,
+    },
+    dropdownButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    dropdownMenu: {
+      position: 'absolute',
+      top: height * 0.055,
+      left: 0,
+      right: 0,
+      backgroundColor: '#2B2B2B',
+      borderWidth: 1,
+      borderColor: '#D1A3F0',
+      borderRadius: 12,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    dropdownOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.015,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    dropdownOptionLast: {
+      borderBottomWidth: 0,
+    },
+    dropdownOptionText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    dropdownOptionSelected: {
+      backgroundColor: 'rgba(108, 92, 231, 0.2)',
     },
   });
 
@@ -300,7 +371,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
         {/* Left Player */}
         <View style={[styles.playerContainer, styles.leftPlayer]}>
           {renderProfileImage(match.userImage, match.userName || match.fencer1Name, true)}
-          <Text style={styles.playerName}>
+          <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
             {match.userName ? match.userName.split(' ')[0] : match.fencer1Name ? match.fencer1Name.split(' ')[0] : 'Player 1'}
           </Text>
         </View>
@@ -308,7 +379,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
         {/* Right Player */}
         <View style={[styles.playerContainer, styles.rightPlayer]}>
           {renderProfileImage(match.opponentImage, match.opponent || match.fencer2Name, false)}
-          <Text style={styles.playerName}>
+          <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
             {match.opponent ? match.opponent.split(' ')[0] : match.fencer2Name ? match.fencer2Name.split(' ')[0] : 'Player 2'}
           </Text>
         </View>
@@ -319,6 +390,62 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ match, cus
             {match.userScore} - {match.opponentScore}
           </Text>
         </View>
+
+        {/* Match Type Dropdown */}
+        {showMatchTypeSelector && (
+          <View style={styles.dropdownContainer}>
+            <TouchableOpacity 
+              style={styles.dropdownButton}
+              onPress={() => setIsDropdownOpen(!isDropdownOpen)}
+            >
+              <Text style={styles.dropdownButtonText}>
+                {matchType === 'training' ? 'Training' : 'Competition'}
+              </Text>
+              <Ionicons 
+                name={isDropdownOpen ? "chevron-up" : "chevron-down"} 
+                size={18} 
+                color="#FFFFFF" 
+              />
+            </TouchableOpacity>
+
+            {isDropdownOpen && (
+              <View style={styles.dropdownMenu}>
+                <TouchableOpacity
+                  style={[
+                    styles.dropdownOption,
+                    matchType === 'training' && styles.dropdownOptionSelected
+                  ]}
+                  onPress={() => {
+                    onMatchTypeChange?.('training');
+                    setIsDropdownOpen(false);
+                  }}
+                >
+                  <Text style={styles.dropdownOptionText}>Training</Text>
+                  {matchType === 'training' && (
+                    <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.dropdownOption,
+                    styles.dropdownOptionLast,
+                    matchType === 'competition' && styles.dropdownOptionSelected
+                  ]}
+                  onPress={() => {
+                    onMatchTypeChange?.('competition');
+                    setIsDropdownOpen(false);
+                  }}
+                >
+                  <Text style={styles.dropdownOptionText}>Competition</Text>
+                  {matchType === 'competition' && (
+                    <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Horizontal Divider */}
         <View style={styles.horizontalDivider} />

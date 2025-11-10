@@ -4,6 +4,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BackButton } from '@/components/BackButton';
 import MatchSummaryCardWithBorder from '@/components/MatchSummaryCardWithBorder';
 import { TouchTimelineChart } from '@/components/TouchTimelineChart';
 import { useAuth } from '@/contexts/AuthContext';
@@ -73,19 +74,6 @@ export default function MatchDetailsScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-    },
-    backButton: {
-      width: width * 0.06,
-      height: width * 0.06,
-      borderRadius: width * 0.03,
-      backgroundColor: '#343434',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    backButtonText: {
-      color: 'white',
-      fontSize: width * 0.04,
-      fontWeight: '600',
     },
     title: {
       fontSize: width * 0.05,
@@ -179,9 +167,7 @@ export default function MatchDetailsScreen() {
         {/* Header Content - Positioned within safe area */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-              <Text style={styles.backButtonText}>←</Text>
-            </TouchableOpacity>
+            <BackButton onPress={handleBack} />
             <Text style={styles.title}>Recent Match Details</Text>
             <TouchableOpacity onPress={handleEdit} style={styles.editButton}>
               <Text style={styles.editButtonText}>✏️</Text>

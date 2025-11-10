@@ -6,6 +6,12 @@ import {
 } from '@/types/database';
 import { supabase } from './supabase';
 
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isValidUuid = (value?: string | null): value is string => {
+  return !!value && UUID_V4_REGEX.test(value);
+};
+
 // Helper to clean up name casing
 const formatFullName = (firstName?: string, lastName?: string, fallbackEmail?: string | null): string | undefined => {
   const normalize = (value?: string) => {
@@ -204,12 +210,17 @@ interface SimplifiedMatch {
 }
 
 const fetchUserMatchesForGoal = async (userId: string): Promise<SimplifiedMatch[]> => {
+  if (!isValidUuid(userId)) {
+    console.warn('Skipping match fetch for goal recalculation due to invalid userId', { userId });
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('match')
-    .select('match_id, final_score, touches_against, result, event_date, created_at')
+    .select('match_id, final_score, touches_against, result, event_date')
     .eq('user_id', userId)
     .order('event_date', { ascending: false })
-    .order('created_at', { ascending: false });
+    .order('match_id', { ascending: false });
 
   if (error) {
     console.error('Error fetching matches for goal recalculation:', {
@@ -351,6 +362,11 @@ const computeIncrementalUpdate = (
 
 export const goalService: GoalService = {
   async getActiveGoals(userId: string): Promise<SimpleGoal[]> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping active goal fetch due to invalid userId', { userId });
+      return [];
+    }
+
     const { data, error } = await supabase
       .from('goal')
       .select('*')
@@ -437,6 +453,11 @@ export const goalService: GoalService = {
   },
 
   async deactivateAllCompletedGoals(userId: string): Promise<number> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping deactivateAllCompletedGoals due to invalid userId', { userId });
+      return 0;
+    }
+
     const { data, error } = await supabase
       .from('goal')
       .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -454,6 +475,11 @@ export const goalService: GoalService = {
   },
 
   async deactivateExpiredGoals(userId: string): Promise<number> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping deactivateExpiredGoals due to invalid userId', { userId });
+      return 0;
+    }
+
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
       .from('goal')
@@ -473,6 +499,11 @@ export const goalService: GoalService = {
   },
 
   async recalculateGoalProgress(goalId: string, userId: string): Promise<SimpleGoal | null> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping goal recalculation due to invalid userId', { userId });
+      return null;
+    }
+
     const goalRecord = await fetchGoalRecord(goalId);
     if (!goalRecord) {
       return null;
@@ -498,6 +529,11 @@ export const goalService: GoalService = {
     finalScore: number,
     opponentScore: number
   ): Promise<GoalUpdateResponse> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping goal updates due to invalid userId', { userId, matchResult, finalScore, opponentScore });
+      return { completedGoals: [], failedGoals: [] };
+    }
+
     const { data: activeGoals, error } = await supabase
       .from('goal')
       .select('*')
@@ -765,18 +801,51 @@ export const matchService = {
       console.log('📡 RPC call result:', { rpcData, rpcError });
 
       if (!rpcError && rpcData) {
+        // Validate that we got a match_id back
+        if (!rpcData.match_id) {
+          console.error('❌ RPC succeeded but returned no match_id:', rpcData);
+          return null;
+        }
         console.log('✅ RPC function succeeded, returning data:', rpcData);
-        return rpcData;
+        return rpcData as Match;
       }
 
-      // If RPC fails, log the specific error and try direct insert
+      // If RPC fails, log the specific error
       if (rpcError) {
         console.error('❌ RPC function failed with error:', rpcError);
+        console.error('❌ Anonymous matches require the RPC function. Please create it in Supabase.');
+        console.error('📝 Run this SQL in your Supabase SQL editor:');
+        console.error(`
+CREATE OR REPLACE FUNCTION create_anonymous_match(match_data jsonb)
+RETURNS json
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+  result_record record;
+BEGIN
+  INSERT INTO match (user_id, fencer_1_name, fencer_2_name, final_score, event_date, result, score_diff, match_type, source)
+  VALUES (
+    NULL, -- user_id is always null for anonymous matches
+    (match_data->>'fencer_1_name')::text,
+    (match_data->>'fencer_2_name')::text,
+    (match_data->>'final_score')::integer,
+    (match_data->>'event_date')::timestamptz,
+    (match_data->>'result')::text,
+    (match_data->>'score_diff')::integer,
+    (match_data->>'match_type')::text,
+    (match_data->>'source')::text
+  )
+  RETURNING * INTO result_record;
+  
+  RETURN row_to_json(result_record);
+END;
+$$;
+        `);
+        return null;
       }
-      console.warn('⚠️ RPC function failed, trying direct insert for anonymous match');
     }
 
-    // Regular match creation (both authenticated and fallback for anonymous)
+    // Regular match creation (for authenticated users)
     const { data, error } = await supabase
       .from('match')
       .insert(matchData)
@@ -784,40 +853,17 @@ export const matchService = {
       .single();
 
     if (error) {
-      console.error('Error creating match:', error);
-      
-      // If this is an anonymous match and we get RLS error, provide helpful message
-      if (userId === null && error.code === '42501') {
-        console.error('❌ Anonymous matches not allowed. Please create the RPC function or modify RLS policy.');
-        console.error('📝 Run this SQL in your Supabase SQL editor:');
-        console.error(`
-CREATE OR REPLACE FUNCTION create_anonymous_match(match_data jsonb)
-RETURNS TABLE(match_id text, user_id text, fencer_1_name text, fencer_2_name text, final_score integer, event_date date, result text, score_diff integer, match_type text, source text)
-LANGUAGE plpgsql SECURITY DEFINER
-AS $$
-BEGIN
-  RETURN QUERY
-  INSERT INTO match (user_id, fencer_1_name, fencer_2_name, final_score, event_date, result, score_diff, match_type, source)
-  VALUES (
-    (match_data->>'user_id')::text,
-    (match_data->>'fencer_1_name')::text,
-    (match_data->>'fencer_2_name')::text,
-    (match_data->>'final_score')::integer,
-    (match_data->>'event_date')::date,
-    (match_data->>'result')::text,
-    (match_data->>'score_diff')::integer,
-    (match_data->>'match_type')::text,
-    (match_data->>'source')::text
-  )
-  RETURNING match.match_id, match.user_id, match.fencer_1_name, match.fencer_2_name, match.final_score, match.event_date, match.result, match.score_diff, match.match_type, match.source;
-END;
-$$;
-        `);
-      }
-      
+      console.error('❌ Error creating match:', error);
       return null;
     }
 
+    // Validate that we got a match_id back
+    if (!data?.match_id) {
+      console.error('❌ Match insert succeeded but returned no match_id. This should not happen for authenticated users.');
+      return null;
+    }
+
+    console.log('✅ Match created successfully:', data.match_id);
     return data;
   },
 
@@ -1260,6 +1306,7 @@ $$;
     period_number?: number;
     score_spp?: number;
     score_by_period?: any; // JSONB field for period-by-period scores
+    match_type?: string;
   }): Promise<Match | null> {
     // First, try to get the match to check if it's anonymous (user_id is null)
     const { data: existingMatch } = await supabase

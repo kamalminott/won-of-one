@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BackButton } from '@/components/BackButton';
+
 export default function ForgotPasswordScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -40,14 +42,7 @@ export default function ForgotPasswordScreen() {
         paddingHorizontal: width * 0.04
       }]}>
         {/* Back Button */}
-        <TouchableOpacity style={[styles.backButton, {
-          width: width * 0.12,
-          height: width * 0.12,
-          borderRadius: width * 0.06,
-          marginRight: width * 0.04
-        }]} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={width * 0.06} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BackButton onPress={handleBack} />
         
         {/* Title */}
         <Text style={[styles.headerTitle, { fontSize: width * 0.05 }]}>Forgot Password</Text>

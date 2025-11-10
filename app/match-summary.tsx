@@ -42,6 +42,7 @@ export default function MatchSummaryScreen() {
   const [completedGoal, setCompletedGoal] = useState<any>(null);
   const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
   const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
+  const [matchType, setMatchType] = useState<'training' | 'competition'>('training');
 
   // Track screen view
   useFocusEffect(
@@ -181,6 +182,13 @@ export default function MatchSummaryScreen() {
     fetchMatchData();
   }, [params.matchId, params.isOffline]);
 
+  // Initialize match type from match data
+  useEffect(() => {
+    if (match?.match_type) {
+      setMatchType(match.match_type as 'training' | 'competition');
+    }
+  }, [match?.match_type]);
+
   const handleBack = () => {
     router.back();
   };
@@ -247,6 +255,35 @@ export default function MatchSummaryScreen() {
 
     try {
       console.log('💾 Saving match and updating goals...');
+      
+      // Update match type in the database
+      if (match.match_id) {
+        await matchService.updateMatch(match.match_id, { 
+          match_type: matchType 
+        });
+        console.log(`✅ Match type updated to: ${matchType}`);
+      }
+      
+      // Check if completed goal info was passed from remote.tsx (for remote matches)
+      const hasCompletedGoalFromRemote = params.completedGoalData;
+      if (hasCompletedGoalFromRemote) {
+        try {
+          const goalData = JSON.parse(params.completedGoalData as string);
+          console.log('🎉 Showing celebration for completed goal from remote:', goalData);
+          setCompletedGoal(goalData);
+          // Get the goal ID from the active goals
+          const activeGoals = await goalService.getActiveGoals(user.id);
+          const matchingGoal = activeGoals.find(g => g.title === goalData.title);
+          if (matchingGoal) {
+            setCompletedGoalId(matchingGoal.id);
+          }
+          setShowCelebration(true);
+          // Don't navigate yet - wait for user to close celebration
+          return;
+        } catch (error) {
+          console.error('Error parsing completed goal data:', error);
+        }
+      }
       
       // Check if failed goal info was passed from remote.tsx (for remote matches)
       const hasFailedGoalFromRemote = params.failedGoalTitle && params.failedGoalReason;
@@ -615,7 +652,12 @@ export default function MatchSummaryScreen() {
           contentInsetAdjustmentBehavior="never"
         >
           {/* Recent Match Card - Full Width */}
-          <MatchSummaryStats match={matchData} />
+          <MatchSummaryStats 
+            match={matchData} 
+            matchType={matchType}
+            onMatchTypeChange={setMatchType}
+            showMatchTypeSelector={!!user}
+          />
 
         {/* Match Summary Card */}
         <MatchSummaryCard

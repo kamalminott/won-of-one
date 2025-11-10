@@ -1,4 +1,4 @@
-import { RecentMatchCard, SwipeToDeleteCard } from '@/components';
+import { RecentMatchCard } from '@/components';
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -52,6 +52,7 @@ export default function RecentMatchesScreen() {
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState<'All Time' | 'Today' | 'This Week' | 'This Month' | 'Last 3 Months'>('All Time');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
 
   // Format date to DD/MM/YYYY
   const formatDate = (dateString: string): string => {
@@ -279,6 +280,9 @@ export default function RecentMatchesScreen() {
       flex: 1,
       textAlign: 'center',
     },
+    menuButton: {
+      padding: width * 0.02,
+    },
     searchContainer: {
       paddingHorizontal: width * 0.04,
       marginBottom: height * 0.02,
@@ -448,6 +452,17 @@ export default function RecentMatchesScreen() {
       <View style={styles.header}>
         <BackButton onPress={() => router.back()} />
         <Text style={styles.title}>Match History</Text>
+        <TouchableOpacity 
+          style={styles.menuButton}
+          onPress={() => setEditMode(!editMode)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons 
+            name={editMode ? "close" : "ellipsis-vertical"} 
+            size={24} 
+            color={editMode ? Colors.purple.primary : "rgba(255, 255, 255, 0.6)"} 
+          />
+        </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
@@ -750,14 +765,12 @@ export default function RecentMatchesScreen() {
           </View>
         ) : (
           matches.map((match) => (
-            <SwipeToDeleteCard
+            <RecentMatchCard 
               key={match.id}
-              matchId={match.id}
-              onDelete={() => handleDeleteMatch(match.id)}
-              disabled={deletingMatchId === match.id}
-            >
-              <RecentMatchCard match={match} />
-            </SwipeToDeleteCard>
+              match={match} 
+              onDelete={handleDeleteMatch}
+              editMode={editMode}
+            />
           ))
         )}
       </ScrollView>

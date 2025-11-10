@@ -153,15 +153,15 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [isUpdatingGoal, setIsUpdatingGoal] = useState(false);
   const [goalType, setGoalType] = useState('Total Matches Played');
-  const [targetValueInput, setTargetValueInput] = useState('10');
+  const [targetValueInput, setTargetValueInput] = useState('1');
   const [timeframe, setTimeframe] = useState('Month');
   const [timeframeNumber, setTimeframeNumber] = useState('1');
   const [notes, setNotes] = useState('Focus on consistency this month.');
   const [showGoalTypeDropdown, setShowGoalTypeDropdown] = useState(false);
   const [showTimeframeDropdown, setShowTimeframeDropdown] = useState(false);
   const [showTimeframeNumberDropdown, setShowTimeframeNumberDropdown] = useState(false);
-  const [matchesForWinRate, setMatchesForWinRate] = useState('20');
-  const [matchesForDifferential, setMatchesForDifferential] = useState('15');
+  const [matchesForWinRate, setMatchesForWinRate] = useState('2');
+  const [matchesForDifferential, setMatchesForDifferential] = useState('2');
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState('');
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -208,7 +208,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       } else {
         // This is a new goal - reset form to defaults
         setGoalType('Total Matches Played');
-        setTargetValueInput('10');
+        setTargetValueInput('1');
         setNotes('Focus on consistency this month.');
       }
       

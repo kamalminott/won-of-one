@@ -1,8 +1,9 @@
+import { analytics } from '@/lib/analytics';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { analytics } from '@/lib/analytics';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { LossPill } from './LossPill';
 import { MatchTypePill } from './MatchTypePill';
 import { WinPill } from './WinPill';
@@ -40,11 +41,15 @@ interface Match {
 interface RecentMatchCardProps {
   match: Match;
   customStyle?: object;
+  onDelete?: (matchId: string) => void;
+  editMode?: boolean;
 }
 
 export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({ 
   match, 
-  customStyle = {} 
+  customStyle = {},
+  onDelete,
+  editMode = false
 }) => {
   const { width, height } = useWindowDimensions();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
@@ -132,6 +137,29 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
     }
   };
 
+  const handleDeletePress = (e: any) => {
+    e.stopPropagation(); // Prevent card press when delete is tapped
+    Alert.alert(
+      'Delete Match',
+      `Are you sure you want to delete this match against ${match.opponentName}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            if (onDelete) {
+              onDelete(match.id);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const styles = StyleSheet.create({
     matchCard: {
       backgroundColor: '#2A2A2A',
@@ -178,6 +206,8 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
     },
     outcomeBadgeContainer: {
       alignItems: 'flex-end',
+      position: 'relative',
+      minHeight: 30, // Ensure consistent height
     },
     separator: {
       height: 1,
@@ -214,6 +244,17 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       fontSize: width * 0.06,
       fontWeight: '700',
     },
+    deleteButton: {
+      position: 'absolute',
+      top: 38, // Position below the pill
+      right: 10, // Move slightly to the left
+      backgroundColor: '#FF6B6B',
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
   });
 
   const getScoreDotColor = (isPlayerScore: boolean) => {
@@ -229,6 +270,7 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       style={styles.matchCard}
       onPress={handleCardPress}
       activeOpacity={0.7}
+      disabled={editMode}
     >
       {/* Opponent Info */}
       <View style={styles.matchHeader}>
@@ -247,6 +289,16 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
             <WinPill />
           ) : (
             <LossPill />
+          )}
+          {/* Delete Button (shown in edit mode) */}
+          {editMode && (
+            <TouchableOpacity 
+              style={styles.deleteButton}
+              onPress={handleDeletePress}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="trash" size={16} color="white" />
+            </TouchableOpacity>
           )}
         </View>
       </View>

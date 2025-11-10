@@ -27,9 +27,9 @@ export const BackButton: React.FC<BackButtonProps> = ({
   return (
     <TouchableOpacity
       style={[{
-        width: width * 0.06,
-        height: width * 0.06,
-        borderRadius: width * 0.03,
+        width: width * 0.08,
+        height: width * 0.08,
+        borderRadius: width * 0.04,
         backgroundColor: '#343434',
         alignItems: 'center',
         justifyContent: 'center',
@@ -39,7 +39,7 @@ export const BackButton: React.FC<BackButtonProps> = ({
     >
       <Ionicons 
         name="arrow-back" 
-        size={width * 0.045} 
+        size={width * 0.05} 
         color={color} 
       />
     </TouchableOpacity>

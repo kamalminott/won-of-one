@@ -84,6 +84,9 @@ export default function RemoteScreen() {
   const [fencerPositions, setFencerPositions] = useState({ fencerA: 'left' as 'left' | 'right', fencerB: 'right' as 'left' | 'right' });
   const [isSwapping, setIsSwapping] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(true); // Automatically enabled
+  // Track which entity is the user (stable across swaps)
+  const [userEntity, setUserEntity] = useState<'fencerA' | 'fencerB'>('fencerA');
+  const isSwappingRef = useRef(false); // Track if we're currently swapping to prevent name overwrites
   // Entity-based name state (position-agnostic)
   const [fencerNames, setFencerNames] = useState({ 
     fencerA: 'Tap to add name', 
@@ -1207,6 +1210,15 @@ export default function RemoteScreen() {
         return null;
       }
       
+      // Validate that we got a valid match_id back
+      if (!match.match_id) {
+        console.error('❌ Match created but no match_id returned. Cannot create match period.');
+        if (userId === null) {
+          console.error('💡 This is an anonymous match. Make sure the create_anonymous_match RPC function exists in Supabase.');
+        }
+        return null;
+      }
+      
       console.log('✅ Match created:', match.match_id);
       
       // Use the exact time when Play was clicked as match start time
@@ -1561,6 +1573,7 @@ export default function RemoteScreen() {
       });
 
       let failedGoalData: any = null; // Declare in outer scope
+      let completedGoalData: any = null; // Declare in outer scope for completed goals
       
       if (updatedMatch) {
         console.log('Match completed successfully:', updatedMatch);
@@ -1585,6 +1598,11 @@ export default function RemoteScreen() {
               touchesAgainst
             );
             console.log('✅ Goals updated successfully:', goalResult);
+            
+            // Store completed goal info to pass through navigation
+            if (goalResult.completedGoals && goalResult.completedGoals.length > 0) {
+              completedGoalData = goalResult.completedGoals[0];
+            }
             
             // Store failed goal info to pass through navigation
             if (goalResult.failedGoals && goalResult.failedGoals.length > 0) {
@@ -1629,6 +1647,11 @@ export default function RemoteScreen() {
           fencer1Name: fencerNames.fencerA,
           fencer2Name: fencerNames.fencerB,
         };
+        
+        // Pass completed goal info if any
+        if (completedGoalData) {
+          navParams.completedGoalData = JSON.stringify(completedGoalData);
+        }
         
         // Pass failed goal info if any
         if (failedGoalData) {
@@ -1953,9 +1976,8 @@ export default function RemoteScreen() {
   // Check if entity is user
   const isEntityUser = useCallback((entity: 'fencerA' | 'fencerB'): boolean => {
     if (!showUserProfile) return false;
-    const entityPosition = getPositionOfEntity(entity);
-    return toggleCardPosition === entityPosition;
-  }, [showUserProfile, getPositionOfEntity, toggleCardPosition]);
+    return entity === userEntity;
+  }, [showUserProfile, userEntity]);
 
   // Get cards by position
   const getCardsByPosition = useCallback((position: 'left' | 'right'): { yellow: 0 | 1; red: number } => {
@@ -1968,33 +1990,45 @@ export default function RemoteScreen() {
     return cards[entity];
   }, [cards]);
 
+  // Initialize userEntity only when toggle is first turned on (not on every position change)
+  const previousShowUserProfile = useRef(showUserProfile);
+  useEffect(() => {
+    // Only update userEntity when toggle changes from off to on
+    if (showUserProfile && !previousShowUserProfile.current) {
+      const currentUserEntity = getEntityAtPosition(toggleCardPosition);
+      setUserEntity(currentUserEntity);
+    }
+    previousShowUserProfile.current = showUserProfile;
+  }, [showUserProfile, toggleCardPosition, getEntityAtPosition]);
+
   // Initialize fencer names based on user profile toggle
   useEffect(() => {
+    // Don't run during swaps - prevents overwriting names mid-swap
+    if (isSwappingRef.current) return;
+    
     if (showUserProfile && userDisplayName) {
-      if (toggleCardPosition === 'left') {
-        // User is on left - assign to entity at left position
-        const leftEntity = getEntityAtPosition('left');
-        setFencerNames(prev => ({
+      // User toggle is ON - set user's name and preserve opponent's name
+      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
+      
+      setFencerNames(prev => {
+        // Only reset opponent name if it's still the default placeholder
+        const shouldResetOpponent = prev[opponentEntity] === 'Tap to add name';
+        
+        return {
           ...prev,
-          [leftEntity]: userDisplayName,
-          [leftEntity === 'fencerA' ? 'fencerB' : 'fencerA']: 'Tap to add name'
-        }));
-      } else {
-        // User is on right - assign to entity at right position
-        const rightEntity = getEntityAtPosition('right');
-        setFencerNames(prev => ({
-          ...prev,
-          [rightEntity]: userDisplayName,
-          [rightEntity === 'fencerA' ? 'fencerB' : 'fencerA']: 'Tap to add name'
-        }));
-      }
-    } else {
-      setFencerNames({
-        fencerA: 'Tap to add name',
-        fencerB: 'Tap to add name'
+          [userEntity]: userDisplayName,
+          // Keep opponent's existing name unless it's still the placeholder
+          ...(shouldResetOpponent ? { [opponentEntity]: 'Tap to add name' } : {})
+        };
       });
+    } else if (!showUserProfile) {
+      // Toggle is OFF - reset the user entity's name to placeholder
+      setFencerNames(prev => ({
+        ...prev,
+        [userEntity]: 'Tap to add name'
+      }));
     }
-  }, [showUserProfile, toggleCardPosition, userDisplayName, getEntityAtPosition]);
+  }, [showUserProfile, userDisplayName, userEntity]);
 
   // Validate that fencer names are filled before starting a match
   const validateFencerNames = useCallback((): { isValid: boolean; message?: string } => {
@@ -2982,6 +3016,7 @@ export default function RemoteScreen() {
     if (isSwapping) return; // Prevent multiple swaps during animation
     
     setIsSwapping(true);
+    isSwappingRef.current = true; // Block name effect during swap
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     // Store current state
@@ -2996,29 +3031,15 @@ export default function RemoteScreen() {
     
     // Animate the swap
     setTimeout(() => {
-      // Swap scores
-      setScores({
-        fencerA: tempFencerBScore,
-        fencerB: tempFencerAScore
-      });
+      // DON'T swap scores - scores stay with their entities (like names)
+      // Scores are entity properties, not position properties
       
-      // Swap names
-      setFencerNames({
-        fencerA: tempFencerBName,
-        fencerB: tempFencerAName
-      });
+      // DON'T swap names - names stay with their entities
+      // Names are managed by the effect based on userEntity
       
-      // Swap emojis
-      setProfileEmojis({
-        fencerA: tempFencerBEmoji,
-        fencerB: tempFencerAEmoji
-      });
+      // DON'T swap emojis - emojis stay with their entities
       
-      // Swap cards
-      setCards({
-        fencerA: tempFencerBCards,
-        fencerB: tempFencerACards
-      });
+      // DON'T swap cards - cards stay with their entities
       
       // Swap positions - just flip the positions
       setFencerPositions(prev => ({
@@ -3029,14 +3050,20 @@ export default function RemoteScreen() {
       // Swap toggle position
       setToggleCardPosition(prev => prev === 'left' ? 'right' : 'left');
       
+      // Swap user entity if user toggle is on
+      if (showUserProfile) {
+        setUserEntity(prev => prev === 'fencerA' ? 'fencerB' : 'fencerA');
+      }
+      
       console.log('🔄 Fencers swapped successfully');
       
       // Reset swapping state after animation
       setTimeout(() => {
         setIsSwapping(false);
+        isSwappingRef.current = false; // Re-enable name effect
       }, 300);
     }, 150);
-  }, [isSwapping, scores, fencerNames, cards, profileEmojis, toggleCardPosition]);
+  }, [isSwapping, scores, fencerNames, cards, profileEmojis, toggleCardPosition, showUserProfile]);
 
   const toggleUserProfile = useCallback(() => {
     setShowUserProfile(prev => !prev);
