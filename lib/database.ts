@@ -836,7 +836,7 @@ BEGIN
     (match_data->>'result')::text,
     (match_data->>'score_diff')::integer,
     (match_data->>'match_type')::text,
-    (match_data->>'source')::text
+    (match_data->>'source')::source_enum
   )
   RETURNING * INTO result_record;
   
