@@ -695,13 +695,13 @@ export default function NeutralMatchSummary() {
         <ExpoStatusBar style="light" />
         
         {/* Header background overlay */}
-        <View style={[styles.headerBackground, { height: insets.top + height * 0.09 }]} />
-
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + height * 0.02 }]}>
-          {/* Title - Centered */}
-          <View style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={styles.headerTitle}>Neutral Match Summary</Text>
+        <View style={[styles.headerBackground, { height: insets.top + height * 0.09 }]}>
+          {/* Header */}
+          <View style={[styles.header, { paddingTop: insets.top + height * 0.02 }]}>
+            {/* Title - Centered */}
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text style={styles.headerTitle}>Neutral Match Summary</Text>
+            </View>
           </View>
         </View>
 
@@ -970,13 +970,13 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   header: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 12,
     backgroundColor: 'transparent',
-    zIndex: 2,
   },
   headerTitle: {
     fontFamily: 'Articulat CF',
