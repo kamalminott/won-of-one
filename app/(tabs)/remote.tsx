@@ -16,7 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, InteractionManager, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, InteractionManager, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // Native module not working after rebuild - using View fallback
 const USE_GESTURE_HANDLER = false; // Disabled until build issue is resolved
@@ -4463,9 +4463,10 @@ export default function RemoteScreen() {
       backgroundColor: Colors.purple.dark || '#4C1D95',
       borderRadius: width * 0.04,
       padding: width * 0.06,
-      width: '95%',
-      maxWidth: width * 0.9,
+      width: Platform.OS === 'android' ? width * 0.95 : '98%',
+      maxWidth: width * 0.95,
       alignItems: 'center',
+      alignSelf: 'center',
     },
     popupTitle: {
       fontSize: width * 0.045,
@@ -5897,7 +5898,7 @@ export default function RemoteScreen() {
             backgroundColor: 'transparent',
           borderRadius: width * 0.02,
           gap: height * 0.012, // Reduced gap between elements
-          marginBottom: layout.adjustMargin(height * 0.02, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset
+          marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset
           }
         ]}>
         
@@ -5913,7 +5914,12 @@ export default function RemoteScreen() {
             style={{
               flex: 1,
               backgroundColor: '#2A2A2A',
-              paddingVertical: layout.adjustPadding(height * 0.045, 'bottom'), // Increased from 0.035
+              paddingVertical: layout.adjustPadding(
+                Platform.OS === 'android' && scores.fencerA === 0 && scores.fencerB === 0 && currentPeriod === 1 && period1Time === 0
+                  ? height * 0.040  // Smaller on Android when timer ready
+                  : height * 0.045,  // Normal size otherwise
+                'bottom'
+              ),
               paddingHorizontal: width * 0.05,
               borderRadius: width * 0.02,
               alignItems: 'center',
@@ -5922,7 +5928,12 @@ export default function RemoteScreen() {
               marginRight: width * 0.025,
               borderWidth: width * 0.005,
               borderColor: 'white',
-              minHeight: layout.adjustPadding(height * 0.14, 'bottom'), // Increased from 0.12
+              minHeight: layout.adjustPadding(
+                Platform.OS === 'android' && scores.fencerA === 0 && scores.fencerB === 0 && currentPeriod === 1 && period1Time === 0
+                  ? height * 0.125  // Smaller on Android when timer ready
+                  : height * 0.14,  // Normal size otherwise
+                'bottom'
+              ),
               opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
             }} 
             onPress={async () => {
@@ -6007,38 +6018,55 @@ export default function RemoteScreen() {
       {/* Edit Time Popup */}
       {showEditPopup && (
         <View style={styles.popupOverlay}>
-          <View style={styles.popupContainer}>
-            <Text style={styles.popupTitle}>Edit Match Time</Text>
-            <TextInput
-              style={styles.timeInput}
-              value={editTimeInput}
-              onChangeText={handleTimeInputChange}
-              onSelectionChange={handleTimeInputSelectionChange}
-              placeholder="0:00"
-              placeholderTextColor="rgba(255, 255, 255, 0.5)"
-              keyboardType="numeric"
-              autoFocus
-              maxLength={5}
-              selectTextOnFocus
-              contextMenuHidden={false}
-            />
-            <Text style={styles.inputHint}>Format: M:SS or MM:SS</Text>
-            <View style={styles.popupButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={handleSaveTime}>
-                <Text style={styles.saveButtonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'position'} 
+            style={{ flex: 1, justifyContent: 'center', width: '100%', alignItems: 'center' }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -100}
+          >
+            <TouchableOpacity 
+              style={{ flex: 1, width: '100%' }} 
+              activeOpacity={1} 
+              onPress={() => Keyboard.dismiss()}
+            >
+              <View style={{ flex: 1, justifyContent: 'center', width: '100%', alignItems: 'center' }}>
+                <TouchableOpacity activeOpacity={1} style={{ width: '100%', alignItems: 'center' }}>
+                  <View style={styles.popupContainer}>
+                    <Text style={styles.popupTitle}>Edit Match Time</Text>
+                    <TextInput
+                      style={styles.timeInput}
+                      value={editTimeInput}
+                      onChangeText={handleTimeInputChange}
+                      onSelectionChange={handleTimeInputSelectionChange}
+                      placeholder="0:00"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      keyboardType="numeric"
+                      autoFocus
+                      maxLength={5}
+                      selectTextOnFocus
+                      contextMenuHidden={false}
+                    />
+                    <Text style={styles.inputHint}>Format: M:SS or MM:SS</Text>
+                    <View style={styles.popupButtons}>
+                      <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.saveButton} onPress={handleSaveTime}>
+                        <Text style={styles.saveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
         </View>
       )}
 
       {/* Reset Options Popup */}
       {showResetPopup && (
         <View style={styles.popupOverlay}>
-          <View style={styles.popupContainer}>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <View style={styles.popupContainer}>
             <Text style={styles.popupTitle}>Reset Options</Text>
             <Text style={styles.inputHint}>What would you like to reset?</Text>
             <View style={styles.popupButtons}>
@@ -6076,6 +6104,7 @@ export default function RemoteScreen() {
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
+            </View>
           </View>
         </View>
       )}
@@ -6084,13 +6113,20 @@ export default function RemoteScreen() {
       {showEditNamesPopup && (
         <View style={styles.popupOverlay}>
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-            style={{ flex: 1 }}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'position'} 
+            style={{ flex: 1, justifyContent: 'center' }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -100}
           >
-            <View style={[styles.popupContainer, { marginTop: height * 0.1 }]}>
-              <Text style={styles.popupTitle}>Edit Fencer Names</Text>
-              <Text style={styles.inputHint}>Enter new names for both fencers:</Text>
+            <TouchableOpacity 
+              style={{ flex: 1 }} 
+              activeOpacity={1} 
+              onPress={() => Keyboard.dismiss()}
+            >
+              <View style={{ flex: 1, justifyContent: 'center' }}>
+                <TouchableOpacity activeOpacity={1}>
+                  <View style={styles.popupContainer}>
+                    <Text style={styles.popupTitle}>Edit Fencer Names</Text>
+                    <Text style={styles.inputHint}>Enter new names for both fencers:</Text>
               
               <View style={styles.nameInputContainer}>
                 <Text style={styles.nameInputLabel}>
@@ -6147,7 +6183,10 @@ export default function RemoteScreen() {
                   <Text style={styles.saveButtonText}>Save</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
           </KeyboardAvoidingView>
         </View>
       )}
@@ -6157,7 +6196,8 @@ export default function RemoteScreen() {
       {/* Score Warning Popup */}
       {showScoreWarning && (
         <View style={styles.popupOverlay}>
-          <View style={styles.popupContainer}>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <View style={styles.popupContainer}>
             <Text style={styles.popupTitle}>⚠️ Multiple Score Changes</Text>
             <Text style={styles.inputHint}>
               You have increased or decreased the score more than once during this active match. Are you sure you want to do this?
@@ -6181,6 +6221,7 @@ export default function RemoteScreen() {
                 <Text style={styles.saveButtonText}>Yes, Continue</Text>
               </TouchableOpacity>
             </View>
+            </View>
           </View>
         </View>
       )}
@@ -6188,7 +6229,8 @@ export default function RemoteScreen() {
       {/* Priority Assignment Popup */}
       {showPriorityPopup && (
         <View style={styles.popupOverlay}>
-          <View style={styles.popupContainer}>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <View style={styles.popupContainer}>
             <Text style={styles.popupTitle}>🏁 Match Ended in Tie!</Text>
             <Text style={styles.inputHint}>
               The match ended with a score of {scores.fencerA}-{scores.fencerB} after Period 3. Would you like to assign priority to determine the winner?
@@ -6202,6 +6244,7 @@ export default function RemoteScreen() {
                 <Text style={styles.saveButtonText}>Yes, Assign Priority</Text>
               </TouchableOpacity>
             </View>
+            </View>
           </View>
         </View>
       )}
@@ -6209,7 +6252,8 @@ export default function RemoteScreen() {
       {/* Image Picker Modal */}
       {showImagePicker && (
         <View style={styles.popupOverlay}>
-          <View style={styles.popupContainer}>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <View style={styles.popupContainer}>
             <Text style={styles.popupTitle}>Select Image</Text>
             <Text style={styles.popupMessage}>
               Choose how you want to add a photo for {selectedFencer === 'fencerA' ? fencerNames.fencerA : fencerNames.fencerB}
@@ -6233,6 +6277,7 @@ export default function RemoteScreen() {
               >
                 <Text style={popupButtonStyles.popupButtonPrimaryText}>🖼️ Photo Library</Text>
               </TouchableOpacity>
+            </View>
             </View>
           </View>
         </View>

@@ -5,7 +5,7 @@
  */
 
 import { analytics } from './analytics';
-import { fencingRemoteService, matchEventService, matchService } from './database';
+import { fencingRemoteService, matchEventService, matchService, supabase } from './database';
 import { networkService } from './networkService';
 import { offlineCache, PendingEvent, RemoteSession } from './offlineCache';
 
@@ -431,8 +431,28 @@ export const offlineRemoteService = {
         if (!remoteId.startsWith('offline_')) {
           for (const event of events) {
             try {
+              const matchId = event.metadata?.match_id;
+              
+              // Validate that the match exists before creating the event
+              if (matchId) {
+                const { data: matchExists } = await supabase
+                  .from('match')
+                  .select('match_id')
+                  .eq('match_id', matchId)
+                  .single();
+                
+                if (!matchExists) {
+                  console.log(`⚠️ Match ${matchId} not found, discarding event: ${event.event_type}`);
+                  // Mark as synced to remove from queue (match no longer exists)
+                  if (event.id) {
+                    syncedEventIds.push(event.id);
+                  }
+                  continue;
+                }
+              }
+              
               await matchEventService.createMatchEvent({
-                match_id: event.metadata?.match_id || null,
+                match_id: matchId || null,
                 fencing_remote_id: event.remote_id,
                 event_type: event.event_type,
                 event_time: event.event_time,

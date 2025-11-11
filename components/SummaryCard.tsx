@@ -28,6 +28,9 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
       paddingVertical: isTall ? height * 0.02 : height * 0.015, // Smaller when isTall is true
       borderRadius: width * 0.03,
       marginHorizontal: width * 0.008,
+      borderWidth: 1,
+      borderColor: 'transparent', // Invisible border - forces iOS to respect borderRadius
+      overflow: 'hidden', // Ensures content respects borderRadius
     },
     iconContainer: {
       marginRight: width * 0.02,

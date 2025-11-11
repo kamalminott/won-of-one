@@ -6,6 +6,9 @@ import {
 } from '@/types/database';
 import { supabase } from './supabase';
 
+// Re-export supabase for use in other services
+export { supabase };
+
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isValidUuid = (value?: string | null): value is string => {

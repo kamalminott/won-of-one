@@ -127,12 +127,12 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
   const styles = StyleSheet.create({
     container: {
       width: width * 0.9, // 358px equivalent
-      height: showMatchTypeSelector ? height * 0.30 : height * 0.28, // Slightly increased height when dropdown is shown
+      height: showMatchTypeSelector ? height * 0.32 : height * 0.30, // Increased height to contain all elements
       alignSelf: 'center',
       marginTop: height * 0.02,
       marginBottom: height * 0.025,
       position: 'relative',
-      overflow: 'visible',
+      overflow: 'visible', // Keep visible to allow pill to overflow
     },
     gradientContainer: {
       flex: 1,
@@ -144,7 +144,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
       shadowOpacity: 1,
       shadowRadius: 30,
       elevation: 8,
-      overflow: 'visible',
+      overflow: 'hidden', // Changed to hidden to clip content within bounds
     },
     winPill: {
       position: 'absolute',

@@ -12,11 +12,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const { user, userName, profileImage } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
@@ -471,7 +472,7 @@ export default function MatchSummaryScreen() {
     },
     scrollContent: {
       paddingTop: height * 0.02, // Add space for the pill to show
-      paddingBottom: height * 0.05,
+      paddingBottom: height * 0.08, // Responsive padding to prevent navigation bar overlap
     },
     offlineBanner: {
       flexDirection: 'row',
@@ -497,8 +498,8 @@ export default function MatchSummaryScreen() {
       alignItems: 'center',
     },
     modalContainer: {
-      width: '90%',
-      maxHeight: '80%',
+      width: '95%',
+      maxWidth: width * 0.95,
     },
     modalContent: {
       borderRadius: width * 0.04,
@@ -531,7 +532,7 @@ export default function MatchSummaryScreen() {
       borderRadius: width * 0.02,
       borderWidth: 1,
       borderColor: 'rgba(255, 255, 255, 0.2)',
-      minHeight: height * 0.15,
+      minHeight: height * 0.25,
       marginBottom: height * 0.02,
     },
     textInput: {
@@ -539,7 +540,7 @@ export default function MatchSummaryScreen() {
       fontSize: Math.round(width * 0.04),
       padding: width * 0.03,
       textAlignVertical: 'top',
-      minHeight: height * 0.15,
+      minHeight: height * 0.25,
     },
     modalFooter: {
       alignItems: 'center',
@@ -624,33 +625,31 @@ export default function MatchSummaryScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Match Summary</Text>
+    <View style={{ flex: 1, backgroundColor: Colors.dark.background }}>
+      <View style={{ paddingTop: insets.top }}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Match Summary</Text>
+        </View>
+
+        {/* Offline Match Indicator */}
+        {(params.isOffline === 'true' || (params.matchId as string)?.startsWith('offline_')) && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline-outline" size={18} color="white" />
+            <Text style={styles.offlineBannerText}>
+              Saved offline - Will sync when you're online
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* Offline Match Indicator */}
-      {(params.isOffline === 'true' || (params.matchId as string)?.startsWith('offline_')) && (
-        <View style={styles.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={18} color="white" />
-          <Text style={styles.offlineBannerText}>
-            Saved offline - Will sync when you're online
-          </Text>
-        </View>
-      )}
-
-      <KeyboardAvoidingView 
+      <ScrollView 
         style={styles.scrollContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView 
-          style={styles.scrollContainer}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-          contentInsetAdjustmentBehavior="never"
-        >
           {/* Recent Match Card - Full Width */}
           <MatchSummaryStats 
             match={matchData} 
@@ -681,8 +680,7 @@ export default function MatchSummaryScreen() {
             : getFirstName(match?.fencer_1_name) || 'Fencer 1'}
           opponentLabel={getFirstName(match?.fencer_2_name) || 'Opponent'}
         />
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </ScrollView>
 
       {/* Notes Modal */}
       <Modal
@@ -693,49 +691,62 @@ export default function MatchSummaryScreen() {
       >
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.modalContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
-            <LinearGradient
-              colors={Colors.glassyGradient.colors}
-              style={styles.modalContent}
-              start={Colors.glassyGradient.start}
-              end={Colors.glassyGradient.end}
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              activeOpacity={1}
+              onPress={() => Keyboard.dismiss()}
             >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Match Notes</Text>
-                <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
-                  <Ionicons name="close" size={24} color="white" />
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <TouchableOpacity activeOpacity={1}>
+                  <View style={styles.modalContainer}>
+                    <LinearGradient
+                      colors={Colors.glassyGradient.colors}
+                      style={styles.modalContent}
+                      start={Colors.glassyGradient.start}
+                      end={Colors.glassyGradient.end}
+                    >
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Match Notes</Text>
+                        <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
+                          <Ionicons name="close" size={24} color="white" />
+                        </TouchableOpacity>
+                      </View>
+                      
+                      <View style={styles.inputContainer}>
+                        <TextInput
+                          style={styles.textInput}
+                          value={notes}
+                          onChangeText={handleNotesChange}
+                          placeholder="Add your thoughts about this match..."
+                          placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                          multiline
+                          maxLength={500}
+                          autoFocus
+                        />
+                      </View>
+                      
+                      <View style={styles.modalFooter}>
+                        <Text style={styles.characterCount}>
+                          {notes.length}/500
+                        </Text>
+                        <View style={styles.buttonContainer}>
+                          <TouchableOpacity onPress={handleCancelNotes} style={styles.cancelButton}>
+                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
+                            <Text style={styles.saveButtonText}>Save</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </LinearGradient>
+                  </View>
                 </TouchableOpacity>
               </View>
-              
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.textInput}
-                  value={notes}
-                  onChangeText={handleNotesChange}
-                  placeholder="Add your thoughts about this match..."
-                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                  multiline
-                  maxLength={500}
-                  autoFocus
-                />
-              </View>
-              
-              <View style={styles.modalFooter}>
-                <Text style={styles.characterCount}>
-                  {notes.length}/500
-                </Text>
-                <View style={styles.buttonContainer}>
-                  <TouchableOpacity onPress={handleCancelNotes} style={styles.cancelButton}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
-                    <Text style={styles.saveButtonText}>Save</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </LinearGradient>
+            </TouchableOpacity>
           </KeyboardAvoidingView>
         </View>
       </Modal>
@@ -754,6 +765,6 @@ export default function MatchSummaryScreen() {
         onSetGoal={handleSetNewGoal}
         onLater={handleLater}
       />
-    </SafeAreaView>
+    </View>
   );
 }

@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, useWindowDimensions, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AddMatchScreen() {
@@ -318,6 +318,13 @@ export default function AddMatchScreen() {
     content: {
       flex: 1,
       padding: getDimension(0.04, width),
+    },
+    scrollView: {
+      flex: 1,
+    },
+    scrollContent: {
+      padding: getDimension(0.04, width),
+      paddingBottom: getDimension(0.02, height),
     },
     section: {
       backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -840,10 +847,21 @@ export default function AddMatchScreen() {
         <View style={{ width: getDimension(0.08, width) }} />
       </View>
 
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.content}>
-          {/* Match Details Section */}
-          <View style={styles.section}>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+        >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View>
+            {/* Match Details Section */}
+            <View style={styles.section}>
           <Text style={styles.sectionTitle}>Match Details</Text>
           
           <View style={styles.inputGroup}>
@@ -1078,29 +1096,29 @@ export default function AddMatchScreen() {
               </Text>
             </View>
           </View>
-        </View>
-        </View>
-      </TouchableWithoutFeedback>
 
-      {/* Save Match Button */}
-      <View style={{ padding: getDimension(0.04, width) }}>
-        <LinearGradient
-          colors={Colors.gradientButton.colors}
-          style={styles.saveButton}
-          start={Colors.gradientButton.start}
-          end={Colors.gradientButton.end}
-        >
-          <TouchableOpacity 
-            onPress={handleSaveMatch} 
-            style={{ width: '100%', alignItems: 'center' }}
-            disabled={isSaving}
+          {/* Save Match Button */}
+          <LinearGradient
+            colors={Colors.gradientButton.colors}
+            style={[styles.saveButton, { marginTop: getDimension(0.04, height) }]}
+            start={Colors.gradientButton.start}
+            end={Colors.gradientButton.end}
           >
-            <Text style={[styles.saveButtonText, isSaving && { opacity: 0.7 }]}>
-              {isSaving ? 'Saving...' : (isEditMode ? 'Update Match' : 'Save Match')}
-            </Text>
-          </TouchableOpacity>
-        </LinearGradient>
-      </View>
+            <TouchableOpacity 
+              onPress={handleSaveMatch} 
+              style={{ width: '100%', alignItems: 'center' }}
+              disabled={isSaving}
+            >
+              <Text style={[styles.saveButtonText, isSaving && { opacity: 0.7 }]}>
+                {isSaving ? 'Saving...' : (isEditMode ? 'Update Match' : 'Save Match')}
+              </Text>
+            </TouchableOpacity>
+          </LinearGradient>
+          </View>
+        </View>
+        </TouchableWithoutFeedback>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Date Picker Modal */}
       <Modal
