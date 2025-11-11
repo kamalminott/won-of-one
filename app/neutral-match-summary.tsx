@@ -715,7 +715,7 @@ export default function NeutralMatchSummary() {
           </View>
         )}
 
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: height * 0.02 }}>
         {/* Match Result Card with Gradient Border */}
         <View style={styles.resultCardContainer}>
           {/* Win Badge */}
