@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Image, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
@@ -771,49 +771,63 @@ export default function ProfileScreen() {
       {/* Name Edit Modal */}
       {showNameEditModal && (
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Edit Name</Text>
-            
-            <View style={styles.nameInputContainer}>
-              <Text style={styles.nameInputLabel}>First Name</Text>
-              <TextInput
-                style={styles.nameInput}
-                value={firstName}
-                onChangeText={setFirstName}
-                placeholder="Enter first name"
-                placeholderTextColor="#9D9D9D"
-                autoFocus
-                maxLength={30}
-              />
-            </View>
-            
-            <View style={styles.nameInputContainer}>
-              <Text style={styles.nameInputLabel}>Last Name</Text>
-              <TextInput
-                style={styles.nameInput}
-                value={lastName}
-                onChangeText={setLastName}
-                placeholder="Enter last name"
-                placeholderTextColor="#9D9D9D"
-                maxLength={30}
-              />
-            </View>
-            
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={handleNameCancel}
-              >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.modalButtonSave]}
-                onPress={handleNameSave}
-              >
-                <Text style={styles.modalButtonSaveText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
+            style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.08 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          >
+            <TouchableOpacity 
+              style={{ flex: 1, width: '100%' }} 
+              activeOpacity={1} 
+              onPress={() => Keyboard.dismiss()}
+            >
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.08, width: '100%' }}>
+                <View style={[styles.modalContainer, { width: width * 0.95 }]}>
+                    <Text style={styles.modalTitle}>Edit Name</Text>
+                    
+                    <View style={styles.nameInputContainer}>
+                      <Text style={styles.nameInputLabel}>First Name</Text>
+                      <TextInput
+                        style={styles.nameInput}
+                        value={firstName}
+                        onChangeText={setFirstName}
+                        placeholder="Enter first name"
+                        placeholderTextColor="#9D9D9D"
+                        autoFocus
+                        maxLength={30}
+                      />
+                    </View>
+                    
+                    <View style={styles.nameInputContainer}>
+                      <Text style={styles.nameInputLabel}>Last Name</Text>
+                      <TextInput
+                        style={styles.nameInput}
+                        value={lastName}
+                        onChangeText={setLastName}
+                        placeholder="Enter last name"
+                        placeholderTextColor="#9D9D9D"
+                        maxLength={30}
+                      />
+                    </View>
+                    
+                    <View style={styles.modalButtonContainer}>
+                      <TouchableOpacity 
+                        style={[styles.modalButton, styles.modalButtonCancel]}
+                        onPress={handleNameCancel}
+                      >
+                        <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.modalButton, styles.modalButtonSave]}
+                        onPress={handleNameSave}
+                      >
+                        <Text style={styles.modalButtonSaveText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
         </View>
       )}
     </SafeAreaView>
@@ -1050,14 +1064,14 @@ const styles = StyleSheet.create({
   modalContainer: {
     backgroundColor: '#2A2A2A',
     borderRadius: 16,
-    width: '80%',
-    maxWidth: 400,
+    width: '95%',
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    alignSelf: 'center',
   },
   modalTitle: {
     fontSize: 18,
