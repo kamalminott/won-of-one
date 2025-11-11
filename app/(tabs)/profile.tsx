@@ -940,7 +940,7 @@ export default function ProfileScreen() {
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-            style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.08 }}
+            style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.04 }}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
             <TouchableOpacity 
@@ -948,7 +948,7 @@ export default function ProfileScreen() {
               activeOpacity={1} 
               onPress={() => Keyboard.dismiss()}
             >
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.08, width: '100%' }}>
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.04, width: '100%' }}>
                 <View style={[styles.modalContainer, { width: width * 0.95 }]}>
                   <Text style={styles.modalTitle}>Change Password</Text>
                   
