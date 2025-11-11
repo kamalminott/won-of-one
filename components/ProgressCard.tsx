@@ -869,7 +869,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       shadowOpacity: 1,
       shadowRadius: width * 0.075,
       elevation: 8,
-      overflow: 'visible',
+      overflow: 'hidden',
       backgroundColor: 'transparent', // Ensures gradient renders properly without background interference
     },
     // Days Left Pill

@@ -3966,7 +3966,7 @@ export default function RemoteScreen() {
       marginTop: layout.adjustMargin(-height * 0.015, 'top'), // Reverted back from -0.035
       marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
       position: 'relative',
-      overflow: 'visible', // Allow pill to show outside card bounds
+      overflow: 'hidden', // Force iOS to respect borderRadius
       // Shadow effects
       shadowColor: Colors.timerBackground.shadowColor,
       shadowOffset: Colors.timerBackground.shadowOffset,
