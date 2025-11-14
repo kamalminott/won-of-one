@@ -1408,7 +1408,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
             {/* Goal Form */}
             <View style={styles.goalForm}>
               {/* Goal Type */}
-              <View style={styles.formField}>
+              <View style={[styles.formField, showGoalTypeDropdown && { zIndex: 1000 }]}>
                 <Text style={styles.fieldLabel}>Goal Type</Text>
                 <TouchableOpacity 
                   style={[
@@ -1505,7 +1505,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
 
               {/* Timeframe */}
               {shouldShowTimeframe() && (
-                <View style={styles.formField}>
+                <View style={[styles.formField, (showTimeframeNumberDropdown || showTimeframeDropdown) && { zIndex: 1000 }]}>
                   <Text style={styles.fieldLabel}>Timeframe</Text>
                   <View style={styles.timeframeContainer}>
                     <TouchableOpacity 

@@ -136,6 +136,8 @@ export interface MatchEvent {
   seconds_since_last_event?: number; // Time since previous event
   fencer_1_name?: string; // User's name
   fencer_2_name?: string; // Opponent's name
+  cancelled_event_id?: string | null; // Reference to the event that was cancelled (for cancellation events)
+  match_time_elapsed?: number; // Time elapsed in the match when event occurred
 }
 
 export interface MatchPeriod {

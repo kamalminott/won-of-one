@@ -23,7 +23,8 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
     console.log('🔄 Converting match to carousel item:', { 
       id: match.id, 
       source: match.source, 
-      opponentName: match.opponentName 
+      opponentName: match.opponentName,
+      matchType: match.matchType
     });
     return {
       id: match.id,
@@ -34,6 +35,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       opponentName: match.opponentName,
       source: match.source, // Pass through source field
       notes: match.notes, // Pass through notes field
+      matchType: match.matchType, // Pass through match type from database
     };
   });
 

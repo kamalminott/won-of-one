@@ -787,7 +787,7 @@ export const matchService = {
       result: userId ? ((remoteData.score_1 || 0) > (remoteData.score_2 || 0) ? 'win' : 'loss') : null, // Only set result if user is present
       // is_win is a generated column - removed from insert
       score_diff: (remoteData.score_1 || 0) - (remoteData.score_2 || 0),
-      match_type: 'practice',
+      match_type: 'training',
       source: 'remote', // User is using the fencing remote
     };
 
@@ -1029,10 +1029,10 @@ $$;
     try {
       console.log('📈 Calculating score progression for USER vs OPPONENT match:', matchId, 'user:', userName);
       
-      // 1. Get all match events ordered by match_time_elapsed (the stored time when hit was scored)
+      // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
       const { data: matchEvents, error: eventsError } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .not('match_time_elapsed', 'is', null) // Only events with stored time
         .order('match_time_elapsed', { ascending: true });
@@ -1047,7 +1047,18 @@ $$;
         return { userData: [], opponentData: [] };
       }
 
-      // 2. Get match data to determine user vs opponent
+      // 2. Build a Set of cancelled event IDs from cancellation events
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+          console.log('🚫 Found cancellation event for:', event.cancelled_event_id);
+        }
+      }
+
+      console.log('📊 Total events:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
+
+      // 3. Get match data to determine user vs opponent
       const { data: matchData, error: matchError } = await supabase
         .from('match')
         .select('fencer_1_name, fencer_2_name')
@@ -1062,7 +1073,7 @@ $$;
       console.log('📈 USER vs OPPONENT - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
       console.log('📈 USER vs OPPONENT - Match events found:', matchEvents.length);
 
-      // 3. Process events using stored match_time_elapsed
+      // 4. Process events using stored match_time_elapsed, filtering out cancelled events
       const userData: {x: string, y: number}[] = [];
       const opponentData: {x: string, y: number}[] = [];
       
@@ -1070,6 +1081,17 @@ $$;
       let opponentScore = 0;
 
       for (const event of matchEvents) {
+        // Skip cancellation events themselves (they're not scoring events)
+        if (event.event_type === 'cancel') {
+          continue;
+        }
+
+        // Skip events that have been cancelled
+        if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+          console.log('🚫 Skipping cancelled event:', event.match_event_id);
+          continue;
+        }
+
         const displaySeconds = event.match_time_elapsed || 0;
         
         // Convert to MM:SS format
@@ -1131,7 +1153,7 @@ $$;
       // First try to get events by match_id
       const { data: eventsByMatchId, error: matchIdError } = await supabase
         .from('match_event')
-        .select('*')
+        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed')
         .eq('match_id', matchId)
         .order('timestamp', { ascending: true });
       
@@ -1146,7 +1168,7 @@ $$;
           console.log('Trying to find events by fencing_remote_id for touches by period:', remoteId);
           const { data: eventsByRemoteId, error: remoteIdError } = await supabase
             .from('match_event')
-            .select('*')
+            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed')
             .eq('fencing_remote_id', remoteId)
             .order('timestamp', { ascending: true });
           
@@ -1168,7 +1190,18 @@ $$;
         };
       }
 
-      // 2. Get final match scores to ensure accuracy
+      // 2. Build a Set of cancelled event IDs from cancellation events
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+          console.log('🚫 Found cancellation event for touches by period:', event.cancelled_event_id);
+        }
+      }
+
+      console.log('📊 Total events for touches by period:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
+
+      // 3. Get final match scores to ensure accuracy
       let authoritativeUserScore = finalUserScore;
       let authoritativeOpponentScore = finalOpponentScore;
       
@@ -1190,7 +1223,7 @@ $$;
       
       console.log('📊 Using authoritative final scores for touches by period:', authoritativeUserScore, '-', authoritativeOpponentScore);
 
-      // 3. Get match periods to determine period boundaries
+      // 4. Get match periods to determine period boundaries
       const { data: matchPeriods, error: periodsError } = await supabase
         .from('match_period')
         .select('*')
@@ -1199,19 +1232,28 @@ $$;
 
       if (periodsError || !matchPeriods || matchPeriods.length === 0) {
         console.log('No match periods found, assuming all events are in period 1');
-        // Count all events as period 1, but cap at final scores
+        // Count all events as period 1, filtering out cancelled events
         let userTouches = 0;
         let opponentTouches = 0;
         
         for (const event of matchEvents) {
-          if (event.scoring_user_name === userName && userTouches < (authoritativeUserScore || 0)) {
+          // Skip cancellation events themselves
+          if (event.event_type === 'cancel') {
+            continue;
+          }
+
+          // Skip events that have been cancelled
+          if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+            console.log('🚫 Skipping cancelled event for touches by period:', event.match_event_id);
+            continue;
+          }
+
+          if (event.scoring_user_name === userName) {
             userTouches++;
-            console.log(`📊 User touch counted in period 1, total: ${userTouches}/${authoritativeUserScore || 0}`);
-          } else if (event.scoring_user_name && event.scoring_user_name !== userName && opponentTouches < (authoritativeOpponentScore || 0)) {
+            console.log(`📊 User touch counted in period 1, total: ${userTouches}`);
+          } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
             opponentTouches++;
-            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}/${authoritativeOpponentScore || 0}`);
-          } else {
-            console.log(`📊 Touch skipped - final scores reached (User: ${userTouches}/${authoritativeUserScore || 0}, Opponent: ${opponentTouches}/${authoritativeOpponentScore || 0})`);
+            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}`);
           }
         }
         
@@ -1222,18 +1264,42 @@ $$;
         };
       }
 
-      // 4. Calculate touches for each period
+      // 5. Calculate touches for each period
       const touchesByPeriod = {
         period1: { user: 0, opponent: 0 },
         period2: { user: 0, opponent: 0 },
         period3: { user: 0, opponent: 0 }
       };
 
-      // Track total touches to cap at final scores
+      // Track total touches (no longer need to cap - cancelled events are filtered)
       let totalUserTouches = 0;
       let totalOpponentTouches = 0;
 
+      // Find the latest event timestamp to use as fallback for period 3's end_time
+      // This handles cases where period 3 doesn't have an end_time set yet
+      // Only consider non-cancelled events for the latest time
+      const validEvents = matchEvents.filter(e => 
+        e.event_type !== 'cancel' && 
+        (!e.match_event_id || !cancelledEventIds.has(e.match_event_id))
+      );
+      const latestEventTime = validEvents.length > 0 
+        ? new Date(Math.max(...validEvents.map(e => new Date(e.timestamp).getTime())))
+        : new Date();
+      
+      // Add a small buffer (5 seconds) to ensure events at the end are included
+      const matchCompletionTime = new Date(latestEventTime.getTime() + 5000);
+
       for (const event of matchEvents) {
+        // Skip cancellation events themselves
+        if (event.event_type === 'cancel') {
+          continue;
+        }
+
+        // Skip events that have been cancelled
+        if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+          console.log('🚫 Skipping cancelled event for touches by period:', event.match_event_id);
+          continue;
+        }
         // Determine which period this event belongs to
         let eventPeriod = 1; // Default to period 1
         
@@ -1249,35 +1315,64 @@ $$;
             console.log(`📊 Event before first period start -> Period 1`);
           } else {
             // Check which period the event falls into
+            // Use improved logic that handles edge cases
+            let bestMatch: { period: number; distance: number } | null = null;
+            
             for (let i = 0; i < matchPeriods.length; i++) {
               const period = matchPeriods[i];
               const periodStart = new Date(period.start_time);
-              const periodEnd = period.end_time ? new Date(period.end_time) : new Date();
+              // For last period without end_time, use match completion time or future time
+              let periodEnd: Date;
+              if (period.end_time) {
+                periodEnd = new Date(period.end_time);
+              } else if (i === matchPeriods.length - 1) {
+                // This is the last period - use match completion time or a future timestamp
+                periodEnd = matchCompletionTime;
+                console.log(`📊 Period ${period.period_number} has no end_time, using match completion time: ${periodEnd.toISOString()}`);
+              } else {
+                // Not the last period but no end_time - use next period's start_time
+                const nextPeriod = matchPeriods[i + 1];
+                periodEnd = nextPeriod ? new Date(nextPeriod.start_time) : matchCompletionTime;
+              }
               
+              // Check if event falls within period boundaries
               if (eventTime >= periodStart && eventTime <= periodEnd) {
                 eventPeriod = period.period_number;
                 console.log(`📊 Event falls in period ${eventPeriod} (${periodStart.toISOString()} - ${periodEnd.toISOString()})`);
                 break;
               }
+              
+              // Track closest period for events that don't match exactly
+              const distanceToStart = Math.abs(eventTime.getTime() - periodStart.getTime());
+              const distanceToEnd = Math.abs(eventTime.getTime() - periodEnd.getTime());
+              const minDistance = Math.min(distanceToStart, distanceToEnd);
+              
+              if (!bestMatch || minDistance < bestMatch.distance) {
+                bestMatch = { period: period.period_number, distance: minDistance };
+              }
+            }
+            
+            // If no exact match found, assign to closest period (within 5 seconds tolerance)
+            if (eventPeriod === 1 && bestMatch && bestMatch.distance < 5000) {
+              eventPeriod = bestMatch.period;
+              console.log(`📊 Event assigned to closest period ${eventPeriod} (distance: ${bestMatch.distance}ms)`);
             }
           }
         }
 
-        // Count the touch, but only if we haven't reached the final scores
-        if (event.scoring_user_name === userName && totalUserTouches < (authoritativeUserScore || 0)) {
+        // Count the touch (cancelled events already filtered out above)
+        if (event.scoring_user_name === userName) {
           totalUserTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.user++;
           else if (eventPeriod === 2) touchesByPeriod.period2.user++;
           else if (eventPeriod === 3) touchesByPeriod.period3.user++;
-          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}/${authoritativeUserScore || 0}`);
-        } else if (event.scoring_user_name && event.scoring_user_name !== userName && totalOpponentTouches < (authoritativeOpponentScore || 0)) {
+          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}`);
+        } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
           totalOpponentTouches++;
           if (eventPeriod === 1) touchesByPeriod.period1.opponent++;
           else if (eventPeriod === 2) touchesByPeriod.period2.opponent++;
           else if (eventPeriod === 3) touchesByPeriod.period3.opponent++;
-          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}/${authoritativeOpponentScore || 0}`);
-        } else {
-          console.log(`📊 Touch skipped - final scores reached (User: ${totalUserTouches}/${authoritativeUserScore}, Opponent: ${totalOpponentTouches}/${authoritativeOpponentScore})`);
+          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}`);
         }
       }
 
@@ -1525,10 +1620,10 @@ $$;
     try {
       console.log('📈 Calculating ANONYMOUS score progression for match:', matchId);
       
-      // 1. Get all match events ordered by match_time_elapsed (the stored time when hit was scored)
+      // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
       const { data: matchEvents, error: eventsError } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .not('match_time_elapsed', 'is', null) // Only events with stored time
         .order('match_time_elapsed', { ascending: true });
@@ -1543,7 +1638,18 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
-      // 2. Get match data to get fencer names and final scores
+      // 2. Build a Set of cancelled event IDs from cancellation events
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+          console.log('🚫 Found cancellation event for:', event.cancelled_event_id);
+        }
+      }
+
+      console.log('📊 Total events:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
+
+      // 3. Get match data to get fencer names and final scores
       const { data: matchData, error: matchError } = await supabase
         .from('match')
         .select('fencer_1_name, fencer_2_name, final_score, touches_against')
@@ -1555,15 +1661,10 @@ $$;
         return { fencer1Data: [], fencer2Data: [] };
       }
 
-      // Get authoritative final scores to cap the count
-      const maxFencer1Score = matchData.final_score || 15;
-      const maxFencer2Score = matchData.touches_against || 15;
-
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
-      console.log('📈 ANONYMOUS - Final scores (max cap):', maxFencer1Score, '-', maxFencer2Score);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
-      // 3. Process events using stored match_time_elapsed
+      // 4. Process events using stored match_time_elapsed, filtering out cancelled events
       const fencer1Data: {x: string, y: number}[] = [];
       const fencer2Data: {x: string, y: number}[] = [];
       
@@ -1571,6 +1672,17 @@ $$;
       let fencer2Score = 0;
 
       for (const event of matchEvents) {
+        // Skip cancellation events themselves (they're not scoring events)
+        if (event.event_type === 'cancel') {
+          continue;
+        }
+
+        // Skip events that have been cancelled
+        if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+          console.log('🚫 Skipping cancelled event:', event.match_event_id);
+          continue;
+        }
+
         const displaySeconds = event.match_time_elapsed || 0;
         
         // Convert to MM:SS format
@@ -1578,21 +1690,21 @@ $$;
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-        if (event.scoring_user_name === matchData.fencer_1_name && fencer1Score < maxFencer1Score) {
-          // Fencer 1 scored (only count if below final score - handles accidental score adds/removes)
+        if (event.scoring_user_name === matchData.fencer_1_name) {
+          // Fencer 1 scored
           fencer1Score++;
           const dataPoint = { x: timeString, y: fencer1Score };
           fencer1Data.push(dataPoint);
-          console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score}/${maxFencer1Score} at ${timeString}`);
-        } else if (event.scoring_user_name === matchData.fencer_2_name && fencer2Score < maxFencer2Score) {
-          // Fencer 2 scored (only count if below final score - handles accidental score adds/removes)
+          console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score} at ${timeString}`);
+        } else if (event.scoring_user_name === matchData.fencer_2_name) {
+          // Fencer 2 scored
           fencer2Score++;
           const dataPoint = { x: timeString, y: fencer2Score };
           fencer2Data.push(dataPoint);
-          console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score}/${maxFencer2Score} at ${timeString}`);
+          console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score} at ${timeString}`);
         } else {
           // Log skipped events to help diagnose issues
-          console.log(`📈 ⏭️  Event skipped - Scorer: "${event.scoring_user_name}", F1: ${fencer1Score}/${maxFencer1Score}, F2: ${fencer2Score}/${maxFencer2Score}`);
+          console.log(`📈 ⏭️  Event skipped - Scorer: "${event.scoring_user_name}" doesn't match fencer names`);
         }
       }
 

@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -47,6 +47,7 @@ export default function NeutralMatchSummary() {
     fencer1: number;
     fencer2: number;
   }>({ fencer1: 0, fencer2: 0 });
+  const [showNewMatchModal, setShowNewMatchModal] = useState(false);
 
   // Extract match data from params
   const {
@@ -924,7 +925,7 @@ export default function NeutralMatchSummary() {
         <View style={styles.actionButtonsContainer}>
           <TouchableOpacity 
             style={styles.startNewMatchButton}
-            onPress={() => router.push('/(tabs)/remote')}
+            onPress={() => setShowNewMatchModal(true)}
           >
             <Ionicons name="add-circle-outline" size={24} color="white" />
             <Text style={styles.startNewMatchButtonText}>Start New Match</Text>
@@ -939,6 +940,92 @@ export default function NeutralMatchSummary() {
           </TouchableOpacity>
         </View>
         </ScrollView>
+
+        {/* New Match Modal */}
+        <Modal
+          visible={showNewMatchModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowNewMatchModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowNewMatchModal(false)}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.modalContainer}>
+                <Text style={styles.modalTitle}>Start New Match</Text>
+                <Text style={styles.modalSubtitle}>
+                  Would you like to keep the same fencers or change one or both fencers?
+                </Text>
+                
+                <View style={styles.modalButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.sameFencersButton]}
+                    onPress={() => {
+                      setShowNewMatchModal(false);
+                      router.push({
+                        pathname: '/(tabs)/remote',
+                        params: {
+                          fencer1Name: fencer1Name as string,
+                          fencer2Name: fencer2Name as string,
+                          isAnonymous: 'true', // Flag to indicate anonymous match
+                        }
+                      });
+                    }}
+                  >
+                    <Ionicons name="people-outline" size={20} color="white" />
+                    <Text style={styles.modalButtonText}>Keep Same Fencers</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.changeOneFencerButton]}
+                    onPress={() => {
+                      setShowNewMatchModal(false);
+                      router.push({
+                        pathname: '/(tabs)/remote',
+                        params: {
+                          resetNames: 'true', // Flag to reset names
+                          keepToggleOff: 'true', // Flag to keep toggle off
+                          changeOneFencer: 'true', // Flag to indicate changing one fencer
+                          fencer1Name: fencer1Name as string, // Keep first fencer name
+                        }
+                      });
+                    }}
+                  >
+                    <Ionicons name="person-outline" size={20} color="white" />
+                    <Text style={styles.modalButtonText}>Change One Fencer</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.changeBothFencersButton]}
+                    onPress={() => {
+                      setShowNewMatchModal(false);
+                      router.push({
+                        pathname: '/(tabs)/remote',
+                        params: {
+                          resetNames: 'true', // Flag to reset names
+                          keepToggleOff: 'true', // Flag to keep toggle off
+                        }
+                      });
+                    }}
+                  >
+                    <Ionicons name="person-add-outline" size={20} color="white" />
+                    <Text style={styles.modalButtonText}>Change Both Fencers</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowNewMatchModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
       </SafeAreaView>
     </>
   );
@@ -1425,7 +1512,7 @@ const styles = StyleSheet.create({
   },
   startNewMatchButton: {
     width: '100%', // Changed from flex: 1 to full width
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#6C5CE7', // Match save button color
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1445,13 +1532,15 @@ const styles = StyleSheet.create({
   },
   backToHomeButton: {
     width: '100%', // Changed from flex: 1 to full width
-    backgroundColor: '#2196F3',
+    backgroundColor: '#2B2B2B', // Match cancel button background
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: height * 0.018,
     borderRadius: width * 0.03,
     gap: width * 0.02,
+    borderWidth: 1,
+    borderColor: '#EF4444', // Match cancel button border color
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -1459,8 +1548,80 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   backToHomeButtonText: {
+    color: '#EF4444', // Match cancel button text color
+    fontSize: width * 0.04,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: width * 0.05,
+  },
+  modalContainer: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: width * 0.05,
+    padding: width * 0.06,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontFamily: 'Articulat CF',
+    fontSize: width * 0.05,
+    fontWeight: '700',
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: height * 0.015,
+  },
+  modalSubtitle: {
+    fontFamily: 'Articulat CF',
+    fontSize: width * 0.038,
+    fontWeight: '400',
+    color: '#9D9D9D',
+    textAlign: 'center',
+    marginBottom: height * 0.03,
+    lineHeight: width * 0.05,
+  },
+  modalButtonsContainer: {
+    flexDirection: 'column',
+    gap: height * 0.015,
+    marginBottom: height * 0.02,
+  },
+  modalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: height * 0.018,
+    borderRadius: width * 0.03,
+    gap: width * 0.025,
+  },
+  sameFencersButton: {
+    backgroundColor: '#6C5CE7',
+  },
+  changeOneFencerButton: {
+    backgroundColor: '#4ECDC4',
+  },
+  changeBothFencersButton: {
+    backgroundColor: '#E17055',
+  },
+  modalButtonText: {
     color: 'white',
     fontSize: width * 0.04,
     fontWeight: '600',
+  },
+  modalCancelButton: {
+    paddingVertical: height * 0.012,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: '#9D9D9D',
+    fontSize: width * 0.038,
+    fontWeight: '500',
   },
 });

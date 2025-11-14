@@ -39,6 +39,7 @@ interface CarouselItem {
   opponentName: string;
   source?: string; // Source of the match: 'manual', 'remote', etc.
   notes?: string; // Match notes
+  matchType?: string; // Match type: 'training' or 'competition'
 }
 
 interface MatchCarouselProps {
@@ -201,7 +202,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
             yourScore: item.youScore.toString(),
             opponentScore: item.opponentScore.toString(),
             opponentName: item.opponentName,
-            matchType: 'Competition', // Default match type for carousel items
+            matchType: item.matchType || 'Training', // Use actual match type from database
             date: item.date,
             time: '12:00PM', // Default time
             isWin: item.isWin.toString(),
@@ -218,7 +219,7 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
             opponentImage: '', // No default image - will use initials fallback
             youScore: item.youScore.toString(),
             opponentScore: item.opponentScore.toString(),
-            matchType: 'Competition', // Default match type for carousel items
+            matchType: item.matchType || 'Training', // Use actual match type from database
             date: item.date,
             duration: '02:30', // Default duration
             location: 'Metro Field House', // Default location

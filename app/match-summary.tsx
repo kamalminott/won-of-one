@@ -145,6 +145,13 @@ export default function MatchSummaryScreen() {
             setNotes(matchData.notes);
           }
           
+          // Load match type from database
+          if (matchData?.match_type) {
+            const type = matchData.match_type.toLowerCase() === 'training' ? 'training' : 'competition';
+            console.log('🏷️ Loading match type from database:', type);
+            setMatchType(type);
+          }
+          
           // Calculate best run and score progression if we have match data and user info
           if (matchData && matchData.fencer_1_name) {
             const calculatedBestRun = await matchService.calculateBestRun(
@@ -441,7 +448,7 @@ export default function MatchSummaryScreen() {
              (match.user_id && match.result === 'loss') ? 'defeat' as const : 
              null, // No outcome for anonymous matches (user_id is null)
     score: `${match.final_score || 0}-${match.touches_against || 0}`,
-    matchType: 'competition' as const, // TODO: Use actual match type
+    matchType: matchType, // Use match type from database
     date: new Date().toLocaleDateString(),
     userScore: match.final_score || 0,
     opponentScore: match.touches_against || 0,
@@ -496,9 +503,10 @@ export default function MatchSummaryScreen() {
       backgroundColor: 'rgba(0, 0, 0, 0.95)',
       justifyContent: 'center',
       alignItems: 'center',
+      paddingHorizontal: width * 0.025,
     },
     modalContainer: {
-      width: '95%',
+      width: width * 0.95,
       maxWidth: width * 0.95,
     },
     modalContent: {
@@ -689,66 +697,66 @@ export default function MatchSummaryScreen() {
         animationType="slide"
         onRequestClose={handleCancelNotes}
       >
-        <View style={styles.modalOverlay}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => Keyboard.dismiss()}
+        >
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-            style={{ flex: 1 }}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            behavior={Platform.OS === 'ios' ? 'position' : 'padding'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 50}
+            style={{ 
+              flex: 1, 
+              justifyContent: Platform.OS === 'ios' ? 'center' : 'center',
+              marginTop: Platform.OS === 'android' ? height * 0.15 : 0
+            }}
           >
-            <TouchableOpacity
-              style={{ flex: 1 }}
-              activeOpacity={1}
-              onPress={() => Keyboard.dismiss()}
-            >
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <TouchableOpacity activeOpacity={1}>
-                  <View style={styles.modalContainer}>
-                    <LinearGradient
-                      colors={Colors.glassyGradient.colors}
-                      style={styles.modalContent}
-                      start={Colors.glassyGradient.start}
-                      end={Colors.glassyGradient.end}
-                    >
-                      <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Match Notes</Text>
-                        <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
-                          <Ionicons name="close" size={24} color="white" />
-                        </TouchableOpacity>
-                      </View>
-                      
-                      <View style={styles.inputContainer}>
-                        <TextInput
-                          style={styles.textInput}
-                          value={notes}
-                          onChangeText={handleNotesChange}
-                          placeholder="Add your thoughts about this match..."
-                          placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                          multiline
-                          maxLength={500}
-                          autoFocus
-                        />
-                      </View>
-                      
-                      <View style={styles.modalFooter}>
-                        <Text style={styles.characterCount}>
-                          {notes.length}/500
-                        </Text>
-                        <View style={styles.buttonContainer}>
-                          <TouchableOpacity onPress={handleCancelNotes} style={styles.cancelButton}>
-                            <Text style={styles.cancelButtonText}>Cancel</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
-                            <Text style={styles.saveButtonText}>Save</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </LinearGradient>
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.modalContainer}>
+                <LinearGradient
+                  colors={Colors.glassyGradient.colors}
+                  style={styles.modalContent}
+                  start={Colors.glassyGradient.start}
+                  end={Colors.glassyGradient.end}
+                >
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Match Notes</Text>
+                    <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
                   </View>
-                </TouchableOpacity>
+                  
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.textInput}
+                      value={notes}
+                      onChangeText={handleNotesChange}
+                      placeholder="Add your thoughts about this match..."
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      multiline
+                      maxLength={500}
+                      autoFocus
+                    />
+                  </View>
+                  
+                  <View style={styles.modalFooter}>
+                    <Text style={styles.characterCount}>
+                      {notes.length}/500
+                    </Text>
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity onPress={handleCancelNotes} style={styles.cancelButton}>
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
+                        <Text style={styles.saveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </LinearGradient>
               </View>
             </TouchableOpacity>
           </KeyboardAvoidingView>
-        </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* Goal Celebration Modal */}
