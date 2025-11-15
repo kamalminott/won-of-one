@@ -138,8 +138,14 @@ export default function RootLayout() {
   // Check for OTA updates on app launch
   React.useEffect(() => {
     async function checkForUpdates() {
-      if (!Updates || !Updates.isEnabled) {
-        console.log('📦 OTA updates not available (dev mode)');
+      if (!Updates) {
+        console.log('📦 OTA updates not available (expo-updates module not found)');
+        return;
+      }
+
+      // Check if updates are enabled (will be false in dev builds)
+      if (!Updates.isEnabled) {
+        console.log('📦 OTA updates not available (dev mode or updates disabled)');
         return;
       }
 
@@ -156,8 +162,14 @@ export default function RootLayout() {
         } else {
           console.log('✅ App is up to date');
         }
-      } catch (error) {
-        console.error('❌ Error checking for updates:', error);
+      } catch (error: any) {
+        // Handle the case where updates are not supported (e.g., in dev builds)
+        if (error?.message?.includes('not supported in development builds') || 
+            error?.message?.includes('not supported')) {
+          console.log('📦 OTA updates not supported in this build type');
+        } else {
+          console.error('❌ Error checking for updates:', error);
+        }
       }
     }
 
