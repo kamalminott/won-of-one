@@ -3,20 +3,114 @@ import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Updates from 'expo-updates';
 
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
+  const [updateInfo, setUpdateInfo] = useState<{
+    updateId: string | null;
+    createdAt: string | null;
+    channel: string | null;
+    runtimeVersion: string | null;
+    isChecking: boolean;
+  }>({
+    updateId: null,
+    createdAt: null,
+    channel: null,
+    runtimeVersion: null,
+    isChecking: false,
+  });
 
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Settings');
+      loadUpdateInfo();
     }, [])
   );
+
+  // Load update information
+  const loadUpdateInfo = async () => {
+    try {
+      if (!Updates.isEnabled) {
+        setUpdateInfo({
+          updateId: 'Not available (dev mode)',
+          createdAt: null,
+          channel: 'development',
+          runtimeVersion: 'N/A',
+          isChecking: false,
+        });
+        return;
+      }
+
+      // Get update information from Updates API
+      const manifest = Updates.manifest;
+      
+      setUpdateInfo({
+        updateId: Updates.updateId || manifest?.id || 'Embedded',
+        createdAt: manifest?.createdAt 
+          ? new Date(manifest.createdAt).toLocaleString() 
+          : 'Unknown',
+        channel: Updates.channel || manifest?.extra?.expoConfig?.updates?.requestHeaders?.['expo-channel-name'] || 'unknown',
+        runtimeVersion: Updates.runtimeVersion || manifest?.runtimeVersion || 'unknown',
+        isChecking: false,
+      });
+    } catch (error) {
+      console.error('Error loading update info:', error);
+      setUpdateInfo(prev => ({
+        ...prev,
+        updateId: 'Error loading',
+        isChecking: false,
+      }));
+    }
+  };
+
+  // Check for updates manually
+  const checkForUpdates = async () => {
+    if (!Updates.isEnabled) {
+      Alert.alert('Updates Disabled', 'OTA updates are not available in development mode.');
+      return;
+    }
+
+    setUpdateInfo(prev => ({ ...prev, isChecking: true }));
+
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      
+      if (update.isAvailable) {
+        Alert.alert(
+          'Update Available',
+          'A new update is available. It will be downloaded and applied on the next app restart.',
+          [
+            {
+              text: 'Download Now',
+              onPress: async () => {
+                await Updates.fetchUpdateAsync();
+                Alert.alert(
+                  'Update Downloaded',
+                  'The update has been downloaded. Restart the app to apply it.',
+                  [{ text: 'OK' }]
+                );
+                loadUpdateInfo();
+              },
+            },
+            { text: 'Later', style: 'cancel' },
+          ]
+        );
+      } else {
+        Alert.alert('Up to Date', 'You are running the latest version.');
+      }
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+      Alert.alert('Error', 'Failed to check for updates. Please try again later.');
+    } finally {
+      setUpdateInfo(prev => ({ ...prev, isChecking: false }));
+    }
+  };
 
   const handleBack = () => {
     router.back();
@@ -292,6 +386,49 @@ export default function SettingsScreen() {
               <Text style={styles.settingLabel}>Default Periods</Text>
               <Text style={styles.settingValue}>3</Text>
             </View>
+          </View>
+        </View>
+
+        {/* App Updates Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>App Updates</Text>
+          <View style={[styles.card, styles.matchDefaultsCard]}>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Update ID</Text>
+              <Text style={[styles.settingValue, { fontSize: width * 0.03 }]} numberOfLines={1}>
+                {updateInfo.updateId || 'Loading...'}
+              </Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Channel</Text>
+              <Text style={styles.settingValue}>{updateInfo.channel || 'Loading...'}</Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Runtime Version</Text>
+              <Text style={styles.settingValue}>{updateInfo.runtimeVersion || 'Loading...'}</Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <TouchableOpacity 
+              style={[styles.settingRow, styles.settingRowLast]} 
+              onPress={checkForUpdates}
+              disabled={updateInfo.isChecking || !Updates.isEnabled}
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Check for Updates</Text>
+              {updateInfo.isChecking && (
+                <ActivityIndicator size="small" color="#6C5CE7" style={{ marginLeft: width * 0.02 }} />
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
