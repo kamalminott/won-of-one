@@ -5,7 +5,14 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Updates from 'expo-updates';
+
+// Safely import expo-updates (may not be available in dev mode)
+let Updates: typeof import('expo-updates') | null = null;
+try {
+  Updates = require('expo-updates');
+} catch (error) {
+  console.log('expo-updates not available (dev mode)');
+}
 
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
@@ -36,6 +43,17 @@ export default function SettingsScreen() {
   // Load update information
   const loadUpdateInfo = async () => {
     try {
+      if (!Updates) {
+        setUpdateInfo({
+          updateId: 'Not available (dev mode)',
+          createdAt: null,
+          channel: 'development',
+          runtimeVersion: 'N/A',
+          isChecking: false,
+        });
+        return;
+      }
+
       if (!Updates.isEnabled) {
         setUpdateInfo({
           updateId: 'Not available (dev mode)',
@@ -61,16 +79,23 @@ export default function SettingsScreen() {
       });
     } catch (error) {
       console.error('Error loading update info:', error);
-      setUpdateInfo(prev => ({
-        ...prev,
-        updateId: 'Error loading',
+      setUpdateInfo({
+        updateId: 'Not available (dev mode)',
+        createdAt: null,
+        channel: 'development',
+        runtimeVersion: 'N/A',
         isChecking: false,
-      }));
+      });
     }
   };
 
   // Check for updates manually
   const checkForUpdates = async () => {
+    if (!Updates) {
+      Alert.alert('Updates Disabled', 'OTA updates are not available in development mode.');
+      return;
+    }
+
     if (!Updates.isEnabled) {
       Alert.alert('Updates Disabled', 'OTA updates are not available in development mode.');
       return;
@@ -419,7 +444,7 @@ export default function SettingsScreen() {
             <TouchableOpacity 
               style={[styles.settingRow, styles.settingRowLast]} 
               onPress={checkForUpdates}
-              disabled={updateInfo.isChecking || !Updates.isEnabled}
+              disabled={updateInfo.isChecking || !Updates || !Updates.isEnabled}
             >
               <View style={styles.iconContainer}>
                 <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
