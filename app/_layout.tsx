@@ -12,6 +12,14 @@ import * as Application from 'expo-application';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 
+// Safely import expo-updates for automatic update checking
+let Updates: typeof import('expo-updates') | null = null;
+try {
+  Updates = require('expo-updates');
+} catch (error) {
+  // Updates not available in dev mode
+}
+
 import { AuthProvider } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
@@ -125,6 +133,37 @@ export default function RootLayout() {
     if (Platform.OS === 'android') {
       RNStatusBar.setBackgroundColor('rgba(19, 19, 19, 1)', true);
     }
+  }, []);
+
+  // Check for OTA updates on app launch
+  React.useEffect(() => {
+    async function checkForUpdates() {
+      if (!Updates || !Updates.isEnabled) {
+        console.log('📦 OTA updates not available (dev mode)');
+        return;
+      }
+
+      try {
+        console.log('🔍 Checking for OTA updates...');
+        const update = await Updates.checkForUpdateAsync();
+        
+        if (update.isAvailable) {
+          console.log('✅ Update available, downloading...');
+          await Updates.fetchUpdateAsync();
+          console.log('✅ Update downloaded, will apply on next app restart');
+          // Note: We don't auto-reload here to avoid disrupting the user
+          // The update will be applied on the next app launch
+        } else {
+          console.log('✅ App is up to date');
+        }
+      } catch (error) {
+        console.error('❌ Error checking for updates:', error);
+      }
+    }
+
+    // Check for updates after a short delay to not block app startup
+    const timeoutId = setTimeout(checkForUpdates, 2000);
+    return () => clearTimeout(timeoutId);
   }, []);
 
   if (!loaded) {
