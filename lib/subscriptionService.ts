@@ -3,9 +3,25 @@
  * Handles RevenueCat subscriptions and syncs with Supabase
  */
 
-import Purchases, { CustomerInfo, PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+
+// Lazy import RevenueCat (only available in production builds, not dev mode)
+let Purchases: any = null;
+let CustomerInfo: any = null;
+let PurchasesOffering: any = null;
+let PurchasesPackage: any = null;
+
+try {
+  const purchasesModule = require('react-native-purchases');
+  Purchases = purchasesModule.default;
+  CustomerInfo = purchasesModule.CustomerInfo;
+  PurchasesOffering = purchasesModule.PurchasesOffering;
+  PurchasesPackage = purchasesModule.PurchasesPackage;
+} catch (error) {
+  // RevenueCat not available in dev mode - that's okay
+  console.log('📦 RevenueCat native module not available (dev mode)');
+}
 
 // RevenueCat API Key (test key for development)
 const REVENUECAT_API_KEY = Platform.select({
@@ -25,6 +41,12 @@ export interface SubscriptionInfo {
   productId: string | null;
   entitlementId: string | null;
 }
+
+// Export types for use in other files
+// In dev mode, these will be null, but TypeScript will still allow the types
+export type CustomerInfo = any;
+export type PurchasesOffering = any;
+export type PurchasesPackage = any;
 
 // Initialize RevenueCat
 let isInitialized = false;
@@ -52,24 +74,33 @@ export const subscriptionService = {
         return;
       }
 
+      if (!Purchases) {
+        console.warn('⚠️ RevenueCat SDK not available - skipping configuration');
+        isInitialized = true;
+        isActuallyConfigured = false;
+        return;
+      }
+
       await Purchases.configure({ apiKey: REVENUECAT_API_KEY });
       isInitialized = true;
       isActuallyConfigured = true;
       console.log('✅ RevenueCat initialized');
 
       // Set user ID if provided (link RevenueCat user to your app user)
-      if (userId) {
+      if (userId && Purchases) {
         await Purchases.logIn(userId);
         console.log('✅ RevenueCat user linked:', userId);
       }
 
       // Set up listener for subscription updates
-      Purchases.addCustomerInfoUpdateListener(async (customerInfo) => {
-        console.log('📦 Subscription status updated');
-        if (userId) {
-          await subscriptionService.syncSubscriptionToSupabase(userId, customerInfo);
-        }
-      });
+      if (Purchases) {
+        Purchases.addCustomerInfoUpdateListener(async (customerInfo) => {
+          console.log('📦 Subscription status updated');
+          if (userId) {
+            await subscriptionService.syncSubscriptionToSupabase(userId, customerInfo);
+          }
+        });
+      }
     } catch (error: any) {
       // Don't crash the app if RevenueCat fails to initialize
       console.error('❌ Error initializing RevenueCat (non-fatal):', error?.message || error);
@@ -84,7 +115,7 @@ export const subscriptionService = {
    */
   async getOfferings(): Promise<PurchasesOffering | null> {
     // If RevenueCat isn't initialized, return null
-    if (!isActuallyConfigured) {
+    if (!isActuallyConfigured || !Purchases) {
       console.warn('⚠️ RevenueCat not initialized - cannot fetch offerings');
       return null;
     }
@@ -102,7 +133,7 @@ export const subscriptionService = {
    * Purchase a subscription package
    */
   async purchasePackage(packageToPurchase: PurchasesPackage): Promise<CustomerInfo> {
-    if (!isActuallyConfigured) {
+    if (!isActuallyConfigured || !Purchases) {
       throw new Error('RevenueCat is not configured. Please set up a production API key.');
     }
     
@@ -133,7 +164,7 @@ export const subscriptionService = {
    * Restore purchases (for users who reinstalled the app)
    */
   async restorePurchases(): Promise<CustomerInfo> {
-    if (!isActuallyConfigured) {
+    if (!isActuallyConfigured || !Purchases) {
       throw new Error('RevenueCat is not configured. Please set up a production API key.');
     }
     
@@ -171,6 +202,16 @@ export const subscriptionService = {
     }
 
     try {
+      if (!Purchases) {
+        return {
+          status: 'none',
+          isActive: false,
+          isTrial: false,
+          expiresAt: null,
+          productId: null,
+          entitlementId: null,
+        };
+      }
       const customerInfo = await Purchases.getCustomerInfo();
       return this.parseCustomerInfo(customerInfo);
     } catch (error: any) {
@@ -319,6 +360,10 @@ export const subscriptionService = {
    * Link RevenueCat user to your app user
    */
   async linkUser(userId: string): Promise<void> {
+    if (!Purchases) {
+      console.warn('⚠️ RevenueCat not available - cannot link user');
+      return;
+    }
     try {
       await Purchases.logIn(userId);
       console.log('✅ RevenueCat user linked:', userId);
@@ -336,6 +381,10 @@ export const subscriptionService = {
    * Log out RevenueCat user (when user logs out of your app)
    */
   async logOut(): Promise<void> {
+    if (!Purchases) {
+      console.warn('⚠️ RevenueCat not available - cannot log out');
+      return;
+    }
     try {
       await Purchases.logOut();
       console.log('✅ RevenueCat user logged out');

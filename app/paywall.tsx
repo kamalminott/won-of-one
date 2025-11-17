@@ -16,14 +16,15 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PurchasesOffering, PurchasesPackage } from '@/lib/subscriptionService';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors } from '@/constants/Colors';
 
 export default function PaywallScreen() {
   const { width, height } = useWindowDimensions();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
@@ -98,6 +99,17 @@ export default function PaywallScreen() {
     }
   };
 
+  const handleClose = () => {
+    // Navigate to home screen with bypass flag to skip paywall redirect
+    console.log('🚪 Closing paywall, navigating to home with bypass flag');
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        bypassPaywall: 'true',
+      },
+    });
+  };
+
   const formatPrice = (packageToFormat: PurchasesPackage) => {
     const product = packageToFormat.product;
     const price = product.priceString;
@@ -126,6 +138,17 @@ export default function PaywallScreen() {
     <>
       <ExpoStatusBar style="light" />
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        {/* Close Button */}
+        <View style={[styles.closeButtonContainer, { paddingTop: insets.top + 10, paddingRight: '5%' }]}>
+          <TouchableOpacity
+            onPress={handleClose}
+            style={styles.closeButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={width * 0.07} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -258,6 +281,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#171717',
+  },
+  closeButtonContainer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    zIndex: 1000,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     paddingHorizontal: '5%',

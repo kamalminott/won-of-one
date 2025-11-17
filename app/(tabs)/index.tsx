@@ -61,52 +61,41 @@ export default function HomeScreen() {
     }
   }, [user]);
 
-  // TEMPORARY: Force paywall to show for UI testing
-  // TODO: Revert this after testing the paywall UI
-  useEffect(() => {
-    if (!user || loading) return;
-    
-    // Force redirect to paywall for testing
-    console.log('🧪 TESTING: Forcing paywall to show');
-    router.replace('/paywall');
-  }, [user, loading]);
-
-  // ORIGINAL CODE (commented out for testing - uncomment after testing):
   // Check subscription status and redirect to paywall if needed
-  // useEffect(() => {
-  //   const checkSubscription = async () => {
-  //     if (!user || loading) return;
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!user || loading) return;
 
-  //     try {
-  //       const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
+      try {
+        const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
         
-  //       // If user has no active subscription and no active trial, show paywall
-  //       if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
-  //         console.log('🔒 No active subscription or trial, redirecting to paywall');
-  //         router.replace('/paywall');
-  //       } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
-  //         // Check if trial has expired
-  //         const now = new Date();
-  //         const expiresAt = subscriptionInfo.expiresAt;
-  //         if (now >= expiresAt) {
-  //           console.log('⏰ Trial expired, redirecting to paywall');
-  //           router.replace('/paywall');
-  //         } else {
-  //           console.log('✅ Trial active, allowing access');
-  //         }
-  //       } else if (subscriptionInfo.isActive) {
-  //         console.log('✅ Active subscription, allowing access');
-  //       }
-  //     } catch (error) {
-  //       console.error('Error checking subscription:', error);
-  //       // On error, allow access (fail open) - you can change this to fail closed if preferred
-  //     }
-  //   };
+        // If user has no active subscription and no active trial, show paywall
+        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
+          console.log('🔒 No active subscription or trial, redirecting to paywall');
+          router.replace('/paywall');
+        } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
+          // Check if trial has expired
+          const now = new Date();
+          const expiresAt = subscriptionInfo.expiresAt;
+          if (now >= expiresAt) {
+            console.log('⏰ Trial expired, redirecting to paywall');
+            router.replace('/paywall');
+          } else {
+            console.log('✅ Trial active, allowing access');
+          }
+        } else if (subscriptionInfo.isActive) {
+          console.log('✅ Active subscription, allowing access');
+        }
+      } catch (error) {
+        console.error('Error checking subscription:', error);
+        // On error, allow access (fail open) - you can change this to fail closed if preferred
+      }
+    };
 
-  //   if (user && !loading) {
-  //     checkSubscription();
-  //   }
-  // }, [user, loading]);
+    if (user && !loading) {
+      checkSubscription();
+    }
+  }, [user, loading]);
 
   // Screen tracking and identify
   useEffect(() => {

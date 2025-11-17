@@ -3040,6 +3040,8 @@ export default function RemoteScreen() {
   // Helper function to perform the actual reset
   const performResetAll = useCallback(async (keepOpponentName: boolean = false) => {
     setIsResetting(true); // Block new operations during reset
+    // Store the current toggle state to preserve it after reset
+    const currentToggleState = showUserProfile;
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
       setIsCompletingMatch(false); // Reset the completion flag
@@ -3313,7 +3315,8 @@ export default function RemoteScreen() {
     
     // Reset fencer positions
     setFencerPositions({ fencerA: 'left', fencerB: 'right' });
-    setShowUserProfile(true);
+    // Preserve the toggle state (ON stays ON, OFF stays OFF)
+    setShowUserProfile(currentToggleState);
     
       console.log('✅ Reset All completed successfully');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -4859,7 +4862,7 @@ export default function RemoteScreen() {
       backgroundColor: Colors.purple.dark || '#4C1D95',
       borderRadius: width * 0.04,
       padding: width * 0.06,
-      width: Platform.OS === 'android' ? width * 0.95 : '98%',
+      width: width * 0.9, // Use consistent width for both iOS and Android
       maxWidth: width * 0.95,
       alignItems: 'center',
       alignSelf: 'center',
@@ -4906,7 +4909,7 @@ export default function RemoteScreen() {
       borderRadius: width * 0.02,
       paddingHorizontal: width * 0.05,
       paddingVertical: height * 0.015,
-      width: width * 0.35,
+      width: '90%', // Make buttons wider for better usability on iOS
       alignItems: 'center',
       flexWrap: 'nowrap',
     },
@@ -4922,7 +4925,7 @@ export default function RemoteScreen() {
       borderRadius: width * 0.02,
       paddingHorizontal: width * 0.05,
       paddingVertical: height * 0.015,
-      width: width * 0.35,
+      width: '90%', // Make buttons wider for better usability on iOS
       alignItems: 'center',
       flexWrap: 'nowrap',
     },
