@@ -93,6 +93,47 @@ export const analytics = {
     }
   },
 
+  // Paywall tracking
+  paywallSubscribeAttempt: (packageId: string) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('paywall_subscribe_attempt', { package_id: packageId });
+      __DEV__ && console.log('📊 PostHog: paywall_subscribe_attempt', { package_id: packageId });
+    } catch (error) {
+      console.error('PostHog paywallSubscribeAttempt error:', error);
+    }
+  },
+
+  paywallSubscribeSuccess: (packageId: string) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('paywall_subscribe_success', { package_id: packageId });
+      __DEV__ && console.log('📊 PostHog: paywall_subscribe_success', { package_id: packageId });
+    } catch (error) {
+      console.error('PostHog paywallSubscribeSuccess error:', error);
+    }
+  },
+
+  paywallSubscribeError: (errorMessage: string) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('paywall_subscribe_error', { error_message: errorMessage });
+      __DEV__ && console.log('📊 PostHog: paywall_subscribe_error', { error_message: errorMessage });
+    } catch (error) {
+      console.error('PostHog paywallSubscribeError error:', error);
+    }
+  },
+
+  paywallSubscribeCancelled: () => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('paywall_subscribe_cancelled');
+      __DEV__ && console.log('📊 PostHog: paywall_subscribe_cancelled');
+    } catch (error) {
+      console.error('PostHog paywallSubscribeCancelled error:', error);
+    }
+  },
+
   // Domain-specific helpers
   matchStart: (props: { mode: 'remote' | 'manual'; is_offline: boolean; remote_id?: string }) => {
     if (!isAvailable || !posthogInstance) return;

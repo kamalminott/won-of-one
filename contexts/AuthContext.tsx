@@ -179,6 +179,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // Link RevenueCat user when user logs in
+        if (session?.user?.id) {
+          try {
+            const { subscriptionService } = await import('@/lib/subscriptionService');
+            await subscriptionService.linkUser(session.user.id);
+          } catch (error) {
+            console.error('❌ Error linking RevenueCat user:', error);
+          }
+        } else {
+          // Log out RevenueCat when user logs out
+          try {
+            const { subscriptionService } = await import('@/lib/subscriptionService');
+            await subscriptionService.logOut();
+          } catch (error) {
+            console.error('❌ Error logging out RevenueCat user:', error);
+          }
+        }
       }
     );
 

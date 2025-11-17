@@ -22,6 +22,7 @@ try {
 
 import { AuthProvider } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { subscriptionService } from '@/lib/subscriptionService';
 
 // Component to connect PostHog instance to analytics helper
 function PostHogConnector() {
@@ -135,6 +136,21 @@ export default function RootLayout() {
     }
   }, []);
 
+  // Initialize RevenueCat on app launch
+  React.useEffect(() => {
+    async function initializeRevenueCat() {
+      try {
+        await subscriptionService.initialize();
+      } catch (error) {
+        console.error('❌ Failed to initialize RevenueCat:', error);
+      }
+    }
+
+    // Initialize RevenueCat after a short delay
+    const timeoutId = setTimeout(initializeRevenueCat, 1000);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
   // Check for OTA updates on app launch
   React.useEffect(() => {
     async function checkForUpdates() {
@@ -194,6 +210,7 @@ export default function RootLayout() {
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="create-account" options={{ headerShown: false }} />
           <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
+          <Stack.Screen name="paywall" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="add-match" options={{ headerShown: false }} />
           <Stack.Screen name="match-history" options={{ headerShown: false }} />
