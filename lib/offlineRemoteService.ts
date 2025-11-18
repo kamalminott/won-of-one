@@ -29,7 +29,12 @@ export const offlineRemoteService = {
     // Try online first if available
     if (isOnline) {
       try {
-        const session = await fencingRemoteService.createRemoteSession(remoteData);
+        // Create database-compatible data (exclude weapon_type for now since column doesn't exist in DB)
+        // We'll store weapon_type in the local cache only
+        const dbRemoteData: any = { ...remoteData };
+        // Remove weapon field - database doesn't have weapon_type column yet
+        delete dbRemoteData.weapon;
+        const session = await fencingRemoteService.createRemoteSession(dbRemoteData);
         if (session) {
           // Also cache locally for offline access
           const cachedSession: RemoteSession = {
@@ -47,6 +52,7 @@ export const offlineRemoteService = {
             period_1_time: 0,
             period_2_time: 0,
             period_3_time: 0,
+            weapon_type: (session as any).weapon_type || remoteData.weapon || 'foil',
             cached_at: Date.now(),
           };
           await offlineCache.cacheActiveRemoteSession(cachedSession);
@@ -76,6 +82,7 @@ export const offlineRemoteService = {
       period_1_time: 0,
       period_2_time: 0,
       period_3_time: 0,
+      weapon_type: remoteData.weapon || 'foil',
       cached_at: Date.now(),
     };
     

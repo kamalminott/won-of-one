@@ -731,16 +731,46 @@ export const matchService = {
   }): Promise<Match | null> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
     
-    // Parse date and time
+    // Parse date and time with validation
     const [day, month, year] = date.split('/');
     const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
     const isPM = time.toUpperCase().includes('PM');
     
-    let hour24 = parseInt(hour);
-    if (isPM && hour24 !== 12) hour24 += 12;
-    if (!isPM && hour24 === 12) hour24 = 0;
+    // Validate parsed values
+    const dayNum = parseInt(day);
+    const monthNum = parseInt(month);
+    const yearNum = parseInt(year);
+    const hourNum = parseInt(hour);
+    const minuteNum = parseInt(minute);
     
-    const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+    let eventDateTime: Date;
+    
+    // Check for invalid values
+    if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) || isNaN(hourNum) || isNaN(minuteNum)) {
+      console.error('❌ Invalid date/time values:', { day, month, year, hour, minute });
+      // Fallback to current date/time
+      eventDateTime = new Date();
+      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+    } else if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31 || hourNum < 0 || hourNum > 23 || minuteNum < 0 || minuteNum > 59) {
+      console.error('❌ Date/time values out of valid range:', { day: dayNum, month: monthNum, year: yearNum, hour: hourNum, minute: minuteNum });
+      // Fallback to current date/time
+      eventDateTime = new Date();
+      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+    } else {
+      let hour24 = hourNum;
+      if (isPM && hour24 !== 12) hour24 += 12;
+      if (!isPM && hour24 === 12) hour24 = 0;
+      
+      eventDateTime = new Date(yearNum, monthNum - 1, dayNum, hour24, minuteNum);
+      
+      // Validate the Date object is valid
+      if (isNaN(eventDateTime.getTime())) {
+        console.error('❌ Invalid Date object created from:', { day: dayNum, month: monthNum, year: yearNum, hour: hour24, minute: minuteNum });
+        // Fallback to current date/time
+        eventDateTime = new Date();
+        console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+      }
+    }
     
     const insertData = {
       user_id: userId,
@@ -788,6 +818,7 @@ export const matchService = {
       // is_win is a generated column - removed from insert
       score_diff: (remoteData.score_1 || 0) - (remoteData.score_2 || 0),
       match_type: 'training',
+      weapon_type: remoteData.weapon_type || 'foil', // Use weapon_type from remote data, default to foil
       source: 'remote', // User is using the fencing remote
     };
 
@@ -1789,6 +1820,13 @@ export const fencingRemoteService = {
   // Delete a fencing remote session
   async deleteRemoteSession(remoteId: string): Promise<boolean> {
     console.log('🗑️ Deleting remote session:', remoteId);
+    
+    // Skip database deletion for offline sessions (they don't exist in the database)
+    if (remoteId.startsWith('offline_')) {
+      console.log('📱 Offline session detected - skipping database deletion (session only exists locally)');
+      return true; // Return true since offline sessions don't need database deletion
+    }
+    
     const { data, error } = await supabase
       .from('fencing_remote')
       .delete()

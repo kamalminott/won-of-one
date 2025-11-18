@@ -2,7 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { analytics } from '@/lib/analytics';
-import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService } from '@/lib/database';
+import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService, userService } from '@/lib/database';
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
@@ -107,6 +107,10 @@ export default function RemoteScreen() {
   const [isCompletingMatch, setIsCompletingMatch] = useState(false);
   const [isResetting, setIsResetting] = useState(false); // Flag to prevent operations during reset
   
+  // Weapon selection state
+  const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'saber'>('foil');
+  const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
+  
   // Offline status indicators
   const [isOffline, setIsOffline] = useState(false);
   const [pendingMatchesCount, setPendingMatchesCount] = useState(0);
@@ -142,6 +146,42 @@ export default function RemoteScreen() {
     testImageLoading(); // Test function to verify AsyncStorage
     // Removed loadPersistedMatchState() - now handled only on focus
   }, []);
+
+  // Load user's preferred weapon from profile
+  useEffect(() => {
+    const loadPreferredWeapon = async () => {
+      if (!user?.id) {
+        // Default to foil if no user
+        setSelectedWeapon('foil');
+        return;
+      }
+
+      try {
+        const userData = await userService.getUserById(user.id);
+        if (userData?.preferred_weapon) {
+          // Validate weapon type
+          const weapon = userData.preferred_weapon.toLowerCase();
+          if (weapon === 'foil' || weapon === 'epee' || weapon === 'saber') {
+            setSelectedWeapon(weapon as 'foil' | 'epee' | 'saber');
+            console.log('✅ Loaded preferred weapon from profile:', weapon);
+          } else {
+            console.log('⚠️ Invalid weapon type in profile, defaulting to foil');
+            setSelectedWeapon('foil');
+          }
+        } else {
+          // Default to foil if no preference set
+          setSelectedWeapon('foil');
+          console.log('ℹ️ No preferred weapon in profile, defaulting to foil');
+        }
+      } catch (error) {
+        console.error('Error loading preferred weapon:', error);
+        // Default to foil on error
+        setSelectedWeapon('foil');
+      }
+    };
+
+    loadPreferredWeapon();
+  }, [user?.id]);
 
   // Track if we need to set fencer names after toggle is turned off
   const pendingFencerNamesRef = useRef<{ fencer1Name: string; fencer2Name: string } | null>(null);
@@ -1221,7 +1261,17 @@ export default function RemoteScreen() {
     // matchTime is the total match duration (e.g., 180 seconds)
     // timeRemaining is how much time is left on the timer
     // So elapsed time = matchTime - timeRemaining
-    const matchTimeElapsed = Math.max(0, matchTime - timeRemaining);
+    // If timer hasn't started yet (hasMatchStarted is false), use 0
+    // For Epee double hits, if timer is paused, use the last known elapsed time
+    let matchTimeElapsed = 0;
+    if (hasMatchStarted) {
+      matchTimeElapsed = Math.max(0, matchTime - timeRemaining);
+    } else if (matchStartTime) {
+      // Timer hasn't started but match has (edge case), calculate from start time
+      const totalElapsedFromStart = now.getTime() - matchStartTime.getTime();
+      const actualMatchTimeMsFromStart = totalElapsedFromStart - totalPausedTime;
+      matchTimeElapsed = Math.max(0, Math.floor(actualMatchTimeMsFromStart / 1000));
+    }
     
     
     // Display the time elapsed that will be used for x-axis
@@ -1351,7 +1401,8 @@ export default function RemoteScreen() {
         fencer_1_name: showUserProfile ? userDisplayName : fencerNames.fencerA, // Use fencerA when user toggle is off
         fencer_2_name: fencerNames.fencerB, // Always fencerB for fencer 2
         scoring_mode: "15-point",
-        device_serial: "REMOTE_001"
+        device_serial: "REMOTE_001",
+        weapon: selectedWeapon // Include selected weapon type
       });
       
       // Get the full session from cache (offlineRemoteService returns minimal object)
@@ -1368,7 +1419,13 @@ export default function RemoteScreen() {
           score_1: session.score_1,
           score_2: session.score_2,
           status: session.status,
+          weapon_type: session.weapon_type || selectedWeapon, // Use weapon_type from session or fallback to selectedWeapon
         };
+        
+        // Update selectedWeapon if session has a weapon_type
+        if (session.weapon_type && session.weapon_type !== selectedWeapon) {
+          setSelectedWeapon(session.weapon_type as 'foil' | 'epee' | 'saber');
+        }
         
         console.log(`Remote session created: ${session.remote_id} (${result.is_offline ? 'OFFLINE' : 'ONLINE'})`);
         setRemoteSession(sessionForState);
@@ -1444,7 +1501,12 @@ export default function RemoteScreen() {
       // First, create a match record from the remote session
       // Only pass user.id if showUserProfile is true (user toggle is on)
       const userId = showUserProfile && user ? user.id : null;
-      const match = await matchService.createMatchFromRemote(activeSession, userId);
+      // Ensure activeSession has weapon_type for match creation
+      const sessionWithWeapon = {
+        ...activeSession,
+        weapon_type: activeSession.weapon_type || selectedWeapon || 'foil'
+      };
+      const match = await matchService.createMatchFromRemote(sessionWithWeapon, userId);
       if (!match) {
         console.error('❌ Failed to create match record');
         return null;
@@ -1667,13 +1729,25 @@ export default function RemoteScreen() {
       setIsCompletingMatch(true); // Prevent further score changes
       
       // Check if this is an offline match
-      const isOfflineMatch = matchId.startsWith('offline_') || remoteSession.remote_id.startsWith('offline_');
+      // Only treat as offline if BOTH the matchId AND remote_id start with 'offline_' AND we're currently offline
+      // If we have a real match_id (not starting with 'offline_'), we should complete it online
+      const isOfflineMatchId = matchId.startsWith('offline_');
+      const isOfflineRemoteId = remoteSession.remote_id.startsWith('offline_');
       const isCurrentlyOffline = await networkService.isOnline().then(online => !online);
       
-      if (isOfflineMatch || isCurrentlyOffline) {
+      // Only complete offline if: both IDs are offline AND we're currently offline
+      // OR if we're currently offline (network unavailable)
+      if ((isOfflineMatchId && isOfflineRemoteId && isCurrentlyOffline) || (isCurrentlyOffline && isOfflineMatchId)) {
         console.log('📱 Offline match completion detected - saving locally');
         await handleOfflineMatchCompletion(finalFencerAScore, finalFencerBScore);
         return;
+      }
+      
+      // If we have a real match_id but remote_id is offline, try to complete online
+      // This handles the case where session was created offline but match was created online
+      if (!isOfflineMatchId && isOfflineRemoteId) {
+        console.log('⚠️ Match has real match_id but remote_id is offline - attempting online completion');
+        // Continue with online completion below
       }
       
       // Calculate total match duration: actual elapsed time from start to finish (excluding pauses)
@@ -3042,6 +3116,8 @@ export default function RemoteScreen() {
     setIsResetting(true); // Block new operations during reset
     // Store the current toggle state to preserve it after reset
     const currentToggleState = showUserProfile;
+    // Store the current weapon selection to preserve it after reset
+    const currentWeapon = selectedWeapon;
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
       setIsCompletingMatch(false); // Reset the completion flag
@@ -3057,20 +3133,38 @@ export default function RemoteScreen() {
       if (currentMatchPeriod && remoteSession) {
         console.log('🗑️ Deleting match and related records...');
         
-        // Delete the match and all related records
-        const matchDeleted = await matchService.deleteMatch(currentMatchPeriod.match_id, remoteSession.remote_id);
-        if (matchDeleted) {
-          console.log('✅ Match and related records deleted successfully');
+        // Delete the match and all related records (only if it's an online match)
+        // Offline matches don't exist in the database, so skip deletion
+        if (currentMatchPeriod.match_id.startsWith('offline_')) {
+          console.log('📱 Offline match detected - skipping database deletion (match only exists locally)');
         } else {
-          console.error('❌ Failed to delete match records');
+          const matchDeleted = await matchService.deleteMatch(currentMatchPeriod.match_id, remoteSession.remote_id);
+          if (matchDeleted) {
+            console.log('✅ Match and related records deleted successfully');
+          } else {
+            console.error('❌ Failed to delete match records');
+          }
         }
         
-        // Delete the remote session
-        const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id);
-        if (sessionDeleted) {
-          console.log('✅ Remote session deleted successfully');
+        // Delete the remote session (only if it's an online session)
+        // Offline sessions are handled by clearing the local cache
+        if (remoteSession.remote_id.startsWith('offline_')) {
+          console.log('📱 Offline session detected - clearing local cache');
+          try {
+            const { offlineCache } = await import('@/lib/offlineCache');
+            await offlineCache.clearActiveRemoteSession();
+            await offlineCache.clearPendingRemoteEvents();
+            console.log('✅ Offline session cache cleared');
+          } catch (error) {
+            console.error('❌ Error clearing offline session cache:', error);
+          }
         } else {
-          console.error('❌ Failed to delete remote session');
+          const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id);
+          if (sessionDeleted) {
+            console.log('✅ Remote session deleted successfully');
+          } else {
+            console.error('❌ Failed to delete remote session');
+          }
         }
         
         // Clear the current match period and remote session state
@@ -3317,6 +3411,8 @@ export default function RemoteScreen() {
     setFencerPositions({ fencerA: 'left', fencerB: 'right' });
     // Preserve the toggle state (ON stays ON, OFF stays OFF)
     setShowUserProfile(currentToggleState);
+    // Preserve the weapon selection (Foil, Epee, or Saber stays the same)
+    setSelectedWeapon(currentWeapon);
     
       console.log('✅ Reset All completed successfully');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -3329,7 +3425,7 @@ export default function RemoteScreen() {
     } finally {
       setIsResetting(false); // Always clear reset flag
     }
-  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, toggleCardPosition]);
+  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, toggleCardPosition, selectedWeapon]);
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {
@@ -3543,6 +3639,88 @@ export default function RemoteScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, [isPlaying]);
+
+  // Handle double hit for Epee (scores both fencers simultaneously)
+  const handleDoubleHit = useCallback(async () => {
+    if (isResetting) {
+      console.log('⚠️ Reset in progress, skipping double hit');
+      return;
+    }
+
+    if (isCompletingMatch) {
+      console.log('🚫 Double hit blocked - match is being completed');
+      return;
+    }
+
+    // Ensure remote session exists
+    const session = await ensureRemoteSession();
+    if (!session) {
+      console.error('❌ Cannot record double hit - no remote session');
+      return;
+    }
+
+    // Show pressed state
+    setIsDoubleHitPressed(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    // Reset pressed state after animation
+    setTimeout(() => {
+      setIsDoubleHitPressed(false);
+    }, 200);
+    
+    // Get current scores before updating
+    const currentFencerAScore = scores.fencerA;
+    const currentFencerBScore = scores.fencerB;
+    const newFencerAScore = currentFencerAScore + 1;
+    const newFencerBScore = currentFencerBScore + 1;
+    
+    // Increment both fencers' scores
+    setScores(prev => ({
+      fencerA: prev.fencerA + 1,
+      fencerB: prev.fencerB + 1
+    }));
+
+    // Update remote session scores
+    if (remoteSession) {
+      const leftEntity = getEntityAtPosition('left');
+      const leftScore = leftEntity === 'fencerA' ? newFencerAScore : newFencerBScore;
+      const rightEntity = getEntityAtPosition('right');
+      const rightScore = rightEntity === 'fencerA' ? newFencerAScore : newFencerBScore;
+      await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, leftScore, rightScore);
+    }
+
+    // Determine which entity is user/opponent for event creation
+    // Create event for fencerA
+    const fencerAIsUser = isEntityUser('fencerA');
+    await createMatchEvent(
+      fencerAIsUser ? 'user' : 'opponent',
+      undefined, // No card
+      'fencerA',
+      newFencerAScore
+    );
+
+    // Create event for fencerB
+    const fencerBIsUser = isEntityUser('fencerB');
+    await createMatchEvent(
+      fencerBIsUser ? 'user' : 'opponent',
+      undefined, // No card
+      'fencerB',
+      newFencerBScore
+    );
+
+    // Track analytics - use capture for custom event
+    analytics.capture('epee_double_hit', {
+      fencer_a_score: newFencerAScore,
+      fencer_b_score: newFencerBScore
+    });
+
+    // Pause timer if it's currently running
+    if (isPlaying) {
+      pauseTimer();
+    }
+
+    console.log('⚔️ Double hit recorded - both fencers scored');
+  }, [isResetting, isCompletingMatch, scores, createMatchEvent, ensureRemoteSession, remoteSession, isPlaying, pauseTimer, isEntityUser, getEntityAtPosition]);
 
   const startTimer = useCallback(() => {
     setIsPlaying(true);
@@ -4729,6 +4907,67 @@ export default function RemoteScreen() {
       fontSize: width * 0.065, // Smaller font on Nexus S, minimum 16px
       color: 'white',
     },
+    doubleHitButton: {
+      width: width * 0.13,
+      height: width * 0.13,
+      borderRadius: width * 0.065,
+      alignItems: 'center',
+      justifyContent: 'center',
+      bottom: height * 0.08,
+      // Base styles match weaponButton
+      // backgroundColor and borderColor will be set inline based on pressed state
+    },
+    doubleHitButtonText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.022,
+      fontWeight: '600',
+      marginTop: width * 0.005,
+    },
+    weaponSelectionContainer: {
+      position: 'absolute',
+      top: height * 0.004,
+      right: width * 0.02,
+      alignItems: 'flex-end',
+      zIndex: 10,
+    },
+    weaponSelectionLabel: {
+      color: '#FFFFFF',
+      fontSize: width * 0.028,
+      fontWeight: '600',
+      marginBottom: height * 0.008,
+    },
+    weaponButtonsRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: width * 0.03,
+    },
+    weaponButton: {
+      width: width * 0.082,
+      height: width * 0.082,
+      borderRadius: width * 0.041,
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      borderWidth: 1.5,
+      borderColor: 'rgba(255, 255, 255, 0.3)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: height * 0.003,
+    },
+    weaponButtonSelected: {
+      backgroundColor: 'rgba(108, 92, 231, 0.3)',
+      borderColor: '#6C5CE7',
+      borderWidth: 2,
+    },
+    weaponButtonLabel: {
+      color: '#9D9D9D',
+      fontSize: width * 0.018,
+      fontWeight: '500',
+      marginTop: width * 0.003,
+    },
+    weaponButtonLabelSelected: {
+      color: '#FFFFFF',
+      fontWeight: '600',
+    },
 
     // Bottom Controls
     bottomControls: {
@@ -5583,6 +5822,82 @@ export default function RemoteScreen() {
           start={Colors.timerBackground.start}
           end={Colors.timerBackground.end}
         >
+          {/* Weapon Selection UI - Only visible before match starts */}
+          {!hasMatchStarted && !isPlaying && (
+            <View style={styles.weaponSelectionContainer}>
+              <View style={styles.weaponButtonsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.weaponButton,
+                    selectedWeapon === 'foil' && styles.weaponButtonSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedWeapon('foil');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Ionicons 
+                    name="flash" 
+                    size={width * 0.032} 
+                    color={selectedWeapon === 'foil' ? '#FFFFFF' : '#9D9D9D'} 
+                  />
+                  <Text style={[
+                    styles.weaponButtonLabel,
+                    selectedWeapon === 'foil' && styles.weaponButtonLabelSelected
+                  ]}>
+                    Foil
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.weaponButton,
+                    selectedWeapon === 'epee' && styles.weaponButtonSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedWeapon('epee');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Ionicons 
+                    name="shield" 
+                    size={width * 0.032} 
+                    color={selectedWeapon === 'epee' ? '#FFFFFF' : '#9D9D9D'} 
+                  />
+                  <Text style={[
+                    styles.weaponButtonLabel,
+                    selectedWeapon === 'epee' && styles.weaponButtonLabelSelected
+                  ]}>
+                    Epee
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.weaponButton,
+                    selectedWeapon === 'saber' && styles.weaponButtonSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedWeapon('saber');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Ionicons 
+                    name="flame" 
+                    size={width * 0.032} 
+                    color={selectedWeapon === 'saber' ? '#FFFFFF' : '#9D9D9D'} 
+                  />
+                  <Text style={[
+                    styles.weaponButtonLabel,
+                    selectedWeapon === 'saber' && styles.weaponButtonLabelSelected
+                  ]}>
+                    Sabre
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          
           <View style={styles.timerHeader}>
           {!isPlaying && !hasMatchStarted && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
@@ -5985,7 +6300,16 @@ export default function RemoteScreen() {
           colors={['#D6A4F0', '#969DFA']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[styles.swapButton, { position: 'absolute', zIndex: 10, alignSelf: 'center' }]}
+          style={[
+            styles.swapButton, 
+            { 
+              position: 'absolute', 
+              zIndex: 10, 
+              alignSelf: 'center',
+              // Move up when Epee is selected to make room for double hit button
+              bottom: selectedWeapon === 'epee' ? height * 0.18 : height * 0.08
+            }
+          ]}
         >
           <TouchableOpacity 
             style={{ 
@@ -5999,6 +6323,40 @@ export default function RemoteScreen() {
             <Ionicons name="swap-horizontal" size={28} color="white" />
           </TouchableOpacity>
         </LinearGradient>
+
+        {/* Double Hit Button (Epee Only) */}
+        {selectedWeapon === 'epee' && (
+          <View
+            style={[
+              styles.doubleHitButton,
+              {
+                position: 'absolute',
+                zIndex: 10,
+                alignSelf: 'center',
+                backgroundColor: isDoubleHitPressed 
+                  ? 'rgba(108, 92, 231, 0.3)' 
+                  : 'rgba(140, 140, 140, 0.65)',
+                borderColor: isDoubleHitPressed 
+                  ? '#6C5CE7' 
+                  : 'rgba(180, 180, 180, 0.75)',
+                borderWidth: isDoubleHitPressed ? 3 : 1.5,
+              }
+            ]}
+          >
+            <TouchableOpacity 
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }} 
+              onPress={handleDoubleHit}
+            >
+              <Ionicons name="add-circle" size={28} color="white" />
+              <Text style={styles.doubleHitButtonText}>Double</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Bob's Card */}
         <View style={[

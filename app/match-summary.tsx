@@ -44,6 +44,23 @@ export default function MatchSummaryScreen() {
   const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
   const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
   const [matchType, setMatchType] = useState<'training' | 'competition'>('training');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Track keyboard height for iOS modal positioning
+  useEffect(() => {
+    if (Platform.OS === 'ios') {
+      const keyboardWillShow = Keyboard.addListener('keyboardWillShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardWillHide = Keyboard.addListener('keyboardWillHide', () => {
+        setKeyboardHeight(0);
+      });
+      return () => {
+        keyboardWillShow.remove();
+        keyboardWillHide.remove();
+      };
+    }
+  }, []);
 
   // Track screen view
   useFocusEffect(
@@ -703,11 +720,12 @@ export default function MatchSummaryScreen() {
           onPress={() => Keyboard.dismiss()}
         >
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'position' : 'padding'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 50}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
             style={{ 
               flex: 1, 
-              justifyContent: Platform.OS === 'ios' ? 'center' : 'center',
+              justifyContent: Platform.OS === 'ios' && keyboardHeight > 0 ? 'flex-end' : 'center',
+              paddingBottom: Platform.OS === 'ios' && keyboardHeight > 0 ? keyboardHeight + 40 : 0,
               marginTop: Platform.OS === 'android' ? height * 0.15 : 0
             }}
           >
