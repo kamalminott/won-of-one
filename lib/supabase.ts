@@ -20,11 +20,15 @@ if (Platform.OS === 'ios' || Platform.OS === 'android') {
 }
 
 // Create Supabase client with conditional storage
+// Enhanced configuration for secure token management
 const supabaseConfig: any = {
   auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
+    autoRefreshToken: true,        // Automatically refresh expired access tokens
+    persistSession: true,          // Save session to AsyncStorage for persistence
+    detectSessionInUrl: false,    // Don't detect sessions from URLs (mobile app)
+    // Optional: Enable token rotation for enhanced security
+    // This requires Supabase to support it in the dashboard
+    flowType: 'pkce',              // Use PKCE flow for better security (recommended)
   },
 };
 

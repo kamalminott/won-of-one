@@ -1,8 +1,10 @@
 import { BackButton } from '@/components/BackButton';
+import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +19,7 @@ try {
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<{
     updateId: string | null;
@@ -31,14 +34,81 @@ export default function SettingsScreen() {
     runtimeVersion: null,
     isChecking: false,
   });
+  
+  const [tokenInfo, setTokenInfo] = useState<{
+    hasAccessToken: boolean;
+    hasRefreshToken: boolean;
+    accessTokenExpiresAt: string | null;
+    minutesUntilExpiry: number | null;
+    willAutoRefresh: boolean;
+    lastRefreshTime: string | null;
+  }>({
+    hasAccessToken: false,
+    hasRefreshToken: false,
+    accessTokenExpiresAt: null,
+    minutesUntilExpiry: null,
+    willAutoRefresh: false,
+    lastRefreshTime: null,
+  });
 
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Settings');
       loadUpdateInfo();
+      loadTokenInfo();
     }, [])
   );
+
+  // Load token information
+  const loadTokenInfo = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error || !session) {
+        setTokenInfo({
+          hasAccessToken: false,
+          hasRefreshToken: false,
+          accessTokenExpiresAt: null,
+          minutesUntilExpiry: null,
+          willAutoRefresh: false,
+          lastRefreshTime: null,
+        });
+        return;
+      }
+
+      const expiresAt = session.expires_at ? new Date(session.expires_at * 1000) : null;
+      const now = new Date();
+      const minutesUntilExpiry = expiresAt 
+        ? Math.floor((expiresAt.getTime() - now.getTime()) / 1000 / 60)
+        : null;
+
+      setTokenInfo({
+        hasAccessToken: !!session.access_token,
+        hasRefreshToken: !!session.refresh_token,
+        accessTokenExpiresAt: expiresAt ? expiresAt.toISOString() : null,
+        minutesUntilExpiry,
+        willAutoRefresh: minutesUntilExpiry !== null && minutesUntilExpiry < 60,
+        lastRefreshTime: null, // We don't track this yet, but could add it
+      });
+    } catch (error) {
+      console.error('Error loading token info:', error);
+    }
+  };
+
+  // Listen for token refresh events
+  useEffect(() => {
+    if (!user) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('✅ [SETTINGS] Token refreshed - updating display');
+        loadTokenInfo();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [user]);
 
   // Load update information
   const loadUpdateInfo = async () => {
@@ -392,6 +462,62 @@ export default function SettingsScreen() {
                 <Ionicons name="trash-outline" size={width * 0.06} color="#FFFFFF" />
               </View>
               <Text style={styles.optionText}>Delete Account</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Session Status Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Session Status</Text>
+          <View style={[styles.card, styles.matchDefaultsCard]}>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Access Token</Text>
+              <Text style={[styles.settingValue, { color: tokenInfo.hasAccessToken ? '#4CAF50' : '#F44336' }]}>
+                {tokenInfo.hasAccessToken ? '✅ Valid' : '❌ Missing'}
+              </Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Refresh Token</Text>
+              <Text style={[styles.settingValue, { color: tokenInfo.hasRefreshToken ? '#4CAF50' : '#F44336' }]}>
+                {tokenInfo.hasRefreshToken ? '✅ Present' : '❌ Missing'}
+              </Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Expires In</Text>
+              <Text style={styles.settingValue}>
+                {tokenInfo.minutesUntilExpiry !== null 
+                  ? tokenInfo.minutesUntilExpiry > 0
+                    ? `${tokenInfo.minutesUntilExpiry} minutes`
+                    : 'Expired (will refresh)'
+                  : 'Unknown'}
+              </Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>Auto-Refresh</Text>
+              <Text style={[styles.settingValue, { color: tokenInfo.willAutoRefresh ? '#FF9800' : '#4CAF50' }]}>
+                {tokenInfo.willAutoRefresh ? '⚠️ Will refresh soon' : '✅ Active'}
+              </Text>
+            </View>
+            
+            <View style={styles.separator} />
+            
+            <TouchableOpacity 
+              style={[styles.settingRow, styles.settingRowLast]} 
+              onPress={loadTokenInfo}
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Refresh Status</Text>
             </TouchableOpacity>
           </View>
         </View>

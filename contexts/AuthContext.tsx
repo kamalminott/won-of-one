@@ -152,30 +152,113 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
-    // Get initial session
+    // Get initial session with enhanced error handling
     const getInitialSession = async () => {
-      console.log('🔍 Checking for existing session...');
+      console.log('🔍 [AUTH] Checking for existing session on app start...');
       
-      // Check AsyncStorage directly
       try {
-        const storedSession = await AsyncStorage.getItem('sb-dxgvjghcpnseglukvqao-auth-token');
-        console.log('🔍 AsyncStorage session:', storedSession ? 'Found' : 'Not found');
+        // Check AsyncStorage directly for debugging
+        try {
+          const storedSession = await AsyncStorage.getItem('sb-dxgvjghcpnseglukvqao-auth-token');
+          if (storedSession) {
+            console.log('✅ [AUTH] AsyncStorage session found:', storedSession.substring(0, 50) + '...');
+          } else {
+            console.log('⚠️ [AUTH] AsyncStorage session NOT found - user will need to login');
+          }
+        } catch (error) {
+          console.log('❌ [AUTH] AsyncStorage error:', error);
+        }
+        
+        // Get session from Supabase (this will auto-refresh if needed)
+        // This is the authoritative source - it reads from AsyncStorage if persistSession is true
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('❌ [AUTH] Error getting session from Supabase:', error);
+          console.error('❌ [AUTH] Error details:', JSON.stringify(error, null, 2));
+          // If session retrieval fails, clear any stale data
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        
+        if (!session) {
+          console.log('⚠️ [AUTH] No session found - user needs to login');
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        
+        console.log('✅ [AUTH] Session found!', { 
+          userId: session?.user?.id,
+          email: session?.user?.email,
+          expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'N/A',
+          refreshToken: session?.refresh_token ? 'Present' : 'Missing'
+        });
+        
+        // Check if session is expired
+        if (session && session.expires_at) {
+          const expiresAt = new Date(session.expires_at * 1000);
+          const now = new Date();
+          if (now >= expiresAt) {
+            console.log('⚠️ [AUTH] Access token expired, will attempt refresh on next API call');
+          } else {
+            const timeUntilExpiry = Math.floor((expiresAt.getTime() - now.getTime()) / 1000 / 60);
+            console.log(`✅ [AUTH] Access token valid for ${timeUntilExpiry} more minutes`);
+          }
+        }
+        
+        // Check refresh token
+        if (!session.refresh_token) {
+          console.warn('⚠️ [AUTH] No refresh token in session - session may not persist');
+        } else {
+          console.log('✅ [AUTH] Refresh token present - session will persist');
+        }
+        
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
       } catch (error) {
-        console.log('🔍 AsyncStorage error:', error);
+        console.error('❌ [AUTH] Unexpected error getting session:', error);
+        setSession(null);
+        setUser(null);
+        setLoading(false);
       }
-      
-      const { data: { session }, error } = await supabase.auth.getSession();
-      console.log('🔍 Session check result:', { session: !!session, error, userId: session?.user?.id });
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
     };
 
     getInitialSession();
 
-    // Listen for auth changes
+    // Listen for auth changes with enhanced error handling
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('🔄 Auth state change:', event, session?.user?.id || 'no user');
+        
+        // Handle token refresh events
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('✅ Token refreshed successfully');
+          // Track successful token refresh for analytics
+          try {
+            const { analytics } = await import('@/lib/analytics');
+            analytics.capture('token_refresh_success');
+          } catch (error) {
+            // Analytics not critical, continue
+          }
+        }
+        
+        // Handle token refresh errors (when user is signed out unexpectedly)
+        if (event === 'SIGNED_OUT' && !session) {
+          console.log('⚠️ User signed out - possible token refresh failure or manual logout');
+          // Track sign out event for analytics
+          try {
+            const { analytics } = await import('@/lib/analytics');
+            analytics.capture('user_signed_out', { reason: 'token_expired_or_manual' });
+          } catch (error) {
+            // Analytics not critical, continue
+          }
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);

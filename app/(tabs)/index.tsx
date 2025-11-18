@@ -14,7 +14,6 @@ import { UserHeader } from '@/components/UserHeader';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
-import { subscriptionService } from '@/lib/subscriptionService';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 export default function HomeScreen() {
@@ -54,12 +53,19 @@ export default function HomeScreen() {
     }, [user, loading])
   );
 
-  // Redirect to login if no user is logged in
+  // Redirect to login if no user is logged in (but wait for auth to finish loading)
   useEffect(() => {
+    // Don't redirect while auth is still loading
+    if (loading) {
+      return;
+    }
+    
+    // Only redirect if we're sure there's no user (after loading completes)
     if (!user) {
+      console.log('⚠️ [HOME] No user found after auth loaded, redirecting to login');
       router.replace('/login');
     }
-  }, [user]);
+  }, [user, loading]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed
