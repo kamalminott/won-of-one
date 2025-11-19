@@ -857,7 +857,18 @@ AS $$
 DECLARE
   result_record record;
 BEGIN
-  INSERT INTO match (user_id, fencer_1_name, fencer_2_name, final_score, event_date, result, score_diff, match_type, source)
+  INSERT INTO match (
+    user_id, 
+    fencer_1_name, 
+    fencer_2_name, 
+    final_score, 
+    event_date, 
+    result, 
+    score_diff, 
+    match_type, 
+    source,
+    weapon_type
+  )
   VALUES (
     NULL, -- user_id is always null for anonymous matches
     (match_data->>'fencer_1_name')::text,
@@ -867,7 +878,8 @@ BEGIN
     (match_data->>'result')::text,
     (match_data->>'score_diff')::integer,
     (match_data->>'match_type')::text,
-    (match_data->>'source')::source_enum
+    (match_data->>'source')::source_enum,
+    (match_data->>'weapon_type')::text
   )
   RETURNING * INTO result_record;
   
@@ -1548,7 +1560,9 @@ BEGIN
         notes = COALESCE((updates->>'notes')::text, notes),
         period_number = COALESCE((updates->>'period_number')::integer, period_number),
         score_spp = COALESCE((updates->>'score_spp')::integer, score_spp),
-        score_by_period = COALESCE((updates->'score_by_period')::jsonb, score_by_period)
+        score_by_period = COALESCE((updates->'score_by_period')::jsonb, score_by_period),
+        fencer_1_name = COALESCE((updates->>'fencer_1_name')::text, fencer_1_name),
+        fencer_2_name = COALESCE((updates->>'fencer_2_name')::text, fencer_2_name)
     WHERE match_id = match_id_param::uuid
     RETURNING * INTO result_record;
     

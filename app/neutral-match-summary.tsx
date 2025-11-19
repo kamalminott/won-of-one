@@ -20,8 +20,12 @@ export default function NeutralMatchSummary() {
   
   const [matchData, setMatchData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [finalPeriodScores, setFinalPeriodScores] = useState<{
+    fencer1Score: number;
+    fencer2Score: number;
+  } | null>(null);
   const [touchesByPeriod, setTouchesByPeriod] = useState<{
-    period1: { user: number; opponent: number };
+    period1: { user: number; opponent: number }; // Chart expects user/opponent, but represents fencer1/fencer2
     period2: { user: number; opponent: number };
     period3: { user: number; opponent: number };
   }>({
@@ -30,7 +34,7 @@ export default function NeutralMatchSummary() {
     period3: { user: 0, opponent: 0 }
   });
   const [scoreProgression, setScoreProgression] = useState<{
-    userData: {x: string, y: number}[],
+    userData: {x: string, y: number}[], // Chart expects userData/opponentData, but represents fencer1/fencer2
     opponentData: {x: string, y: number}[]
   }>({ userData: [], opponentData: [] });
   const [leadChanges, setLeadChanges] = useState<number>(0);
@@ -50,12 +54,13 @@ export default function NeutralMatchSummary() {
   const [showNewMatchModal, setShowNewMatchModal] = useState(false);
 
   // Extract match data from params
+  // Note: params use alice/bob naming from remote page, but we rename to fencer1/fencer2 internally
   const {
     matchId,
-    aliceScore,
-    bobScore,
-    aliceCards,
-    bobCards,
+    aliceScore: fencer1Score,
+    bobScore: fencer2Score,
+    aliceCards: fencer1Cards,
+    bobCards: fencer2Cards,
     matchDuration,
     fencer1Name,
     fencer2Name,
@@ -565,10 +570,15 @@ export default function NeutralMatchSummary() {
           newLeader = null; // Tied
         }
 
-        // If leader changed (and we're not at 0-0), count as lead change
+        // Only count lead changes when the lead actually changes from one fencer to another
+        // Do NOT count when going to/from tied (null leader)
+        // Do NOT count the first score (when currentLeader is null and we get our first leader)
         if (newLeader !== currentLeader && (fencer1Score > 0 || fencer2Score > 0)) {
-          if (currentLeader !== null) { // Don't count the first score as a lead change
+          // Only count if BOTH currentLeader and newLeader are actual leaders (not null/tied)
+          // This means we're going from one fencer leading to the other fencer leading
+          if (currentLeader !== null && newLeader !== null) {
             leadChanges++;
+            console.log(`📊 Lead change detected: ${currentLeader} → ${newLeader} (${fencer1Score}-${fencer2Score})`);
           }
           currentLeader = newLeader;
         }
@@ -595,15 +605,15 @@ export default function NeutralMatchSummary() {
             
             const matchFromParams = {
               match_id: matchId as string,
-              fencer_1_name: params.fencer1Name as string || 'Fencer 1',
-              fencer_2_name: params.fencer2Name as string || 'Fencer 2',
-              final_score: parseInt(params.aliceScore as string || '0'),
-              touches_against: parseInt(params.bobScore as string || '0'),
-              bout_length_s: parseInt(params.matchDuration as string || '0'),
-              yellow_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').yellow + 
-                           JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').yellow,
-              red_cards: JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}').red + 
-                         JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}').red,
+            fencer_1_name: params.fencer1Name as string || 'Fencer 1',
+            fencer_2_name: params.fencer2Name as string || 'Fencer 2',
+            final_score: parseInt(fencer1Score as string || '0'),
+            touches_against: parseInt(fencer2Score as string || '0'),
+            bout_length_s: parseInt(params.matchDuration as string || '0'),
+            yellow_cards: JSON.parse(fencer1Cards as string || '{"yellow":0,"red":0}').yellow + 
+                         JSON.parse(fencer2Cards as string || '{"yellow":0,"red":0}').yellow,
+            red_cards: JSON.parse(fencer1Cards as string || '{"yellow":0,"red":0}').red + 
+                       JSON.parse(fencer2Cards as string || '{"yellow":0,"red":0}').red,
               period_number: parseInt(params.periodNumber as string || '1'),
               score_spp: parseInt(params.scoreSpp as string || '0'),
               score_by_period: params.scoreByPeriod ? JSON.parse(params.scoreByPeriod as string) : undefined,
@@ -625,6 +635,7 @@ export default function NeutralMatchSummary() {
             }
             
             // Simplified stats for offline matches (no event data available)
+            // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
             setScoreProgression({ userData: [], opponentData: [] });
             setLeadChanges(0);
             setTimeLeading({ fencer1: 0, fencer2: 0, tied: 100 });
@@ -636,8 +647,19 @@ export default function NeutralMatchSummary() {
           }
           
           // Online match - fetch from database
+          // The database should have the updated fencer names reflecting any swaps
+          // Add a small delay to ensure database update has propagated (if just completed)
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
           const data = await matchService.getMatchById(matchId as string);
           setMatchData(data);
+          
+          console.log('📊 [NEUTRAL SUMMARY] Fetched match data from database:', {
+            matchId: data?.match_id,
+            fencer_1_name: data?.fencer_1_name,
+            fencer_2_name: data?.fencer_2_name,
+            note: 'These should reflect final positions after any swaps'
+          });
           
           // Fetch actual period scores from match_period table
           try {
@@ -656,14 +678,28 @@ export default function NeutralMatchSummary() {
               console.log('📊 Found match periods:', matchPeriods);
               
               // Initialize with zeros
+              // Note: Chart component expects 'user' and 'opponent', but for neutral matches these represent fencer1 and fencer2
               const touchesByPeriodData = {
-                period1: { user: 0, opponent: 0 },
+                period1: { user: 0, opponent: 0 }, // user = fencer1, opponent = fencer2
                 period2: { user: 0, opponent: 0 },
                 period3: { user: 0, opponent: 0 }
               };
 
               // Sort periods by period_number to ensure correct order
               const sortedPeriods = matchPeriods.sort((a, b) => (a.period_number || 0) - (b.period_number || 0));
+              
+              // Get final period scores for header display (position-based, reflects swaps)
+              const finalPeriod = sortedPeriods[sortedPeriods.length - 1];
+              if (finalPeriod) {
+                setFinalPeriodScores({
+                  fencer1Score: finalPeriod.fencer_1_score || 0,
+                  fencer2Score: finalPeriod.fencer_2_score || 0,
+                });
+                console.log('📊 Final period scores for header:', {
+                  fencer1Score: finalPeriod.fencer_1_score,
+                  fencer2Score: finalPeriod.fencer_2_score
+                });
+              }
               
               // Fill in actual period scores (touches scored PER period, not cumulative)
               sortedPeriods.forEach((period, index) => {
@@ -679,15 +715,16 @@ export default function NeutralMatchSummary() {
                 const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
                 const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
                 
+                // Map fencer1/fencer2 to user/opponent for chart component (chart expects user/opponent prop names)
                 if (periodNum === 1) {
-                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod;
-                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod;
+                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod; // fencer1 -> user
+                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent
                 } else if (periodNum === 2) {
-                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod;
-                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod;
+                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod; // fencer1 -> user
+                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent
                 } else if (periodNum === 3) {
-                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod;
-                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod;
+                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod; // fencer1 -> user
+                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent
                 }
               });
 
@@ -716,42 +753,44 @@ export default function NeutralMatchSummary() {
                   if (hasFencer1Data && hasFencer2Data) {
                     console.log('📈 Using real anonymous score progression data from database');
                     // Convert to the format expected by the chart component
+                    // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
                     const scoreProgression = {
-                      userData: calculatedScoreProgression.fencer1Data,
-                      opponentData: calculatedScoreProgression.fencer2Data
+                      userData: calculatedScoreProgression.fencer1Data, // fencer1 -> userData
+                      opponentData: calculatedScoreProgression.fencer2Data // fencer2 -> opponentData
                     };
                     setScoreProgression(scoreProgression);
                   } else {
                     console.log('📈 Anonymous score progression data incomplete, using real data where available');
                     // Use the real data we have and create simple fallback for missing data
-                    const aliceScoreNum = parseInt(aliceScore as string) || 0;
-                    const bobScoreNum = parseInt(bobScore as string) || 0;
+                    const fencer1ScoreNum = parseInt(fencer1Score as string) || 0;
+                    const fencer2ScoreNum = parseInt(fencer2Score as string) || 0;
                     const matchDurationNum = parseInt(matchDuration as string) || 1;
                     
                     let finalFencer1Data = calculatedScoreProgression.fencer1Data;
                     let finalFencer2Data = calculatedScoreProgression.fencer2Data;
                     
                     // If fencer 1 data is missing, create simple fallback
-                    if (!hasFencer1Data && aliceScoreNum > 0) {
+                    if (!hasFencer1Data && fencer1ScoreNum > 0) {
                       const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
                       finalFencer1Data = [
                         { x: "0:00", y: 0 },
-                        { x: finalTime, y: aliceScoreNum }
+                        { x: finalTime, y: fencer1ScoreNum }
                       ];
                     }
                     
                     // If fencer 2 data is missing, create simple fallback
-                    if (!hasFencer2Data && bobScoreNum > 0) {
+                    if (!hasFencer2Data && fencer2ScoreNum > 0) {
                       const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
                       finalFencer2Data = [
                         { x: "0:00", y: 0 },
-                        { x: finalTime, y: bobScoreNum }
+                        { x: finalTime, y: fencer2ScoreNum }
                       ];
                     }
                     
+                    // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
                     const mixedScoreProgression = {
-                      userData: finalFencer1Data,
-                      opponentData: finalFencer2Data
+                      userData: finalFencer1Data, // fencer1 -> userData
+                      opponentData: finalFencer2Data // fencer2 -> opponentData
                     };
                     
                     console.log('📈 Using mixed anonymous score progression (real + fallback):', mixedScoreProgression);
@@ -761,20 +800,21 @@ export default function NeutralMatchSummary() {
                   console.error('Error calculating score progression:', error);
                   
                   // Create simple fallback score progression from final scores
-                  const aliceScoreNum = parseInt(aliceScore as string) || 0;
-                  const bobScoreNum = parseInt(bobScore as string) || 0;
+                  const fencer1ScoreNum = parseInt(fencer1Score as string) || 0;
+                  const fencer2ScoreNum = parseInt(fencer2Score as string) || 0;
                   const matchDurationNum = parseInt(matchDuration as string) || 1;
                   
                   const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
                   
+                  // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
                   const fallbackScoreProgression = {
                     userData: [
                       { x: "0:00", y: 0 },
-                      { x: finalTime, y: aliceScoreNum }
+                      { x: finalTime, y: fencer1ScoreNum } // fencer1 -> userData
                     ],
                     opponentData: [
                       { x: "0:00", y: 0 },
-                      { x: finalTime, y: bobScoreNum }
+                      { x: finalTime, y: fencer2ScoreNum } // fencer2 -> opponentData
                     ]
                   };
                   
@@ -783,13 +823,11 @@ export default function NeutralMatchSummary() {
                 }
               }
             } else {
-              console.log('📊 No match periods found, using final scores as fallback');
-              // Fallback to final scores if no period data
-              const aliceScoreNum = parseInt(aliceScore as string) || 0;
-              const bobScoreNum = parseInt(bobScore as string) || 0;
-              
+              console.log('📊 No match periods found, cannot calculate touches by period');
+              // No period data available - set all periods to zero
+              // Chart expects user/opponent, but for neutral matches these represent fencer1/fencer2
               const touchesByPeriodData = {
-                period1: { user: aliceScoreNum, opponent: bobScoreNum },
+                period1: { user: 0, opponent: 0 }, // user = fencer1, opponent = fencer2
                 period2: { user: 0, opponent: 0 },
                 period3: { user: 0, opponent: 0 }
               };
@@ -798,12 +836,10 @@ export default function NeutralMatchSummary() {
             }
           } catch (error) {
             console.error('Error fetching period data:', error);
-            // Fallback to final scores
-            const aliceScoreNum = parseInt(aliceScore as string) || 0;
-            const bobScoreNum = parseInt(bobScore as string) || 0;
-            
+            // Error fetching period data - set all periods to zero
+            // Chart expects user/opponent, but for neutral matches these represent fencer1/fencer2
             const touchesByPeriodData = {
-              period1: { user: aliceScoreNum, opponent: bobScoreNum },
+              period1: { user: 0, opponent: 0 }, // user = fencer1, opponent = fencer2
               period2: { user: 0, opponent: 0 },
               period3: { user: 0, opponent: 0 }
             };
@@ -903,26 +939,60 @@ export default function NeutralMatchSummary() {
     );
   }
 
-  // Use database fencer names and scores if available (reflects final positions after swaps)
-  // Otherwise fall back to params
-  const finalFencer1Name = matchData?.fencer_1_name || (fencer1Name as string) || 'Fencer 1';
-  const finalFencer2Name = matchData?.fencer_2_name || (fencer2Name as string) || 'Fencer 2';
-  const finalFencer1Score = matchData?.final_score || parseInt(aliceScore as string) || 0;
-  const finalFencer2Score = matchData?.touches_against || parseInt(bobScore as string) || 0;
+  // ALWAYS use database fencer names for online matches (reflects final positions after swaps)
+  // Database is the source of truth - it's updated with position-based names after swaps
+  // For offline matches, use params (which also reflect current positions)
+  const isOfflineMatch = params.isOffline === 'true' || (matchId as string)?.startsWith('offline_');
   
-  const aliceScoreNum = finalFencer1Score;
-  const bobScoreNum = finalFencer2Score;
+  // For online matches, ONLY use database values (they reflect swaps correctly)
+  // For offline matches, use params (which are position-based)
+  const finalFencer1Name = isOfflineMatch 
+    ? ((fencer1Name as string) || 'Fencer 1') // Offline: use params
+    : (matchData?.fencer_1_name || (fencer1Name as string) || 'Fencer 1'); // Online: prefer database, fallback to params
+  
+  const finalFencer2Name = isOfflineMatch
+    ? ((fencer2Name as string) || 'Fencer 2') // Offline: use params
+    : (matchData?.fencer_2_name || (fencer2Name as string) || 'Fencer 2'); // Online: prefer database, fallback to params
+  
+  console.log('🔍 [NEUTRAL SUMMARY] Header fencer names:', {
+    isOfflineMatch,
+    fromDatabase: {
+      fencer1: matchData?.fencer_1_name,
+      fencer2: matchData?.fencer_2_name
+    },
+    fromParams: {
+      fencer1: fencer1Name,
+      fencer2: fencer2Name
+    },
+    final: {
+      fencer1: finalFencer1Name,
+      fencer2: finalFencer2Name
+    },
+    note: isOfflineMatch ? 'Using params (offline match)' : 'Using database (online match - reflects swaps)'
+  });
+  
+  // Use final period scores from match_period table (position-based, reflects swaps correctly)
+  // This matches what the touches by period card uses
+  // IMPORTANT: Do NOT use matchData?.final_score or matchData?.touches_against as fallback
+  // because those are entity-based (user/opponent) and don't reflect swaps
+  // Use params (fencer1Score/fencer2Score) as fallback since they're position-based
+  const finalFencer1Score = finalPeriodScores?.fencer1Score ?? (parseInt(fencer1Score as string) || 0);
+  const finalFencer2Score = finalPeriodScores?.fencer2Score ?? (parseInt(fencer2Score as string) || 0);
+  
+  // Final scores for display (use period scores if available, otherwise use params)
+  const fencer1ScoreDisplay = finalFencer1Score;
+  const fencer2ScoreDisplay = finalFencer2Score;
   const matchDurationNum = parseInt(matchDuration as string) || 0;
-  const aliceCardsData = aliceCards ? JSON.parse(aliceCards as string) : { yellow: 0, red: 0 };
-  const bobCardsData = bobCards ? JSON.parse(bobCards as string) : { yellow: 0, red: 0 };
+  const fencer1CardsData = fencer1Cards ? JSON.parse(fencer1Cards as string) : { yellow: 0, red: 0 };
+  const fencer2CardsData = fencer2Cards ? JSON.parse(fencer2Cards as string) : { yellow: 0, red: 0 };
 
   // Extract first names only - use final names from database
   const fencer1FirstName = finalFencer1Name.split(' ')[0];
   const fencer2FirstName = finalFencer2Name.split(' ')[0];
 
   // Calculate winner
-  const winner = aliceScoreNum > bobScoreNum ? fencer1FirstName : bobScoreNum > aliceScoreNum ? fencer2FirstName : 'Tied';
-  const scoreDiff = Math.abs(aliceScoreNum - bobScoreNum);
+  const winner = fencer1ScoreDisplay > fencer2ScoreDisplay ? fencer1FirstName : fencer2ScoreDisplay > fencer1ScoreDisplay ? fencer2FirstName : 'Tied';
+  const scoreDiff = Math.abs(fencer1ScoreDisplay - fencer2ScoreDisplay);
 
   return (
     <>
@@ -998,7 +1068,7 @@ export default function NeutralMatchSummary() {
 
                 {/* Score Container */}
                 <View style={styles.scoreContainer}>
-                  <Text style={styles.scoreText}>{aliceScoreNum} - {bobScoreNum}</Text>
+                  <Text style={styles.scoreText}>{fencer1ScoreDisplay} - {fencer2ScoreDisplay}</Text>
                   <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
                   <View style={styles.trophyPill}>
                     <Ionicons name="trophy-outline" size={16} color="#FFFFFF" />
@@ -1007,9 +1077,9 @@ export default function NeutralMatchSummary() {
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {aliceScoreNum > bobScoreNum 
-                        ? `${fencer1FirstName} win by ${aliceScoreNum - bobScoreNum} point${aliceScoreNum - bobScoreNum !== 1 ? 's' : ''}`
-                        : `${fencer2FirstName} win by ${bobScoreNum - aliceScoreNum} point${bobScoreNum - aliceScoreNum !== 1 ? 's' : ''}`
+                      {fencer1ScoreDisplay > fencer2ScoreDisplay 
+                        ? `${fencer1FirstName} win by ${fencer1ScoreDisplay - fencer2ScoreDisplay} point${fencer1ScoreDisplay - fencer2ScoreDisplay !== 1 ? 's' : ''}`
+                        : `${fencer2FirstName} win by ${fencer2ScoreDisplay - fencer1ScoreDisplay} point${fencer2ScoreDisplay - fencer1ScoreDisplay !== 1 ? 's' : ''}`
                       }
                     </Text>
                   </View>
@@ -1030,7 +1100,14 @@ export default function NeutralMatchSummary() {
                 <Ionicons name="flash" size={20} color="white" />
               </View>
               <View style={styles.metaContent}>
-                <Text style={styles.metaValue}>Foil</Text>
+                <Text style={styles.metaValue}>
+                  {(() => {
+                    const weapon = matchData?.weapon_type || 'foil';
+                    // Normalize 'saber' to 'sabre' for consistency, then capitalize
+                    const normalizedWeapon = weapon === 'saber' ? 'sabre' : weapon;
+                    return normalizedWeapon.charAt(0).toUpperCase() + normalizedWeapon.slice(1);
+                  })()}
+                </Text>
                 <Text style={styles.metaLabel}>Weapon</Text>
               </View>
             </View>
@@ -1062,8 +1139,8 @@ export default function NeutralMatchSummary() {
             <TouchesByPeriodChart 
               title=""
               touchesByPeriod={touchesByPeriod}
-              userLabel={finalFencer1Name}
-              opponentLabel={finalFencer2Name}
+              userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
+              opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
             />
           </View>
         </View>
@@ -1074,10 +1151,10 @@ export default function NeutralMatchSummary() {
           <ScoreProgressionChart 
             title=""
             scoreProgression={scoreProgression}
-            userScore={aliceScoreNum}
-            opponentScore={bobScoreNum}
-            userLabel={finalFencer1Name}
-            opponentLabel={finalFencer2Name}
+            userScore={fencer1ScoreDisplay} // fencer1 score (chart prop name is userScore)
+            opponentScore={fencer2ScoreDisplay} // fencer2 score (chart prop name is opponentScore)
+            userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
+            opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
             styleOverrides={{
               container: {
                 marginHorizontal: 0, // Remove chart's own margin - wrapper handles it
@@ -1136,7 +1213,7 @@ export default function NeutralMatchSummary() {
             <View style={styles.cardsScore}>
               <View style={styles.cardIndicator}>
                 <View style={[styles.cardSquare, { backgroundColor: '#FDCB6E' }]} />
-                <Text style={styles.cardsScoreText}>{aliceCardsData.yellow + aliceCardsData.red} - {bobCardsData.yellow + bobCardsData.red}</Text>
+                <Text style={styles.cardsScoreText}>{fencer1CardsData.yellow + fencer1CardsData.red} - {fencer2CardsData.yellow + fencer2CardsData.red}</Text>
                 <View style={[styles.cardSquare, { backgroundColor: '#FC5655' }]} />
               </View>
             </View>

@@ -1,7 +1,7 @@
 # Weapon-Specific Remote Implementation Planning
 
 ## Overview
-Implement weapon-specific remotes (Foil, Epee, Saber) with different features and UI adaptations based on the selected weapon.
+Implement weapon-specific remotes (Foil, Epee, Sabre) with different features and UI adaptations based on the selected weapon.
 
 ---
 
@@ -12,7 +12,7 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 - **Display**: Three circular buttons with weapon icons
   - Foil icon
   - Epee icon
-  - Saber icon
+  - Sabre icon
 - **Visibility**:
   - Visible before match starts (during countdown)
   - Hidden once match starts
@@ -32,9 +32,9 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
   - **Layout**: Switch button moves up, double hit button appears below it
   - **Visibility**: Only visible when Epee is selected
 
-### 4. Saber-Specific Features
+### 4. Sabre-Specific Features
 - **Timer/Play Button**: 
-  - Saber matches don't use a time limit
+  - Sabre matches don't use a time limit
   - **Status**: ⚠️ **DECISION PENDING** - See questions below
 
 ### 5. Reset Logic
@@ -49,24 +49,24 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 
 ## Pending Decisions
 
-### Saber Match Behavior
+### Sabre Match Behavior
 
-#### Question 1: How should a Saber match start?
+#### Question 1: How should a Sabre match start?
 - [ ] Option A: Remove play button entirely; match starts when first score is recorded
 - [ ] Option B: Keep "Start Match" button (no timer, just marks match start)
 - [ ] Option C: Match auto-starts when weapon is selected
 
-#### Question 2: What should we track for Saber matches?
+#### Question 2: What should we track for Sabre matches?
 - [ ] Option A: Time elapsed (for stats only, no limit)
 - [ ] Option B: Just score progression (no time tracking)
 - [ ] Option C: Both time elapsed and score progression
 
-#### Question 3: For match completion in Saber:
+#### Question 3: For match completion in Sabre:
 - [ ] Option A: Auto-complete when target score is reached (15 or 5)
 - [ ] Option B: Manual "Finish Match" button when target is reached
 - [ ] Option C: Both (auto-detect but allow manual override)
 
-#### Question 4: Should the timer display be hidden for Saber, or show elapsed time for stats?
+#### Question 4: Should the timer display be hidden for Sabre, or show elapsed time for stats?
 - [ ] Option A: Completely hidden
 - [ ] Option B: Show elapsed time (for statistics)
 - [ ] Option C: Show "No Time Limit" text
@@ -79,7 +79,7 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 - `app/(tabs)/remote.tsx` - Main remote screen
   - Add weapon selection UI
   - Add weapon state management
-  - Conditionally show/hide timer for Saber
+  - Conditionally show/hide timer for Sabre
   - Add double hit button for Epee
   - Adjust switch button position when Epee is selected
 
@@ -89,14 +89,14 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 - Need to ensure weapon type is saved with match data
 
 ### State Management
-- Add `selectedWeapon` state: `'foil' | 'epee' | 'saber'`
+- Add `selectedWeapon` state: `'foil' | 'epee' | 'sabre'`
 - Initialize from user's `preferred_weapon` or default to 'foil'
 - Track if match has started to hide weapon selection
 
 ### UI Components Needed
 1. Weapon selection circles (3 buttons with icons)
 2. Double hit button (Epee only)
-3. Conditional timer/play button visibility (Saber)
+3. Conditional timer/play button visibility (Sabre)
 
 ---
 
@@ -114,8 +114,8 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
   - [ ] Position below switch button, centered
   - [ ] Move switch button up
   - [ ] Implement double scoring logic
-- [ ] **Saber**: Timer/play button handling
-  - [ ] ⚠️ Awaiting decisions on Saber behavior
+- [ ] **Sabre**: Timer/play button handling
+  - [ ] ⚠️ Awaiting decisions on Sabre behavior
 
 ### Phase 3: Match Logic
 - [ ] Save weapon type with match data
@@ -125,7 +125,7 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 ### Phase 4: Testing
 - [ ] Test weapon selection visibility
 - [ ] Test Epee double hit functionality
-- [ ] Test Saber match flow (once decisions made)
+- [ ] Test Sabre match flow (once decisions made)
 - [ ] Test reset behavior with all weapons
 - [ ] Test default weapon loading from profile
 
@@ -135,7 +135,7 @@ Implement weapon-specific remotes (Foil, Epee, Saber) with different features an
 
 1. **Weapon Icons**: Where are the weapon icon images located? Do they need to be added to the assets folder?
 
-2. **Saber Match Behavior**: See "Pending Decisions" section above - need answers to 4 questions about Saber timer/start/completion behavior.
+2. **Sabre Match Behavior**: See "Pending Decisions" section above - need answers to 4 questions about Sabre timer/start/completion behavior.
 
 ---
 

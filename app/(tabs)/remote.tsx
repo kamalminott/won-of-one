@@ -108,7 +108,7 @@ export default function RemoteScreen() {
   const [isResetting, setIsResetting] = useState(false); // Flag to prevent operations during reset
   
   // Weapon selection state
-  const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'saber'>('foil');
+  const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'sabre'>('foil');
   const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
   
   // Offline status indicators
@@ -161,8 +161,10 @@ export default function RemoteScreen() {
         if (userData?.preferred_weapon) {
           // Validate weapon type
           const weapon = userData.preferred_weapon.toLowerCase();
-          if (weapon === 'foil' || weapon === 'epee' || weapon === 'saber') {
-            setSelectedWeapon(weapon as 'foil' | 'epee' | 'saber');
+          if (weapon === 'foil' || weapon === 'epee' || weapon === 'sabre' || weapon === 'saber') {
+            // Normalize 'saber' to 'sabre' for consistency
+            const normalizedWeapon = weapon === 'saber' ? 'sabre' : weapon;
+            setSelectedWeapon(normalizedWeapon as 'foil' | 'epee' | 'sabre');
             // console.log('✅ Loaded preferred weapon from profile:', weapon);
           } else {
             // console.log('⚠️ Invalid weapon type in profile, defaulting to foil');
@@ -250,18 +252,17 @@ export default function RemoteScreen() {
     }
     
     if (params.fencer1Name && params.fencer2Name) {
-      // If this is an anonymous match (from neutral match summary), disable user toggle FIRST
+      // If this is an anonymous match (from neutral match summary), let useLayoutEffect handle it
+      // to avoid conflicts and ensure synchronous setup before paint
       if (params.isAnonymous === 'true') {
-        // console.log('👤 Disabling user toggle for anonymous match');
-        // Store names to set after toggle is off
-        pendingFencerNamesRef.current = {
-          fencer1Name: params.fencer1Name as string,
-          fencer2Name: params.fencer2Name as string,
-        };
-        setShowUserProfile(false);
+        // Don't set names here - useLayoutEffect will handle it synchronously
+        // Just ensure toggle is off (useLayoutEffect will also do this, but this is a backup)
+        if (showUserProfile) {
+          setShowUserProfile(false);
+        }
       } else {
         // Not anonymous, just set names normally
-        // console.log('📝 Setting fencer names from params:', params.fencer1Name, params.fencer2Name);
+        console.log('📝 Setting fencer names from params:', params.fencer1Name, params.fencer2Name);
         setFencerNames({
           fencerA: params.fencer1Name as string,
           fencerB: params.fencer2Name as string,
@@ -270,12 +271,34 @@ export default function RemoteScreen() {
     }
   }, [params.fencer1Name, params.fencer2Name, params.isAnonymous, params.resetNames, params.keepToggleOff, params.changeOneFencer, showUserProfile]);
 
-  // Set fencer names after user toggle is turned off (for anonymous matches)
-  // Use useLayoutEffect to ensure it runs synchronously before paint
+  // Set fencer names and toggle state synchronously for anonymous matches (before paint)
+  // This ensures both are set before the first render, eliminating race conditions
   useLayoutEffect(() => {
-    // Only set names if we have pending names AND we're not in a reset names flow
-    if (!showUserProfile && pendingFencerNamesRef.current && params.resetNames !== 'true') {
-      // console.log('📝 [useLayoutEffect] Setting fencer names after toggle is off:', pendingFencerNamesRef.current);
+    // Handle anonymous match setup - set names and toggle synchronously
+    if (params.isAnonymous === 'true' && params.fencer1Name && params.fencer2Name && params.resetNames !== 'true') {
+      console.log('🔧 [useLayoutEffect] Setting anonymous match names synchronously:', {
+        fencer1Name: params.fencer1Name,
+        fencer2Name: params.fencer2Name,
+        currentFencerNames: fencerNames,
+        showUserProfile
+      });
+      // Set names immediately (synchronously before paint)
+      // fencer1Name = left position, fencer2Name = right position
+      // fencerA defaults to left, fencerB defaults to right
+      setFencerNames({
+        fencerA: params.fencer1Name as string,
+        fencerB: params.fencer2Name as string,
+      });
+      // Set toggle off immediately (synchronously before paint)
+      // Both state updates happen in the same synchronous effect, so they're both set before render
+      setShowUserProfile(false);
+      // Clear pending names ref since we've handled it here
+      pendingFencerNamesRef.current = null;
+      console.log('✅ [useLayoutEffect] Anonymous match setup complete - names and toggle set');
+    }
+    // Legacy: Handle pending names if they exist (backup for edge cases)
+    else if (!showUserProfile && pendingFencerNamesRef.current && params.resetNames !== 'true') {
+      console.log('📝 [useLayoutEffect] Setting fencer names after toggle is off:', pendingFencerNamesRef.current);
       const namesToSet = pendingFencerNamesRef.current;
       // Clear the pending names first to prevent re-triggering
       pendingFencerNamesRef.current = null;
@@ -284,13 +307,9 @@ export default function RemoteScreen() {
         fencerA: namesToSet.fencer1Name,
         fencerB: namesToSet.fencer2Name,
       });
-      // console.log('✅ [useLayoutEffect] Fencer names set:', { 
-      //   fencerA: namesToSet.fencer1Name, 
-      //   fencerB: namesToSet.fencer2Name,
-      //   showUserProfile: showUserProfile
-      // });
+      console.log('✅ [useLayoutEffect] Fencer names set from pending ref');
     }
-  }, [showUserProfile, params.resetNames]);
+  }, [params, showUserProfile, fencerNames]);
 
   // Also check with useEffect as a backup
   useEffect(() => {
@@ -551,35 +570,17 @@ export default function RemoteScreen() {
       // Check for fencer names from params (e.g., when coming from neutral match summary)
       // This takes precedence over persisted state
       else if (params.fencer1Name && params.fencer2Name) {
-        // If this is an anonymous match (from neutral match summary), disable user toggle FIRST
+        // If this is an anonymous match (from neutral match summary), let useLayoutEffect handle it
+        // to avoid conflicts and ensure synchronous setup before paint
         if (params.isAnonymous === 'true') {
-          // console.log('👤 [useFocusEffect] Disabling user toggle for anonymous match on focus');
-          // Store names to set after toggle is off
-          pendingFencerNamesRef.current = {
-            fencer1Name: params.fencer1Name as string,
-            fencer2Name: params.fencer2Name as string,
-          };
-          setShowUserProfile(false);
-          
-          // Also set names directly after a brief delay to ensure they're set
-          setTimeout(() => {
-            if (pendingFencerNamesRef.current) {
-              // console.log('📝 [useFocusEffect setTimeout] Setting fencer names directly:', pendingFencerNamesRef.current);
-              const namesToSet = pendingFencerNamesRef.current;
-              pendingFencerNamesRef.current = null;
-              setFencerNames({
-                fencerA: namesToSet.fencer1Name,
-                fencerB: namesToSet.fencer2Name,
-              });
-              // console.log('✅ [useFocusEffect setTimeout] Fencer names set:', { 
-              //   fencerA: namesToSet.fencer1Name, 
-              //   fencerB: namesToSet.fencer2Name 
-              // });
-            }
-          }, 100);
+          // Don't set names here - useLayoutEffect will handle it synchronously
+          // Just ensure toggle is off (useLayoutEffect will also do this, but this is a backup)
+          if (showUserProfile) {
+            setShowUserProfile(false);
+          }
         } else {
           // Not anonymous, just set names normally
-          // console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
+          console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
           setFencerNames({
             fencerA: params.fencer1Name as string,
             fencerB: params.fencer2Name as string,
@@ -1430,7 +1431,9 @@ export default function RemoteScreen() {
         
         // Update selectedWeapon if session has a weapon_type
         if (session.weapon_type && session.weapon_type !== selectedWeapon) {
-          setSelectedWeapon(session.weapon_type as 'foil' | 'epee' | 'saber');
+          // Normalize 'saber' to 'sabre' for consistency
+          const normalizedWeapon = session.weapon_type === 'saber' ? 'sabre' : session.weapon_type;
+          setSelectedWeapon(normalizedWeapon as 'foil' | 'epee' | 'sabre');
         }
         
         console.log(`Remote session created: ${session.remote_id} (${result.is_offline ? 'OFFLINE' : 'ONLINE'})`);
@@ -1811,13 +1814,19 @@ export default function RemoteScreen() {
 
       // IMPORTANT: End the current period FIRST before calculating touches by period
       // This ensures period 3 (or current period) has proper end_time for event assignment
+      // Use position-based scores (not entity-based) to match database columns (fencer_1 = left, fencer_2 = right)
       const matchCompletionTime = new Date().toISOString();
+      const leftScore = getScoreByPosition('left'); // Score of entity currently on left (position-based)
+      const rightScore = getScoreByPosition('right'); // Score of entity currently on right (position-based)
+      const leftCards = getCardsByPosition('left'); // Cards of entity currently on left (position-based)
+      const rightCards = getCardsByPosition('right'); // Cards of entity currently on right (position-based)
+      
       await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
         end_time: matchCompletionTime,
-        fencer_1_score: actualFencerAScore,
-        fencer_2_score: actualFencerBScore,
-        fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-        fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+        fencer_1_score: leftScore, // Position-based: score of entity currently on left
+        fencer_2_score: rightScore, // Position-based: score of entity currently on right
+        fencer_1_cards: leftCards.yellow + leftCards.red, // Position-based: cards of entity currently on left
+        fencer_2_cards: rightCards.yellow + rightCards.red, // Position-based: cards of entity currently on right
         timestamp: matchCompletionTime,
       });
       console.log('✅ Current period ended with completion time:', matchCompletionTime);
@@ -2343,8 +2352,18 @@ export default function RemoteScreen() {
   // Get name by position
   const getNameByPosition = useCallback((position: 'left' | 'right'): string => {
     const entity = getEntityAtPosition(position);
-    return fencerNames[entity];
-  }, [getEntityAtPosition, fencerNames]);
+    const name = fencerNames[entity];
+    // Debug logging to trace the issue
+    const isAnonymous = params?.isAnonymous === 'true';
+    if (isAnonymous) {
+      console.log(`🔍 [getNameByPosition] Position: ${position}, Entity: ${entity}, Name: ${name}`, {
+        fencerNames,
+        fencerPositions,
+        showUserProfile
+      });
+    }
+    return name;
+  }, [getEntityAtPosition, fencerNames, fencerPositions, params, showUserProfile]);
 
   // Get name by entity
   const getNameByEntity = useCallback((entity: 'fencerA' | 'fencerB'): string => {
@@ -3457,7 +3476,7 @@ export default function RemoteScreen() {
     setFencerPositions({ fencerA: 'left', fencerB: 'right' });
     // Preserve the toggle state (ON stays ON, OFF stays OFF)
     setShowUserProfile(currentToggleState);
-    // Preserve the weapon selection (Foil, Epee, or Saber stays the same)
+    // Preserve the weapon selection (Foil, Epee, or Sabre stays the same)
     setSelectedWeapon(currentWeapon);
     
       console.log('✅ Reset All completed successfully');
@@ -5920,21 +5939,21 @@ export default function RemoteScreen() {
                 <TouchableOpacity
                   style={[
                     styles.weaponButton,
-                    selectedWeapon === 'saber' && styles.weaponButtonSelected
+                    selectedWeapon === 'sabre' && styles.weaponButtonSelected
                   ]}
                   onPress={() => {
-                    setSelectedWeapon('saber');
+                    setSelectedWeapon('sabre');
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
                 >
                   <Ionicons 
                     name="flame" 
                     size={width * 0.032} 
-                    color={selectedWeapon === 'saber' ? '#FFFFFF' : '#9D9D9D'} 
+                    color={selectedWeapon === 'sabre' ? '#FFFFFF' : '#9D9D9D'} 
                   />
                   <Text style={[
                     styles.weaponButtonLabel,
-                    selectedWeapon === 'saber' && styles.weaponButtonLabelSelected
+                    selectedWeapon === 'sabre' && styles.weaponButtonLabelSelected
                   ]}>
                     Sabre
                   </Text>
