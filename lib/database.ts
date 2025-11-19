@@ -731,16 +731,46 @@ export const matchService = {
   }): Promise<Match | null> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
     
-    // Parse date and time
+    // Parse date and time with validation
     const [day, month, year] = date.split('/');
     const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
     const isPM = time.toUpperCase().includes('PM');
     
-    let hour24 = parseInt(hour);
-    if (isPM && hour24 !== 12) hour24 += 12;
-    if (!isPM && hour24 === 12) hour24 = 0;
+    // Validate parsed values
+    const dayNum = parseInt(day);
+    const monthNum = parseInt(month);
+    const yearNum = parseInt(year);
+    const hourNum = parseInt(hour);
+    const minuteNum = parseInt(minute);
     
-    const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+    let eventDateTime: Date;
+    
+    // Check for invalid values
+    if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) || isNaN(hourNum) || isNaN(minuteNum)) {
+      console.error('❌ Invalid date/time values:', { day, month, year, hour, minute });
+      // Fallback to current date/time
+      eventDateTime = new Date();
+      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+    } else if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31 || hourNum < 0 || hourNum > 23 || minuteNum < 0 || minuteNum > 59) {
+      console.error('❌ Date/time values out of valid range:', { day: dayNum, month: monthNum, year: yearNum, hour: hourNum, minute: minuteNum });
+      // Fallback to current date/time
+      eventDateTime = new Date();
+      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+    } else {
+      let hour24 = hourNum;
+      if (isPM && hour24 !== 12) hour24 += 12;
+      if (!isPM && hour24 === 12) hour24 = 0;
+      
+      eventDateTime = new Date(yearNum, monthNum - 1, dayNum, hour24, minuteNum);
+      
+      // Validate the Date object is valid
+      if (isNaN(eventDateTime.getTime())) {
+        console.error('❌ Invalid Date object created from:', { day: dayNum, month: monthNum, year: yearNum, hour: hour24, minute: minuteNum });
+        // Fallback to current date/time
+        eventDateTime = new Date();
+        console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+      }
+    }
     
     const insertData = {
       user_id: userId,
@@ -788,6 +818,7 @@ export const matchService = {
       // is_win is a generated column - removed from insert
       score_diff: (remoteData.score_1 || 0) - (remoteData.score_2 || 0),
       match_type: 'training',
+      weapon_type: remoteData.weapon_type || 'foil', // Use weapon_type from remote data, default to foil
       source: 'remote', // User is using the fencing remote
     };
 
@@ -1030,9 +1061,10 @@ $$;
       console.log('📈 Calculating score progression for USER vs OPPONENT match:', matchId, 'user:', userName);
       
       // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
+      // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEvents, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
         .eq('match_id', matchId)
         .not('match_time_elapsed', 'is', null) // Only events with stored time
         .order('match_time_elapsed', { ascending: true });
@@ -1074,6 +1106,7 @@ $$;
       console.log('📈 USER vs OPPONENT - Match events found:', matchEvents.length);
 
       // 4. Process events using stored match_time_elapsed, filtering out cancelled events
+      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
       const userData: {x: string, y: number}[] = [];
       const opponentData: {x: string, y: number}[] = [];
       
@@ -1099,25 +1132,64 @@ $$;
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
+        // Determine which fencer scored based on event's stored fencer names (handles swaps correctly)
+        // Events store fencer_1_name and fencer_2_name at the time of the event
+        // Match table stores final fencer_1_name and fencer_2_name (after any swaps)
+        // We need to map the event's fencer to the final match fencer based on entity identity
+        
+        let isUserScored = false;
+        
+        // First, check if scorer matches userName directly
         if (event.scoring_user_name === userName) {
-          // User scored (exact match with userName parameter)
-          userScore++;
-          const dataPoint = { x: timeString, y: userScore };
-          userData.push(dataPoint);
-        } else if (event.scoring_user_name === matchData.fencer_1_name && matchData.fencer_1_name !== userName) {
-          // Fencer 1 scored, but they're not the current user (name changed scenario)
-          userScore++;
-          const dataPoint = { x: timeString, y: userScore };
-          userData.push(dataPoint);
-        } else if (event.scoring_user_name === matchData.fencer_2_name) {
-          // Fencer 2 scored (opponent)
-          opponentScore++;
-          const dataPoint = { x: timeString, y: opponentScore };
-          opponentData.push(dataPoint);
+          isUserScored = true;
+        } else if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          // Then map to final match fencer names
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            // Check if this entity is the user in the final match
+            if (event.fencer_1_name === matchData.fencer_1_name && matchData.fencer_1_name === userName) {
+              isUserScored = true;
+            } else if (event.fencer_1_name === matchData.fencer_2_name && matchData.fencer_2_name === userName) {
+              // Entity was swapped - fencer_1 at event time is fencer_2 at match end, and they're the user
+              isUserScored = true;
+            } else if (event.fencer_1_name === matchData.fencer_1_name) {
+              // Same entity, still fencer_1 (no swap or swapped back)
+              isUserScored = matchData.fencer_1_name === userName;
+            } else if (event.fencer_1_name === matchData.fencer_2_name) {
+              // Entity swapped - was fencer_1, now fencer_2
+              isUserScored = matchData.fencer_2_name === userName;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            // Check if this entity is the user in the final match
+            if (event.fencer_2_name === matchData.fencer_2_name && matchData.fencer_2_name === userName) {
+              isUserScored = true;
+            } else if (event.fencer_2_name === matchData.fencer_1_name && matchData.fencer_1_name === userName) {
+              // Entity was swapped - fencer_2 at event time is fencer_1 at match end, and they're the user
+              isUserScored = true;
+            } else if (event.fencer_2_name === matchData.fencer_2_name) {
+              // Same entity, still fencer_2 (no swap or swapped back)
+              isUserScored = matchData.fencer_2_name === userName;
+            } else if (event.fencer_2_name === matchData.fencer_1_name) {
+              // Entity swapped - was fencer_2, now fencer_1
+              isUserScored = matchData.fencer_1_name === userName;
+            }
+          }
         } else {
-          // Handle cases where scoring_user_name doesn't match any known fencer names
-          // This happens when fencer names changed between match creation and completion
-          // For now, treat any unmatched scorer as opponent (this matches the "Touches by Period" logic)
+          // Fallback: try to match directly with match table names
+          if (event.scoring_user_name === matchData.fencer_1_name && matchData.fencer_1_name === userName) {
+            isUserScored = true;
+          } else if (event.scoring_user_name === matchData.fencer_2_name && matchData.fencer_2_name === userName) {
+            isUserScored = true;
+          }
+        }
+
+        if (isUserScored) {
+          userScore++;
+          const dataPoint = { x: timeString, y: userScore };
+          userData.push(dataPoint);
+        } else {
           opponentScore++;
           const dataPoint = { x: timeString, y: opponentScore };
           opponentData.push(dataPoint);
@@ -1405,6 +1477,8 @@ $$;
     score_spp?: number;
     score_by_period?: any; // JSONB field for period-by-period scores
     match_type?: string;
+    fencer_1_name?: string; // Update fencer names to reflect current positions (after swaps)
+    fencer_2_name?: string; // Update fencer names to reflect current positions (after swaps)
   }): Promise<Match | null> {
     // First, try to get the match to check if it's anonymous (user_id is null)
     const { data: existingMatch } = await supabase
@@ -1621,9 +1695,10 @@ $$;
       console.log('📈 Calculating ANONYMOUS score progression for match:', matchId);
       
       // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
+      // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEvents, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
         .eq('match_id', matchId)
         .not('match_time_elapsed', 'is', null) // Only events with stored time
         .order('match_time_elapsed', { ascending: true });
@@ -1665,6 +1740,7 @@ $$;
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
       // 4. Process events using stored match_time_elapsed, filtering out cancelled events
+      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
       const fencer1Data: {x: string, y: number}[] = [];
       const fencer2Data: {x: string, y: number}[] = [];
       
@@ -1690,21 +1766,61 @@ $$;
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-        if (event.scoring_user_name === matchData.fencer_1_name) {
-          // Fencer 1 scored
+        // Determine which fencer scored based on event's stored fencer names (handles swaps correctly)
+        // Events store fencer_1_name and fencer_2_name at the time of the event
+        // Match table stores final fencer_1_name and fencer_2_name (after any swaps)
+        // We need to map the event's fencer to the final match fencer based on entity identity
+        
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          // Then map to final match fencer names
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            // Check if this entity is fencer_1 or fencer_2 in the final match
+            if (event.fencer_1_name === matchData.fencer_1_name) {
+              // Same entity, still fencer_1 (no swap or swapped back)
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === matchData.fencer_2_name) {
+              // Entity swapped - was fencer_1, now fencer_2
+              isFencer1Scored = false;
+            } else {
+              // Fallback: try direct match
+              isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            // Check if this entity is fencer_1 or fencer_2 in the final match
+            if (event.fencer_2_name === matchData.fencer_2_name) {
+              // Same entity, still fencer_2 (no swap or swapped back)
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === matchData.fencer_1_name) {
+              // Entity swapped - was fencer_2, now fencer_1
+              isFencer1Scored = true;
+            } else {
+              // Fallback: try direct match
+              isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+            }
+          } else {
+            // Fallback: try direct match with match table names
+            isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+          }
+        } else {
+          // Fallback: try direct match with match table names
+          isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+        }
+
+        if (isFencer1Scored) {
           fencer1Score++;
           const dataPoint = { x: timeString, y: fencer1Score };
           fencer1Data.push(dataPoint);
           console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score} at ${timeString}`);
-        } else if (event.scoring_user_name === matchData.fencer_2_name) {
-          // Fencer 2 scored
+        } else {
           fencer2Score++;
           const dataPoint = { x: timeString, y: fencer2Score };
           fencer2Data.push(dataPoint);
           console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score} at ${timeString}`);
-        } else {
-          // Log skipped events to help diagnose issues
-          console.log(`📈 ⏭️  Event skipped - Scorer: "${event.scoring_user_name}" doesn't match fencer names`);
         }
       }
 
@@ -1789,6 +1905,13 @@ export const fencingRemoteService = {
   // Delete a fencing remote session
   async deleteRemoteSession(remoteId: string): Promise<boolean> {
     console.log('🗑️ Deleting remote session:', remoteId);
+    
+    // Skip database deletion for offline sessions (they don't exist in the database)
+    if (remoteId.startsWith('offline_')) {
+      console.log('📱 Offline session detected - skipping database deletion (session only exists locally)');
+      return true; // Return true since offline sessions don't need database deletion
+    }
+    
     const { data, error } = await supabase
       .from('fencing_remote')
       .delete()

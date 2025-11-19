@@ -360,8 +360,8 @@ export const subscriptionService = {
    * Link RevenueCat user to your app user
    */
   async linkUser(userId: string): Promise<void> {
-    if (!Purchases) {
-      console.warn('⚠️ RevenueCat not available - cannot link user');
+    if (!Purchases || !isActuallyConfigured) {
+      console.warn('⚠️ RevenueCat not configured - skipping linkUser');
       return;
     }
     try {
@@ -381,8 +381,8 @@ export const subscriptionService = {
    * Log out RevenueCat user (when user logs out of your app)
    */
   async logOut(): Promise<void> {
-    if (!Purchases) {
-      console.warn('⚠️ RevenueCat not available - cannot log out');
+    if (!Purchases || !isActuallyConfigured) {
+      console.warn('⚠️ RevenueCat not configured - skipping logOut');
       return;
     }
     try {

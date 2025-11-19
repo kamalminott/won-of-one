@@ -28,6 +28,7 @@ export interface RemoteSession {
   period_1_time: number;
   period_2_time: number;
   period_3_time: number;
+  weapon_type?: string;
   cached_at: number;
 }
 

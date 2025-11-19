@@ -18,6 +18,10 @@ interface Match {
   bestRun: number;
   fencer1Name?: string;
   fencer2Name?: string;
+  isFencer1User?: boolean;
+  isFencer2User?: boolean;
+  fencer1Score?: number; // Score of fencer_1 (left position)
+  fencer2Score?: number; // Score of fencer_2 (right position)
 }
 
 interface MatchSummaryStatsProps {
@@ -45,6 +49,8 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
     fencer1Name: match.fencer1Name,
     opponent: match.opponent,
     fencer2Name: match.fencer2Name,
+    isFencer1User: match.isFencer1User,
+    isFencer2User: match.isFencer2User,
     userImage: match.userImage,
     opponentImage: match.opponentImage
   });
@@ -78,10 +84,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
 
   // Helper function to render profile image or initials
   const renderProfileImage = (imageUri: string | undefined, name: string | undefined, isUser: boolean = false) => {
-    const displayName = isUser 
-      ? (match.userName || match.fencer1Name || 'Player')
-      : (match.opponent || match.fencer2Name || 'Opponent');
-    
+    const displayName = name || (isUser ? 'Player' : 'Opponent');
     const initials = getInitials(displayName);
     
     // Only show image if it's a real image, not placeholder or example URLs
@@ -343,6 +346,24 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
     },
   });
 
+  // Always use fencer1Name and fencer2Name from database (reflects final positions after any swaps)
+  // Only fall back to userName/opponent if fencer names are not available
+  const leftName = match.fencer1Name || 'Player 1';
+  const rightName = match.fencer2Name || 'Player 2';
+  const leftIsUser = !!match.isFencer1User;
+  const rightIsUser = !!match.isFencer2User;
+  const leftImage = leftIsUser ? match.userImage : match.opponentImage;
+  const rightImage = rightIsUser ? match.userImage : match.opponentImage;
+  
+  console.log('🔍 MatchSummaryStats - Calculated values:', {
+    leftName,
+    rightName,
+    leftIsUser,
+    rightIsUser,
+    leftImage: leftImage ? 'has image' : 'no image',
+    rightImage: rightImage ? 'has image' : 'no image'
+  });
+
   return (
     <View style={styles.container}>
       {/* Win Pill */}
@@ -370,24 +391,27 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
 
         {/* Left Player */}
         <View style={[styles.playerContainer, styles.leftPlayer]}>
-          {renderProfileImage(match.userImage, match.userName || match.fencer1Name, true)}
+          {renderProfileImage(leftImage, leftName, leftIsUser)}
           <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
-            {match.userName ? match.userName.split(' ')[0] : match.fencer1Name ? match.fencer1Name.split(' ')[0] : 'Player 1'}
+            {leftName.split(' ')[0]}
           </Text>
         </View>
 
         {/* Right Player */}
         <View style={[styles.playerContainer, styles.rightPlayer]}>
-          {renderProfileImage(match.opponentImage, match.opponent || match.fencer2Name, false)}
+          {renderProfileImage(rightImage, rightName, rightIsUser)}
           <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
-            {match.opponent ? match.opponent.split(' ')[0] : match.fencer2Name ? match.fencer2Name.split(' ')[0] : 'Player 2'}
+            {rightName.split(' ')[0]}
           </Text>
         </View>
 
         {/* Score */}
         <View style={styles.scoreContainer}>
           <Text style={styles.scoreText}>
-            {match.userScore} - {match.opponentScore}
+            {/* Display score based on position (left - right), not user/opponent */}
+            {match.fencer1Score !== undefined && match.fencer2Score !== undefined
+              ? `${match.fencer1Score} - ${match.fencer2Score}`
+              : `${match.userScore} - ${match.opponentScore}`}
           </Text>
         </View>
 

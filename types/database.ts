@@ -51,6 +51,7 @@ export interface FencingRemote {
   linked_match_id?: string;
   scoring_mode?: string;
   device_serial?: string;
+  weapon_type?: string;
   created_at?: string;
 }
 
