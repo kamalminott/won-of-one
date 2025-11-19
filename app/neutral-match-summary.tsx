@@ -62,11 +62,27 @@ export default function NeutralMatchSummary() {
   } = params;
 
   // Function to calculate longest runs from match events
-  const calculateLongestRuns = async (matchId: string) => {
+  const calculateLongestRuns = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
+      // Get match data to get final fencer names (handles swaps)
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for longest runs:', matchError);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      // Use final fencer names from database (reflects positions after swaps)
+      const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
+      const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -79,6 +95,14 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0 };
       }
 
+      // Build cancelled event IDs set
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
       let fencer1CurrentRun = 0;
       let fencer2CurrentRun = 0;
       let fencer1LongestRun = 0;
@@ -86,7 +110,42 @@ export default function NeutralMatchSummary() {
 
       // Process events chronologically to find consecutive scoring streaks
       for (const event of matchEvents) {
-        if (event.scoring_user_name === fencer1Name) {
+        // Skip cancelled events
+        if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
+          continue;
+        }
+
+        // Determine which fencer scored using entity-based logic (handles swaps)
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            if (event.fencer_1_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            if (event.fencer_2_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else {
+            isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+          }
+        } else {
+          isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+        }
+
+        if (isFencer1Scored) {
           // Fencer 1 scored - increment their run, reset fencer 2's run
           fencer1CurrentRun++;
           fencer2CurrentRun = 0;
@@ -95,7 +154,7 @@ export default function NeutralMatchSummary() {
           if (fencer1CurrentRun > fencer1LongestRun) {
             fencer1LongestRun = fencer1CurrentRun;
           }
-        } else if (event.scoring_user_name === fencer2Name) {
+        } else {
           // Fencer 2 scored - increment their run, reset fencer 1's run
           fencer2CurrentRun++;
           fencer1CurrentRun = 0;
@@ -124,11 +183,27 @@ export default function NeutralMatchSummary() {
   };
 
   // Function to calculate bounce back times from match events
-  const calculateBounceBackTimes = async (matchId: string) => {
+  const calculateBounceBackTimes = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
+      // Get match data to get final fencer names (handles swaps)
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for bounce back times:', matchError);
+        return { fencer1: 0, fencer2: 0 };
+      }
+
+      // Use final fencer names from database (reflects positions after swaps)
+      const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
+      const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -141,6 +216,14 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0 };
       }
 
+      // Build cancelled event IDs set
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
       const fencer1BounceBackTimes: number[] = [];
       const fencer2BounceBackTimes: number[] = [];
 
@@ -150,16 +233,51 @@ export default function NeutralMatchSummary() {
 
       // Process events chronologically
       for (const event of matchEvents) {
+        // Skip cancelled events
+        if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
+          continue;
+        }
+
         const currentTime = event.match_time_elapsed || 0;
 
-        if (event.scoring_user_name === fencer1Name) {
+        // Determine which fencer scored using entity-based logic (handles swaps)
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            if (event.fencer_1_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            if (event.fencer_2_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else {
+            isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+          }
+        } else {
+          isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+        }
+
+        if (isFencer1Scored) {
           // Fencer 1 scored - check if fencer 2 was scored against recently
           if (lastFencer2ScoredAgainst !== null) {
             const bounceBackTime = currentTime - lastFencer2ScoredAgainst;
             fencer2BounceBackTimes.push(bounceBackTime);
           }
           lastFencer2ScoredAgainst = currentTime;
-        } else if (event.scoring_user_name === fencer2Name) {
+        } else {
           // Fencer 2 scored - check if fencer 1 was scored against recently
           if (lastFencer1ScoredAgainst !== null) {
             const bounceBackTime = currentTime - lastFencer1ScoredAgainst;
@@ -196,14 +314,30 @@ export default function NeutralMatchSummary() {
   };
 
   // Function to calculate time leading percentages from match events
-  const calculateTimeLeading = async (matchId: string) => {
+  const calculateTimeLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
+      // Get match data to get final fencer names (handles swaps)
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for time leading:', matchError);
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      // Use final fencer names from database (reflects positions after swaps)
+      const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
+      const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+      
       console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
-      console.log('🔍 TIME LEADING DEBUG - Fencer names:', { fencer1Name, fencer2Name });
+      console.log('🔍 TIME LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
       
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -213,17 +347,22 @@ export default function NeutralMatchSummary() {
       }
 
       console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
-      if (matchEvents && matchEvents.length > 0) {
-        console.log('🔍 TIME LEADING DEBUG - Sample events:', matchEvents.slice(0, 3));
-      }
 
       if (!matchEvents || matchEvents.length === 0) {
         console.log('🔍 TIME LEADING DEBUG - No events found, returning default values');
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
-      let aliceScore = 0;
-      let bobScore = 0;
+      // Build cancelled event IDs set
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
+      let fencer1Score = 0;
+      let fencer2Score = 0;
       let fencer1LeadingTime = 0;
       let fencer2LeadingTime = 0;
       let tiedTime = 0;
@@ -232,35 +371,61 @@ export default function NeutralMatchSummary() {
       // Process each scoring event chronologically
       for (let i = 0; i < matchEvents.length; i++) {
         const event = matchEvents[i];
+        
+        // Skip cancelled events
+        if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
+          continue;
+        }
+
         const currentTime = event.match_time_elapsed || 0;
         
         // Calculate time leading BEFORE this event (based on current scores)
         const timeDiff = currentTime - lastTime;
         
-        console.log(`🔍 TIME LEADING DEBUG - Event ${i}: scorer="${event.scoring_user_name}", time=${currentTime}`);
-        console.log(`🔍 TIME LEADING DEBUG - Before event: aliceScore=${aliceScore}, bobScore=${bobScore}, timeDiff=${timeDiff}`);
+        // Determine which fencer scored using entity-based logic (handles swaps)
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            if (event.fencer_1_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            if (event.fencer_2_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else {
+            isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+          }
+        } else {
+          isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+        }
         
         // Determine who was leading during this time period (BEFORE the event)
-        if (aliceScore > bobScore) {
+        if (fencer1Score > fencer2Score) {
           fencer1LeadingTime += timeDiff;
-          console.log(`🔍 TIME LEADING DEBUG - Fencer1 was leading for ${timeDiff}s`);
-        } else if (bobScore > aliceScore) {
+        } else if (fencer2Score > fencer1Score) {
           fencer2LeadingTime += timeDiff;
-          console.log(`🔍 TIME LEADING DEBUG - Fencer2 was leading for ${timeDiff}s`);
         } else {
           tiedTime += timeDiff;
-          console.log(`🔍 TIME LEADING DEBUG - Tied for ${timeDiff}s`);
         }
 
         // Update scores AFTER calculating time leading
-        if (event.scoring_user_name === fencer1Name) {
-          aliceScore++;
-          console.log(`🔍 TIME LEADING DEBUG - Fencer1 scored! New aliceScore: ${aliceScore}`);
-        } else if (event.scoring_user_name === fencer2Name) {
-          bobScore++;
-          console.log(`🔍 TIME LEADING DEBUG - Fencer2 scored! New bobScore: ${bobScore}`);
+        if (isFencer1Scored) {
+          fencer1Score++;
         } else {
-          console.log(`🔍 TIME LEADING DEBUG - Unknown scorer: ${event.scoring_user_name}`);
+          fencer2Score++;
         }
 
         lastTime = currentTime;
@@ -268,7 +433,7 @@ export default function NeutralMatchSummary() {
 
       // Handle time from last event to actual match end (not remaining time)
       // The match ended at the last event time, so no additional time should be added
-      console.log(`🔍 TIME LEADING DEBUG - Final calculation: match ended at ${lastTime}s, aliceScore=${aliceScore}, bobScore=${bobScore}`);
+      console.log(`🔍 TIME LEADING DEBUG - Final calculation: match ended at ${lastTime}s, fencer1Score=${fencer1Score}, fencer2Score=${fencer2Score}`);
       console.log(`🔍 TIME LEADING DEBUG - No additional time added - match ended at last event`);
 
       // Calculate percentages
@@ -285,8 +450,8 @@ export default function NeutralMatchSummary() {
         fencer1LeadingTime,
         fencer2LeadingTime,
         tiedTime,
-        finalAliceScore: aliceScore,
-        finalBobScore: bobScore
+        finalFencer1Score: fencer1Score,
+        finalFencer2Score: fencer2Score
       });
 
       return {
@@ -301,11 +466,27 @@ export default function NeutralMatchSummary() {
   };
 
   // Function to calculate lead changes from match events
-  const calculateLeadChanges = async (matchId: string) => {
+  const calculateLeadChanges = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
+      // Get match data to get final fencer names (handles swaps)
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for lead changes:', matchError);
+        return 0;
+      }
+
+      // Use final fencer names from database (reflects positions after swaps)
+      const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
+      const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -318,31 +499,74 @@ export default function NeutralMatchSummary() {
         return 0;
       }
 
+      // Build cancelled event IDs set
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
       let leadChanges = 0;
       let currentLeader: string | null = null;
-      let aliceScore = 0;
-      let bobScore = 0;
+      let fencer1Score = 0;
+      let fencer2Score = 0;
 
       // Process each scoring event chronologically
       for (const event of matchEvents) {
-        if (event.scoring_user_name === fencer1Name) {
-          aliceScore++;
-        } else if (event.scoring_user_name === fencer2Name) {
-          bobScore++;
+        // Skip cancelled events
+        if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
+          continue;
+        }
+
+        // Determine which fencer scored using entity-based logic (handles swaps)
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            if (event.fencer_1_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            if (event.fencer_2_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else {
+            isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+          }
+        } else {
+          isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+        }
+
+        if (isFencer1Scored) {
+          fencer1Score++;
+        } else {
+          fencer2Score++;
         }
 
         // Check if lead has changed
         let newLeader: string | null = null;
-        if (aliceScore > bobScore) {
-          newLeader = fencer1Name as string;
-        } else if (bobScore > aliceScore) {
-          newLeader = fencer2Name as string;
+        if (fencer1Score > fencer2Score) {
+          newLeader = finalFencer1Name;
+        } else if (fencer2Score > fencer1Score) {
+          newLeader = finalFencer2Name;
         } else {
           newLeader = null; // Tied
         }
 
         // If leader changed (and we're not at 0-0), count as lead change
-        if (newLeader !== currentLeader && (aliceScore > 0 || bobScore > 0)) {
+        if (newLeader !== currentLeader && (fencer1Score > 0 || fencer2Score > 0)) {
           if (currentLeader !== null) { // Don't count the first score as a lead change
             leadChanges++;
           }
@@ -591,17 +815,21 @@ export default function NeutralMatchSummary() {
         // Calculate lead changes, time leading, bounce back times, and longest runs
         if (matchId) {
           try {
-            const calculatedLeadChanges = await calculateLeadChanges(matchId as string);
+            // Get final fencer names from database (handles swaps)
+            const finalFencer1Name = matchData?.fencer_1_name || (fencer1Name as string) || 'Fencer 1';
+            const finalFencer2Name = matchData?.fencer_2_name || (fencer2Name as string) || 'Fencer 2';
+            
+            const calculatedLeadChanges = await calculateLeadChanges(matchId as string, finalFencer1Name, finalFencer2Name);
             setLeadChanges(calculatedLeadChanges);
             
-            const calculatedTimeLeading = await calculateTimeLeading(matchId as string);
+            const calculatedTimeLeading = await calculateTimeLeading(matchId as string, finalFencer1Name, finalFencer2Name);
             console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
             setTimeLeading(calculatedTimeLeading);
             
-            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string);
+            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string, finalFencer1Name, finalFencer2Name);
             setBounceBackTimes(calculatedBounceBackTimes);
             
-            const calculatedLongestRuns = await calculateLongestRuns(matchId as string);
+            const calculatedLongestRuns = await calculateLongestRuns(matchId as string, finalFencer1Name, finalFencer2Name);
             setLongestRuns(calculatedLongestRuns);
           } catch (error) {
             console.error('Error calculating match statistics:', error);
@@ -675,15 +903,22 @@ export default function NeutralMatchSummary() {
     );
   }
 
-  const aliceScoreNum = parseInt(aliceScore as string) || 0;
-  const bobScoreNum = parseInt(bobScore as string) || 0;
+  // Use database fencer names and scores if available (reflects final positions after swaps)
+  // Otherwise fall back to params
+  const finalFencer1Name = matchData?.fencer_1_name || (fencer1Name as string) || 'Fencer 1';
+  const finalFencer2Name = matchData?.fencer_2_name || (fencer2Name as string) || 'Fencer 2';
+  const finalFencer1Score = matchData?.final_score || parseInt(aliceScore as string) || 0;
+  const finalFencer2Score = matchData?.touches_against || parseInt(bobScore as string) || 0;
+  
+  const aliceScoreNum = finalFencer1Score;
+  const bobScoreNum = finalFencer2Score;
   const matchDurationNum = parseInt(matchDuration as string) || 0;
   const aliceCardsData = aliceCards ? JSON.parse(aliceCards as string) : { yellow: 0, red: 0 };
   const bobCardsData = bobCards ? JSON.parse(bobCards as string) : { yellow: 0, red: 0 };
 
-  // Extract first names only
-  const fencer1FirstName = (fencer1Name as string).split(' ')[0];
-  const fencer2FirstName = (fencer2Name as string).split(' ')[0];
+  // Extract first names only - use final names from database
+  const fencer1FirstName = finalFencer1Name.split(' ')[0];
+  const fencer2FirstName = finalFencer2Name.split(' ')[0];
 
   // Calculate winner
   const winner = aliceScoreNum > bobScoreNum ? fencer1FirstName : bobScoreNum > aliceScoreNum ? fencer2FirstName : 'Tied';
@@ -736,7 +971,7 @@ export default function NeutralMatchSummary() {
                 {/* Left Player */}
                 <View style={styles.leftPlayerContainer}>
                   <View style={styles.playerAvatar}>
-                    <Text style={styles.playerInitials}>{getInitials(fencer1Name as string)}</Text>
+                    <Text style={styles.playerInitials}>{getInitials(finalFencer1Name)}</Text>
                   </View>
                   <Text 
                     style={styles.playerName}
@@ -750,7 +985,7 @@ export default function NeutralMatchSummary() {
                 {/* Right Player */}
                 <View style={styles.rightPlayerContainer}>
                   <View style={styles.playerAvatar}>
-                    <Text style={styles.playerInitials}>{getInitials(fencer2Name as string)}</Text>
+                    <Text style={styles.playerInitials}>{getInitials(finalFencer2Name)}</Text>
                   </View>
                   <Text 
                     style={styles.playerName}
@@ -827,8 +1062,8 @@ export default function NeutralMatchSummary() {
             <TouchesByPeriodChart 
               title=""
               touchesByPeriod={touchesByPeriod}
-              userLabel={fencer1Name as string}
-              opponentLabel={fencer2Name as string}
+              userLabel={finalFencer1Name}
+              opponentLabel={finalFencer2Name}
             />
           </View>
         </View>
@@ -841,8 +1076,8 @@ export default function NeutralMatchSummary() {
             scoreProgression={scoreProgression}
             userScore={aliceScoreNum}
             opponentScore={bobScoreNum}
-            userLabel={fencer1Name as string}
-            opponentLabel={fencer2Name as string}
+            userLabel={finalFencer1Name}
+            opponentLabel={finalFencer2Name}
             styleOverrides={{
               container: {
                 marginHorizontal: 0, // Remove chart's own margin - wrapper handles it
@@ -858,8 +1093,8 @@ export default function NeutralMatchSummary() {
 
           {/* Time Leading Card */}
           <TimeLeadingCard 
-            fencer1Name={fencer1Name as string}
-            fencer2Name={fencer2Name as string}
+            fencer1Name={finalFencer1Name}
+            fencer2Name={finalFencer2Name}
             timeLeading={timeLeading}
           />
         </View>
@@ -868,15 +1103,15 @@ export default function NeutralMatchSummary() {
         <View style={styles.twoColumnContainer}>
           {/* Bounce Back Time Card */}
           <BounceBackTimeCard 
-            fencer1Name={fencer1Name as string}
-            fencer2Name={fencer2Name as string}
+            fencer1Name={finalFencer1Name}
+            fencer2Name={finalFencer2Name}
             bounceBackTimes={bounceBackTimes}
           />
 
           {/* Longest Run Card */}
           <LongestRunCard 
-            fencer1Name={fencer1Name as string}
-            fencer2Name={fencer2Name as string}
+            fencer1Name={finalFencer1Name}
+            fencer2Name={finalFencer2Name}
             longestRuns={longestRuns}
           />
         </View>

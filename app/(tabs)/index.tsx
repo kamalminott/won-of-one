@@ -17,7 +17,7 @@ import { goalService, matchService, userService } from '@/lib/database';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 export default function HomeScreen() {
-  console.log('🏠 HomeScreen rendered!');
+  // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
   const { user, loading, signOut, userName, profileImage } = useAuth();
   const params = useLocalSearchParams();
@@ -62,7 +62,7 @@ export default function HomeScreen() {
     
     // Only redirect if we're sure there's no user (after loading completes)
     if (!user) {
-      console.log('⚠️ [HOME] No user found after auth loaded, redirecting to login');
+      // console.log('⚠️ [HOME] No user found after auth loaded, redirecting to login');
       router.replace('/login');
     }
   }, [user, loading]);
@@ -118,7 +118,7 @@ export default function HomeScreen() {
     if (params.autoOpenGoalModal === 'true' && !dataLoading && goalCardRef.current) {
       // Small delay to ensure UI is ready and data is loaded
       const timer = setTimeout(() => {
-        console.log('🎯 Auto-opening goal modal after celebration');
+        // console.log('🎯 Auto-opening goal modal after celebration');
         goalCardRef.current?.openModal();
       }, 500);
       
@@ -169,32 +169,32 @@ export default function HomeScreen() {
 
   const fetchUserData = async () => {
     if (!user) {
-      console.log('No user found, skipping data fetch');
+      // console.log('No user found, skipping data fetch');
       setDataLoading(false);
       return;
     }
     
-    console.log('Fetching data for user:', user.id);
+    // console.log('Fetching data for user:', user.id);
     setDataLoading(true);
     try {
       // First, ensure user exists in app_user table
       const existingUser = await userService.getUserById(user.id);
       if (!existingUser) {
-        console.log('User not found in app_user table, creating...');
+        // console.log('User not found in app_user table, creating...');
         await userService.createUser(user.id, user.email || '');
       }
       
       // Clean up any old completed goals that weren't auto-deactivated
       const deactivatedCount = await goalService.deactivateAllCompletedGoals(user.id);
-      if (deactivatedCount > 0) {
-        console.log(`🧹 Cleaned up ${deactivatedCount} old completed goals`);
-      }
+      // if (deactivatedCount > 0) {
+      //   console.log(`🧹 Cleaned up ${deactivatedCount} old completed goals`);
+      // }
       
       // Deactivate any expired goals (past deadline and not completed)
       const expiredCount = await goalService.deactivateExpiredGoals(user.id);
-      if (expiredCount > 0) {
-        console.log(`⏰ Auto-deactivated ${expiredCount} expired goal(s)`);
-      }
+      // if (expiredCount > 0) {
+      //   console.log(`⏰ Auto-deactivated ${expiredCount} expired goal(s)`);
+      // }
       
       // Fetch matches, goals, and training time data in parallel
       // Note: Fetch more matches to support windowed goal calculations
@@ -204,24 +204,24 @@ export default function HomeScreen() {
         matchService.getAllMatchesForTrainingTime(user.id)
       ]);
       
-      console.log('Fetched matches:', matchesData);
-      console.log('Fetched goals:', goalsData);
-      console.log('Goals count:', goalsData.length);
-      console.log('Fetched training time data:', trainingTimeData);
+      // console.log('Fetched matches:', matchesData);
+      // console.log('Fetched goals:', goalsData);
+      // console.log('Goals count:', goalsData.length);
+      // console.log('Fetched training time data:', trainingTimeData);
       
       // Calculate win rate from matches
       const calculatedWinRate = calculateWinRate(matchesData);
-      console.log('Calculated win rate:', calculatedWinRate + '%');
+      // console.log('Calculated win rate:', calculatedWinRate + '%');
       
       // Calculate total training time
       const totalSeconds = trainingTimeData.reduce((sum, match) => sum + (match.bout_length_s || 0), 0);
       const formattedTrainingTime = formatTrainingTime(totalSeconds);
-      console.log('Total training time (seconds):', totalSeconds);
-      console.log('Formatted training time:', formattedTrainingTime);
+      // console.log('Total training time (seconds):', totalSeconds);
+      // console.log('Formatted training time:', formattedTrainingTime);
       
       // Calculate weekly sessions
       const calculatedWeeklySessions = calculateWeeklySessions(matchesData);
-      console.log('Weekly sessions:', calculatedWeeklySessions);
+      // console.log('Weekly sessions:', calculatedWeeklySessions);
       
       setMatches(matchesData);
       setGoals(goalsData);
@@ -242,7 +242,7 @@ export default function HomeScreen() {
 
   const handleSetNewGoal = () => {
     // This will be handled by the GoalCard modal
-    console.log('Set new goal clicked');
+    // console.log('Set new goal clicked');
   };
 
   const handleUpdateGoal = () => {
@@ -298,8 +298,8 @@ export default function HomeScreen() {
     const total = 5; // Target sessions (days) per week
     const daysRemaining = Math.max(0, 6 - now.getDay()); // Days left in week (Sunday=0, Saturday=6)
     
-    console.log('Current day of week:', now.getDay(), 'Days remaining:', daysRemaining);
-    console.log('Current sessions:', current, 'Target sessions:', total);
+    // console.log('Current day of week:', now.getDay(), 'Days remaining:', daysRemaining);
+    // console.log('Current sessions:', current, 'Target sessions:', total);
     
     return { current, total, daysRemaining };
   };
@@ -478,32 +478,32 @@ export default function HomeScreen() {
                 if (goal.match_window && goal.starting_match_count !== undefined) {
                   // Get matches since goal was created
                   const matchesSinceGoalCreation = Math.max(0, matches.length - goal.starting_match_count);
-                  console.log('🔍 Frontend window calculation:', {
-                    totalMatches: matches.length,
-                    startingMatchCount: goal.starting_match_count,
-                    matchesSinceGoalCreation,
-                    matchWindow: goal.match_window
-                  });
+                  // console.log('🔍 Frontend window calculation:', {
+                  //   totalMatches: matches.length,
+                  //   startingMatchCount: goal.starting_match_count,
+                  //   matchesSinceGoalCreation,
+                  //   matchWindow: goal.match_window
+                  // });
                   
                   const matchesSinceGoal = matches.slice(0, matchesSinceGoalCreation);
                   // Limit to window size
                   windowMatches = matchesSinceGoal.slice(0, goal.match_window);
                   
-                  console.log('🔍 Frontend window matches:', {
-                    matchesSinceGoalCount: matchesSinceGoal.length,
-                    windowMatchesCount: windowMatches.length,
-                    windowMatches: windowMatches.map(m => ({ id: m.id, isWin: m.isWin }))
-                  });
+                  // console.log('🔍 Frontend window matches:', {
+                  //   matchesSinceGoalCount: matchesSinceGoal.length,
+                  //   windowMatchesCount: windowMatches.length,
+                  //   windowMatches: windowMatches.map(m => ({ id: m.id, isWin: m.isWin }))
+                  // });
                 }
                 
                 const windowWins = windowMatches.filter(m => m.isWin).length;
                 const windowLosses = windowMatches.filter(m => !m.isWin).length;
                 
-                console.log('🔍 Frontend record calculation:', {
-                  windowWins,
-                  windowLosses,
-                  totalWindowMatches: windowMatches.length
-                });
+                // console.log('🔍 Frontend record calculation:', {
+                //   windowWins,
+                //   windowLosses,
+                //   totalWindowMatches: windowMatches.length
+                // });
                 
                 // For windowed goals, calculate progress from actual window wins
                 // For non-windowed goals, use the progress from backend
@@ -511,12 +511,12 @@ export default function HomeScreen() {
                 if (goal.match_window && goal.title === 'Wins') {
                   const rawProgress = goal.targetValue > 0 ? Math.round((windowWins / goal.targetValue) * 100) : 0;
                   calculatedProgress = Math.max(0, Math.min(rawProgress, 100));
-                  console.log('🎯 Windowed goal progress calculation:', {
-                    windowWins,
-                    targetValue: goal.targetValue,
-                    rawProgress,
-                    calculatedProgress
-                  });
+                  // console.log('🎯 Windowed goal progress calculation:', {
+                  //   windowWins,
+                  //   targetValue: goal.targetValue,
+                  //   rawProgress,
+                  //   calculatedProgress
+                  // });
                 }
                 
                 return (
@@ -538,19 +538,19 @@ export default function HomeScreen() {
                     onSetNewGoal={handleSetNewGoal}
                     onUpdateGoal={handleUpdateGoal}
                 onGoalSaved={async (goalData) => {
-                  console.log('Goal saved callback triggered with data:', goalData);
+                  // console.log('Goal saved callback triggered with data:', goalData);
                   if (user) {
                     try {
                       // If this is a windowed goal, add starting match count
                       if (goalData.match_window) {
                         const currentMatches = await matchService.getRecentMatches(user.id, 10000);
                         goalData.starting_match_count = currentMatches.length;
-                        console.log('Adding starting_match_count:', goalData.starting_match_count);
+                        // console.log('Adding starting_match_count:', goalData.starting_match_count);
                       }
                       
-                      console.log('Saving goal to database...');
+                      // console.log('Saving goal to database...');
                       const newGoal = await goalService.createGoal(goalData, user.id);
-                      console.log('Goal saved result:', newGoal);
+                      // console.log('Goal saved result:', newGoal);
                       if (newGoal) {
                         // Track goal creation
                         analytics.goalSaved({ 
@@ -570,17 +570,17 @@ export default function HomeScreen() {
                   }
                 }}
                 onGoalUpdated={async (goalId, updates) => {
-                  console.log('🔄 onGoalUpdated callback triggered with goalId:', goalId, 'updates:', updates);
+                  // console.log('🔄 onGoalUpdated callback triggered with goalId:', goalId, 'updates:', updates);
                   try {
                     // If match_window is being added or modified, recalculate starting_match_count
                     if (updates.match_window !== undefined && user) {
                       const currentMatches = await matchService.getRecentMatches(user.id, 10000);
                       updates.starting_match_count = currentMatches.length;
-                      console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
+                      // console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
                     }
                     
                     const updatedGoal = await goalService.updateGoal(goalId, updates);
-                    console.log('Update result:', updatedGoal);
+                    // console.log('Update result:', updatedGoal);
                     
                     if (updatedGoal && user) {
                       // Get goal type for tracking
@@ -590,7 +590,7 @@ export default function HomeScreen() {
                         target: updates.target_value
                       });
                       
-                      console.log('✅ Goal updated, recalculating progress...');
+                      // console.log('✅ Goal updated, recalculating progress...');
                       
                       // Recalculate progress if target, window, or deadline changed
                       const needsRecalculation = 
@@ -600,17 +600,17 @@ export default function HomeScreen() {
                       
                       if (needsRecalculation) {
                         await goalService.recalculateGoalProgress(goalId, user.id);
-                        console.log('✅ Progress recalculated');
+                        // console.log('✅ Progress recalculated');
                       }
                       
                       // Small delay to ensure database update propagates
                       setTimeout(async () => {
                         await fetchUserData();
-                        console.log('✅ Home screen refreshed after update');
+                        // console.log('✅ Home screen refreshed after update');
                         Alert.alert('Success', 'Goal updated successfully!');
                       }, 100);
                     } else {
-                      console.log('❌ Update failed');
+                      // console.log('❌ Update failed');
                       Alert.alert('Error', 'Failed to update goal');
                     }
                   } catch (error) {
@@ -619,27 +619,27 @@ export default function HomeScreen() {
                   }
                 }}
                 onGoalDeleted={async (goalId) => {
-                  console.log('🗑️ onGoalDeleted callback triggered with goalId:', goalId);
+                  // console.log('🗑️ onGoalDeleted callback triggered with goalId:', goalId);
                   try {
                     // Get goal type before deletion for tracking
                     const goal = goals.find(g => g.id === goalId);
                     const goalType = goal?.title || 'unknown';
                     
                     const success = await goalService.deleteGoal(goalId);
-                    console.log('Delete result:', success);
+                    // console.log('Delete result:', success);
                     
                     if (success) {
                       analytics.goalDeleted({ goal_type: goalType });
-                      console.log('✅ Goal deleted, refreshing home screen...');
+                      // console.log('✅ Goal deleted, refreshing home screen...');
                       
                       // Small delay to ensure database update propagates
                       setTimeout(async () => {
                         await fetchUserData();
-                        console.log('✅ Home screen refreshed after deletion');
+                        // console.log('✅ Home screen refreshed after deletion');
                         Alert.alert('Success', 'Goal deleted successfully');
                       }, 100);
                     } else {
-                      console.log('❌ Delete failed');
+                      // console.log('❌ Delete failed');
                       Alert.alert('Error', 'Failed to delete goal');
                     }
                   } catch (error) {
@@ -663,19 +663,19 @@ export default function HomeScreen() {
                 onSetNewGoal={handleSetNewGoal}
                 onUpdateGoal={handleUpdateGoal}
                 onGoalSaved={async (goalData) => {
-                  console.log('Goal saved callback triggered with data:', goalData);
+                  // console.log('Goal saved callback triggered with data:', goalData);
                   if (user) {
                     try {
                       // If this is a windowed goal, add starting match count
                       if (goalData.match_window) {
                         const currentMatches = await matchService.getRecentMatches(user.id, 10000);
                         goalData.starting_match_count = currentMatches.length;
-                        console.log('Adding starting_match_count:', goalData.starting_match_count);
+                        // console.log('Adding starting_match_count:', goalData.starting_match_count);
                       }
                       
-                      console.log('Saving goal to database...');
+                      // console.log('Saving goal to database...');
                       const newGoal = await goalService.createGoal(goalData, user.id);
-                      console.log('Goal saved result:', newGoal);
+                      // console.log('Goal saved result:', newGoal);
                       if (newGoal) {
                         // Track goal creation
                         analytics.goalSaved({ 

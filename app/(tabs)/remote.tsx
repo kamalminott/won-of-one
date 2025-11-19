@@ -134,7 +134,7 @@ export default function RemoteScreen() {
     try {
       const aliceImage = await AsyncStorage.getItem('opponent_image_alice');
       const bobImage = await AsyncStorage.getItem('opponent_image_bob');
-      console.log('Direct AsyncStorage check - Alice:', aliceImage, 'Bob:', bobImage);
+      // console.log('Direct AsyncStorage check - Alice:', aliceImage, 'Bob:', bobImage);
     } catch (error) {
       console.error('Error checking AsyncStorage:', error);
     }
@@ -163,15 +163,15 @@ export default function RemoteScreen() {
           const weapon = userData.preferred_weapon.toLowerCase();
           if (weapon === 'foil' || weapon === 'epee' || weapon === 'saber') {
             setSelectedWeapon(weapon as 'foil' | 'epee' | 'saber');
-            console.log('✅ Loaded preferred weapon from profile:', weapon);
+            // console.log('✅ Loaded preferred weapon from profile:', weapon);
           } else {
-            console.log('⚠️ Invalid weapon type in profile, defaulting to foil');
+            // console.log('⚠️ Invalid weapon type in profile, defaulting to foil');
             setSelectedWeapon('foil');
           }
         } else {
           // Default to foil if no preference set
           setSelectedWeapon('foil');
-          console.log('ℹ️ No preferred weapon in profile, defaulting to foil');
+          // console.log('ℹ️ No preferred weapon in profile, defaulting to foil');
         }
       } catch (error) {
         console.error('Error loading preferred weapon:', error);
@@ -195,55 +195,55 @@ export default function RemoteScreen() {
       
       // Handle "Change One Fencer" option
       if (params.changeOneFencer === 'true' && params.fencer1Name) {
-        console.log('🔄 [useEffect] Changing one fencer - keeping first, resetting second');
+        // console.log('🔄 [useEffect] Changing one fencer - keeping first, resetting second');
         // Keep first fencer, reset second
         if (!showUserProfile) {
           setTimeout(() => {
-            console.log('🔄 [useEffect setTimeout] Keeping first fencer, resetting second');
+            // console.log('🔄 [useEffect setTimeout] Keeping first fencer, resetting second');
             setFencerNames({
               fencerA: params.fencer1Name as string,
               fencerB: 'Tap to add name',
             });
-            console.log('✅ [useEffect setTimeout] One fencer kept, one reset, toggle remains off');
+            // console.log('✅ [useEffect setTimeout] One fencer kept, one reset, toggle remains off');
           }, 50);
         } else {
           setShowUserProfile(false);
           setTimeout(() => {
-            console.log('🔄 [useEffect setTimeout] Keeping first fencer, resetting second after toggle off');
+            // console.log('🔄 [useEffect setTimeout] Keeping first fencer, resetting second after toggle off');
             setFencerNames({
               fencerA: params.fencer1Name as string,
               fencerB: 'Tap to add name',
             });
-            console.log('✅ [useEffect setTimeout] Toggle turned off, one fencer kept, one reset');
+            // console.log('✅ [useEffect setTimeout] Toggle turned off, one fencer kept, one reset');
           }, 100);
         }
         return; // Don't process other params
       }
       
       // Handle "Change Both Fencers" option
-      console.log('🔄 [useEffect] Resetting both fencer names while keeping toggle off');
+      // console.log('🔄 [useEffect] Resetting both fencer names while keeping toggle off');
       // If toggle is already off, keep it off and reset names
       if (!showUserProfile) {
         // Use setTimeout to ensure this runs after any other effects
         setTimeout(() => {
-          console.log('🔄 [useEffect setTimeout] Setting both names to "Tap to add name"');
+          // console.log('🔄 [useEffect setTimeout] Setting both names to "Tap to add name"');
           setFencerNames({
             fencerA: 'Tap to add name',
             fencerB: 'Tap to add name',
           });
-          console.log('✅ [useEffect setTimeout] Both names reset, toggle remains off');
+          // console.log('✅ [useEffect setTimeout] Both names reset, toggle remains off');
         }, 50);
       } else {
         // If toggle is on, turn it off first, then reset names
         setShowUserProfile(false);
         // Use a delay to ensure toggle is off before resetting
         setTimeout(() => {
-          console.log('🔄 [useEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
+          // console.log('🔄 [useEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
           setFencerNames({
             fencerA: 'Tap to add name',
             fencerB: 'Tap to add name',
           });
-          console.log('✅ [useEffect setTimeout] Toggle turned off and both names reset');
+          // console.log('✅ [useEffect setTimeout] Toggle turned off and both names reset');
         }, 100);
       }
       return; // Don't process other params
@@ -252,7 +252,7 @@ export default function RemoteScreen() {
     if (params.fencer1Name && params.fencer2Name) {
       // If this is an anonymous match (from neutral match summary), disable user toggle FIRST
       if (params.isAnonymous === 'true') {
-        console.log('👤 Disabling user toggle for anonymous match');
+        // console.log('👤 Disabling user toggle for anonymous match');
         // Store names to set after toggle is off
         pendingFencerNamesRef.current = {
           fencer1Name: params.fencer1Name as string,
@@ -261,7 +261,7 @@ export default function RemoteScreen() {
         setShowUserProfile(false);
       } else {
         // Not anonymous, just set names normally
-        console.log('📝 Setting fencer names from params:', params.fencer1Name, params.fencer2Name);
+        // console.log('📝 Setting fencer names from params:', params.fencer1Name, params.fencer2Name);
         setFencerNames({
           fencerA: params.fencer1Name as string,
           fencerB: params.fencer2Name as string,
@@ -275,7 +275,7 @@ export default function RemoteScreen() {
   useLayoutEffect(() => {
     // Only set names if we have pending names AND we're not in a reset names flow
     if (!showUserProfile && pendingFencerNamesRef.current && params.resetNames !== 'true') {
-      console.log('📝 [useLayoutEffect] Setting fencer names after toggle is off:', pendingFencerNamesRef.current);
+      // console.log('📝 [useLayoutEffect] Setting fencer names after toggle is off:', pendingFencerNamesRef.current);
       const namesToSet = pendingFencerNamesRef.current;
       // Clear the pending names first to prevent re-triggering
       pendingFencerNamesRef.current = null;
@@ -284,11 +284,11 @@ export default function RemoteScreen() {
         fencerA: namesToSet.fencer1Name,
         fencerB: namesToSet.fencer2Name,
       });
-      console.log('✅ [useLayoutEffect] Fencer names set:', { 
-        fencerA: namesToSet.fencer1Name, 
-        fencerB: namesToSet.fencer2Name,
-        showUserProfile: showUserProfile
-      });
+      // console.log('✅ [useLayoutEffect] Fencer names set:', { 
+      //   fencerA: namesToSet.fencer1Name, 
+      //   fencerB: namesToSet.fencer2Name,
+      //   showUserProfile: showUserProfile
+      // });
     }
   }, [showUserProfile, params.resetNames]);
 
@@ -296,18 +296,18 @@ export default function RemoteScreen() {
   useEffect(() => {
     // Only set names if we have pending names AND we're not in a reset names flow
     if (!showUserProfile && pendingFencerNamesRef.current && params.resetNames !== 'true') {
-      console.log('📝 [useEffect] Setting fencer names after toggle is off (backup):', pendingFencerNamesRef.current);
+      // console.log('📝 [useEffect] Setting fencer names after toggle is off (backup):', pendingFencerNamesRef.current);
       const namesToSet = pendingFencerNamesRef.current;
       pendingFencerNamesRef.current = null;
       setFencerNames({
         fencerA: namesToSet.fencer1Name,
         fencerB: namesToSet.fencer2Name,
       });
-      console.log('✅ [useEffect] Fencer names set (backup):', { 
-        fencerA: namesToSet.fencer1Name, 
-        fencerB: namesToSet.fencer2Name,
-        showUserProfile: showUserProfile
-      });
+      // console.log('✅ [useEffect] Fencer names set (backup):', { 
+      //   fencerA: namesToSet.fencer1Name, 
+      //   fencerB: namesToSet.fencer2Name,
+      //   showUserProfile: showUserProfile
+      // });
     }
   }, [showUserProfile, params.resetNames]);
 
@@ -331,7 +331,7 @@ export default function RemoteScreen() {
       const nowOffline = !isConnected;
       wasOfflineRef.current = nowOffline;
       setIsOffline(nowOffline);
-      console.log(`🌐 Network status: ${isConnected ? 'ONLINE' : 'OFFLINE'}`);
+      // console.log(`🌐 Network status: ${isConnected ? 'ONLINE' : 'OFFLINE'}`);
       
       if (nowOffline && !wasOffline) {
         // Just went offline - track offline mode detection
@@ -450,11 +450,11 @@ export default function RemoteScreen() {
   // Setup auto-sync when user is available
   useEffect(() => {
     if (user?.id) {
-      console.log('✅ Setting up auto-sync for user:', user.id);
+      // console.log('✅ Setting up auto-sync for user:', user.id);
       const cleanup = setupAutoSync(user.id);
       
       return () => {
-        console.log('🧹 Cleaning up auto-sync');
+        // console.log('🧹 Cleaning up auto-sync');
         cleanup();
       };
     }
@@ -498,52 +498,52 @@ export default function RemoteScreen() {
         
         // Handle "Change One Fencer" option
         if (params.changeOneFencer === 'true' && params.fencer1Name) {
-          console.log('🔄 [useFocusEffect] Changing one fencer - keeping first, resetting second');
+          // console.log('🔄 [useFocusEffect] Changing one fencer - keeping first, resetting second');
           if (!showUserProfile) {
             setTimeout(() => {
-              console.log('🔄 [useFocusEffect setTimeout] Keeping first fencer, resetting second');
+              // console.log('🔄 [useFocusEffect setTimeout] Keeping first fencer, resetting second');
               setFencerNames({
                 fencerA: params.fencer1Name as string,
                 fencerB: 'Tap to add name',
               });
-              console.log('✅ [useFocusEffect setTimeout] One fencer kept, one reset, toggle remains off');
+              // console.log('✅ [useFocusEffect setTimeout] One fencer kept, one reset, toggle remains off');
             }, 50);
           } else {
             setShowUserProfile(false);
             setTimeout(() => {
-              console.log('🔄 [useFocusEffect setTimeout] Keeping first fencer, resetting second after toggle off');
+              // console.log('🔄 [useFocusEffect setTimeout] Keeping first fencer, resetting second after toggle off');
               setFencerNames({
                 fencerA: params.fencer1Name as string,
                 fencerB: 'Tap to add name',
               });
-              console.log('✅ [useFocusEffect setTimeout] Toggle turned off, one fencer kept, one reset');
+              // console.log('✅ [useFocusEffect setTimeout] Toggle turned off, one fencer kept, one reset');
             }, 100);
           }
         }
         // Handle "Change Both Fencers" option
         else {
-          console.log('🔄 [useFocusEffect] Resetting both fencer names while keeping toggle off');
+          // console.log('🔄 [useFocusEffect] Resetting both fencer names while keeping toggle off');
           // If toggle is already off, keep it off and reset names
           if (!showUserProfile) {
             // Use setTimeout to ensure this runs after any other effects
             setTimeout(() => {
-              console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name"');
+              // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name"');
               setFencerNames({
                 fencerA: 'Tap to add name',
                 fencerB: 'Tap to add name',
               });
-              console.log('✅ [useFocusEffect setTimeout] Both names reset, toggle remains off');
+              // console.log('✅ [useFocusEffect setTimeout] Both names reset, toggle remains off');
             }, 50);
           } else {
             // If toggle is on, turn it off first, then reset names
             setShowUserProfile(false);
             setTimeout(() => {
-              console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
+              // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
               setFencerNames({
                 fencerA: 'Tap to add name',
                 fencerB: 'Tap to add name',
               });
-              console.log('✅ [useFocusEffect setTimeout] Toggle turned off and both names reset');
+              // console.log('✅ [useFocusEffect setTimeout] Toggle turned off and both names reset');
             }, 100);
           }
         }
@@ -553,7 +553,7 @@ export default function RemoteScreen() {
       else if (params.fencer1Name && params.fencer2Name) {
         // If this is an anonymous match (from neutral match summary), disable user toggle FIRST
         if (params.isAnonymous === 'true') {
-          console.log('👤 [useFocusEffect] Disabling user toggle for anonymous match on focus');
+          // console.log('👤 [useFocusEffect] Disabling user toggle for anonymous match on focus');
           // Store names to set after toggle is off
           pendingFencerNamesRef.current = {
             fencer1Name: params.fencer1Name as string,
@@ -564,22 +564,22 @@ export default function RemoteScreen() {
           // Also set names directly after a brief delay to ensure they're set
           setTimeout(() => {
             if (pendingFencerNamesRef.current) {
-              console.log('📝 [useFocusEffect setTimeout] Setting fencer names directly:', pendingFencerNamesRef.current);
+              // console.log('📝 [useFocusEffect setTimeout] Setting fencer names directly:', pendingFencerNamesRef.current);
               const namesToSet = pendingFencerNamesRef.current;
               pendingFencerNamesRef.current = null;
               setFencerNames({
                 fencerA: namesToSet.fencer1Name,
                 fencerB: namesToSet.fencer2Name,
               });
-              console.log('✅ [useFocusEffect setTimeout] Fencer names set:', { 
-                fencerA: namesToSet.fencer1Name, 
-                fencerB: namesToSet.fencer2Name 
-              });
+              // console.log('✅ [useFocusEffect setTimeout] Fencer names set:', { 
+              //   fencerA: namesToSet.fencer1Name, 
+              //   fencerB: namesToSet.fencer2Name 
+              // });
             }
           }, 100);
         } else {
           // Not anonymous, just set names normally
-          console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
+          // console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
           setFencerNames({
             fencerA: params.fencer1Name as string,
             fencerB: params.fencer2Name as string,
@@ -593,11 +593,11 @@ export default function RemoteScreen() {
         // wait until nav animations & interactions are done — Alert/Modal will show immediately
         await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()));
 
-        console.log('🎯 Checking resume conditions:', {
-          cancelled,
-          hasNavigatedAwayRef: hasNavigatedAwayRef.current,
-          resumePromptShown: resumePromptShownRef.current
-        });
+        // console.log('🎯 Checking resume conditions:', {
+        //   cancelled,
+        //   hasNavigatedAwayRef: hasNavigatedAwayRef.current,
+        //   resumePromptShown: resumePromptShownRef.current
+        // });
         
         if (!cancelled && hasNavigatedAwayRef.current && !resumePromptShownRef.current && !isActivelyUsingAppRef.current) {
           // Check if there's actually a saved match state worth resuming
@@ -610,20 +610,20 @@ export default function RemoteScreen() {
             const hasActiveMatch = savedFencerAScore > 0 || savedFencerBScore > 0 || matchState.currentPeriod > 1;
             
             if (hasActiveMatch) {
-              console.log('🎯 Showing resume prompt - active match found');
+              // console.log('🎯 Showing resume prompt - active match found');
               resumePromptShownRef.current = true;
               // force the prompt
               await loadPersistedMatchState({ forcePrompt: true });
             } else {
-              console.log('🎯 No active match to resume - clearing flag');
+              // console.log('🎯 No active match to resume - clearing flag');
               setHasNavigatedAway(false);
             }
           } else {
-            console.log('🎯 No saved state - clearing flag');
+            // console.log('🎯 No saved state - clearing flag');
             setHasNavigatedAway(false);
           }
         } else {
-          console.log('🎯 Skipping resume prompt - conditions not met');
+          // console.log('🎯 Skipping resume prompt - conditions not met');
           // Reset navigation flag when screen gains focus normally
           if (hasNavigatedAwayRef.current) {
             setHasNavigatedAway(false);
@@ -652,7 +652,7 @@ export default function RemoteScreen() {
       const bobImage = await AsyncStorage.getItem('opponent_image_bob');
       const userImage = await AsyncStorage.getItem('user_profile_image');
       
-      console.log('Loaded images - Alice:', aliceImage, 'Bob:', bobImage, 'User:', userImage);
+      // console.log('Loaded images - Alice:', aliceImage, 'Bob:', bobImage, 'User:', userImage);
       
       setOpponentImages({
         fencerA: aliceImage,
@@ -702,11 +702,11 @@ export default function RemoteScreen() {
           style={styles.profileImage}
           resizeMode="cover"
           onError={(error) => {
-            console.log('❌ Image failed to load, will show initials instead:', error);
+            // console.log('❌ Image failed to load, will show initials instead:', error);
             setImageLoadErrors(prev => new Set(prev).add(imageUri));
           }}
           onLoad={() => {
-            console.log('✅ Image loaded successfully');
+            // console.log('✅ Image loaded successfully');
           }}
         />
       );
@@ -737,7 +737,7 @@ export default function RemoteScreen() {
       if (!hasMatchStarted && !isPlaying) {
         // No active match to save
         await AsyncStorage.removeItem('ongoing_match_state');
-        console.log('💾 No active match - cleared any saved state');
+        // console.log('💾 No active match - cleared any saved state');
         return;
       }
 
@@ -760,22 +760,22 @@ export default function RemoteScreen() {
       };
       
       // Log what's being saved in match state
-      console.log('💾 SAVING MATCH STATE:', {
-        fencerAScore: scores.fencerA,
-        fencerBScore: scores.fencerB,
-        currentPeriod,
-        fencerNames,
-        matchStartTime: matchStartTime?.toISOString(),
-        lastEventTime: lastEventTime?.toISOString(),
-        totalPausedTime,
-        matchId: currentMatchPeriod?.match_id
-      });
+      // console.log('💾 SAVING MATCH STATE:', {
+      //   fencerAScore: scores.fencerA,
+      //   fencerBScore: scores.fencerB,
+      //   currentPeriod,
+      //   fencerNames,
+      //   matchStartTime: matchStartTime?.toISOString(),
+      //   lastEventTime: lastEventTime?.toISOString(),
+      //   totalPausedTime,
+      //   matchId: currentMatchPeriod?.match_id
+      // });
       
       // Note: Individual scoring events with timing are stored in match_event table, not in match state
-      console.log('💾 NOTE: Individual scoring events are stored in database (match_event table), not in match state');
+      // console.log('💾 NOTE: Individual scoring events are stored in database (match_event table), not in match state');
 
       await AsyncStorage.setItem('ongoing_match_state', JSON.stringify(matchState));
-      console.log('💾 Match state saved:', matchState);
+      // console.log('💾 Match state saved:', matchState);
     } catch (error) {
       console.error('Error saving match state:', error);
     }
@@ -864,7 +864,7 @@ export default function RemoteScreen() {
               text: 'Resume Match',
               onPress: () => {
                 setHasNavigatedAway(false); // Reset navigation flag
-                console.log('🔄 User chose to resume completed match');
+                // console.log('🔄 User chose to resume completed match');
                 restoreMatchState(matchState);
               }
             }
@@ -904,7 +904,7 @@ export default function RemoteScreen() {
               text: 'Resume Match',
               onPress: () => {
                 setHasNavigatedAway(false); // Reset navigation flag
-                console.log('🔄 User chose to resume match');
+                // console.log('🔄 User chose to resume match');
                 restoreMatchState(matchState);
               }
             }
@@ -1280,17 +1280,23 @@ export default function RemoteScreen() {
     const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     console.log(`🕐 TIME ELAPSED FOR X-AXIS: ${timeString} (${matchTimeElapsed} seconds)`);
     
-    // Determine the actual scorer name - use the names that will be stored in fencer_1_name/fencer_2_name
+    // Determine the actual scorer name - use entity-based logic (not position-based)
+    // Events store fencer_1_name and fencer_2_name based on entity identity, not position
     const leftEntity = getEntityAtPosition('left');
     const rightEntity = getEntityAtPosition('right');
-    const fencer1Name = showUserProfile && toggleCardPosition === 'left' ? userDisplayName : getNameByEntity(leftEntity);
-    const fencer2Name = showUserProfile && toggleCardPosition === 'right' ? userDisplayName : getNameByEntity(rightEntity);
+    // Use isEntityUser to correctly identify which entity is the user (not which position)
+    const leftIsUser = showUserProfile && isEntityUser(leftEntity);
+    const rightIsUser = showUserProfile && isEntityUser(rightEntity);
+    // Store names based on entity identity: fencer_1 = left entity, fencer_2 = right entity
+    const fencer1Name = leftIsUser ? userDisplayName : getNameByEntity(leftEntity);
+    const fencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
     
-    // Determine who actually scored
+    // Determine who actually scored - use entity-based logic
     let scoringUserName;
     if (showUserProfile) {
-      // User vs opponent mode: use scorer parameter
-      scoringUserName = scorer === 'user' ? fencer1Name : fencer2Name;
+      // User vs opponent mode: use entity-based logic to determine scorer name
+      const actualScoringEntity = scoringEntity || (scorer === 'user' ? userEntity : (userEntity === 'fencerA' ? 'fencerB' : 'fencerA'));
+      scoringUserName = isEntityUser(actualScoringEntity) ? userDisplayName : getNameByEntity(actualScoringEntity);
     } else {
       // Anonymous mode: use scoringEntity to determine actual fencer
       if (scoringEntity) {
@@ -1786,9 +1792,10 @@ export default function RemoteScreen() {
       const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scores.fencerB;
 
       if (user?.id && showUserProfile) {
-        // User is registered AND toggle is on - determine their position and result
-        const userScore = toggleCardPosition === 'left' ? actualFencerAScore : actualFencerBScore;
-        const opponentScore = toggleCardPosition === 'left' ? actualFencerBScore : actualFencerAScore;
+        // User is registered AND toggle is on - determine their entity and result
+        // Use entity-based logic (not position-based) since userEntity doesn't change when swapping
+        const userScore = userEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore;
+        const opponentScore = userEntity === 'fencerA' ? actualFencerBScore : actualFencerAScore;
 
         finalScore = userScore;
         touchesAgainst = opponentScore;
@@ -1895,7 +1902,16 @@ export default function RemoteScreen() {
         touchesByPeriod
       });
 
-      // 1. Update match with final scores and completion status
+      // Get current fencer names based on positions (handles swaps correctly)
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+      // Use isEntityUser to correctly identify which entity is the user (not which position)
+      const leftIsUser = showUserProfile && isEntityUser(leftEntity);
+      const rightIsUser = showUserProfile && isEntityUser(rightEntity);
+      const currentFencer1Name = leftIsUser ? userDisplayName : getNameByEntity(leftEntity);
+      const currentFencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
+
+      // 1. Update match with final scores, completion status, and current fencer names (reflects any swaps)
       const updatedMatch = await matchService.updateMatch(currentMatchPeriod.match_id, {
         final_score: finalScore,
         // touches_against is a generated column - don't set it explicitly
@@ -1908,6 +1924,8 @@ export default function RemoteScreen() {
         period_number: periodNumber,
         score_spp: scoreSpp,
         score_by_period: scoreByPeriod,
+        fencer_1_name: currentFencer1Name, // Update to reflect current positions (after any swaps)
+        fencer_2_name: currentFencer2Name, // Update to reflect current positions (after any swaps)
       });
 
       let failedGoalData: any = null; // Declare in outer scope
@@ -1965,18 +1983,24 @@ export default function RemoteScreen() {
       // 4. Navigate to appropriate match summary based on user toggle
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - go to regular match summary
+        // Use position-based names and scores (reflects any swaps) - these match what's in the database
+        const leftScore = getScoreByPosition('left'); // Score of entity currently on left
+        const rightScore = getScoreByPosition('right'); // Score of entity currently on right
+        const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
+        const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
+        
         const navParams: any = {
           matchId: matchId, // Use stored match ID
           remoteId: remoteSession.remote_id,
-          // Pass current match state for display
-          aliceScore: actualFencerAScore.toString(),
-          bobScore: actualFencerBScore.toString(),
-          aliceCards: JSON.stringify(cards.fencerA),
-          bobCards: JSON.stringify(cards.fencerB),
+          // Pass current match state for display (position-based to match names)
+          aliceScore: leftScore.toString(), // Score of fencer on left (fencer1)
+          bobScore: rightScore.toString(), // Score of fencer on right (fencer2)
+          aliceCards: JSON.stringify(leftCards),
+          bobCards: JSON.stringify(rightCards),
           matchDuration: matchDuration.toString(),
           result: result || '',
-          fencer1Name: fencerNames.fencerA,
-          fencer2Name: fencerNames.fencerB,
+          fencer1Name: currentFencer1Name, // Use position-based names (left = fencer1)
+          fencer2Name: currentFencer2Name, // Use position-based names (right = fencer2)
         };
         
         // Pass completed goal info if any
@@ -1996,20 +2020,26 @@ export default function RemoteScreen() {
         });
       } else {
         // User toggle is off OR no registered user - go to neutral match summary
+        // Use position-based names and scores (reflects any swaps) - these match what's in the database
+        const leftScore = getScoreByPosition('left'); // Score of entity currently on left
+        const rightScore = getScoreByPosition('right'); // Score of entity currently on right
+        const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
+        const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
+        
         router.push({
           pathname: '/neutral-match-summary',
           params: {
             matchId: matchId, // Use stored match ID
             remoteId: remoteSession.remote_id,
-            // Pass current match state for display
-            aliceScore: actualFencerAScore.toString(),
-            bobScore: actualFencerBScore.toString(),
-            aliceCards: JSON.stringify(cards.fencerA),
-            bobCards: JSON.stringify(cards.fencerB),
+            // Pass current match state for display (position-based to match names)
+            aliceScore: leftScore.toString(), // Score of fencer on left (fencer1)
+            bobScore: rightScore.toString(), // Score of fencer on right (fencer2)
+            aliceCards: JSON.stringify(leftCards),
+            bobCards: JSON.stringify(rightCards),
             matchDuration: matchDuration.toString(),
             result: result || '',
-            fencer1Name: fencerNames.fencerA,
-            fencer2Name: fencerNames.fencerB,
+            fencer1Name: currentFencer1Name, // Use position-based names (left = fencer1)
+            fencer2Name: currentFencer2Name, // Use position-based names (right = fencer2)
           }
         });
       }
@@ -2084,9 +2114,10 @@ export default function RemoteScreen() {
       let scoreDiff: number | null;
 
       if (user?.id && showUserProfile) {
-        // User is registered AND toggle is on - determine their position and result
-        const userScore = toggleCardPosition === 'left' ? actualFencerAScore : actualFencerBScore;
-        const opponentScore = toggleCardPosition === 'left' ? actualFencerBScore : actualFencerAScore;
+        // User is registered AND toggle is on - determine their entity and result
+        // Use entity-based logic (not position-based) since userEntity doesn't change when swapping
+        const userScore = userEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore;
+        const opponentScore = userEntity === 'fencerA' ? actualFencerBScore : actualFencerAScore;
 
         finalScore = userScore;
         touchesAgainst = opponentScore;
@@ -2145,20 +2176,35 @@ export default function RemoteScreen() {
         is_offline: true
       });
 
+      // Get current fencer names based on positions (handles swaps correctly)
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+      // Use isEntityUser to correctly identify which entity is the user (not which position)
+      const leftIsUser = showUserProfile && isEntityUser(leftEntity);
+      const rightIsUser = showUserProfile && isEntityUser(rightEntity);
+      const currentFencer1Name = leftIsUser ? userDisplayName : getNameByEntity(leftEntity);
+      const currentFencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
+      
+      // Get position-based scores and cards (reflects any swaps)
+      const leftScore = getScoreByPosition('left'); // Score of entity currently on left
+      const rightScore = getScoreByPosition('right'); // Score of entity currently on right
+      const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
+      const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
+
       // Navigate to match summary with offline flag and all data
       const navParams: any = {
         matchId: completionResult.matchId || matchId, // Use returned matchId from offline cache
         remoteId: remoteSession.remote_id,
         isOffline: 'true', // Flag to indicate offline match
-        // Pass all match state for display
-        aliceScore: actualFencerAScore.toString(),
-        bobScore: actualFencerBScore.toString(),
-        aliceCards: JSON.stringify(cards.fencerA),
-        bobCards: JSON.stringify(cards.fencerB),
+        // Pass all match state for display (position-based to match names)
+        aliceScore: leftScore.toString(), // Score of fencer on left (fencer1)
+        bobScore: rightScore.toString(), // Score of fencer on right (fencer2)
+        aliceCards: JSON.stringify(leftCards),
+        bobCards: JSON.stringify(rightCards),
         matchDuration: matchDuration.toString(),
         result: result || '',
-        fencer1Name: fencerNames.fencerA,
-        fencer2Name: fencerNames.fencerB,
+        fencer1Name: currentFencer1Name, // Use position-based names (left = fencer1)
+        fencer2Name: currentFencer2Name, // Use position-based names (right = fencer2)
         periodNumber: periodNumber.toString(),
         scoreSpp: scoreSpp.toString(),
         scoreByPeriod: JSON.stringify(scoreByPeriod),
@@ -3528,13 +3574,12 @@ export default function RemoteScreen() {
         fencerB: prev.fencerB === 'left' ? 'right' : 'left'
       }));
       
-      // Swap toggle position
+      // Swap toggle position (which side the user card is on)
       setToggleCardPosition(prev => prev === 'left' ? 'right' : 'left');
       
-      // Swap user entity if user toggle is on
-      if (showUserProfile) {
-        setUserEntity(prev => prev === 'fencerA' ? 'fencerB' : 'fencerA');
-      }
+      // DON'T swap userEntity - userEntity represents which entity (fencerA or fencerB) is the user
+      // This should stay constant - only positions change when swapping
+      // The userEntity is tied to the actual fencer identity, not their position
       
       console.log('🔄 Fencers swapped successfully');
       

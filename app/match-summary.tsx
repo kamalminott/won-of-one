@@ -171,9 +171,25 @@ export default function MatchSummaryScreen() {
           
           // Calculate best run and score progression if we have match data and user info
           if (matchData && matchData.fencer_1_name) {
+            // Determine which fencer is the user (for calculations)
+            const normalizedUserName = userName ? userName.trim().toLowerCase() : '';
+            const isFencer1User = normalizedUserName && matchData.fencer_1_name
+              ? matchData.fencer_1_name.trim().toLowerCase() === normalizedUserName
+              : false;
+            const isFencer2User = normalizedUserName && matchData.fencer_2_name
+              ? matchData.fencer_2_name.trim().toLowerCase() === normalizedUserName
+              : false;
+            
+            // Use the actual user's name for calculations (could be fencer_1 or fencer_2)
+            const userFencerName = isFencer1User 
+              ? (matchData.fencer_1_name || 'You')
+              : isFencer2User 
+              ? (matchData.fencer_2_name || 'You')
+              : (matchData.fencer_1_name || 'You'); // Fallback to fencer_1 if no user match
+            
             const calculatedBestRun = await matchService.calculateBestRun(
               params.matchId as string, 
-              matchData.fencer_1_name,
+              userFencerName,
               params.remoteId as string // Pass the remoteId to help find events
             );
             console.log('🏃 Calculated best run:', calculatedBestRun);
@@ -181,14 +197,14 @@ export default function MatchSummaryScreen() {
 
             const calculatedScoreProgression = await matchService.calculateScoreProgression(
               params.matchId as string,
-              matchData.fencer_1_name || 'You'
+              userFencerName
             );
             console.log('📈 Calculated score progression:', calculatedScoreProgression);
             setScoreProgression(calculatedScoreProgression);
 
             const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
               params.matchId as string,
-              matchData.fencer_1_name,
+              userFencerName,
               params.remoteId as string
             );
             console.log('📊 Calculated touches by period:', calculatedTouchesByPeriod);
@@ -455,6 +471,29 @@ export default function MatchSummaryScreen() {
   };
 
   // Prepare match data for MatchSummaryStats
+  const normalizeName = (value?: string | null) => {
+    if (!value) return '';
+    return value.trim().toLowerCase();
+  };
+  const normalizedUserName = normalizeName(userName);
+  const isFencer1User = normalizedUserName && match?.fencer_1_name
+    ? normalizeName(match.fencer_1_name) === normalizedUserName
+    : false;
+  const isFencer2User = normalizedUserName && match?.fencer_2_name
+    ? normalizeName(match.fencer_2_name) === normalizedUserName
+    : false;
+  
+  console.log('🔍 Match Summary - User identification:', {
+    userName,
+    normalizedUserName,
+    fencer1Name: match?.fencer_1_name,
+    fencer2Name: match?.fencer_2_name,
+    normalizedFencer1: match?.fencer_1_name ? normalizeName(match.fencer_1_name) : 'N/A',
+    normalizedFencer2: match?.fencer_2_name ? normalizeName(match.fencer_2_name) : 'N/A',
+    isFencer1User,
+    isFencer2User
+  });
+
   const matchData = match ? {
     id: match.match_id,
     opponent: match.fencer_2_name || 'Opponent',
@@ -467,11 +506,36 @@ export default function MatchSummaryScreen() {
     score: `${match.final_score || 0}-${match.touches_against || 0}`,
     matchType: matchType, // Use match type from database
     date: new Date().toLocaleDateString(),
-    userScore: match.final_score || 0,
-    opponentScore: match.touches_against || 0,
+    // Use entity-based logic to determine which score belongs to the user
+    // final_score is fencer_1's score, touches_against is fencer_2's score
+    userScore: isFencer1User 
+      ? (match.final_score || 0) 
+      : isFencer2User 
+      ? (match.touches_against || 0) 
+      : (match.final_score || 0), // Fallback to fencer_1 if no user match
+    opponentScore: isFencer1User 
+      ? (match.touches_against || 0) 
+      : isFencer2User 
+      ? (match.final_score || 0) 
+      : (match.touches_against || 0), // Fallback to fencer_2 if no user match
     bestRun: bestRun, // Now using calculated best run from database
     fencer1Name: match.fencer_1_name,
-    fencer2Name: match.fencer_2_name
+    fencer2Name: match.fencer_2_name,
+    isFencer1User,
+    isFencer2User,
+    // Map entity-based scores (user/opponent) to position-based scores (left/right)
+    // final_score = user's score, touches_against = opponent's score
+    // fencer_1_name and fencer_2_name are position-based (left/right after swap)
+    fencer1Score: isFencer1User 
+      ? (match.final_score || 0)  // User is fencer_1 (left), so use user's score
+      : isFencer2User 
+      ? (match.touches_against || 0)  // User is fencer_2 (right), so fencer_1 (left) is opponent
+      : (match.final_score || 0), // Fallback
+    fencer2Score: isFencer1User 
+      ? (match.touches_against || 0)  // User is fencer_1 (left), so fencer_2 (right) is opponent
+      : isFencer2User 
+      ? (match.final_score || 0)  // User is fencer_2 (right), so use user's score
+      : (match.touches_against || 0) // Fallback
   } : null;
 
   const styles = StyleSheet.create({
@@ -700,10 +764,16 @@ export default function MatchSummaryScreen() {
           notes={notes}
           onNotesChange={handleNotesChange}
           onNotesPress={handleNotesPress}
-          userLabel={match?.user_id 
-            ? getFirstName(userName || match?.fencer_1_name) || 'You'
+          userLabel={match?.user_id && isFencer1User
+            ? getFirstName(match?.fencer_1_name) || 'You'
+            : match?.user_id && isFencer2User
+            ? getFirstName(match?.fencer_2_name) || 'You'
             : getFirstName(match?.fencer_1_name) || 'Fencer 1'}
-          opponentLabel={getFirstName(match?.fencer_2_name) || 'Opponent'}
+          opponentLabel={match?.user_id && isFencer1User
+            ? getFirstName(match?.fencer_2_name) || 'Opponent'
+            : match?.user_id && isFencer2User
+            ? getFirstName(match?.fencer_1_name) || 'Opponent'
+            : getFirstName(match?.fencer_2_name) || 'Fencer 2'}
         />
       </ScrollView>
 
