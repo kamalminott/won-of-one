@@ -20,9 +20,9 @@ const getInitials = (name: string | undefined): string => {
 
 interface MatchSummaryCardProps {
   leftPlayerName: string;
-  leftPlayerImage: string;
+  leftPlayerImage?: string;
   rightPlayerName: string;
-  rightPlayerImage: string;
+  rightPlayerImage?: string;
   youScore: number;
   opponentScore: number;
   duration: string;

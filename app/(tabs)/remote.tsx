@@ -73,6 +73,7 @@ export default function RemoteScreen() {
   const [currentPeriod, setCurrentPeriod] = useState(1);
   // Entity-based score state (position-agnostic)
   const [scores, setScores] = useState({ fencerA: 0, fencerB: 0 });
+  const scoresRef = useRef({ fencerA: 0, fencerB: 0 }); // Ref to track current scores for timer callbacks
   const [isPlaying, setIsPlaying] = useState(false);
   const [matchTime, setMatchTime] = useState(180); // 3 minutes in seconds
   const [period1Time, setPeriod1Time] = useState(0); // in seconds
@@ -2297,6 +2298,7 @@ export default function RemoteScreen() {
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
   const [isPriorityRound, setIsPriorityRound] = useState(false); // Track if currently in priority round
   const [hasShownPriorityScorePopup, setHasShownPriorityScorePopup] = useState(false); // Track if priority score popup has been shown
+  const [priorityRoundPeriod, setPriorityRoundPeriod] = useState<number | null>(null); // Track which period priority round was assigned in
   // Entity-based card state (position-agnostic)
   const [yellowCards, setYellowCards] = useState<{ fencerA: number[], fencerB: number[] }>({ fencerA: [], fencerB: [] });
   const [redCards, setRedCards] = useState<{ fencerA: number[], fencerB: number[] }>({ fencerA: [], fencerB: [] });
@@ -2568,6 +2570,57 @@ export default function RemoteScreen() {
 
   // Note: Removed conflicting useFocusEffect that was resetting all state
 
+  // Keep scoresRef in sync with scores state
+  useEffect(() => {
+    scoresRef.current = scores;
+  }, [scores]);
+
+  // Helper function to transition to next period (used when skipping break)
+  const transitionToNextPeriod = async (currentPeriodValue: number) => {
+    const nextPeriod = currentPeriodValue + 1;
+    
+    // End current period and create new one
+    if (currentMatchPeriod) {
+      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+        end_time: new Date().toISOString(),
+        fencer_1_score: scores.fencerA,
+        fencer_2_score: scores.fencerB,
+        fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+        fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+      });
+      
+      const periodData = {
+        match_id: currentMatchPeriod.match_id,
+        period_number: nextPeriod,
+        start_time: new Date().toISOString(),
+        fencer_1_score: scores.fencerA,
+        fencer_2_score: scores.fencerB,
+        fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+        fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+        priority_assigned: priorityFencer || undefined,
+        priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
+      };
+      
+      const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+      if (newPeriodRecord) {
+        setCurrentMatchPeriod(newPeriodRecord);
+        setMatchId(newPeriodRecord.match_id); // Store match ID safely
+      }
+    }
+    
+    setCurrentPeriod(nextPeriod);
+    currentPeriodRef.current = nextPeriod; // Update ref
+    setTimeRemaining(matchTime);
+    setIsPlaying(false);
+    
+    // Show next period ready message
+    setTimeout(() => {
+      Alert.alert('Next Round!', `Period ${nextPeriod} ready. Timer set to ${formatTime(matchTime)}.`);
+    }, 100);
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
   const incrementPeriod = async () => {
     if (currentPeriod < 3) {
       // Pause timer if it's currently running
@@ -2755,10 +2808,40 @@ export default function RemoteScreen() {
                 // Track priority winner
                 await trackPriorityWinner(entityDisplayName);
                 await trackPriorityRoundEnd(entityDisplayName);
-                // Complete match with entity as winner - pass the updated scores
-                const finalFencerAScore = entity === 'fencerA' ? newScore : scores.fencerA;
-                const finalFencerBScore = entity === 'fencerB' ? newScore : scores.fencerB;
-                await proceedWithMatchCompletion(finalFencerAScore, finalFencerBScore);
+                
+                // Check which period priority was assigned in
+                const period = priorityRoundPeriod;
+                if (period === 1 || period === 2) {
+                  // Period 1-2: Show break popup, then transition to next period
+                  setIsPriorityRound(false); // Exit priority round mode
+                  setPriorityRoundPeriod(null); // Reset
+                  
+                  // Show break popup
+                  Alert.alert(
+                    'Priority Winner!',
+                    `${entityDisplayName} won on priority!\n\nWould you like to take a 1-minute break?`,
+                    [
+                      { 
+                        text: 'Skip Break', 
+                        style: 'cancel',
+                        onPress: async () => {
+                          await transitionToNextPeriod(period);
+                        }
+                      },
+                      { 
+                        text: 'Take Break', 
+                        onPress: () => {
+                          startBreakTimer();
+                        }
+                      }
+                    ]
+                  );
+                } else {
+                  // Period 3: Complete match
+                  const finalFencerAScore = entity === 'fencerA' ? newScore : scores.fencerA;
+                  const finalFencerBScore = entity === 'fencerB' ? newScore : scores.fencerB;
+                  await proceedWithMatchCompletion(finalFencerAScore, finalFencerBScore);
+                }
               }
             }
           ]
@@ -3852,112 +3935,184 @@ export default function RemoteScreen() {
             const winnerName = priorityFencer === 'fencerA' 
               ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.fencerA)
               : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.fencerB);
-            Alert.alert(
-              '⏱️ Time Expired',
-              `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!`,
-              [
-                {
-                  text: 'OK',
-                  onPress: async () => {
-                    await proceedWithMatchCompletion();
+            // Check which period priority was assigned in
+            const period = priorityRoundPeriod;
+            if (period === 1 || period === 2) {
+              // Period 1-2: Show break popup, then transition to next period
+              setIsPriorityRound(false); // Exit priority round mode
+              setPriorityRoundPeriod(null); // Reset
+              
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!\n\nWould you like to take a 1-minute break?`,
+                [
+                  { 
+                    text: 'Skip Break', 
+                    style: 'cancel',
+                    onPress: async () => {
+                      await transitionToNextPeriod(period);
+                    }
+                  },
+                  { 
+                    text: 'Take Break', 
+                    onPress: () => {
+                      startBreakTimer();
+                    }
                   }
-                }
-              ]
-            );
+                ]
+              );
+            } else {
+              // Period 3: Complete match
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!`,
+                [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await proceedWithMatchCompletion();
+                    }
+                  }
+                ]
+              );
+            }
           } else {
             // Score changed - higher score wins
             const winnerName = currentFencerAScore > currentFencerBScore 
               ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.fencerA)
               : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.fencerB);
+            // Check which period priority was assigned in
+            const period = priorityRoundPeriod;
+            if (period === 1 || period === 2) {
+              // Period 1-2: Show break popup, then transition to next period
+              setIsPriorityRound(false); // Exit priority round mode
+              setPriorityRoundPeriod(null); // Reset
+              
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!\n\nWould you like to take a 1-minute break?`,
+                [
+                  { 
+                    text: 'Skip Break', 
+                    style: 'cancel',
+                    onPress: async () => {
+                      await transitionToNextPeriod(period);
+                    }
+                  },
+                  { 
+                    text: 'Take Break', 
+                    onPress: () => {
+                      startBreakTimer();
+                    }
+                  }
+                ]
+              );
+            } else {
+              // Period 3: Complete match
+              Alert.alert(
+                '⏱️ Time Expired',
+                `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!`,
+                [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await proceedWithMatchCompletion();
+                    }
+                  }
+                ]
+              );
+            }
+          }
+          return; // Don't continue to regular period logic
+        }
+        
+        // Check if scores are tied for any period (use ref to get current value)
+        const currentScores = scoresRef.current;
+        const isTied = currentScores.fencerA === currentScores.fencerB;
+        
+        // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
+        if (currentPeriodValue === 1 || currentPeriodValue === 2) {
+          // Period 1 or 2 - show break popup (with priority option if tied)
+          if (isTied) {
+            // Scores are tied - show 3-button popup with priority option
             Alert.alert(
-              '⏱️ Time Expired',
-              `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!`,
+              'Match Time Complete!',
+              `Period ${currentPeriodValue} ended in a tie (${scores.fencerA}-${scores.fencerB}). Would you like to assign priority?`,
               [
-                {
-                  text: 'OK',
+                { 
+                  text: 'Assign Priority', 
+                  onPress: () => {
+                    // Store which period priority is being assigned in
+                    setPriorityRoundPeriod(currentPeriodValue);
+                    // Assign priority and start priority round (same as period 3)
+                    autoAssignPriority(true);
+                    // Priority round will start after animation completes
+                  }
+                },
+                { 
+                  text: 'Skip Break', 
+                  style: 'cancel',
                   onPress: async () => {
-                    await proceedWithMatchCompletion();
+                    await transitionToNextPeriod(currentPeriodValue);
+                  }
+                },
+                { 
+                  text: 'Take Break', 
+                  onPress: () => {
+                    startBreakTimer();
+                  }
+                }
+              ]
+            );
+          } else {
+            // Scores are not tied - show normal break popup
+            Alert.alert(
+              'Match Time Complete!',
+              'Would you like to take a 1-minute break?',
+              [
+                { 
+                  text: 'Skip Break', 
+                  style: 'cancel',
+                  onPress: async () => {
+                    await transitionToNextPeriod(currentPeriodValue);
+                  }
+                },
+                { 
+                  text: 'Take Break', 
+                  onPress: () => {
+                    startBreakTimer();
                   }
                 }
               ]
             );
           }
-          return; // Don't continue to regular period logic
-        }
-        
-        // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
-        if (currentPeriodValue === 1 || currentPeriodValue === 2) {
-          // Period 1 or 2 - show break popup
-          Alert.alert(
-            'Match Time Complete!',
-            'Would you like to take a 1-minute break?',
-            [
-              { 
-                text: 'No', 
-                style: 'cancel',
-                onPress: async () => {
-                  // Go to next period
-                  const nextPeriod = currentPeriodValue + 1;
-                  
-                  // End current period and create new one
-                  if (currentMatchPeriod) {
-                    await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
-                      end_time: new Date().toISOString(),
-                      fencer_1_score: scores.fencerA,
-                      fencer_2_score: scores.fencerB,
-                      fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                      fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                    });
-                    
-                    const periodData = {
-                      match_id: currentMatchPeriod.match_id,
-                      period_number: nextPeriod,
-                      start_time: new Date().toISOString(),
-                      fencer_1_score: scores.fencerA,
-                      fencer_2_score: scores.fencerB,
-                      fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                      fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                      priority_assigned: priorityFencer || undefined,
-                      priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
-                    };
-                    
-                    const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
-                    if (newPeriodRecord) {
-                      setCurrentMatchPeriod(newPeriodRecord);
-                      setMatchId(newPeriodRecord.match_id); // Store match ID safely
-                    }
-                  }
-                  
-                  setCurrentPeriod(nextPeriod);
-                  currentPeriodRef.current = nextPeriod; // Update ref
-                  setTimeRemaining(matchTime);
-                  setIsPlaying(false);
-                  
-                  
-                  // Show next period ready message
-                  setTimeout(() => {
-                    Alert.alert('Next Round!', `Period ${nextPeriod} ready. Timer set to ${formatTime(matchTime)}.`);
-                  }, 100);
-                  
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                }
-              },
-              { 
-                text: 'Yes', 
-                onPress: () => {
-                  startBreakTimer();
-                }
-              }
-            ]
-          );
         } else if (currentPeriodValue === 3) {
           // Period 3 - check if scores are tied
-          const currentFencerAScore = scores.fencerA;
-          const currentFencerBScore = scores.fencerB;
-          console.log(`🔍 Period 3 ended - checking tie: fencerAScore=${currentFencerAScore}, fencerBScore=${currentFencerBScore}, isTied=${currentFencerAScore === currentFencerBScore}`);
-          if (currentFencerAScore === currentFencerBScore) {
-            // Scores are tied - user must manually click priority button (no auto popup)
-            console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
+          if (isTied) {
+            // Scores are tied - show 2-button popup with priority option
+            Alert.alert(
+              'Match Time Complete!',
+              `Period 3 ended in a tie (${currentScores.fencerA}-${currentScores.fencerB}). Would you like to assign priority?`,
+              [
+                { 
+                  text: 'Assign Priority', 
+                  onPress: () => {
+                    // Assign priority and start priority round (for period 3)
+                    autoAssignPriority(true);
+                    // Priority round will start after animation completes
+                  }
+                },
+                { 
+                  text: 'Complete Match', 
+                  style: 'cancel',
+                  onPress: async () => {
+                    setTimeRemaining(0);
+                    // Complete the match without priority
+                    await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                  }
+                }
+              ]
+            );
           } else {
             // Scores are not tied - show match completion
             Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
@@ -4019,112 +4174,205 @@ export default function RemoteScreen() {
               const winnerName = priorityFencer === 'fencerA' 
                 ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.fencerA)
                 : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.fencerB);
-              Alert.alert(
-                '⏱️ Time Expired',
-                `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!`,
-                [
-                  {
-                    text: 'OK',
-                    onPress: async () => {
-                      await proceedWithMatchCompletion();
+              // Check which period priority was assigned in
+              const period = priorityRoundPeriod;
+              if (period === 1 || period === 2) {
+                // Period 1-2: Show break popup, then transition to next period
+                setIsPriorityRound(false); // Exit priority round mode
+                setPriorityRoundPeriod(null); // Reset
+                
+                Alert.alert(
+                  '⏱️ Time Expired',
+                  `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!\n\nWould you like to take a 1-minute break?`,
+                  [
+                    { 
+                      text: 'Skip Break', 
+                      style: 'cancel',
+                      onPress: async () => {
+                        await transitionToNextPeriod(period);
+                      }
+                    },
+                    { 
+                      text: 'Take Break', 
+                      onPress: () => {
+                        startBreakTimer();
+                      }
                     }
-                  }
-                ]
-              );
+                  ]
+                );
+              } else {
+                // Period 3: Complete match
+                Alert.alert(
+                  '⏱️ Time Expired',
+                  `Priority timer ended with score still tied at ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins on priority!`,
+                  [
+                    {
+                      text: 'OK',
+                      onPress: async () => {
+                        await proceedWithMatchCompletion();
+                      }
+                    }
+                  ]
+                );
+              }
             } else {
               // Score changed - higher score wins
               const winnerName = currentFencerAScore > currentFencerBScore 
                 ? (showUserProfile && toggleCardPosition === 'left' ? userDisplayName : fencerNames.fencerA)
                 : (showUserProfile && toggleCardPosition === 'right' ? userDisplayName : fencerNames.fencerB);
+              
+              // Check which period priority was assigned in
+              const period = priorityRoundPeriod;
+              if (period === 1 || period === 2) {
+                // Period 1-2: Show break popup, then transition to next period
+                setIsPriorityRound(false); // Exit priority round mode
+                setPriorityRoundPeriod(null); // Reset
+                
+                Alert.alert(
+                  '⏱️ Time Expired',
+                  `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!\n\nWould you like to take a 1-minute break?`,
+                  [
+                    { 
+                      text: 'Skip Break', 
+                      style: 'cancel',
+                      onPress: async () => {
+                        await transitionToNextPeriod(period);
+                      }
+                    },
+                    { 
+                      text: 'Take Break', 
+                      onPress: () => {
+                        startBreakTimer();
+                      }
+                    }
+                  ]
+                );
+              } else {
+                // Period 3: Complete match
+                Alert.alert(
+                  '⏱️ Time Expired',
+                  `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!`,
+                  [
+                    {
+                      text: 'OK',
+                      onPress: async () => {
+                        await proceedWithMatchCompletion();
+                      }
+                    }
+                  ]
+                );
+              }
+            }
+            return; // Don't continue to regular period logic
+          }
+          
+          // Check if scores are tied for any period (use ref to get current value)
+          const currentScores = scoresRef.current;
+          const isTied = currentScores.fencerA === currentScores.fencerB;
+          
+          // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
+          if (currentPeriodValue === 1 || currentPeriodValue === 2) {
+            // Period 1 or 2 - show break popup (with priority option if tied)
+            if (isTied) {
+              // Scores are tied - show 3-button popup with priority option
               Alert.alert(
-                '⏱️ Time Expired',
-                `Priority timer ended with score ${currentFencerAScore}-${currentFencerBScore}.\n\n${winnerName} wins!`,
+                'Match Time Complete!',
+                `Period ${currentPeriodValue} ended in a tie (${currentScores.fencerA}-${currentScores.fencerB}). Would you like to assign priority?`,
                 [
-                  {
-                    text: 'OK',
+                  { 
+                    text: 'Assign Priority', 
+                    onPress: () => {
+                      // Assign priority without starting priority round (for period 1-2)
+                      // Priority will be saved to next period
+                      autoAssignPriority(false);
+                      // After priority animation completes (3 seconds), show break popup
+                      setTimeout(() => {
+                        Alert.alert(
+                          'Priority Assigned!',
+                          'Would you like to take a 1-minute break?',
+                          [
+                            { 
+                              text: 'Skip Break', 
+                              style: 'cancel',
+                              onPress: async () => {
+                                await transitionToNextPeriod(currentPeriodValue);
+                              }
+                            },
+                            { 
+                              text: 'Take Break', 
+                              onPress: () => {
+                                startBreakTimer();
+                              }
+                            }
+                          ]
+                        );
+                      }, 3500); // Wait for priority animation to complete (3 seconds) + small buffer
+                    }
+                  },
+                  { 
+                    text: 'Skip Break', 
+                    style: 'cancel',
                     onPress: async () => {
-                      await proceedWithMatchCompletion();
+                      await transitionToNextPeriod(currentPeriodValue);
+                    }
+                  },
+                  { 
+                    text: 'Take Break', 
+                    onPress: () => {
+                      startBreakTimer();
+                    }
+                  }
+                ]
+              );
+            } else {
+              // Scores are not tied - show normal break popup
+              Alert.alert(
+                'Match Time Complete!',
+                'Would you like to take a 1-minute break?',
+                [
+                  { 
+                    text: 'Skip Break', 
+                    style: 'cancel',
+                    onPress: async () => {
+                      await transitionToNextPeriod(currentPeriodValue);
+                    }
+                  },
+                  { 
+                    text: 'Take Break', 
+                    onPress: () => {
+                      startBreakTimer();
                     }
                   }
                 ]
               );
             }
-            return; // Don't continue to regular period logic
-          }
-          
-          // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
-          if (currentPeriodValue === 1 || currentPeriodValue === 2) {
-            // Period 1 or 2 - show break popup
-            Alert.alert(
-              'Match Time Complete!',
-              'Would you like to take a 1-minute break?',
-              [
-                { 
-                  text: 'No', 
-                  style: 'cancel',
-                  onPress: async () => {
-                    // Go to next period
-                    const nextPeriod = currentPeriodValue + 1;
-                    
-                    // End current period and create new one
-                    if (currentMatchPeriod) {
-                      await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
-                        end_time: new Date().toISOString(),
-                        fencer_1_score: scores.fencerA,
-                        fencer_2_score: scores.fencerB,
-                        fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                        fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                      });
-                      
-                      const periodData = {
-                        match_id: currentMatchPeriod.match_id,
-                        period_number: nextPeriod,
-                        start_time: new Date().toISOString(),
-                        fencer_1_score: scores.fencerA,
-                        fencer_2_score: scores.fencerB,
-                        fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                        fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                        priority_assigned: priorityFencer || undefined,
-                        priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
-                      };
-                      
-                      const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
-                      if (newPeriodRecord) {
-                        setCurrentMatchPeriod(newPeriodRecord);
-                        setMatchId(newPeriodRecord.match_id); // Store match ID safely
-                      }
-                    }
-                    
-                    setCurrentPeriod(nextPeriod);
-                    currentPeriodRef.current = nextPeriod; // Update ref
-                    setTimeRemaining(matchTime);
-                    setIsPlaying(false);
-                    
-                    
-                    // Show next period ready message
-                    setTimeout(() => {
-                      Alert.alert('Next Round!', `Period ${nextPeriod} ready. Timer set to ${formatTime(matchTime)}.`);
-                    }, 100);
-                    
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  }
-                },
-                { 
-                  text: 'Yes', 
-                  onPress: () => {
-                    startBreakTimer();
-                  }
-                }
-              ]
-            );
           } else if (currentPeriodValue === 3) {
             // Period 3 - check if scores are tied
-            const currentFencerAScore = scores.fencerA;
-            const currentFencerBScore = scores.fencerB;
-            console.log(`🔍 Period 3 ended (second check) - checking tie: fencerAScore=${currentFencerAScore}, fencerBScore=${currentFencerBScore}, isTied=${currentFencerAScore === currentFencerBScore}`);
-            if (currentFencerAScore === currentFencerBScore) {
-              // Scores are tied - user must manually click priority button (no auto popup)
-              console.log('⚖️ Period 3 ended in tie - waiting for user to assign priority');
+            if (isTied) {
+              // Scores are tied - show 2-button popup with priority option
+              Alert.alert(
+                'Match Time Complete!',
+                `Period 3 ended in a tie (${currentScores.fencerA}-${currentScores.fencerB}). Would you like to assign priority?`,
+                [
+                  { 
+                    text: 'Assign Priority', 
+                    onPress: () => {
+                      // Assign priority and start priority round (for period 3)
+                      autoAssignPriority(true);
+                      // Priority round will start after animation completes
+                    }
+                  },
+                  { 
+                    text: 'Complete Match', 
+                    style: 'cancel',
+                    onPress: async () => {
+                      setTimeRemaining(0);
+                      // Complete the match without priority
+                      await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                    }
+                  }
+                ]
+              );
             } else {
               // Scores are not tied - show match completion
               Alert.alert('Match Complete!', 'All periods have been completed. Great job!', [
@@ -4312,7 +4560,7 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
-  const assignPriorityWithAnimation = (finalFencer: 'fencerA' | 'fencerB') => {
+  const assignPriorityWithAnimation = (finalFencer: 'fencerA' | 'fencerB', shouldStartPriorityRound: boolean = true) => {
     setIsAssigningPriority(true);
     setPriorityFencer(null);
     
@@ -4347,28 +4595,36 @@ export default function RemoteScreen() {
         setPriorityFencer(finalFencer);
         setIsAssigningPriority(false);
         
-        // Enter priority round mode
-        setIsPriorityRound(true);
-        setHasShownPriorityScorePopup(false); // Reset popup flag for new priority round
-        
-        // Track priority round start
-        trackPriorityRoundStart();
-        
-        // Reset timer to 1 minute for priority round
-        setMatchTime(60); // 1 minute
-        setTimeRemaining(60);
-        setIsPlaying(false); // User must press play to start priority timer
-        
-        // Show priority result
-        setTimeout(() => {
+        if (shouldStartPriorityRound) {
+          // Enter priority round mode (for period 3)
+          setIsPriorityRound(true);
+          setHasShownPriorityScorePopup(false); // Reset popup flag for new priority round
+          
+          // Track priority round start
+          trackPriorityRoundStart();
+          
+          // Reset timer to 1 minute for priority round
+          setMatchTime(60); // 1 minute
+          setTimeRemaining(60);
+          setIsPlaying(false); // User must press play to start priority timer
+          
+          // Show priority result
+          setTimeout(() => {
+            const priorityFencerName = getNameByEntity(finalFencer);
+              
+            Alert.alert(
+              'Priority Assigned!', 
+              `${priorityFencerName} has priority!\n\nTimer reset to 1:00 for sudden death round.\n\nPress Play when ready.`,
+              [{ text: 'OK' }]
+            );
+          }, 500);
+        } else {
+          // Just assign priority without starting priority round (for period 1-2)
+          // Priority is stored in state and will be saved to next period
           const priorityFencerName = getNameByEntity(finalFencer);
-            
-          Alert.alert(
-            'Priority Assigned!', 
-            `${priorityFencerName} has priority!\n\nTimer reset to 1:00 for sudden death round.\n\nPress Play when ready.`,
-            [{ text: 'OK' }]
-          );
-        }, 500);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          // Don't show alert here - break popup will be shown by the caller
+        }
         
         // Success haptic feedback
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -4383,11 +4639,11 @@ export default function RemoteScreen() {
     const randomValue = Math.random();
     const finalFencer = randomValue < 0.5 ? 'fencerA' : 'fencerB';
     
-    // Use shared animation function
-    assignPriorityWithAnimation(finalFencer);
+    // Use shared animation function - always start priority round when called from button
+    assignPriorityWithAnimation(finalFencer, true);
   };
 
-  const autoAssignPriority = () => {
+  const autoAssignPriority = (shouldStartPriorityRound: boolean = true) => {
     if (isAssigningPriority) return; // Prevent multiple assignments
     
     // Determine random priority (entity-based)
@@ -4398,7 +4654,7 @@ export default function RemoteScreen() {
     setShowPriorityPopup(false);
     
     // Use shared animation function
-    assignPriorityWithAnimation(finalFencer);
+    assignPriorityWithAnimation(finalFencer, shouldStartPriorityRound);
   };
 
   const startInjuryTimer = () => {
@@ -5998,7 +6254,8 @@ export default function RemoteScreen() {
           )}
           
           {/* Injury Timer Display - shows when injury timer is active (higher priority than match timer) */}
-          {!isBreakTime && isInjuryTimer && (
+          {/* Hide injury timer when priority should be shown (tied scores at period end) */}
+          {!isBreakTime && isInjuryTimer && !(timeRemaining === 0 && scores.fencerA === scores.fencerB) && (
             <View style={[styles.countdownDisplay, { 
               backgroundColor: hasMatchStarted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)',
               borderWidth: width * 0.003,
@@ -6634,7 +6891,7 @@ export default function RemoteScreen() {
           style={[
             styles.assignPriorityButton, 
             {
-              backgroundColor: (currentPeriod === 3 && timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+              backgroundColor: (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
                 Colors.yellow.accent :
                 hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
             },
@@ -6650,7 +6907,7 @@ export default function RemoteScreen() {
           ]}
           onPress={
             hasMatchStarted ? (
-              (currentPeriod === 3 && timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+              (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
                 () => setShowPriorityPopup(true) :
                 (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
             ) : undefined
@@ -6658,10 +6915,10 @@ export default function RemoteScreen() {
           disabled={!hasMatchStarted}
         >
           <Text style={styles.assignPriorityIcon}>
-            {(currentPeriod === 3 && timeRemaining === 0 && scores.fencerA === scores.fencerB) ? '🎲' : '🏥'}
+            {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ? '🎲' : '🏥'}
           </Text>
           <Text style={styles.assignPriorityText}>
-            {(currentPeriod === 3 && timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+            {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
               'Assign Priority' :
               (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')
             }
@@ -7186,14 +7443,14 @@ export default function RemoteScreen() {
             <View style={styles.popupContainer}>
             <Text style={styles.popupTitle}>🏁 Match Ended in Tie!</Text>
             <Text style={styles.inputHint}>
-              The match ended with a score of {scores.fencerA}-{scores.fencerB} after Period 3. Would you like to assign priority to determine the winner?
+              Period {currentPeriod} ended with a score of {scores.fencerA}-{scores.fencerB}. Would you like to assign priority to determine the winner?
             </Text>
             
             <View style={styles.popupButtons}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowPriorityPopup(false)}>
                 <Text style={styles.cancelButtonText}>No</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={autoAssignPriority}>
+              <TouchableOpacity style={styles.saveButton} onPress={() => autoAssignPriority(true)}>
                 <Text style={styles.saveButtonText}>Yes, Assign Priority</Text>
               </TouchableOpacity>
             </View>

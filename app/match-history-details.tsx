@@ -1,7 +1,7 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
@@ -27,7 +27,7 @@ interface MatchDetailsProps {
 
 export default function MatchDetailsScreen() {
   const { width, height } = useWindowDimensions();
-  const { userName, profileImage } = useAuth();
+  const { userName, profileImage, user } = useAuth();
   const params = useLocalSearchParams();
   const [matchInsights, setMatchInsights] = useState({
     avgTimeBetweenTouches: '22s',
@@ -36,6 +36,8 @@ export default function MatchDetailsScreen() {
   });
   
   const [matchNotes, setMatchNotes] = useState('');
+  const [match, setMatch] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   
   const [scoreProgression, setScoreProgression] = useState<{
     userData: Array<{ x: string; y: number }>;
@@ -45,28 +47,28 @@ export default function MatchDetailsScreen() {
     opponentData: []
   });
   
+  // Normalize name for comparison (handles case, whitespace, etc.)
+  const normalizeName = (name: string | null | undefined): string => {
+    if (!name) return '';
+    return name.trim().toLowerCase();
+  };
   
-  // Get match data from route params
-  const matchData: MatchDetailsProps = {
-    matchId: params.matchId as string || '1',
-    youScore: params.youScore ? parseInt(params.youScore as string) : 0,  // Fixed: Check if param exists first
-    opponentScore: params.opponentScore ? parseInt(params.opponentScore as string) : 0,  // Fixed: Check if param exists first
-    opponentName: params.opponentName as string || 'Alex',
-    opponentImage: params.opponentImage as string,
-    date: params.date as string || 'Today',
-    duration: params.duration as string || '02:30',
-    matchType: params.matchType as string || 'Training',
-    location: params.location as string || 'Metro Field House'
+  // Get first name from full name
+  const getFirstName = (name: string | null | undefined): string => {
+    if (!name) return '';
+    return name.split(' ')[0];
   };
 
   // Calculate match insights from real data
   const calculateMatchInsights = async () => {
+    if (!match?.match_id) return;
+    
     try {
       // Get match events for this match
       const { data: matchEvents, error } = await supabase
         .from('match_event')
         .select('*')
-        .eq('match_id', matchData.matchId)
+        .eq('match_id', match.match_id)
         .order('timestamp', { ascending: true });
 
       if (error || !matchEvents || matchEvents.length === 0) {
@@ -166,10 +168,28 @@ export default function MatchDetailsScreen() {
 
   // Fetch score progression data
   const fetchScoreProgression = async () => {
+    if (!match?.match_id) return;
+    
     try {
+      // Determine which fencer is the user (for calculations)
+      const normalizedUserName = normalizeName(userName);
+      const isFencer1User = normalizedUserName && match.fencer_1_name
+        ? normalizeName(match.fencer_1_name) === normalizedUserName
+        : false;
+      const isFencer2User = normalizedUserName && match.fencer_2_name
+        ? normalizeName(match.fencer_2_name) === normalizedUserName
+        : false;
+      
+      // Use the actual user's name for calculations (could be fencer_1 or fencer_2)
+      const userFencerName = isFencer1User 
+        ? (match.fencer_1_name || 'You')
+        : isFencer2User 
+        ? (match.fencer_2_name || 'You')
+        : (match.fencer_1_name || 'You'); // Fallback to fencer_1 if no user match
+      
       const progression = await matchService.calculateScoreProgression(
-        matchData.matchId, 
-        userName || 'You'
+        match.match_id, 
+        userFencerName
       );
       console.log('📊 fetchScoreProgression received:', progression);
       setScoreProgression(progression);
@@ -180,26 +200,15 @@ export default function MatchDetailsScreen() {
 
   // Fetch match notes
   const fetchMatchNotes = async () => {
+    if (!match?.match_id) return;
+    
     try {
-      // First try to get notes from match table
-      const { data: match, error } = await supabase
-        .from('match')
-        .select('*')
-        .eq('match_id', matchData.matchId)
-        .single();
-
-      if (error) {
-        console.log('No match found for notes:', error);
-        return;
-      }
-
-      // Check if notes field exists and has content
+      // Notes are already in the match object we fetched
       if (match && 'notes' in match && match.notes) {
         setMatchNotes(match.notes);
-        console.log('📝 Match notes loaded from match table:', match.notes);
+        console.log('📝 Match notes loaded from match object:', match.notes);
       } else {
-        console.log('📝 No notes found in match record or notes field does not exist');
-        // Could implement alternative storage like a separate notes table if needed
+        console.log('📝 No notes found in match record');
       }
     } catch (error) {
       console.error('Error fetching match notes:', error);
@@ -207,17 +216,242 @@ export default function MatchDetailsScreen() {
   };
 
 
-  // Load match insights, score progression, and notes when component mounts
+  // Fetch match data when component mounts
   useEffect(() => {
-    calculateMatchInsights();
-    fetchScoreProgression();
-    fetchMatchNotes();
-  }, [matchData.matchId]);
+    const fetchMatch = async () => {
+      if (!params.matchId) {
+        console.log('⚠️ No matchId in params');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        console.log('🔍 Fetching match data for matchId:', params.matchId);
+        const matchData = await matchService.getMatchById(params.matchId as string);
+        console.log('✅ Match data fetched:', {
+          matchId: matchData?.match_id,
+          fencer1Name: matchData?.fencer_1_name,
+          fencer2Name: matchData?.fencer_2_name,
+          finalScore: matchData?.final_score,
+          touchesAgainst: matchData?.touches_against
+        });
+        setMatch(matchData);
+      } catch (error) {
+        console.error('❌ Error fetching match:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMatch();
+  }, [params.matchId]);
+
+  // Load match insights, score progression, and notes when match is loaded
+  useEffect(() => {
+    if (match && match.match_id) {
+      calculateMatchInsights();
+      fetchScoreProgression();
+      fetchMatchNotes();
+    }
+  }, [match?.match_id]);
 
   // Debug score progression state changes
   useEffect(() => {
     console.log('📊 scoreProgression state changed:', scoreProgression);
   }, [scoreProgression]);
+
+  // Calculate display data based on match from database
+  // Determine which fencer is the user and map names/scores correctly
+  const normalizedUserName = normalizeName(userName);
+  const isFencer1User = normalizedUserName && match?.fencer_1_name
+    ? normalizeName(match.fencer_1_name) === normalizedUserName
+    : false;
+  const isFencer2User = normalizedUserName && match?.fencer_2_name
+    ? normalizeName(match.fencer_2_name) === normalizedUserName
+    : false;
+  
+  console.log('🔍 [Match History Details] User identification:', {
+    userName,
+    normalizedUserName,
+    fencer1Name: match?.fencer_1_name,
+    fencer2Name: match?.fencer_2_name,
+    normalizedFencer1: match?.fencer_1_name ? normalizeName(match.fencer_1_name) : 'N/A',
+    normalizedFencer2: match?.fencer_2_name ? normalizeName(match.fencer_2_name) : 'N/A',
+    isFencer1User,
+    isFencer2User
+  });
+  
+  // Map position-based names (fencer_1 = left, fencer_2 = right)
+  // These reflect the final positions after any swaps
+  // IMPORTANT: We need to ensure we show the correct name for each position
+  // If a fencer is the user, show user's name; if opponent, show opponent's name
+  let leftPlayerName: string;
+  let rightPlayerName: string;
+  
+  if (match && match.fencer_1_name !== null && match.fencer_1_name !== undefined && 
+      match.fencer_2_name !== null && match.fencer_2_name !== undefined) {
+    // Match data is loaded - get names from database
+    let fencer1Name = match.fencer_1_name;
+    let fencer2Name = match.fencer_2_name;
+    
+    // Handle "You" replacement for manual matches
+    if (fencer1Name === 'You') {
+      fencer1Name = userName || 'You';
+    }
+    if (fencer2Name === 'You') {
+      fencer2Name = userName || 'You';
+    }
+    
+    // Determine which fencer is the user and which is the opponent
+    // Then assign names to left/right positions correctly
+    if (isFencer1User) {
+      // User is fencer_1 (left position), opponent is fencer_2 (right position)
+      leftPlayerName = fencer1Name; // User's name
+      rightPlayerName = fencer2Name; // Opponent's name
+    } else if (isFencer2User) {
+      // User is fencer_2 (right position), opponent is fencer_1 (left position)
+      leftPlayerName = fencer1Name; // Opponent's name
+      rightPlayerName = fencer2Name; // User's name
+    } else {
+      // Can't identify user - use database values as-is (fallback)
+      // This handles edge cases where user name doesn't match either fencer
+      leftPlayerName = fencer1Name;
+      rightPlayerName = fencer2Name;
+      
+      // If both names are the same (data issue), try to use params
+      if (fencer1Name === fencer2Name && params.opponentName) {
+        console.warn('⚠️ [Match History Details] Both fencers have same name - using opponent from params');
+        // Assume user is on left (old behavior)
+        rightPlayerName = params.opponentName as string;
+      }
+    }
+  } else {
+    // Match data not loaded yet - use params as fallback
+    leftPlayerName = userName || (params.opponentName ? 'Fencer 1' : 'Fencer 1');
+    rightPlayerName = params.opponentName as string || 'Fencer 2';
+  }
+  
+  console.log('🔍 [Match History Details] Position-based names:', {
+    matchExists: !!match,
+    fromDatabase: {
+      fencer1: match?.fencer_1_name,
+      fencer2: match?.fencer_2_name,
+      fencer1Type: typeof match?.fencer_1_name,
+      fencer2Type: typeof match?.fencer_2_name,
+      fencer1IsNull: match?.fencer_1_name === null,
+      fencer2IsNull: match?.fencer_2_name === null,
+      fencer1IsUndefined: match?.fencer_1_name === undefined,
+      fencer2IsUndefined: match?.fencer_2_name === undefined,
+      fencer1IsEmpty: match?.fencer_1_name === '',
+      fencer2IsEmpty: match?.fencer_2_name === ''
+    },
+    fromParams: {
+      userName,
+      opponentName: params.opponentName
+    },
+    final: {
+      left: leftPlayerName,
+      right: rightPlayerName
+    },
+    isFencer1User,
+    isFencer2User,
+    loading,
+    bothNamesSame: leftPlayerName === rightPlayerName,
+    note: (match && match.fencer_1_name !== null && match.fencer_1_name !== undefined) 
+      ? 'Using database values (reflects swaps)' 
+      : 'Using params fallback (assumes user on left)'
+  });
+  
+  // Final safeguard: If both names are the same and match the user, use opponent from params
+  if (leftPlayerName === rightPlayerName && leftPlayerName === userName && params.opponentName) {
+    console.warn('⚠️ [Match History Details] Both names are user name - using opponent from params');
+    // Assume user is on left (old behavior)
+    rightPlayerName = params.opponentName as string;
+  }
+  
+  // Determine which position has the user for image/display
+  // If match data is available, use the calculated values
+  // Otherwise, assume user is on left (old behavior before swaps were tracked)
+  const leftIsUser = match ? isFencer1User : true;
+  const rightIsUser = match ? isFencer2User : false;
+  
+  // Map position-based scores (fencer_1 = left, fencer_2 = right)
+  // IMPORTANT: final_score and touches_against are entity-based (user/opponent), not position-based
+  // We need to map them to position-based scores based on which fencer is the user
+  // For now, use entity-based scores for display (will be corrected by MatchSummaryCardWithBorder)
+  // But we should ideally fetch period scores which are position-based
+  const leftScore = match 
+    ? (isFencer1User 
+      ? (match.final_score || 0)  // User is fencer_1 (left), so use user's score
+      : isFencer2User 
+      ? (match.touches_against || 0)  // User is fencer_2 (right), so fencer_1 (left) is opponent
+      : (match.final_score || 0)) // Fallback
+    : (params.youScore ? parseInt(params.youScore as string) : 0);
+  const rightScore = match
+    ? (isFencer1User 
+      ? (match.touches_against || 0)  // User is fencer_1 (left), so fencer_2 (right) is opponent
+      : isFencer2User 
+      ? (match.final_score || 0)  // User is fencer_2 (right), so use user's score
+      : (match.touches_against || 0)) // Fallback
+    : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
+  
+  console.log('🔍 [Match History Details] Position-based scores:', {
+    fromDatabase: {
+      final_score: match?.final_score,
+      touches_against: match?.touches_against
+    },
+    entityMapping: {
+      isFencer1User,
+      isFencer2User
+    },
+    final: {
+      left: leftScore,
+      right: rightScore
+    },
+    note: 'Mapped entity-based scores to position-based scores'
+  });
+  
+  // For win/loss calculation, use entity-based logic (user vs opponent)
+  // If match data is available, use entity-based calculation
+  // Otherwise, use params (which are entity-based: youScore vs opponentScore)
+  const userScore = match 
+    ? (isFencer1User 
+      ? (match.final_score || 0) 
+      : isFencer2User 
+      ? (match.touches_against || 0) 
+      : (match.final_score || 0))
+    : (params.youScore ? parseInt(params.youScore as string) : 0);
+  const opponentScore = match
+    ? (isFencer1User 
+      ? (match.touches_against || 0) 
+      : isFencer2User 
+      ? (match.final_score || 0) 
+      : (match.touches_against || 0))
+    : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
+  
+  // Get user's name for labels (could be on left or right)
+  const userFencerName = match
+    ? (isFencer1User 
+      ? (match.fencer_1_name || userName || 'You')
+      : isFencer2User 
+      ? (match.fencer_2_name || userName || 'You')
+      : (match.fencer_1_name || userName || 'You'))
+    : (userName || 'You');
+  const opponentFencerName = match
+    ? (isFencer1User 
+      ? (match.fencer_2_name || 'Opponent')
+      : isFencer2User 
+      ? (match.fencer_1_name || 'Opponent')
+      : (match.fencer_2_name || 'Opponent'))
+    : (params.opponentName as string || 'Opponent');
+  
+  // Format duration
+  const duration = match?.bout_length_s 
+    ? `${Math.floor(match.bout_length_s / 60)}:${(match.bout_length_s % 60).toString().padStart(2, '0')}`
+    : (params.duration as string || '02:30');
+  
+  // Get match type
+  const matchType = match?.match_type || (params.matchType as string) || 'Training';
 
   const handleBack = () => {
     router.back();
@@ -367,25 +601,25 @@ export default function MatchDetailsScreen() {
         >
           {/* Match Summary Card with Gradient Border */}
           <MatchSummaryCardWithBorder
-            leftPlayerName={userName || "You"}
-            leftPlayerImage={profileImage}
-            rightPlayerName={matchData.opponentName}
-            rightPlayerImage={matchData.opponentImage}
-            youScore={matchData.youScore}
-            opponentScore={matchData.opponentScore}
-            duration={matchData.duration}
-            matchType={matchData.matchType}
-            isWin={params.isWin === 'true' || matchData.youScore > matchData.opponentScore}
+            leftPlayerName={getFirstName(leftPlayerName)}
+            leftPlayerImage={leftIsUser ? (profileImage || undefined) : undefined}
+            rightPlayerName={getFirstName(rightPlayerName)}
+            rightPlayerImage={rightIsUser ? (profileImage || undefined) : undefined}
+            youScore={userScore}
+            opponentScore={opponentScore}
+            duration={duration}
+            matchType={matchType}
+            isWin={params.isWin === 'true' || userScore > opponentScore}
           />
 
           {/* Score Progression Timeline */}
           <View style={styles.chartSection}>
             <ScoreProgressionChart 
               scoreProgression={scoreProgression}
-              userScore={matchData.youScore}
-              opponentScore={matchData.opponentScore}
-              userLabel={userName || 'You'}
-              opponentLabel={matchData.opponentName || 'Opponent'}
+              userScore={userScore}
+              opponentScore={opponentScore}
+              userLabel={getFirstName(userFencerName) || userName || 'You'}
+              opponentLabel={getFirstName(opponentFencerName) || 'Opponent'}
             />
           </View>
 

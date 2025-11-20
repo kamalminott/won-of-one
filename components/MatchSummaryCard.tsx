@@ -31,6 +31,7 @@ interface MatchSummaryCardProps {
   onNotesPress?: () => void;
   userLabel?: string;
   opponentLabel?: string;
+  userPosition?: 'left' | 'right'; // Position of user in match header (left = fencer_1, right = fencer_2)
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -51,9 +52,21 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   onNotesChange,
   onNotesPress,
   userLabel = 'You',
-  opponentLabel = 'Opponent'
+  opponentLabel = 'Opponent',
+  userPosition // Position of user in match header (left = fencer_1, right = fencer_2)
 }) => {
   const { width, height } = useWindowDimensions();
+  
+  console.log('📊 [MATCH SUMMARY CARD] Received props:', {
+    userLabel,
+    opponentLabel,
+    userPosition,
+    userScore,
+    opponentScore,
+    hasScoreProgression: !!scoreProgression,
+    scoreProgressionUserDataLength: scoreProgression?.userData?.length || 0,
+    scoreProgressionOpponentDataLength: scoreProgression?.opponentData?.length || 0,
+  });
 
   // Sample data for charts
   const lineChartData = [
@@ -124,12 +137,24 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       {/* Top card with win pill has been removed */}
       
       {/* Score Progression Chart */}
+      {(() => {
+        console.log('📊 [MATCH SUMMARY CARD] Passing props to ScoreProgressionChart:', {
+          userLabel,
+          opponentLabel,
+          userPosition,
+          userScore,
+          opponentScore,
+          scoreProgressionLength: scoreProgression?.userData?.length || 0,
+        });
+        return null;
+      })()}
       <ScoreProgressionChart 
         scoreProgression={scoreProgression} 
         userScore={userScore}
         opponentScore={opponentScore}
         userLabel={userLabel}
         opponentLabel={opponentLabel}
+        userPosition={userPosition}
       />
       
       {/* Touches by Period Chart and Key Stats Card - Side by Side */}
@@ -138,6 +163,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
           touchesByPeriod={touchesByPeriod}
           userLabel={userLabel}
           opponentLabel={opponentLabel}
+          userPosition={userPosition}
         />
         <KeyStatsCard 
           bestRun={bestRun} 

@@ -604,6 +604,24 @@ export const matchService = {
   async getRecentMatches(userId: string, limit: number = 10): Promise<SimpleMatch[]> {
     console.log('🔍 getRecentMatches called with userId:', userId, 'limit:', limit);
     
+    // Fetch user's name to identify which fencer is the user (handles swaps correctly)
+    const userProfile = await userService.getUserById(userId);
+    const userDisplayName = userProfile?.name || '';
+    
+    // Helper function to normalize names for comparison
+    const normalizeName = (name?: string | null): string => {
+      if (!name) return '';
+      return name.trim().toLowerCase();
+    };
+    
+    const normalizedUserName = normalizeName(userDisplayName);
+    
+    console.log('👤 User identification for opponent matching:', {
+      userId,
+      userDisplayName,
+      normalizedUserName
+    });
+    
     const { data, error } = await supabase
       .from('match')
       .select(`
@@ -623,7 +641,8 @@ export const matchService = {
     console.log('📊 Raw matches data from database:', data?.length, 'matches found');
     console.log('📊 Match details:', data?.map(m => ({ 
       id: m.match_id, 
-      opponent: m.fencer_2_name, 
+      fencer1: m.fencer_1_name,
+      fencer2: m.fencer_2_name,
       source: m.source, 
       hasPeriods: m.match_period?.length > 0 
     })));
@@ -662,13 +681,54 @@ export const matchService = {
         }
       }
       
+      // Determine which fencer is the user and which is the opponent
+      // This correctly handles cases where fencers were swapped during the match
+      const fencer1Name = match.fencer_1_name || '';
+      const fencer2Name = match.fencer_2_name || '';
+      const normalizedFencer1 = normalizeName(fencer1Name);
+      const normalizedFencer2 = normalizeName(fencer2Name);
+      
+      // Special case: manual matches may store "You" as fencer_1_name
+      const isManualMatchWithYou = match.source === 'manual' && 
+        (normalizedFencer1 === 'you' || fencer1Name === 'You');
+      
+      // Check which fencer matches the user
+      const isFencer1User = isManualMatchWithYou || 
+        (normalizedUserName && normalizedFencer1 
+          ? normalizedFencer1 === normalizedUserName 
+          : false);
+      const isFencer2User = normalizedUserName && normalizedFencer2 
+        ? normalizedFencer2 === normalizedUserName 
+        : false;
+      
+      // Determine opponent name (whichever fencer is NOT the user)
+      let opponentName: string;
+      if (isFencer1User) {
+        // User is fencer_1, so opponent is fencer_2
+        opponentName = fencer2Name || 'Unknown';
+      } else if (isFencer2User) {
+        // User is fencer_2, so opponent is fencer_1
+        opponentName = fencer1Name || 'Unknown';
+      } else {
+        // Fallback: if we can't identify the user, use fencer_2 (old behavior)
+        // This handles edge cases where user name doesn't match either fencer name
+        opponentName = fencer2Name || 'Unknown';
+        console.log('⚠️ Could not identify user in match, using fallback:', {
+          matchId: match.match_id,
+          fencer1Name,
+          fencer2Name,
+          userDisplayName,
+          source: match.source
+        });
+      }
+      
       return {
         id: match.match_id,
         youScore: match.final_score || 0,
         opponentScore: match.touches_against || 0,
         date: match.event_date ? new Date(match.event_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         time: completionTime,
-        opponentName: match.fencer_2_name || 'Unknown',
+        opponentName: opponentName, // Use the calculated opponent name (handles swaps correctly)
         isWin: match.is_win || false,
         matchType: match.match_type || undefined,
         source: match.source || 'unknown', // Include source field
