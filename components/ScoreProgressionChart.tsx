@@ -122,6 +122,7 @@ interface ScoreProgressionChartProps {
   opponentScore?: number;
   userLabel?: string;
   opponentLabel?: string;
+  userPosition?: 'left' | 'right'; // Position of user in match header (left = fencer_1, right = fencer_2)
 }
 
 export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
@@ -139,7 +140,8 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
   userScore = 0,
   opponentScore = 0,
   userLabel = 'You',
-  opponentLabel = 'Opponent'
+  opponentLabel = 'Opponent',
+  userPosition // Position of user in match header (left = fencer_1, right = fencer_2)
 }) => {
   const { width, height: screenHeight } = useWindowDimensions();
 
@@ -180,7 +182,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log(`📊 Converting user point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
         return { x: totalSeconds, y: point.y };
       });
-      
+
       const oppSeries: ScoreSeries = scoreProgression.opponentData.map(point => {
         // Handle time format like "00:08" or "(8:00)"
         const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
@@ -189,12 +191,25 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log(`📊 Converting opponent point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
         return { x: totalSeconds, y: point.y };
       });
+
+      // Prepend starting point (0, 0) at time 0 to show the 0→1 transition for first score
+      // Find the earliest time point to use as the starting time
+      const initialTimes = [...userSeries.map(p => p.x), ...oppSeries.map(p => p.x)];
+      const earliestTime = initialTimes.length > 0 ? Math.min(...initialTimes) : 0;
+      const startTime = 0; // Always start at time 0 to show the 0→1 transition
       
-      // Calculate gap series
+      // Only add starting point if series don't already start at 0 with score 0
+      if (userSeries.length === 0 || userSeries[0].x !== startTime || userSeries[0].y !== 0) {
+        userSeries.unshift({ x: startTime, y: 0 });
+      }
+      if (oppSeries.length === 0 || oppSeries[0].x !== startTime || oppSeries[0].y !== 0) {
+        oppSeries.unshift({ x: startTime, y: 0 });
+      }
+      
+      // Calculate gap series from the updated series (which now include starting points)
       const gapSeries: ScoreSeries = [];
       const allTimes = new Set([...userSeries.map(p => p.x), ...oppSeries.map(p => p.x)]);
       const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
-      
       for (const time of sortedTimes) {
         const userPoint = userSeries.find(p => p.x === time);
         const oppPoint = oppSeries.find(p => p.x === time);
@@ -389,17 +404,43 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log('📊 User Y values (sorted):', userData);
         console.log('📊 Opponent Y values (sorted):', opponentData);
         
+        // Chart always renders: first dataset (red) = fencer_1 (left), second dataset (green) = fencer_2 (right)
+        // This matches the header order: fencer_1_name (left) - fencer_2_name (right)
+        // userData = fencer_1 (left position), opponentData = fencer_2 (right position) - position-based from database
+        // Legend will show correct names and colors to match this
+        console.log('📊 [CHART] Rendering with:', {
+          userLabel,
+          opponentLabel,
+          userPosition,
+          userDataLength: paddedUserData.length,
+          opponentDataLength: paddedOpponentData.length,
+          firstUserValue: paddedUserData[0],
+          firstOpponentValue: paddedOpponentData[0]
+        });
+        
+        // Assign colors based on userPosition
+        // paddedUserData = fencer1Data (left position)
+        // paddedOpponentData = fencer2Data (right position)
+        // When userPosition === 'left': user is fencer1 (red), opponent is fencer2 (green)
+        // When userPosition === 'right': user is fencer2 (red), opponent is fencer1 (green)
+        const fencer1Color = userPosition === 'left' 
+          ? (opacity = 1) => `rgba(255, 118, 117, ${opacity})` // Red (user)
+          : (opacity = 1) => `rgba(0, 184, 148, ${opacity})`; // Green (opponent)
+        const fencer2Color = userPosition === 'right'
+          ? (opacity = 1) => `rgba(255, 118, 117, ${opacity})` // Red (user)
+          : (opacity = 1) => `rgba(0, 184, 148, ${opacity})`; // Green (opponent)
+        
         const chartData_kit = {
           labels: displayLabels,
           datasets: [
             {
-              data: paddedUserData,
-              color: (opacity = 1) => `rgba(255, 118, 117, ${opacity})`, // Red for user
+              data: paddedUserData, // fencer_1 (left position)
+              color: fencer1Color,
               strokeWidth: 3,
             },
             {
-              data: paddedOpponentData,
-              color: (opacity = 1) => `rgba(0, 184, 148, ${opacity})`, // Green for opponent
+              data: paddedOpponentData, // fencer_2 (right position)
+              color: fencer2Color,
               strokeWidth: 3,
             }
           ]
@@ -603,18 +644,48 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       ? [styles.legend, { marginTop: -(screenHeight * 0.070) }]
       : [styles.legend, { marginTop: -(screenHeight * 0.025) }];
     
+    // Legend order should match header: userLabel (left) - opponentLabel (right)
+    // Header always shows: fencer_1_name (left) - fencer_2_name (right)
+    // userLabel = fencer_1_name (left position), opponentLabel = fencer_2_name (right position)
+    // So legend should always show: userLabel (left) - opponentLabel (right) to match header
+    // Colors indicate which is user (red) vs opponent (green)
+    const leftColor = userPosition === 'left' ? '#FF7675' : '#00B894';
+    const rightColor = userPosition === 'right' ? '#FF7675' : '#00B894';
+    
+    console.log('📊 [SCORE PROGRESSION CHART] Rendering legend:', {
+      userLabel,
+      opponentLabel,
+      userPosition,
+      userScore,
+      opponentScore,
+      leftColor,
+      rightColor,
+      chartUserDataLength: chartData.userSeries.length,
+      chartOpponentDataLength: chartData.oppSeries.length,
+      chartUserFirstPoint: chartData.userSeries[0],
+      chartOpponentFirstPoint: chartData.oppSeries[0],
+    });
+    
+    const leftLegendItem = (
+      <View style={styles.legendItem}>
+        <View style={[styles.legendDot, { backgroundColor: leftColor }]} />
+        <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
+      </View>
+    );
+    
+    const rightLegendItem = (
+      <View style={styles.legendItem}>
+        <View style={[styles.legendDot, { backgroundColor: rightColor }]} />
+        <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
+      </View>
+    );
+    
     switch (variant) {
       case 'dualAxis':
         return (
           <View style={legendStyle}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
-              <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
-              <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
-            </View>
+            {leftLegendItem}
+            {rightLegendItem}
           </View>
         );
         
@@ -631,14 +702,8 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       default:
         return (
           <View style={styles.legend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
-              <Text style={styles.legendText}>{userLabel} ({userScore})</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
-              <Text style={styles.legendText}>{opponentLabel} ({opponentScore})</Text>
-            </View>
+            {leftLegendItem}
+            {rightLegendItem}
           </View>
         );
     }

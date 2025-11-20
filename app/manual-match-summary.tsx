@@ -15,10 +15,12 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
+  const { userName } = useAuth();
   
   // Extract parameters from navigation
   const {
@@ -49,12 +51,14 @@ export default function ManualMatchSummaryScreen() {
   };
 
   // Create match object for MatchSummaryStats component
+  // Replace "You" with user's actual name from auth context
+  const userDisplayName = userName || 'You';
   const matchData = {
     id: 'manual-match',
     opponent: opponentName as string || 'Alex',
     opponentImage: '',
     userImage: '',
-    userName: 'You',
+    userName: userDisplayName, // Use actual user name instead of "You"
     outcome: isWinBool ? ('victory' as const) : ('defeat' as const),
     score: `${yourScoreNum} - ${opponentScoreNum}`,
     matchType: matchType === 'Training' ? ('training' as const) : ('competition' as const),
@@ -62,7 +66,7 @@ export default function ManualMatchSummaryScreen() {
     userScore: yourScoreNum,
     opponentScore: opponentScoreNum,
     bestRun: 0, // Default value
-    fencer1Name: 'You',
+    fencer1Name: userDisplayName, // Use actual user name instead of "You"
     fencer2Name: opponentName as string || 'Alex',
   };
 

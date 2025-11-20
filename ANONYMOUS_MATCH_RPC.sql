@@ -19,7 +19,8 @@ BEGIN
     result, 
     score_diff, 
     match_type, 
-    source
+    source,
+    weapon_type
   )
   VALUES (
     NULL, -- user_id is always null for anonymous matches
@@ -30,7 +31,8 @@ BEGIN
     (match_data->>'result')::text,
     (match_data->>'score_diff')::integer,
     (match_data->>'match_type')::text,
-    (match_data->>'source')::text
+    (match_data->>'source')::source_enum,
+    (match_data->>'weapon_type')::text
   )
   RETURNING * INTO result_record;
   

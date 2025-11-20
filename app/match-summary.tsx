@@ -6,6 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { goalService, matchService } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -195,20 +196,107 @@ export default function MatchSummaryScreen() {
             console.log('🏃 Calculated best run:', calculatedBestRun);
             setBestRun(calculatedBestRun);
 
-            const calculatedScoreProgression = await matchService.calculateScoreProgression(
-              params.matchId as string,
-              userFencerName
+            // Use calculateAnonymousScoreProgression to get position-based data directly from database
+            // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
+            // This returns fencer1Data/fencer2Data which matches the header's fencer_1_name/fencer_2_name
+            const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
+              params.matchId as string
             );
-            console.log('📈 Calculated score progression:', calculatedScoreProgression);
-            setScoreProgression(calculatedScoreProgression);
+            console.log('📈 [MATCH SUMMARY] Calculated position-based score progression:', {
+              fencer1DataLength: calculatedScoreProgression.fencer1Data.length,
+              fencer2DataLength: calculatedScoreProgression.fencer2Data.length,
+              fencer1FirstPoint: calculatedScoreProgression.fencer1Data[0],
+              fencer2FirstPoint: calculatedScoreProgression.fencer2Data[0],
+              fencer1LastPoint: calculatedScoreProgression.fencer1Data[calculatedScoreProgression.fencer1Data.length - 1],
+              fencer2LastPoint: calculatedScoreProgression.fencer2Data[calculatedScoreProgression.fencer2Data.length - 1],
+            });
+            // Convert to chart format: fencer1Data -> userData (left), fencer2Data -> opponentData (right)
+            const scoreProgData = {
+              userData: calculatedScoreProgression.fencer1Data, // fencer_1 (left position) - matches header
+              opponentData: calculatedScoreProgression.fencer2Data // fencer_2 (right position) - matches header
+            };
+            console.log('📈 [MATCH SUMMARY] Setting scoreProgression:', {
+              userDataLength: scoreProgData.userData.length,
+              opponentDataLength: scoreProgData.opponentData.length,
+              userDataFirst: scoreProgData.userData[0],
+              opponentDataFirst: scoreProgData.opponentData[0],
+            });
+            setScoreProgression(scoreProgData);
 
-            const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
-              params.matchId as string,
-              userFencerName,
-              params.remoteId as string
-            );
-            console.log('📊 Calculated touches by period:', calculatedTouchesByPeriod);
-            setTouchesByPeriod(calculatedTouchesByPeriod);
+            // Use position-based touchesByPeriod from match_period table (same approach as header and neutral match summary)
+            // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
+            const { data: matchPeriods, error: periodsError } = await supabase
+              .from('match_period')
+              .select('period_number, fencer_1_score, fencer_2_score')
+              .eq('match_id', params.matchId as string)
+              .order('period_number', { ascending: true });
+
+            if (periodsError) {
+              console.error('Error fetching match periods:', periodsError);
+              // Fallback to entity-based calculation
+              const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
+                params.matchId as string,
+                userFencerName,
+                params.remoteId as string
+              );
+              setTouchesByPeriod(calculatedTouchesByPeriod);
+            } else if (matchPeriods && matchPeriods.length > 0) {
+              // Initialize with zeros - chart expects 'user' and 'opponent', but these represent fencer1 and fencer2
+              const touchesByPeriodData = {
+                period1: { user: 0, opponent: 0 }, // user = fencer1 (left), opponent = fencer2 (right)
+                period2: { user: 0, opponent: 0 },
+                period3: { user: 0, opponent: 0 }
+              };
+              
+              // Sort periods by period_number to ensure correct order
+              const sortedPeriods = matchPeriods.sort((a, b) => (a.period_number || 0) - (b.period_number || 0));
+              
+              // Fill in actual period scores (touches scored PER period, not cumulative)
+              sortedPeriods.forEach((period, index) => {
+                const periodNum = period.period_number || 1;
+                const currentFencer1Score = period.fencer_1_score || 0;
+                const currentFencer2Score = period.fencer_2_score || 0;
+                
+                // Get previous period's cumulative scores (0 if first period)
+                const previousFencer1Score = index > 0 ? (sortedPeriods[index - 1].fencer_1_score || 0) : 0;
+                const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
+                
+                // Calculate touches scored DURING this period
+                const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
+                const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+                
+                // Map fencer1/fencer2 to user/opponent for chart component (matches header: fencer_1 = left, fencer_2 = right)
+                if (periodNum === 1) {
+                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                } else if (periodNum === 2) {
+                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                } else if (periodNum === 3) {
+                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                }
+              });
+              
+              console.log('📊 [MATCH SUMMARY] Using position-based period scores from database:', {
+                touchesByPeriodData,
+                period1User: touchesByPeriodData.period1.user,
+                period1Opponent: touchesByPeriodData.period1.opponent,
+                period2User: touchesByPeriodData.period2.user,
+                period2Opponent: touchesByPeriodData.period2.opponent,
+                period3User: touchesByPeriodData.period3.user,
+                period3Opponent: touchesByPeriodData.period3.opponent,
+              });
+              setTouchesByPeriod(touchesByPeriodData);
+            } else {
+              // No period data - fallback to entity-based calculation
+              const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
+                params.matchId as string,
+                userFencerName,
+                params.remoteId as string
+              );
+              setTouchesByPeriod(calculatedTouchesByPeriod);
+            }
           }
         } catch (error) {
           console.error('Error fetching match data:', error);
@@ -753,27 +841,81 @@ export default function MatchSummaryScreen() {
           onSeeFullSummary={handleSeeFullSummary}
           onCancelMatch={handleCancelMatch}
           onSaveMatch={handleSaveMatch}
-          scoreProgression={scoreProgression}
-          userScore={match?.final_score || 0}
-          opponentScore={match?.touches_against || 0}
+          // Use position-based data directly (same as header approach)
+          // scoreProgression is already position-based: userData = fencer_1 (left), opponentData = fencer_2 (right)
+          scoreProgression={(() => {
+            console.log('📊 [MATCH SUMMARY] Passing scoreProgression to chart:', {
+              userDataLength: scoreProgression.userData.length,
+              opponentDataLength: scoreProgression.opponentData.length,
+              userDataFirst: scoreProgression.userData[0],
+              opponentDataFirst: scoreProgression.opponentData[0],
+              userDataLast: scoreProgression.userData[scoreProgression.userData.length - 1],
+              opponentDataLast: scoreProgression.opponentData[scoreProgression.opponentData.length - 1],
+            });
+            return scoreProgression;
+          })()}
+          // Pass position-based scores to match the header and labels
+          // fencer1Score = score of fencer_1 (left position), fencer2Score = score of fencer_2 (right position)
+          userScore={(() => {
+            const score = matchData?.fencer1Score || 0;
+            console.log('📊 [MATCH SUMMARY] userScore (fencer1Score):', score, 'from matchData:', matchData?.fencer1Score);
+            return score;
+          })()}
+          opponentScore={(() => {
+            const score = matchData?.fencer2Score || 0;
+            console.log('📊 [MATCH SUMMARY] opponentScore (fencer2Score):', score, 'from matchData:', matchData?.fencer2Score);
+            return score;
+          })()}
           bestRun={bestRun}
           yellowCards={match?.yellow_cards || 0}
           redCards={match?.red_cards || 0}
           matchDurationSeconds={match?.bout_length_s || 0}
-          touchesByPeriod={touchesByPeriod}
+          // touchesByPeriod is position-based from match_period table (same approach as neutral match summary)
+          touchesByPeriod={(() => {
+            console.log('📊 [MATCH SUMMARY] Passing touchesByPeriod to chart:', {
+              period1: touchesByPeriod.period1,
+              period2: touchesByPeriod.period2,
+              period3: touchesByPeriod.period3,
+            });
+            return touchesByPeriod;
+          })()}
           notes={notes}
           onNotesChange={handleNotesChange}
           onNotesPress={handleNotesPress}
-          userLabel={match?.user_id && isFencer1User
-            ? getFirstName(match?.fencer_1_name) || 'You'
-            : match?.user_id && isFencer2User
-            ? getFirstName(match?.fencer_2_name) || 'You'
-            : getFirstName(match?.fencer_1_name) || 'Fencer 1'}
-          opponentLabel={match?.user_id && isFencer1User
-            ? getFirstName(match?.fencer_2_name) || 'Opponent'
-            : match?.user_id && isFencer2User
-            ? getFirstName(match?.fencer_1_name) || 'Opponent'
-            : getFirstName(match?.fencer_2_name) || 'Fencer 2'}
+          // Pass position-based labels to match the header display - EXACT same approach as header
+          // Header uses: match.fencer1Name (fencer_1_name) and match.fencer2Name (fencer_2_name) from database
+          // So we use the exact same values here
+          userLabel={(() => {
+            const label = getFirstName(match?.fencer_1_name) || 'Fencer 1';
+            console.log('📊 [MATCH SUMMARY] userLabel (fencer_1_name):', label, 'from database:', match?.fencer_1_name);
+            return label;
+          })()}
+          opponentLabel={(() => {
+            const label = getFirstName(match?.fencer_2_name) || 'Fencer 2';
+            console.log('📊 [MATCH SUMMARY] opponentLabel (fencer_2_name):', label, 'from database:', match?.fencer_2_name);
+            return label;
+          })()}
+          // Determine user position by checking which database name matches the user's name
+          userPosition={(() => {
+            const position = match?.fencer_1_name && userName && normalizeName(match.fencer_1_name) === normalizeName(userName)
+              ? 'left'  // User is fencer_1 (left position)
+              : match?.fencer_2_name && userName && normalizeName(match.fencer_2_name) === normalizeName(userName)
+              ? 'right' // User is fencer_2 (right position)
+              : 'left';  // Fallback
+            console.log('📊 [MATCH SUMMARY] userPosition calculation:', {
+              position,
+              userName,
+              normalizedUserName: normalizeName(userName),
+              fencer1Name: match?.fencer_1_name,
+              normalizedFencer1: match?.fencer_1_name ? normalizeName(match.fencer_1_name) : 'N/A',
+              fencer2Name: match?.fencer_2_name,
+              normalizedFencer2: match?.fencer_2_name ? normalizeName(match.fencer_2_name) : 'N/A',
+              isFencer1User,
+              isFencer2User,
+              matchId: match?.match_id
+            });
+            return position;
+          })()}
         />
       </ScrollView>
 

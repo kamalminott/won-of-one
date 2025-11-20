@@ -355,13 +355,19 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
   const leftImage = leftIsUser ? match.userImage : match.opponentImage;
   const rightImage = rightIsUser ? match.userImage : match.opponentImage;
   
-  console.log('🔍 MatchSummaryStats - Calculated values:', {
+  console.log('🔍 [MATCH SUMMARY STATS] Header values:', {
     leftName,
     rightName,
     leftIsUser,
     rightIsUser,
+    fencer1Name: match.fencer1Name,
+    fencer2Name: match.fencer2Name,
+    isFencer1User: match.isFencer1User,
+    isFencer2User: match.isFencer2User,
     leftImage: leftImage ? 'has image' : 'no image',
-    rightImage: rightImage ? 'has image' : 'no image'
+    rightImage: rightImage ? 'has image' : 'no image',
+    fencer1Score: match.fencer1Score,
+    fencer2Score: match.fencer2Score,
   });
 
   return (

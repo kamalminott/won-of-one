@@ -37,6 +37,7 @@ export interface Match {
   is_win?: boolean;
   is_complete?: boolean; // NEW: Track completion status
   notes?: string; // Match notes
+  weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
 }
 
 export interface FencingRemote {
