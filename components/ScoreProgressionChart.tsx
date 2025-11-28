@@ -877,3 +877,4 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
 // Export the utility function for external use
 export { buildScoreSeries };
 export type { BuildScoreSeriesResult, ScoreSeries, ScoringEvent };
+
