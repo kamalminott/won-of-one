@@ -458,6 +458,31 @@ export const offlineRemoteService = {
                 }
               }
               
+              // Check for duplicate event before creating
+              // Duplicate = same match_id, match_time_elapsed, scoring_user_name, and event_type
+              if (matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
+                const { data: existingEvent, error: checkError } = await supabase
+                  .from('match_event')
+                  .select('match_event_id')
+                  .eq('match_id', matchId)
+                  .eq('match_time_elapsed', event.match_time_elapsed)
+                  .eq('scoring_user_name', event.scoring_user_name)
+                  .eq('event_type', event.event_type)
+                  .maybeSingle();
+                
+                if (checkError) {
+                  console.error(`❌ Error checking for duplicate event:`, checkError);
+                  // Continue to create event anyway (better to have duplicate than lose data)
+                } else if (existingEvent) {
+                  console.log(`🔄 Duplicate event detected during sync, skipping: match_id=${matchId}, time=${event.match_time_elapsed}s, scorer=${event.scoring_user_name}, type=${event.event_type}`);
+                  // Mark as synced since the event already exists
+                  if (event.id) {
+                    syncedEventIds.push(event.id);
+                  }
+                  continue;
+                }
+              }
+              
               await matchEventService.createMatchEvent({
                 match_id: matchId || null,
                 fencing_remote_id: event.remote_id,
@@ -465,6 +490,14 @@ export const offlineRemoteService = {
                 event_time: event.event_time,
                 scoring_user_name: event.scoring_user_name,
                 match_time_elapsed: event.match_time_elapsed,
+                // ✅ Extract ALL fields from metadata:
+                match_period_id: event.metadata?.match_period_id || null,
+                scoring_user_id: event.metadata?.scoring_user_id || null,
+                fencer_1_name: event.metadata?.fencer_1_name || null,
+                fencer_2_name: event.metadata?.fencer_2_name || null,
+                card_given: event.metadata?.card_given || null,
+                score_diff: event.metadata?.score_diff || null,
+                seconds_since_last_event: event.metadata?.seconds_since_last_event || null,
               });
               
               if (event.id) {

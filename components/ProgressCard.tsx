@@ -1024,6 +1024,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       shadowRadius: width * 0.075,
       elevation: 8,
       padding: width * 0.05,
+      overflow: 'visible', // Allow dropdowns to extend beyond card bounds
+      zIndex: 1,
     },
     sectionHeader: {
       flexDirection: 'row',
@@ -1049,6 +1051,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     dropdownContainer: {
       position: 'relative',
       marginBottom: height * 0.02,
+      zIndex: 20000, // Higher than week dropdown to appear on top
     },
     dropdown: {
       width: width * 0.4,
@@ -1078,8 +1081,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       shadowOffset: { width: 0, height: width * 0.005 },
       shadowOpacity: 0.25,
       shadowRadius: width * 0.02,
-      elevation: 8,
-      zIndex: 1000,
+      elevation: 25, // Higher elevation for Android than week dropdown
+      zIndex: 20001, // Higher than week dropdown menu to appear on top
     },
     dropdownItem: {
       paddingHorizontal: width * 0.04,
@@ -1195,6 +1198,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     weekDropdownContainer: {
       position: 'relative',
       marginBottom: height * 0.02,
+      zIndex: 10000, // Ensure dropdown appears above all other content
     },
     weekDropdown: {
       width: '100%',
@@ -1224,8 +1228,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       shadowOffset: { width: 0, height: width * 0.005 },
       shadowOpacity: 0.25,
       shadowRadius: width * 0.02,
-      elevation: 8,
-      zIndex: 1000,
+      elevation: 20, // Higher elevation for Android
+      zIndex: 10001, // Higher than container to ensure it's on top
     },
     weekDropdownItem: {
       paddingHorizontal: width * 0.04,
@@ -1855,7 +1859,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             <View style={styles.dropdownContainer}>
               <TouchableOpacity 
                 style={styles.dropdown}
-                onPress={() => setShowDropdown(!showDropdown)}
+                onPress={() => {
+                  setShowWeekDropdown(false); // Close week dropdown when opening activity dropdown
+                  setShowDropdown(!showDropdown);
+                }}
               >
                 <Text style={styles.dropdownText}>{selectedActivity}</Text>
                 <Ionicons 
@@ -1895,7 +1902,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             <View style={styles.weekDropdownContainer}>
               <TouchableOpacity 
                 style={styles.weekDropdown}
-                onPress={() => setShowWeekDropdown(!showWeekDropdown)}
+                onPress={() => {
+                  setShowDropdown(false); // Close activity dropdown when opening week dropdown
+                  setShowWeekDropdown(!showWeekDropdown);
+                }}
               >
                 <Text style={styles.weekDropdownText}>
                   {weekOptions[selectedWeek].label} - {calculateDaysLeft()} {formatDaysText(calculateDaysLeft())}
@@ -2052,7 +2062,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               <Text style={styles.dropdownLabel}>Activity Type</Text>
               <TouchableOpacity 
                 style={styles.dropdown}
-                onPress={() => setShowDropdown(!showDropdown)}
+                onPress={() => {
+                  setShowWeekDropdown(false); // Close week dropdown when opening activity dropdown
+                  setShowDropdown(!showDropdown);
+                }}
               >
                 <Text style={styles.dropdownText}>{selectedActivity}</Text>
                 <Ionicons 

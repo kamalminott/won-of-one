@@ -60,34 +60,12 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
     };
   }, [tooltip.visible]);
 
-  // Handle bar press
-  const handleBarPress = (data: any, index: number) => {
-    // Find which period and player this bar represents
-    const periodIndex = Math.floor(index / 2); // Each period has 2 bars (user + opponent)
-    const isUserBar = index % 2 === 0; // Even indices are user bars, odd are opponent bars
-    
-    let period = '';
-    let touches = 0;
-    let player: 'user' | 'opponent' = 'user';
-    
-    // Use the actual data object instead of the individual bar data
-    const currentData = touchesByPeriod || defaultData;
-    
-    if (periodIndex === 0) {
-      period = 'P1';
-      touches = isUserBar ? currentData.period1.user : currentData.period1.opponent;
-      player = isUserBar ? 'user' : 'opponent';
-    } else if (periodIndex === 1) {
-      period = 'P2';
-      touches = isUserBar ? currentData.period2.user : currentData.period2.opponent;
-      player = isUserBar ? 'user' : 'opponent';
-    } else if (periodIndex === 2) {
-      period = 'P3';
-      touches = isUserBar ? currentData.period3.user : currentData.period3.opponent;
-      player = isUserBar ? 'user' : 'opponent';
-    }
+  // Handle bar press using metadata on each bar to avoid index assumptions
+  const handleBarPress = (data: any) => {
+    const period = data.period || '';
+    const player: 'user' | 'opponent' = data.player || 'user';
+    const touches = data.originalValue ?? data.value ?? 0;
 
-    // Show tooltip
     setTooltip({
       visible: true,
       x: 50, // Fixed position for now
@@ -180,38 +158,61 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
 
   const data = touchesByPeriod || defaultData;
 
-  // Assign colors based on userPosition
-  // data.period1.user = fencer1 (left position) touches
-  // data.period1.opponent = fencer2 (right position) touches
-  // When userPosition === 'left': user is fencer1 (red), opponent is fencer2 (green)
-  // When userPosition === 'right': user is fencer2 (red), opponent is fencer1 (green)
-  const fencer1Color = userPosition === 'left' ? '#FF7675' : '#00B894'; // Red if user, green if opponent
-  const fencer2Color = userPosition === 'right' ? '#FF7675' : '#00B894'; // Red if user, green if opponent
+  // Colors by identity to match legend: user = red, opponent = green
+  const userColor = '#FF7675';
+  const opponentColor = '#00B894';
   
-  // Chart data for touches by period - only show periods with touches, but always show both bars
-  const chartData = [];
-  
-  // Only add periods that have touches (user or opponent), but always show both bars for that period
-  if (data.period1.user > 0 || data.period1.opponent > 0) {
-    chartData.push(
-      { value: data.period1.user, label: 'P1', frontColor: fencer1Color }, // fencer1 (left)
-      { value: data.period1.opponent > 0 ? data.period1.opponent : 0.1, label: 'P1', frontColor: fencer2Color } // fencer2 (right)
-    );
-  }
-  
-  if (data.period2.user > 0 || data.period2.opponent > 0) {
-    chartData.push(
-      { value: data.period2.user, label: 'P2', frontColor: fencer1Color }, // fencer1 (left)
-      { value: data.period2.opponent > 0 ? data.period2.opponent : 0.1, label: 'P2', frontColor: fencer2Color } // fencer2 (right)
-    );
-  }
-  
-  if (data.period3.user > 0 || data.period3.opponent > 0) {
-    chartData.push(
-      { value: data.period3.user, label: 'P3', frontColor: fencer1Color }, // fencer1 (left)
-      { value: data.period3.opponent > 0 ? data.period3.opponent : 0.1, label: 'P3', frontColor: fencer2Color } // fencer2 (right)
-    );
-  }
+  // Chart data for touches by period - always include all periods to keep ordering stable
+  const chartData = [
+    {
+      value: data.period1.user > 0 ? data.period1.user : 0.1,
+      originalValue: data.period1.user,
+      label: 'P1',
+      frontColor: userColor,
+      period: 'P1',
+      player: 'user'
+    },
+    {
+      value: data.period1.opponent > 0 ? data.period1.opponent : 0.1,
+      originalValue: data.period1.opponent,
+      label: 'P1',
+      frontColor: opponentColor,
+      period: 'P1',
+      player: 'opponent'
+    },
+    {
+      value: data.period2.user > 0 ? data.period2.user : 0.1,
+      originalValue: data.period2.user,
+      label: 'P2',
+      frontColor: userColor,
+      period: 'P2',
+      player: 'user'
+    },
+    {
+      value: data.period2.opponent > 0 ? data.period2.opponent : 0.1,
+      originalValue: data.period2.opponent,
+      label: 'P2',
+      frontColor: opponentColor,
+      period: 'P2',
+      player: 'opponent'
+    },
+    {
+      value: data.period3.user > 0 ? data.period3.user : 0.1,
+      originalValue: data.period3.user,
+      label: 'P3',
+      frontColor: userColor,
+      period: 'P3',
+      player: 'user'
+    },
+    {
+      value: data.period3.opponent > 0 ? data.period3.opponent : 0.1,
+      originalValue: data.period3.opponent,
+      label: 'P3',
+      frontColor: opponentColor,
+      period: 'P3',
+      player: 'opponent'
+    },
+  ];
 
   // Calculate the maximum value for Y-axis scaling
   const maxValue = Math.max(
@@ -274,13 +275,10 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
         />
       </View>
       
-      {/* Legend showing both players - order matches header position */}
-      {/* Header always shows: fencer_1_name (left) - fencer_2_name (right) */}
-      {/* userLabel = fencer_1_name (left), opponentLabel = fencer_2_name (right) */}
-      {/* So legend should always show: userLabel (left) - opponentLabel (right) */}
+      {/* Legend showing both players with fixed identity colors: user=red, opponent=green */}
       {(() => {
-        const leftColor = userPosition === 'left' ? '#FF7675' : '#00B894';
-        const rightColor = userPosition === 'right' ? '#FF7675' : '#00B894';
+        const leftColor = '#FF7675';  // user
+        const rightColor = '#00B894'; // opponent
         console.log('📊 [TOUCHES BY PERIOD CHART] Rendering legend:', {
           userLabel,
           opponentLabel,
@@ -297,11 +295,11 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       })()}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: userPosition === 'left' ? '#FF7675' : '#00B894' }]} />
+          <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
           <Text style={styles.legendText}>{userLabel}</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: userPosition === 'right' ? '#FF7675' : '#00B894' }]} />
+          <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
           <Text style={styles.legendText}>{opponentLabel}</Text>
         </View>
       </View>

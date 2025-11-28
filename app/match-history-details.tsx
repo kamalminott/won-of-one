@@ -620,6 +620,7 @@ export default function MatchDetailsScreen() {
               opponentScore={opponentScore}
               userLabel={getFirstName(userFencerName) || userName || 'You'}
               opponentLabel={getFirstName(opponentFencerName) || 'Opponent'}
+              userPosition={isFencer1User ? 'left' : isFencer2User ? 'right' : 'left'}
             />
           </View>
 
