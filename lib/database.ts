@@ -1,8 +1,8 @@
 import {
-  AppUser, DiaryEntry, Drill, Equipment,
-  FencingRemote, Goal, Match,
-  MatchApproval, MatchEvent,
-  SimpleGoal, SimpleMatch
+    AppUser, DiaryEntry, Drill, Equipment,
+    FencingRemote, Goal, Match,
+    MatchApproval, MatchEvent,
+    SimpleGoal, SimpleMatch
 } from '@/types/database';
 import { supabase } from './supabase';
 
@@ -1132,6 +1132,29 @@ $$;
     try {
       console.log('📈 Calculating score progression for USER vs OPPONENT match:', matchId, 'user:', userName);
       
+      // DEBUG: First check if ANY events exist for this match (without null filter)
+      const { data: allEvents, error: allEventsError } = await supabase
+        .from('match_event')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId);
+      
+      console.log('🔍 DEBUG - All events for match:', {
+        matchId,
+        totalEvents: allEvents?.length || 0,
+        eventsWithNullTime: allEvents?.filter(e => e.match_time_elapsed === null || e.match_time_elapsed === undefined).length || 0,
+        eventsWithTime: allEvents?.filter(e => e.match_time_elapsed !== null && e.match_time_elapsed !== undefined).length || 0,
+        sampleEvents: allEvents?.slice(0, 3).map(e => ({
+          id: e.match_event_id,
+          type: e.event_type,
+          timeElapsed: e.match_time_elapsed,
+          scorer: e.scoring_user_name
+        })) || []
+      });
+      
+      if (allEventsError) {
+        console.error('Error fetching all match events (debug):', allEventsError);
+      }
+      
       // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEvents, error: eventsError } = await supabase
@@ -1147,7 +1170,8 @@ $$;
       }
 
       if (!matchEvents || matchEvents.length === 0) {
-        console.log('No match events found for score progression calculation');
+        console.log('No match events found for score progression calculation (with match_time_elapsed filter)');
+        console.log('🔍 DEBUG - This means all events have null match_time_elapsed, or no events exist');
         return { userData: [], opponentData: [] };
       }
 
@@ -1162,10 +1186,10 @@ $$;
 
       console.log('📊 Total events:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
 
-      // 3. Get match data to determine user vs opponent
+      // 3. Get match data to determine user vs opponent AND final scores for validation
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name')
+        .select('fencer_1_name, fencer_2_name, final_score, touches_against')
         .eq('match_id', matchId)
         .single();
 
@@ -1177,25 +1201,52 @@ $$;
       console.log('📈 USER vs OPPONENT - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
       console.log('📈 USER vs OPPONENT - Match events found:', matchEvents.length);
 
-      // 4. Process events using stored match_time_elapsed, filtering out cancelled events
-      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
-      const userData: {x: string, y: number}[] = [];
-      const opponentData: {x: string, y: number}[] = [];
+      // 4. Deduplicate only exact duplicate IDs so rapid same-second touches are not dropped
+      // (previously we deduped by time+scorer which incorrectly removed valid same-second touches)
+      const seenEvents = new Set<string>();
+      const duplicateEvents: string[] = [];
       
-      let userScore = 0;
-      let opponentScore = 0;
-
-      for (const event of matchEvents) {
+      const uniqueEvents = matchEvents.filter(event => {
         // Skip cancellation events themselves (they're not scoring events)
         if (event.event_type === 'cancel') {
-          continue;
+          return false;
         }
 
         // Skip events that have been cancelled
         if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
           console.log('🚫 Skipping cancelled event:', event.match_event_id);
-          continue;
+          return false;
         }
+
+        // Only dedupe when the match_event_id repeats (true duplicate)
+        const eventKey = event.match_event_id || '';
+        if (eventKey && seenEvents.has(eventKey)) {
+          duplicateEvents.push(event.match_event_id || 'unknown');
+          console.log(`🔄 Duplicate event detected and skipped by ID: ${event.match_event_id}`);
+          return false;
+        }
+        
+        if (eventKey) {
+          seenEvents.add(eventKey);
+        }
+        return true;
+      });
+
+      if (duplicateEvents.length > 0) {
+        console.log(`⚠️ Found ${duplicateEvents.length} duplicate events in match ${matchId}. These have been deduplicated by ID.`);
+      }
+
+      console.log(`📊 After deduplication: ${uniqueEvents.length} unique events (removed ${matchEvents.length - uniqueEvents.length} duplicates)`);
+
+      // 5. Process unique events using stored match_time_elapsed, filtering out cancelled events
+      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
+      let userData: {x: string, y: number}[] = [];
+      let opponentData: {x: string, y: number}[] = [];
+      
+      let userScore = 0;
+      let opponentScore = 0;
+
+      for (const event of uniqueEvents) {
 
         const displaySeconds = event.match_time_elapsed || 0;
         
@@ -1272,6 +1323,77 @@ $$;
       console.log('📈 Final USER score progression:', userData);
       console.log('📈 Final OPPONENT score progression:', opponentData);
 
+      // Validate and cap progression to match final scores
+      // Determine which fencer is the user to map final scores correctly
+      const isUserFencer1 = matchData.fencer_1_name === userName;
+      const isUserFencer2 = matchData.fencer_2_name === userName;
+
+      // Map final scores based on which fencer is the user
+      // If user is fencer_1: user's score = final_score, opponent's = touches_against
+      // If user is fencer_2: user's score = touches_against, opponent's = final_score
+      const finalUserScore = isUserFencer1 
+        ? (matchData.final_score || 0)
+        : isUserFencer2
+        ? (matchData.touches_against || 0)
+        : (matchData.final_score || 0); // Fallback
+
+      const finalOpponentScore = isUserFencer1
+        ? (matchData.touches_against || 0)
+        : isUserFencer2
+        ? (matchData.final_score || 0)
+        : (matchData.touches_against || 0); // Fallback
+
+      // Get the last Y values from progression
+      const lastUserY = userData.length > 0 ? userData[userData.length - 1].y : 0;
+      const lastOpponentY = opponentData.length > 0 ? opponentData[opponentData.length - 1].y : 0;
+
+      // If progression exceeds final scores, cap it and log warning
+      if (lastUserY !== finalUserScore || lastOpponentY !== finalOpponentScore) {
+        console.warn(`⚠️ Score progression mismatch detected!`, {
+          matchId,
+          userName,
+          isUserFencer1,
+          isUserFencer2,
+          progression: { user: lastUserY, opponent: lastOpponentY },
+          finalScores: { user: finalUserScore, opponent: finalOpponentScore },
+          difference: { user: lastUserY - finalUserScore, opponent: lastOpponentY - finalOpponentScore }
+        });
+        
+        // Cap the progression to final scores
+        if (lastUserY > finalUserScore) {
+          userData = userData.filter(point => point.y <= finalUserScore);
+          if (userData.length > 0) {
+            const lastPoint = userData[userData.length - 1];
+            userData[userData.length - 1] = { ...lastPoint, y: finalUserScore };
+          } else if (finalUserScore > 0) {
+            // Add a point at the last time if needed
+            const lastTime = uniqueEvents.length > 0 
+              ? (uniqueEvents[uniqueEvents.length - 1].match_time_elapsed || 0)
+              : 0;
+            const minutes = Math.floor(lastTime / 60);
+            const seconds = lastTime % 60;
+            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            userData.push({ x: timeString, y: finalUserScore });
+          }
+        }
+        
+        if (lastOpponentY > finalOpponentScore) {
+          opponentData = opponentData.filter(point => point.y <= finalOpponentScore);
+          if (opponentData.length > 0) {
+            const lastPoint = opponentData[opponentData.length - 1];
+            opponentData[opponentData.length - 1] = { ...lastPoint, y: finalOpponentScore };
+          } else if (finalOpponentScore > 0) {
+            const lastTime = uniqueEvents.length > 0 
+              ? (uniqueEvents[uniqueEvents.length - 1].match_time_elapsed || 0)
+              : 0;
+            const minutes = Math.floor(lastTime / 60);
+            const seconds = lastTime % 60;
+            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            opponentData.push({ x: timeString, y: finalOpponentScore });
+          }
+        }
+      }
+
       return {
         userData,
         opponentData
@@ -1297,7 +1419,7 @@ $$;
       // First try to get events by match_id
       const { data: eventsByMatchId, error: matchIdError } = await supabase
         .from('match_event')
-        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed')
+        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id')
         .eq('match_id', matchId)
         .order('timestamp', { ascending: true });
       
@@ -1312,7 +1434,7 @@ $$;
           console.log('Trying to find events by fencing_remote_id for touches by period:', remoteId);
           const { data: eventsByRemoteId, error: remoteIdError } = await supabase
             .from('match_event')
-            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed')
+            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id')
             .eq('fencing_remote_id', remoteId)
             .order('timestamp', { ascending: true });
           
@@ -1408,6 +1530,16 @@ $$;
         };
       }
 
+      // Map match_period_id to period_number for reliable assignment (avoids time-based misalignment when periods are skipped)
+      const periodNumberById: Record<string, number> = {};
+      if (matchPeriods) {
+        matchPeriods.forEach(period => {
+          if (period.match_period_id) {
+            periodNumberById[period.match_period_id] = period.period_number || 1;
+          }
+        });
+      }
+
       // 5. Calculate touches for each period
       const touchesByPeriod = {
         period1: { user: 0, opponent: 0 },
@@ -1447,7 +1579,10 @@ $$;
         // Determine which period this event belongs to
         let eventPeriod = 1; // Default to period 1
         
-        if (matchPeriods.length > 0) {
+        // Prefer match_period_id mapping to avoid timing errors when periods are skipped or have missing end_time
+        if (event.match_period_id && periodNumberById[event.match_period_id]) {
+          eventPeriod = periodNumberById[event.match_period_id];
+        } else if (matchPeriods.length > 0) {
           const firstPeriodStart = new Date(matchPeriods[0].start_time);
           const eventTime = new Date(event.timestamp);
           
@@ -1813,25 +1948,52 @@ $$;
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
-      // 4. Process events using stored match_time_elapsed, filtering out cancelled events
-      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
-      const fencer1Data: {x: string, y: number}[] = [];
-      const fencer2Data: {x: string, y: number}[] = [];
+      // 4. Deduplicate events by (match_time_elapsed, scoring_user_name, event_type)
+      // This prevents duplicate events from being counted multiple times
+      const seenEvents = new Set<string>();
+      const duplicateEvents: string[] = [];
       
-      let fencer1Score = 0;
-      let fencer2Score = 0;
-
-      for (const event of matchEvents) {
+      const uniqueEvents = matchEvents.filter(event => {
         // Skip cancellation events themselves (they're not scoring events)
         if (event.event_type === 'cancel') {
-          continue;
+          return false;
         }
 
         // Skip events that have been cancelled
         if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
           console.log('🚫 Skipping cancelled event:', event.match_event_id);
-          continue;
+          return false;
         }
+
+        // Create unique key: match_time_elapsed + scoring_user_name + event_type
+        // This ensures we only count one event per time/scorer combination
+        const eventKey = `${event.match_time_elapsed}_${event.scoring_user_name}_${event.event_type}`;
+        
+        if (seenEvents.has(eventKey)) {
+          duplicateEvents.push(event.match_event_id || 'unknown');
+          console.log(`🔄 Duplicate event detected and skipped: ${event.match_event_id} (time: ${event.match_time_elapsed}s, scorer: ${event.scoring_user_name})`);
+          return false;
+        }
+        
+        seenEvents.add(eventKey);
+        return true;
+      });
+
+      if (duplicateEvents.length > 0) {
+        console.log(`⚠️ Found ${duplicateEvents.length} duplicate events in match ${matchId}. These have been deduplicated.`);
+      }
+
+      console.log(`📊 After deduplication: ${uniqueEvents.length} unique events (removed ${matchEvents.length - uniqueEvents.length} duplicates)`);
+
+      // 5. Process unique events using stored match_time_elapsed
+      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
+      let fencer1Data: {x: string, y: number}[] = [];
+      let fencer2Data: {x: string, y: number}[] = [];
+      
+      let fencer1Score = 0;
+      let fencer2Score = 0;
+
+      for (const event of uniqueEvents) {
 
         const displaySeconds = event.match_time_elapsed || 0;
         
@@ -1900,6 +2062,24 @@ $$;
 
       console.log('📈 Final fencer 1 score progression:', fencer1Data);
       console.log('📈 Final fencer 2 score progression:', fencer2Data);
+
+      // Validate progression vs final scores for anonymous matches
+      // Always trust progression counts for charting; finals may be stale or swapped after side switches
+      const finalFencer1Score = matchData.final_score || 0;
+      const finalFencer2Score = matchData.touches_against || 0;
+
+      const lastFencer1Y = fencer1Data.length > 0 ? fencer1Data[fencer1Data.length - 1].y : 0;
+      const lastFencer2Y = fencer2Data.length > 0 ? fencer2Data[fencer2Data.length - 1].y : 0;
+
+      if (lastFencer1Y !== finalFencer1Score || lastFencer2Y !== finalFencer2Score) {
+        console.warn(`⚠️ Anonymous score progression mismatch detected!`, {
+          matchId,
+          progression: { fencer1: lastFencer1Y, fencer2: lastFencer2Y },
+          finalScores: { fencer1: finalFencer1Score, fencer2: finalFencer2Score },
+          difference: { fencer1: lastFencer1Y - finalFencer1Score, fencer2: lastFencer2Y - finalFencer2Score }
+        });
+        // Do not mutate progression to match finals; keep progression as truth for charting
+      }
 
       return {
         fencer1Data,

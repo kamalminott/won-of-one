@@ -1260,14 +1260,60 @@ export default function RemoteScreen() {
     const actualMatchTimeMs = totalElapsed - totalPausedTime;
     
     // Use the actual match timer time instead of wall clock time
-    // matchTime is the total match duration (e.g., 180 seconds)
-    // timeRemaining is how much time is left on the timer
-    // So elapsed time = matchTime - timeRemaining
+    // matchTime is the total match duration per period (e.g., 180 seconds)
+    // timeRemaining is how much time is left on the timer for the current period
+    // Need to account for completed periods, but only count periods that were actually played
+    // Query match_period table to determine which periods were actually played (have start_time)
+    // This ensures we don't add time for skipped periods (e.g., if user started on period 2)
     // If timer hasn't started yet (hasMatchStarted is false), use 0
     // For Epee double hits, if timer is paused, use the last known elapsed time
     let matchTimeElapsed = 0;
     if (hasMatchStarted) {
-      matchTimeElapsed = Math.max(0, matchTime - timeRemaining);
+      // Query match_period table to see which periods were actually played
+      // This ensures we don't add time for skipped periods (e.g., if user started on period 2)
+      let actualCompletedPeriods = 0;
+      let actualCompletedPeriodsTime = 0;
+      
+      if (currentMatchPeriod?.match_id) {
+        try {
+          const { data: periodsData } = await supabase
+            .from('match_period')
+            .select('period_number, start_time')
+            .eq('match_id', currentMatchPeriod.match_id)
+            .order('period_number', { ascending: true });
+          
+          const matchPeriods = periodsData || [];
+          
+          // Count periods that were actually played (have start_time)
+          const actualPeriodsPlayed = matchPeriods.filter(p => p.start_time) || [];
+          actualCompletedPeriods = Math.max(0, actualPeriodsPlayed.length - 1); // Exclude current period
+          actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+          
+          console.log('🕐 [MATCH TIME ELAPSED] Period calculation:', {
+            matchId: currentMatchPeriod.match_id,
+            currentPeriod,
+            matchPeriods: matchPeriods.map(p => ({ period_number: p.period_number, hasStartTime: !!p.start_time })),
+            actualPeriodsPlayed: actualPeriodsPlayed.map(p => p.period_number),
+            actualCompletedPeriods,
+            actualCompletedPeriodsTime
+          });
+        } catch (error) {
+          console.warn('⚠️ Error querying match_period table, falling back to currentPeriod calculation:', error);
+          // Fallback to original calculation if query fails
+          actualCompletedPeriods = currentPeriod - 1;
+          actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+        }
+      } else {
+        // Fallback if no match_id available
+        actualCompletedPeriods = currentPeriod - 1;
+        actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+      }
+      
+      // Calculate elapsed time for current period
+      const currentPeriodElapsed = matchTime - timeRemaining;
+      
+      // Total = actual completed periods + current period
+      matchTimeElapsed = Math.max(0, actualCompletedPeriodsTime + currentPeriodElapsed);
     } else if (matchStartTime) {
       // Timer hasn't started but match has (edge case), calculate from start time
       const totalElapsedFromStart = now.getTime() - matchStartTime.getTime();
@@ -1760,13 +1806,41 @@ export default function RemoteScreen() {
         // Continue with online completion below
       }
       
-      // Calculate total match duration: actual elapsed time from start to finish (excluding pauses)
+      // Calculate total match duration: timer-based elapsed time (same calculation as events)
+      // Query match_period table to determine which periods were actually played
+      // This ensures we don't add time for skipped periods (e.g., if user started on period 2)
+      // Timer stops when paused, so this excludes pauses automatically
       let matchDuration = 0;
-      if (matchStartTime) {
+      let matchPeriods: any[] | null = null;
+      let actualPeriodsPlayed: any[] = [];
+      
+      if (hasMatchStarted) {
+        // Query match_period table to see which periods were actually played
+        const { data: periodsData } = await supabase
+          .from('match_period')
+          .select('period_number, start_time')
+          .eq('match_id', currentMatchPeriod.match_id)
+          .order('period_number', { ascending: true });
+        
+        matchPeriods = periodsData || null;
+        
+        // Count periods that were actually played (have start_time)
+        actualPeriodsPlayed = matchPeriods?.filter(p => p.start_time) || [];
+        const actualCompletedPeriods = Math.max(0, actualPeriodsPlayed.length - 1); // Exclude current period
+        const actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+        
+        // Calculate elapsed time for current period
+        const currentPeriodElapsed = matchTime - timeRemaining;
+        
+        // Total = actual completed periods + current period
+        matchDuration = Math.max(0, actualCompletedPeriodsTime + currentPeriodElapsed);
+      } else if (matchStartTime) {
+        // Fallback: if timer hasn't started but match has, use wall-clock time excluding pauses
         const completionTime = new Date();
         const totalElapsed = completionTime.getTime() - matchStartTime.getTime();
         const actualMatchTime = totalElapsed - totalPausedTime;
         matchDuration = Math.max(0, Math.floor(actualMatchTime / 1000)); // Convert to seconds
+        console.warn('⚠️ Timer not started, using wall-clock fallback calculation');
       } else {
         // Fallback: if no start time, use period-based calculation (shouldn't happen normally)
         const completedPeriods = currentPeriod - 1;
@@ -1775,15 +1849,31 @@ export default function RemoteScreen() {
         console.warn('⚠️ No matchStartTime found, using fallback period-based calculation');
       }
       
-      console.log('🕐 Match duration calculation (actual elapsed time):', {
-        matchStartTime: matchStartTime?.toISOString(),
-        completionTime: new Date().toISOString(),
-        totalElapsed: matchStartTime ? (new Date().getTime() - matchStartTime.getTime()) / 1000 : 0,
-        totalPausedTime: totalPausedTime / 1000,
-        actualMatchTime: matchStartTime ? ((new Date().getTime() - matchStartTime.getTime()) - totalPausedTime) / 1000 : 0,
+      // Log the calculation details
+      const logData: any = {
+        hasMatchStarted,
+        matchTime,
+        timeRemaining,
+        currentPeriod,
         calculatedDuration: matchDuration,
         formattedDuration: `${Math.floor(matchDuration / 60)}:${(matchDuration % 60).toString().padStart(2, '0')}`
-      });
+      };
+      
+      if (hasMatchStarted && matchPeriods) {
+        logData.matchPeriodsCount = matchPeriods.length;
+        logData.actualPeriodsPlayed = actualPeriodsPlayed.length;
+        logData.actualPeriodsPlayedNumbers = actualPeriodsPlayed.map(p => p.period_number);
+        logData.actualCompletedPeriods = Math.max(0, actualPeriodsPlayed.length - 1);
+        logData.actualCompletedPeriodsTime = Math.max(0, actualPeriodsPlayed.length - 1) * matchTime;
+        logData.currentPeriodElapsed = matchTime - timeRemaining;
+      } else {
+        logData.matchStartTime = matchStartTime?.toISOString();
+        logData.completionTime = new Date().toISOString();
+        logData.totalElapsed = matchStartTime ? (new Date().getTime() - matchStartTime.getTime()) / 1000 : 0;
+        logData.totalPausedTime = totalPausedTime / 1000;
+      }
+      
+      console.log('🕐 Match duration calculation (timer-based elapsed time):', logData);
       
       // Determine result based on user_id presence
       let result: string | null = null;
@@ -1791,9 +1881,13 @@ export default function RemoteScreen() {
       let touchesAgainst: number;
       let scoreDiff: number | null;
 
-      // Use passed scores if provided, otherwise use current state scores
-      const actualFencerAScore = finalFencerAScore !== undefined ? finalFencerAScore : scores.fencerA;
-      const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scores.fencerB;
+      // Use passed scores if provided, otherwise use the latest ref (prevents stale state during rapid finish)
+      const actualFencerAScore = finalFencerAScore !== undefined ? finalFencerAScore : scoresRef.current.fencerA;
+      const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scoresRef.current.fencerB;
+
+      // Pre-compute position-based scores (reflects swaps) for anonymous saves
+      const leftScore = getScoreByPosition('left'); // Score of entity currently on left (position-based)
+      const rightScore = getScoreByPosition('right'); // Score of entity currently on right (position-based)
 
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their entity and result
@@ -1806,9 +1900,9 @@ export default function RemoteScreen() {
         scoreDiff = userScore - opponentScore;
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
-        // User toggle is off OR no registered user - record as anonymous match
-        finalScore = actualFencerAScore;
-        touchesAgainst = actualFencerBScore;
+        // User toggle is off OR no registered user - record position-based scores so names stay aligned after swaps
+        finalScore = leftScore;
+        touchesAgainst = rightScore;
         scoreDiff = null; // No score_diff when no user is present
         result = null; // No win/loss determination
       }
@@ -1817,8 +1911,6 @@ export default function RemoteScreen() {
       // This ensures period 3 (or current period) has proper end_time for event assignment
       // Use position-based scores (not entity-based) to match database columns (fencer_1 = left, fencer_2 = right)
       const matchCompletionTime = new Date().toISOString();
-      const leftScore = getScoreByPosition('left'); // Score of entity currently on left (position-based)
-      const rightScore = getScoreByPosition('right'); // Score of entity currently on right (position-based)
       const leftCards = getCardsByPosition('left'); // Cards of entity currently on left (position-based)
       const rightCards = getCardsByPosition('right'); // Cards of entity currently on right (position-based)
       
@@ -1868,23 +1960,31 @@ export default function RemoteScreen() {
           .order('period_number', { ascending: true });
 
         if (matchPeriods && matchPeriods.length > 0) {
-          const period = matchPeriods[0]; // Use first period
+          // Use the actual period_number from the database (could be 1, 2, or 3)
+          // This correctly handles cases where user skipped to period 2 or 3
+          const actualPeriodNumber = matchPeriods[0].period_number || 1;
+          periodNumber = actualPeriodNumber;
           
-          // For anonymous matches, both fencers are equal participants
-          periodNumber = 1; // All touches in first period for now
-          scoreSpp = Math.round((period.fencer_1_score + period.fencer_2_score) / periodNumber);
+          console.log('📊 [ANONYMOUS MATCH] Using actual period number:', {
+            actualPeriodNumber,
+            periodData: matchPeriods[0],
+            allPeriods: matchPeriods.map(p => ({ period_number: p.period_number, fencer_1_score: p.fencer_1_score, fencer_2_score: p.fencer_2_score }))
+          });
           
-          // Structure score by period data using actual fencer scores
+          // Calculate score per period based on actual period number
+          scoreSpp = Math.round((matchPeriods[0].fencer_1_score + matchPeriods[0].fencer_2_score) / periodNumber);
+          
+          // Structure score by period data - only populate the period that was actually played
           scoreByPeriod = {
-            period1: { user: period.fencer_1_score, opponent: period.fencer_2_score },
-            period2: { user: 0, opponent: 0 },
-            period3: { user: 0, opponent: 0 }
+            period1: actualPeriodNumber === 1 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
+            period2: actualPeriodNumber === 2 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
+            period3: actualPeriodNumber === 3 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 }
           };
           
           touchesByPeriod = {
-            period1: { user: period.fencer_1_score, opponent: period.fencer_2_score },
-            period2: { user: 0, opponent: 0 },
-            period3: { user: 0, opponent: 0 }
+            period1: actualPeriodNumber === 1 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
+            period2: actualPeriodNumber === 2 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
+            period3: actualPeriodNumber === 3 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 }
           };
         } else {
           // Fallback if no period data
@@ -2113,15 +2213,19 @@ export default function RemoteScreen() {
       const currentPeriodElapsed = matchTime - timeRemaining;
       const matchDuration = (completedPeriods * matchTime) + currentPeriodElapsed;
 
-      // Use passed scores if provided, otherwise use current state scores
-      const actualFencerAScore = finalFencerAScore !== undefined ? finalFencerAScore : scores.fencerA;
-      const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scores.fencerB;
+      // Use passed scores if provided, otherwise use the latest ref (prevents stale state during rapid finish)
+      const actualFencerAScore = finalFencerAScore !== undefined ? finalFencerAScore : scoresRef.current.fencerA;
+      const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scoresRef.current.fencerB;
 
       // Determine result based on user_id presence
       let result: string | null = null;
       let finalScore: number;
       let touchesAgainst: number;
       let scoreDiff: number | null;
+
+      // Position-based scores (reflect swaps) for anonymous saves
+      const leftScore = getScoreByPosition('left');
+      const rightScore = getScoreByPosition('right');
 
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their entity and result
@@ -2135,8 +2239,8 @@ export default function RemoteScreen() {
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
         // User toggle is off OR no registered user - record as anonymous match
-        finalScore = actualFencerAScore;
-        touchesAgainst = actualFencerBScore;
+        finalScore = leftScore;
+        touchesAgainst = rightScore;
         scoreDiff = null;
         result = null;
       }
@@ -2196,8 +2300,6 @@ export default function RemoteScreen() {
       const currentFencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
       
       // Get position-based scores and cards (reflects any swaps)
-      const leftScore = getScoreByPosition('left'); // Score of entity currently on left
-      const rightScore = getScoreByPosition('right'); // Score of entity currently on right
       const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
       const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
 
@@ -2721,6 +2823,8 @@ export default function RemoteScreen() {
     const newScore = currentScore + 1;
     const otherEntity = entity === 'fencerA' ? 'fencerB' : 'fencerA';
     const otherScore = getScoreByEntity(otherEntity);
+    // Keep the ref in sync immediately so completion uses the latest values even before React updates state
+    scoresRef.current = { ...scoresRef.current, [entity]: newScore };
     
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
@@ -2922,7 +3026,57 @@ export default function RemoteScreen() {
 
     const now = new Date();
     const actualMatchTime = getActualMatchTime();
-    const matchTimeElapsed = Math.max(0, matchTime - timeRemaining);
+    // Calculate elapsed time accounting for completed periods
+    // Query match_period table to determine which periods were actually played (have start_time)
+    // This ensures we don't add time for skipped periods (e.g., if user started on period 2)
+    let matchTimeElapsed = 0;
+    if (hasMatchStarted) {
+      // Query match_period table to see which periods were actually played
+      // This ensures we don't add time for skipped periods (e.g., if user started on period 2)
+      let actualCompletedPeriods = 0;
+      let actualCompletedPeriodsTime = 0;
+      
+      if (currentMatchPeriod?.match_id) {
+        try {
+          const { data: periodsData } = await supabase
+            .from('match_period')
+            .select('period_number, start_time')
+            .eq('match_id', currentMatchPeriod.match_id)
+            .order('period_number', { ascending: true });
+          
+          const matchPeriods = periodsData || [];
+          
+          // Count periods that were actually played (have start_time)
+          const actualPeriodsPlayed = matchPeriods.filter(p => p.start_time) || [];
+          actualCompletedPeriods = Math.max(0, actualPeriodsPlayed.length - 1); // Exclude current period
+          actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+          
+          console.log('🕐 [CANCELLATION EVENT] Period calculation:', {
+            matchId: currentMatchPeriod.match_id,
+            currentPeriod,
+            matchPeriods: matchPeriods.map(p => ({ period_number: p.period_number, hasStartTime: !!p.start_time })),
+            actualPeriodsPlayed: actualPeriodsPlayed.map(p => p.period_number),
+            actualCompletedPeriods,
+            actualCompletedPeriodsTime
+          });
+        } catch (error) {
+          console.warn('⚠️ Error querying match_period table for cancellation event, falling back to currentPeriod calculation:', error);
+          // Fallback to original calculation if query fails
+          actualCompletedPeriods = currentPeriod - 1;
+          actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+        }
+      } else {
+        // Fallback if no match_id available
+        actualCompletedPeriods = currentPeriod - 1;
+        actualCompletedPeriodsTime = actualCompletedPeriods * matchTime;
+      }
+      
+      // Calculate elapsed time for current period
+      const currentPeriodElapsed = matchTime - timeRemaining;
+      
+      // Total = actual completed periods + current period
+      matchTimeElapsed = Math.max(0, actualCompletedPeriodsTime + currentPeriodElapsed);
+    }
     
     // Determine scorer and names (same logic as createMatchEvent)
     const entityIsUser = isEntityUser(entity);

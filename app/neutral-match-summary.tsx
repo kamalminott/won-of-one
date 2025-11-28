@@ -1141,6 +1141,7 @@ export default function NeutralMatchSummary() {
               touchesByPeriod={touchesByPeriod}
               userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
               opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
+              userPosition="left" // For neutral matches, use 'left' to ensure fencer1 is red and fencer2 is green
             />
           </View>
         </View>
@@ -1155,6 +1156,7 @@ export default function NeutralMatchSummary() {
             opponentScore={fencer2ScoreDisplay} // fencer2 score (chart prop name is opponentScore)
             userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
             opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
+            userPosition="left" // For neutral matches, use 'left' to ensure fencer1 is red and fencer2 is green
             styleOverrides={{
               container: {
                 marginHorizontal: 0, // Remove chart's own margin - wrapper handles it

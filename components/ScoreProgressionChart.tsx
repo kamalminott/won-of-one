@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LineChart as RNChartKit } from 'react-native-chart-kit';
 import { LineChart } from 'react-native-gifted-charts';
@@ -145,6 +145,29 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
 }) => {
   const { width, height: screenHeight } = useWindowDimensions();
 
+  // Add comprehensive logging for received props
+  const userDataLength = scoreProgression?.userData?.length ?? 0;
+  const opponentDataLength = scoreProgression?.opponentData?.length ?? 0;
+  const userDataLastY = userDataLength > 0 
+    ? scoreProgression?.userData?.[userDataLength - 1]?.y ?? null
+    : null;
+  const opponentDataLastY = opponentDataLength > 0 
+    ? scoreProgression?.opponentData?.[opponentDataLength - 1]?.y ?? null
+    : null;
+
+  console.log('📊 [SCORE PROGRESSION CHART] Received props:', {
+    userScore,
+    opponentScore,
+    userLabel,
+    opponentLabel,
+    userPosition,
+    hasScoreProgression: !!scoreProgression,
+    scoreProgressionUserDataLength: userDataLength,
+    scoreProgressionOpponentDataLength: opponentDataLength,
+    scoreProgressionUserLastY: userDataLastY,
+    scoreProgressionOpponentLastY: opponentDataLastY,
+  });
+
   // Tooltip state
   // Victory Native handles tooltips natively, no need for state management
 
@@ -224,9 +247,14 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       const oppMax = Math.max(...oppSeries.map(p => p.y));
       const gapMax = Math.max(...gapSeries.map(p => Math.abs(p.y)));
       
+      // Use final scores from props if available, otherwise use calculated max
+      // This ensures Y-axis shows full range even if progression data was capped
+      const finalUserMax = userScore > 0 ? Math.max(userMax, userScore) : Math.max(userMax, 1);
+      const finalOppMax = opponentScore > 0 ? Math.max(oppMax, opponentScore) : Math.max(oppMax, 1);
+      
       const yDomains = {
-        user: [0, Math.max(userMax, 1)] as [number, number],
-        opponent: [0, Math.max(oppMax, 1)] as [number, number],
+        user: [0, finalUserMax] as [number, number],
+        opponent: [0, finalOppMax] as [number, number],
         gap: [-Math.max(gapMax, 1), Math.max(gapMax, 1)] as [number, number]
       };
       
@@ -240,7 +268,19 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     }
     
     return buildScoreSeries([]);
-  }, [events, scoreProgression]);
+  }, [events, scoreProgression, userScore, opponentScore]);
+
+  // Track seen Y-axis labels to prevent duplicates
+  // Use a unique key based on chart data to reset when data changes
+  const seenYLabelsRef = useRef<{ 
+    key: string; 
+    set: Set<string>; 
+    lastValidLabel: string; // Track last valid label to return for duplicates (prevents gaps)
+  }>({ 
+    key: '', 
+    set: new Set(),
+    lastValidLabel: '0'
+  });
 
   const styles = StyleSheet.create({
     container: {
@@ -253,7 +293,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       marginHorizontal: width * 0.02, // Reduced from 0.04 to make graph wider
       left: 0,
       right: 0,
-      overflow: 'visible',
+      overflow: 'hidden', // Prevent scrollable chart from spilling outside container
     },
     title: {
       fontSize: Math.round(width * 0.035),
@@ -387,12 +427,47 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         // Use the original data without padding to prevent extending beyond X-axis
         const maxUserScore = Math.max(...userData, 0);
         const maxOpponentScore = Math.max(...opponentData, 0);
-        const maxScore = Math.max(maxUserScore, maxOpponentScore, 5); // Minimum range of 0-5
+        
+        console.log('�� [SCORE PROGRESSION CHART] Y-axis calculation:', {
+          fromProgressionData: {
+            maxUserScore,
+            maxOpponentScore,
+          },
+          fromProps: {
+            userScore,
+            opponentScore,
+          },
+        });
+
+        // Use final scores from props to ensure Y-axis shows full range but keep the scale aligned to real data
+        // Dropping the hard minimum of 5 prevents the library from creating fractional steps that round into duplicate labels
+        const finalMaxUserScore = userScore > 0 ? Math.max(maxUserScore, userScore) : maxUserScore;
+        const finalMaxOpponentScore = opponentScore > 0 ? Math.max(maxOpponentScore, opponentScore) : maxOpponentScore;
+        const maxScore = Math.max(finalMaxUserScore, finalMaxOpponentScore);
+        
+        console.log('�� [SCORE PROGRESSION CHART] Final Y-axis calculation:', {
+          finalMaxUserScore,
+          finalMaxOpponentScore,
+          maxScore,
+          calculation: {
+            step1_userMax: userScore > 0 
+              ? `Math.max(${maxUserScore}, ${userScore}) = ${finalMaxUserScore}`
+              : `from progression = ${finalMaxUserScore}`,
+            step2_oppMax: opponentScore > 0
+              ? `Math.max(${maxOpponentScore}, ${opponentScore}) = ${finalMaxOpponentScore}`
+              : `from progression = ${finalMaxOpponentScore}`,
+            step3_final: `Math.max(${finalMaxUserScore}, ${finalMaxOpponentScore}) = ${maxScore}`,
+          },
+        });
         
         // Use original data without padding
         const paddedUserData = [...userData];
         const paddedOpponentData = [...opponentData];
         const paddedLabels = [...timeLabels];
+        const dataMaxValue = Math.max(
+          paddedUserData.length ? Math.max(...paddedUserData) : 0,
+          paddedOpponentData.length ? Math.max(...paddedOpponentData) : 0
+        );
         
         console.log('📊 Chart Kit Labels:', timeLabels);
         console.log('📊 User Data:', userData);
@@ -418,46 +493,81 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
           firstOpponentValue: paddedOpponentData[0]
         });
         
-        // Assign colors based on userPosition
-        // paddedUserData = fencer1Data (left position)
-        // paddedOpponentData = fencer2Data (right position)
-        // When userPosition === 'left': user is fencer1 (red), opponent is fencer2 (green)
-        // When userPosition === 'right': user is fencer2 (red), opponent is fencer1 (green)
-        const fencer1Color = userPosition === 'left' 
-          ? (opacity = 1) => `rgba(255, 118, 117, ${opacity})` // Red (user)
-          : (opacity = 1) => `rgba(0, 184, 148, ${opacity})`; // Green (opponent)
-        const fencer2Color = userPosition === 'right'
-          ? (opacity = 1) => `rgba(255, 118, 117, ${opacity})` // Red (user)
-          : (opacity = 1) => `rgba(0, 184, 148, ${opacity})`; // Green (opponent)
+        // Use maxScore calculated from props to ensure Y-axis shows full range
+        // This ensures the chart displays correctly even if progression data was capped
+        // maxScore already accounts for userScore and opponentScore props
+        const maxValue = Math.max(maxScore, dataMaxValue);
+        
+        // Calculate segments to show only integer values from 0 to max data value
+        // Keeping segments at or below the highest plotted score avoids fractional steps that round into duplicates
+        const yAxisCeiling = Math.max(Math.floor(dataMaxValue), 1);
+        const calculatedSegments = Math.max(1, Math.min(yAxisCeiling, 10)); // Between 1 and 10 segments
+        
+        // Calculate the exact Y-axis values we expect to show (0 to yAxisCeiling, integers only)
+        const desiredYValues = Array.from({ length: yAxisCeiling + 1 }, (_, i) => i);
+        console.log('📊 [Y-AXIS] Desired Y-axis values:', desiredYValues, 'maxValue:', maxValue, 'dataMaxValue:', dataMaxValue, 'segments:', calculatedSegments);
+        
+        // Ensure the chart data doesn't exceed maxValue to prevent the chart from generating extra labels
+        // This helps prevent the chart from generating labels based on data points that exceed the range
+        const normalizedUserData = paddedUserData.map(val => Math.min(val, maxValue));
+        const normalizedOpponentData = paddedOpponentData.map(val => Math.min(val, maxValue));
+        
+        // Colors by identity (match legend): user = red, opponent = green
+        // Dataset order is identity-based (dataset[0] = user, dataset[1] = opponent)
+        const userLineColor = (opacity = 1) => `rgba(255, 118, 117, ${opacity})`;
+        const opponentLineColor = (opacity = 1) => `rgba(0, 184, 148, ${opacity})`;
+        const datasetColors = [userLineColor, opponentLineColor];
         
         const chartData_kit = {
           labels: displayLabels,
           datasets: [
             {
-              data: paddedUserData, // fencer_1 (left position)
-              color: fencer1Color,
+              data: normalizedUserData, // fencer_1 (left position) - normalized to prevent extra labels
+              color: datasetColors[0],
               strokeWidth: 3,
             },
             {
-              data: paddedOpponentData, // fencer_2 (right position)
-              color: fencer2Color,
+              data: normalizedOpponentData, // fencer_2 (right position) - normalized to prevent extra labels
+              color: datasetColors[1],
               strokeWidth: 3,
             }
           ]
         };
-
-        // Calculate maxValue BEFORE using it in chartConfig
-        const maxValue = Math.max(
-          ...chartData.userSeries.map(p => p.y),
-          ...chartData.oppSeries.map(p => p.y),
-          1
-        );
+        
+        // Create a unique key based on chart data to detect when data actually changes
+        // Only reset the Set when chart data changes, not on every render
+        const chartDataKey = JSON.stringify({
+          userSeries: chartData.userSeries.map(p => `${p.x}-${p.y}`),
+          oppSeries: chartData.oppSeries.map(p => `${p.x}-${p.y}`),
+          maxValue,
+          segments: calculatedSegments
+        });
+        
+        // Reset Set only when chart data actually changes
+        // Ensure ref is properly initialized
+        if (!seenYLabelsRef.current.set) {
+          seenYLabelsRef.current.set = new Set();
+          seenYLabelsRef.current.lastValidLabel = '0';
+        }
+        if (!seenYLabelsRef.current.lastValidLabel) {
+          seenYLabelsRef.current.lastValidLabel = '0';
+        }
+        if (seenYLabelsRef.current.key !== chartDataKey) {
+          seenYLabelsRef.current.set.clear();
+          seenYLabelsRef.current.key = chartDataKey;
+          seenYLabelsRef.current.lastValidLabel = '0';
+          console.log('📊 [Y-AXIS] Chart data changed, resetting seen labels', {
+            maxValue,
+            segments: calculatedSegments,
+            chartDataKey
+          });
+        }
         
         const chartConfig = {
           backgroundColor: "#2B2B2B", // Match the card background color
           backgroundGradientFrom: "#2B2B2B",
           backgroundGradientTo: "#2B2B2B",
-          decimalPlaces: 0,
+          decimalPlaces: 0, // Force integer labels - CRITICAL for preventing fractional labels
           color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
           labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
           style: {
@@ -483,15 +593,33 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
             fill: "rgba(255, 255, 255, 0.7)",
             rotation: 0
           },
-          // Y-axis label configuration - try different approach
+          // Y-axis label configuration
           propsForHorizontalLabels: {
             fontSize: 12,
             fill: "rgba(255, 255, 255, 0.9)",
             fontWeight: "500"
           },
-          // Force y-axis labels to show
-          formatYLabel: (yValue: string) => yValue,
-          count: Math.min(maxValue, 5) // Ensure we have proper segments
+          // formatYLabel in chartConfig - may not be called by library, but keeping for compatibility
+          formatYLabel: (yValue: string) => {
+            console.log('📊 [Y-AXIS] formatYLabel (chartConfig) called with:', yValue);
+            if (!seenYLabelsRef.current.set) {
+              seenYLabelsRef.current.set = new Set();
+              seenYLabelsRef.current.lastValidLabel = '0';
+            }
+            if (!seenYLabelsRef.current.lastValidLabel) {
+              seenYLabelsRef.current.lastValidLabel = '0';
+            }
+            const roundedValue = Math.round(parseFloat(yValue)).toString();
+            if (seenYLabelsRef.current.set.has(roundedValue)) {
+              console.log('📊 [Y-AXIS] ❌ Duplicate (chartConfig):', roundedValue, '- returning same value to overlap');
+              // Return the same value so duplicates overlap instead of leaving gaps
+              return roundedValue;
+            }
+            seenYLabelsRef.current.set.add(roundedValue);
+            seenYLabelsRef.current.lastValidLabel = roundedValue;
+            console.log('📊 [Y-AXIS] ✅ New label (chartConfig):', roundedValue);
+            return roundedValue;
+          }
         };
 
         const chartComponent = (
@@ -519,18 +647,40 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
               withVerticalLines={true}
               withHorizontalLines={true}
               fromZero={true}
-              segments={Math.min(maxValue, 5)}
+              segments={calculatedSegments}
+              formatYLabel={(yValue: string) => {
+                // This is a fallback - formatYLabel in chartConfig should work, but this ensures it's called
+                console.log('📊 [Y-AXIS] formatYLabel (component prop) called with:', yValue);
+                // Use the same deduplication logic
+                if (!seenYLabelsRef.current.set) {
+                  seenYLabelsRef.current.set = new Set();
+                  seenYLabelsRef.current.lastValidLabel = '0';
+                }
+                if (!seenYLabelsRef.current.lastValidLabel) {
+                  seenYLabelsRef.current.lastValidLabel = '0';
+                }
+                const roundedValue = Math.round(parseFloat(yValue)).toString();
+                if (seenYLabelsRef.current.set.has(roundedValue)) {
+                  console.log('📊 [Y-AXIS] ❌ Duplicate (component prop):', roundedValue, '- returning same value to overlap');
+                  // Return the same value so duplicates overlap instead of leaving gaps
+                  return roundedValue;
+                }
+                seenYLabelsRef.current.set.add(roundedValue);
+                seenYLabelsRef.current.lastValidLabel = roundedValue;
+                console.log('📊 [Y-AXIS] ✅ New label (component prop):', roundedValue);
+                return roundedValue;
+              }}
             />
           </TouchableOpacity>
         );
 
         return (
-          <View style={{ height: chartHeight, width: width * 1, overflow: 'visible', marginLeft: 0, paddingLeft: width * 0.05 }}>
+          <View style={{ height: chartHeight, width: width * 1, overflow: 'hidden', marginLeft: 0, paddingLeft: width * 0.02 }}>
             {isScrollable ? (
               <ScrollView 
                 horizontal 
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingRight: width * 0.1 }}
+                contentContainerStyle={{ paddingRight: width * 0.05 }}
               >
                 {chartComponent}
               </ScrollView>
@@ -648,9 +798,9 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     // Header always shows: fencer_1_name (left) - fencer_2_name (right)
     // userLabel = fencer_1_name (left position), opponentLabel = fencer_2_name (right position)
     // So legend should always show: userLabel (left) - opponentLabel (right) to match header
-    // Colors indicate which is user (red) vs opponent (green)
-    const leftColor = userPosition === 'left' ? '#FF7675' : '#00B894';
-    const rightColor = userPosition === 'right' ? '#FF7675' : '#00B894';
+    // Legend colors by identity: user = red, opponent = green
+    const leftColor = '#FF7675';
+    const rightColor = '#00B894';
     
     console.log('📊 [SCORE PROGRESSION CHART] Rendering legend:', {
       userLabel,

@@ -210,10 +210,14 @@ export default function MatchSummaryScreen() {
               fencer1LastPoint: calculatedScoreProgression.fencer1Data[calculatedScoreProgression.fencer1Data.length - 1],
               fencer2LastPoint: calculatedScoreProgression.fencer2Data[calculatedScoreProgression.fencer2Data.length - 1],
             });
-            // Convert to chart format: fencer1Data -> userData (left), fencer2Data -> opponentData (right)
-            const scoreProgData = {
-              userData: calculatedScoreProgression.fencer1Data, // fencer_1 (left position) - matches header
-              opponentData: calculatedScoreProgression.fencer2Data // fencer_2 (right position) - matches header
+            // Map progression to user/opponent based on which fencer is the user
+            // Map progression to user/opponent based on which fencer is the user
+            const scoreProgData = isFencer1User ? {
+              userData: calculatedScoreProgression.fencer1Data, // user on left
+              opponentData: calculatedScoreProgression.fencer2Data
+            } : {
+              userData: calculatedScoreProgression.fencer2Data, // user on right
+              opponentData: calculatedScoreProgression.fencer1Data
             };
             console.log('📈 [MATCH SUMMARY] Setting scoreProgression:', {
               userDataLength: scoreProgData.userData.length,
@@ -222,6 +226,15 @@ export default function MatchSummaryScreen() {
               opponentDataFirst: scoreProgData.opponentData[0],
             });
             setScoreProgression(scoreProgData);
+            // Precompute progression totals to validate other derived data
+            const progressionFencer1Total = scoreProgData.userData.length > 0 ? scoreProgData.userData[scoreProgData.userData.length - 1].y : 0;
+            const progressionFencer2Total = scoreProgData.opponentData.length > 0 ? scoreProgData.opponentData[scoreProgData.opponentData.length - 1].y : 0;
+
+            const clampTouches = (data: { period1: { user: number; opponent: number }; period2: { user: number; opponent: number }; period3: { user: number; opponent: number }; }) => ({
+              period1: { user: Math.max(0, data.period1.user), opponent: Math.max(0, data.period1.opponent) },
+              period2: { user: Math.max(0, data.period2.user), opponent: Math.max(0, data.period2.opponent) },
+              period3: { user: Math.max(0, data.period3.user), opponent: Math.max(0, data.period3.opponent) },
+            });
 
             // Use position-based touchesByPeriod from match_period table (same approach as header and neutral match summary)
             // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
@@ -287,7 +300,42 @@ export default function MatchSummaryScreen() {
                 period3User: touchesByPeriodData.period3.user,
                 period3Opponent: touchesByPeriodData.period3.opponent,
               });
-              setTouchesByPeriod(touchesByPeriodData);
+              // Remap to user/opponent based on which fencer is the user
+              const mappedTouchesByPeriodRaw = isFencer1User ? touchesByPeriodData : {
+                period1: { user: touchesByPeriodData.period1.opponent, opponent: touchesByPeriodData.period1.user },
+                period2: { user: touchesByPeriodData.period2.opponent, opponent: touchesByPeriodData.period2.user },
+                period3: { user: touchesByPeriodData.period3.opponent, opponent: touchesByPeriodData.period3.user },
+              };
+              const mappedTouchesByPeriod = clampTouches(mappedTouchesByPeriodRaw);
+
+              // If period totals don't match progression totals, fall back to event-derived calculation
+              const periodUserTotal = mappedTouchesByPeriod.period1.user + mappedTouchesByPeriod.period2.user + mappedTouchesByPeriod.period3.user;
+              const periodOpponentTotal = mappedTouchesByPeriod.period1.opponent + mappedTouchesByPeriod.period2.opponent + mappedTouchesByPeriod.period3.opponent;
+              const totalsMatch = periodUserTotal === progressionFencer1Total && periodOpponentTotal === progressionFencer2Total;
+              if (!totalsMatch) {
+                console.warn('⚠️ [MATCH SUMMARY] Period totals mismatch progression totals, recalculating from events', {
+                  periodUserTotal,
+                  periodOpponentTotal,
+                  progressionFencer1Total,
+                  progressionFencer2Total
+                });
+                const recalculatedRaw = await matchService.calculateTouchesByPeriod(
+                  params.matchId as string,
+                  userFencerName,
+                  params.remoteId as string,
+                  progressionFencer1Total,
+                  progressionFencer2Total
+                );
+                const recalculatedMappedRaw = isFencer1User ? recalculatedRaw : {
+                  period1: { user: recalculatedRaw.period1.opponent, opponent: recalculatedRaw.period1.user },
+                  period2: { user: recalculatedRaw.period2.opponent, opponent: recalculatedRaw.period2.user },
+                  period3: { user: recalculatedRaw.period3.opponent, opponent: recalculatedRaw.period3.user },
+                };
+                const recalculated = clampTouches(recalculatedMappedRaw);
+                setTouchesByPeriod(recalculated);
+              } else {
+                setTouchesByPeriod(mappedTouchesByPeriod);
+              }
             } else {
               // No period data - fallback to entity-based calculation
               const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
@@ -563,6 +611,25 @@ export default function MatchSummaryScreen() {
     if (!value) return '';
     return value.trim().toLowerCase();
   };
+
+  // Parse "MM:SS" or "(M:SS)" into total seconds
+  const parseTimeLabelToSeconds = (label?: string | null) => {
+    if (!label) return 0;
+    const cleaned = label.replace(/[()]/g, '');
+    const parts = cleaned.split(':');
+    if (parts.length !== 2) return 0;
+    const [m, s] = parts.map(Number);
+    if (Number.isNaN(m) || Number.isNaN(s)) return 0;
+    return m * 60 + s;
+  };
+
+  // Get the max elapsed time from score progression (fallback if bout_length_s is stale)
+  const getProgressionDurationSeconds = () => {
+    const userTimes = scoreProgression.userData.map(p => parseTimeLabelToSeconds(p.x));
+    const opponentTimes = scoreProgression.opponentData.map(p => parseTimeLabelToSeconds(p.x));
+    return Math.max(0, ...userTimes, ...opponentTimes);
+  };
+
   const normalizedUserName = normalizeName(userName);
   const isFencer1User = normalizedUserName && match?.fencer_1_name
     ? normalizeName(match.fencer_1_name) === normalizedUserName
@@ -570,7 +637,7 @@ export default function MatchSummaryScreen() {
   const isFencer2User = normalizedUserName && match?.fencer_2_name
     ? normalizeName(match.fencer_2_name) === normalizedUserName
     : false;
-  
+
   console.log('🔍 Match Summary - User identification:', {
     userName,
     normalizedUserName,
@@ -582,6 +649,28 @@ export default function MatchSummaryScreen() {
     isFencer2User
   });
 
+  // Progression totals (already mapped to user/opponent orientation)
+  const progressionUserTotal = scoreProgression.userData.length > 0
+    ? scoreProgression.userData[scoreProgression.userData.length - 1].y
+    : 0;
+  const progressionOpponentTotal = scoreProgression.opponentData.length > 0
+    ? scoreProgression.opponentData[scoreProgression.opponentData.length - 1].y
+    : 0;
+
+  // Fallbacks from DB (position-based)
+  const dbFencer1Score = match?.final_score || 0;      // left
+  const dbFencer2Score = match?.touches_against || 0;  // right
+
+  // Derive user/opponent scores with orientation; prefer progression totals when available
+  const fallbackUserScore = isFencer1User ? dbFencer1Score : isFencer2User ? dbFencer2Score : dbFencer1Score;
+  const fallbackOpponentScore = isFencer1User ? dbFencer2Score : isFencer2User ? dbFencer1Score : dbFencer2Score;
+  const userScoreFinal = progressionUserTotal > 0 ? progressionUserTotal : fallbackUserScore;
+  const opponentScoreFinal = progressionOpponentTotal > 0 ? progressionOpponentTotal : fallbackOpponentScore;
+
+  // Map to header positions (fencer_1 = left, fencer_2 = right)
+  const fencer1ScoreFinal = isFencer1User ? userScoreFinal : opponentScoreFinal;
+  const fencer2ScoreFinal = isFencer1User ? opponentScoreFinal : userScoreFinal;
+
   const matchData = match ? {
     id: match.match_id,
     opponent: match.fencer_2_name || 'Opponent',
@@ -591,40 +680,37 @@ export default function MatchSummaryScreen() {
     outcome: (match.user_id && match.result === 'win') ? 'victory' as const : 
              (match.user_id && match.result === 'loss') ? 'defeat' as const : 
              null, // No outcome for anonymous matches (user_id is null)
-    score: `${match.final_score || 0}-${match.touches_against || 0}`,
+    score: `${fencer1ScoreFinal}-${fencer2ScoreFinal}`,
     matchType: matchType, // Use match type from database
     date: new Date().toLocaleDateString(),
-    // Use entity-based logic to determine which score belongs to the user
-    // final_score is fencer_1's score, touches_against is fencer_2's score
-    userScore: isFencer1User 
-      ? (match.final_score || 0) 
-      : isFencer2User 
-      ? (match.touches_against || 0) 
-      : (match.final_score || 0), // Fallback to fencer_1 if no user match
-    opponentScore: isFencer1User 
-      ? (match.touches_against || 0) 
-      : isFencer2User 
-      ? (match.final_score || 0) 
-      : (match.touches_against || 0), // Fallback to fencer_2 if no user match
+    // Use entity-based logic to determine which score belongs to the user, prefer progression totals
+    userScore: userScoreFinal,
+    opponentScore: opponentScoreFinal,
     bestRun: bestRun, // Now using calculated best run from database
     fencer1Name: match.fencer_1_name,
     fencer2Name: match.fencer_2_name,
     isFencer1User,
     isFencer2User,
-    // Map entity-based scores (user/opponent) to position-based scores (left/right)
-    // final_score = user's score, touches_against = opponent's score
-    // fencer_1_name and fencer_2_name are position-based (left/right after swap)
-    fencer1Score: isFencer1User 
-      ? (match.final_score || 0)  // User is fencer_1 (left), so use user's score
-      : isFencer2User 
-      ? (match.touches_against || 0)  // User is fencer_2 (right), so fencer_1 (left) is opponent
-      : (match.final_score || 0), // Fallback
-    fencer2Score: isFencer1User 
-      ? (match.touches_against || 0)  // User is fencer_1 (left), so fencer_2 (right) is opponent
-      : isFencer2User 
-      ? (match.final_score || 0)  // User is fencer_2 (right), so use user's score
-      : (match.touches_against || 0) // Fallback
+    // Map position-based scores (fencer_1 = left, fencer_2 = right) using oriented totals
+    fencer1Score: fencer1ScoreFinal,
+    fencer2Score: fencer2ScoreFinal,
   } : null;
+
+  // Log position-based scores calculation for debugging
+  if (matchData) {
+    console.log('📊 [MATCH SUMMARY] Calculating position-based scores:', {
+      matchId: match?.match_id,
+      fromDatabase: {
+        final_score: match?.final_score,
+        touches_against: match?.touches_against,
+      },
+      calculated: {
+        fencer1Score: matchData.fencer1Score,
+        fencer2Score: matchData.fencer2Score,
+      },
+      note: 'Position-mapped from entity scores using which fencer is the user (handles side swaps)'
+    });
+  }
 
   const styles = StyleSheet.create({
     container: {
@@ -858,18 +944,36 @@ export default function MatchSummaryScreen() {
           // fencer1Score = score of fencer_1 (left position), fencer2Score = score of fencer_2 (right position)
           userScore={(() => {
             const score = matchData?.fencer1Score || 0;
-            console.log('📊 [MATCH SUMMARY] userScore (fencer1Score):', score, 'from matchData:', matchData?.fencer1Score);
+            console.log('📊 [MATCH SUMMARY] Passing userScore to chart:', {
+              score,
+              source: 'matchData.fencer1Score',
+              matchDataFencer1Score: matchData?.fencer1Score,
+              matchFinalScore: match?.final_score,
+              matchTouchesAgainst: match?.touches_against,
+            });
             return score;
           })()}
           opponentScore={(() => {
             const score = matchData?.fencer2Score || 0;
-            console.log('📊 [MATCH SUMMARY] opponentScore (fencer2Score):', score, 'from matchData:', matchData?.fencer2Score);
+            console.log('📊 [MATCH SUMMARY] Passing opponentScore to chart:', {
+              score,
+              source: 'matchData.fencer2Score',
+              matchDataFencer2Score: matchData?.fencer2Score,
+              matchFinalScore: match?.final_score,
+              matchTouchesAgainst: match?.touches_against,
+            });
             return score;
           })()}
           bestRun={bestRun}
           yellowCards={match?.yellow_cards || 0}
           redCards={match?.red_cards || 0}
-          matchDurationSeconds={match?.bout_length_s || 0}
+          matchDurationSeconds={(() => {
+            const progressionDuration = getProgressionDurationSeconds();
+            const boutLength = match?.bout_length_s || 0;
+            const duration = Math.max(boutLength, progressionDuration);
+            console.log('⏱️ [MATCH SUMMARY] Passing duration to KeyStatsCard:', { boutLength, progressionDuration, duration });
+            return duration;
+          })()}
           // touchesByPeriod is position-based from match_period table (same approach as neutral match summary)
           touchesByPeriod={(() => {
             console.log('📊 [MATCH SUMMARY] Passing touchesByPeriod to chart:', {
