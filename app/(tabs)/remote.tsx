@@ -2712,6 +2712,7 @@ export default function RemoteScreen() {
   const [isBreakTime, setIsBreakTime] = useState(false); // For break timer
   const [breakTimeRemaining, setBreakTimeRemaining] = useState(60); // 1 minute break
   const [breakTimerRef, setBreakTimerRef] = useState<number | null>(null); // Break timer reference
+  const [hasShownBreakPopup, setHasShownBreakPopup] = useState(false); // Flag to prevent multiple break popups
   const [isManualReset, setIsManualReset] = useState(false); // Flag to prevent auto-sync during manual reset
   const [hasMatchStarted, setHasMatchStarted] = useState(false); // Track if match has been started
   const [isAssigningPriority, setIsAssigningPriority] = useState(false); // Track if priority is being assigned
@@ -3092,6 +3093,9 @@ export default function RemoteScreen() {
   // Helper function to transition to next period (used when skipping break)
   const transitionToNextPeriod = async (currentPeriodValue: number) => {
     const nextPeriod = currentPeriodValue + 1;
+    
+    // Reset break popup flag
+    setHasShownBreakPopup(false);
     
     // End current period and create new one
     if (currentMatchPeriod) {
@@ -4372,6 +4376,7 @@ export default function RemoteScreen() {
     setIsPlaying(false);
     isPlayingRef.current = false; // Update ref
     setTimeRemaining(matchTime);
+    setHasShownBreakPopup(false); // Reset break popup flag
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [matchTime]);
 
@@ -4524,6 +4529,12 @@ export default function RemoteScreen() {
         isPlayingRef.current = false; // Update ref
         // Haptic feedback for timer completion
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        
+        // Prevent multiple popups from showing
+        if (hasShownBreakPopup) {
+          return;
+        }
+        setHasShownBreakPopup(true);
         
         // Get the current period value to avoid stale closure
         const currentPeriodValue = currentPeriodRef.current;
@@ -5022,6 +5033,9 @@ export default function RemoteScreen() {
   const startBreakTimer = () => {
     console.log('Starting break timer');
     
+    // Reset timeRemaining to prevent timer expiration check from retriggering
+    setTimeRemaining(matchTime);
+    
     // Set break time state FIRST - this should make the break timer display appear
     setIsBreakTime(true);
     setBreakTimeRemaining(60); // 1 minute
@@ -5034,6 +5048,7 @@ export default function RemoteScreen() {
     
     // Update other states
     setIsPlaying(false);
+    setHasShownBreakPopup(false); // Reset flag so popup can show again after break
     
     // Start the break countdown
     const interval = setInterval(() => {
@@ -5081,6 +5096,8 @@ export default function RemoteScreen() {
           setCurrentPeriod(nextPeriod);
           currentPeriodRef.current = nextPeriod; // Update ref
           
+          // Reset break popup flag for next period
+          setHasShownBreakPopup(false);
           
           // Restart main timer from where it was paused
           setIsManualReset(true); // Prevent auto-sync
