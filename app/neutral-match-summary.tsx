@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -318,6 +318,68 @@ export default function NeutralMatchSummary() {
     }
   };
 
+  // Normalizes match events for timing (ensures non-decreasing elapsed times, handles missing/non-monotonic values)
+  const normalizeEventsForTiming = (
+    rawEvents: any[],
+    periods: { match_period_id?: string; period_number?: number; start_time?: string; end_time?: string }[]
+  ) => {
+    if (!rawEvents || rawEvents.length === 0) return [];
+    
+    // Remove cancelled events and those cancelled by another event
+    const cancelledIds = new Set<string>();
+    rawEvents.forEach(ev => {
+      if (ev.event_type === 'cancel' && ev.cancelled_event_id) {
+        cancelledIds.add(ev.cancelled_event_id);
+      }
+    });
+    const events = rawEvents
+      .filter(ev => ev.event_type !== 'cancel' && !(ev.match_event_id && cancelledIds.has(ev.match_event_id)))
+      .sort((a, b) => {
+        const aTime = a.timestamp ? new Date(a.timestamp).getTime() : (a.match_time_elapsed ?? 0);
+        const bTime = b.timestamp ? new Date(b.timestamp).getTime() : (b.match_time_elapsed ?? 0);
+        return aTime - bTime;
+      });
+    
+    // Map period id to start time and period number
+    const periodMeta: Record<string, { start: number; end?: number; number: number }> = {};
+    periods.forEach(p => {
+      if (p.match_period_id && p.start_time) {
+        periodMeta[p.match_period_id] = {
+          start: new Date(p.start_time).getTime(),
+          end: p.end_time ? new Date(p.end_time).getTime() : undefined,
+          number: p.period_number || 1
+        };
+      }
+    });
+    
+    let lastElapsed = 0;
+    const normalized = events.map((ev, idx) => {
+      let elapsed = ev.match_time_elapsed ?? null;
+      // If elapsed missing or non-monotonic, rebuild using timestamps and period anchors
+      if (elapsed === null || elapsed < lastElapsed) {
+        if (ev.match_period_id && periodMeta[ev.match_period_id]) {
+          const startMs = periodMeta[ev.match_period_id].start;
+          const evMs = ev.timestamp ? new Date(ev.timestamp).getTime() : startMs + (idx * 1000);
+          elapsed = Math.max(0, Math.round((evMs - startMs) / 1000));
+        } else if (ev.timestamp) {
+          const evMs = new Date(ev.timestamp).getTime();
+          const baseMs = events[0].timestamp ? new Date(events[0].timestamp).getTime() : evMs;
+          elapsed = Math.max(0, Math.round((evMs - baseMs) / 1000));
+        } else {
+          elapsed = lastElapsed + 1; // fallback monotonic
+        }
+      }
+      // Ensure non-decreasing
+      if (elapsed < lastElapsed) {
+        elapsed = lastElapsed + 1;
+      }
+      lastElapsed = elapsed;
+      return { ...ev, match_time_elapsed: elapsed };
+    });
+    
+    return normalized;
+  };
+
   // Function to calculate time leading percentages from match events
   const calculateTimeLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
@@ -340,7 +402,7 @@ export default function NeutralMatchSummary() {
       console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
       console.log('🔍 TIME LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
       
-      const { data: matchEvents, error } = await supabase
+      const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
         .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
@@ -351,6 +413,7 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
+      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], matchData ? [matchData] : []);
       console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -489,7 +552,7 @@ export default function NeutralMatchSummary() {
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
 
-      const { data: matchEvents, error } = await supabase
+      const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
         .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
@@ -499,6 +562,8 @@ export default function NeutralMatchSummary() {
         console.error('Error fetching match events for lead changes:', error);
         return 0;
       }
+
+      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], matchData ? [matchData] : []);
 
       if (!matchEvents || matchEvents.length === 0) {
         return 0;
@@ -513,7 +578,8 @@ export default function NeutralMatchSummary() {
       }
 
       let leadChanges = 0;
-      let currentLeader: string | null = null;
+      // Track last non-tied leader so we can count switches even if a tie happens between
+      let lastLeader: string | null = null;
       let fencer1Score = 0;
       let fencer2Score = 0;
 
@@ -570,17 +636,13 @@ export default function NeutralMatchSummary() {
           newLeader = null; // Tied
         }
 
-        // Only count lead changes when the lead actually changes from one fencer to another
-        // Do NOT count when going to/from tied (null leader)
-        // Do NOT count the first score (when currentLeader is null and we get our first leader)
-        if (newLeader !== currentLeader && (fencer1Score > 0 || fencer2Score > 0)) {
-          // Only count if BOTH currentLeader and newLeader are actual leaders (not null/tied)
-          // This means we're going from one fencer leading to the other fencer leading
-          if (currentLeader !== null && newLeader !== null) {
+        // Count a lead change when we switch from one leader to the other, even if a tie occurred between.
+        if (newLeader !== null) {
+          if (lastLeader !== null && newLeader !== lastLeader) {
             leadChanges++;
-            console.log(`📊 Lead change detected: ${currentLeader} → ${newLeader} (${fencer1Score}-${fencer2Score})`);
+            console.log(`📊 Lead change detected: ${lastLeader} → ${newLeader} (${fencer1Score}-${fencer2Score})`);
           }
-          currentLeader = newLeader;
+          lastLeader = newLeader;
         }
       }
 
@@ -702,6 +764,7 @@ export default function NeutralMatchSummary() {
               }
               
               // Fill in actual period scores (touches scored PER period, not cumulative)
+              let hasNegativeDelta = false;
               sortedPeriods.forEach((period, index) => {
                 const periodNum = period.period_number || 1;
                 const currentFencer1Score = period.fencer_1_score || 0;
@@ -712,8 +775,13 @@ export default function NeutralMatchSummary() {
                 const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
                 
                 // Calculate touches scored DURING this period
-                const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
-                const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+                let fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
+                let fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+                
+                // If a swap happened between periods, deltas can go negative. Flag so we can fall back to events.
+                if (fencer1TouchesThisPeriod < 0 || fencer2TouchesThisPeriod < 0) {
+                  hasNegativeDelta = true;
+                }
                 
                 // Map fencer1/fencer2 to user/opponent for chart component (chart expects user/opponent prop names)
                 if (periodNum === 1) {
@@ -728,8 +796,71 @@ export default function NeutralMatchSummary() {
                 }
               });
 
-              console.log('📊 Using actual period scores from database:', touchesByPeriodData);
-              setTouchesByPeriod(touchesByPeriodData);
+              // If we detected a negative delta (likely due to side swap), fall back to event-based counting per period
+              if (hasNegativeDelta) {
+                try {
+                  console.warn('⚠️ Negative period deltas detected, recalculating touches by period from events');
+                  const { data: periodEvents, error: periodEventsError } = await supabase
+                    .from('match_event')
+                    .select('match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+                    .eq('match_id', matchId as string)
+                    .order('timestamp', { ascending: true });
+                  
+                  if (periodEventsError || !periodEvents) {
+                    console.error('❌ Error fetching events for period recalculation:', periodEventsError);
+                    setTouchesByPeriod(touchesByPeriodData);
+                  } else {
+                    // Build a map from match_period_id to period_number
+                    const periodNumberById: Record<string, number> = {};
+                    sortedPeriods.forEach(p => {
+                      if (p.match_period_id) {
+                        periodNumberById[p.match_period_id] = p.period_number || 1;
+                      }
+                    });
+
+                    const recalculated = {
+                      period1: { user: 0, opponent: 0 },
+                      period2: { user: 0, opponent: 0 },
+                      period3: { user: 0, opponent: 0 }
+                    };
+
+                    const cancelledIds = new Set<string>();
+                    periodEvents.forEach(ev => {
+                      if (ev.event_type === 'cancel' && ev.cancelled_event_id) {
+                        cancelledIds.add(ev.cancelled_event_id);
+                      }
+                    });
+
+                    periodEvents.forEach(ev => {
+                      if (ev.event_type === 'cancel') return;
+                      if (ev.match_event_id && cancelledIds.has(ev.match_event_id)) return;
+
+                      const periodNum = ev.match_period_id ? periodNumberById[ev.match_period_id] || 1 : 1;
+                      const isFencer1 = ev.scoring_user_name === ev.fencer_1_name;
+                      
+                      const target =
+                        periodNum === 1 ? recalculated.period1 :
+                        periodNum === 2 ? recalculated.period2 :
+                        recalculated.period3;
+
+                      if (isFencer1) {
+                        target.user += 1;
+                      } else {
+                        target.opponent += 1;
+                      }
+                    });
+
+                    console.log('📊 Recalculated touches by period from events:', recalculated);
+                    setTouchesByPeriod(recalculated);
+                  }
+                } catch (error) {
+                  console.error('❌ Error during event-based period recalculation:', error);
+                  setTouchesByPeriod(touchesByPeriodData);
+                }
+              } else {
+                console.log('📊 Using actual period scores from database:', touchesByPeriodData);
+                setTouchesByPeriod(touchesByPeriodData);
+              }
               
               // Also fetch score progression data
               if (data && data.fencer_1_name) {
@@ -1282,6 +1413,7 @@ export default function NeutralMatchSummary() {
                       router.push({
                         pathname: '/(tabs)/remote',
                         params: {
+                          resetAll: 'true',
                           fencer1Name: fencer1Name as string,
                           fencer2Name: fencer2Name as string,
                           isAnonymous: 'true', // Flag to indicate anonymous match
@@ -1297,15 +1429,52 @@ export default function NeutralMatchSummary() {
                     style={[styles.modalButton, styles.changeOneFencerButton]}
                     onPress={() => {
                       setShowNewMatchModal(false);
-                      router.push({
-                        pathname: '/(tabs)/remote',
-                        params: {
-                          resetNames: 'true', // Flag to reset names
-                          keepToggleOff: 'true', // Flag to keep toggle off
-                          changeOneFencer: 'true', // Flag to indicate changing one fencer
-                          fencer1Name: fencer1Name as string, // Keep first fencer name
-                        }
-                      });
+                      // Show Alert to ask which fencer to keep
+                      Alert.alert(
+                        'Change One Fencer',
+                        'Which fencer would you like to keep?',
+                        [
+                          {
+                            text: 'Cancel',
+                            style: 'cancel',
+                            onPress: () => {
+                              console.log('🔄 Change one fencer cancelled');
+                            }
+                          },
+                          {
+                            text: fencer1Name as string,
+                            onPress: () => {
+                              console.log(`🔄 User chose to keep first fencer (${fencer1Name})`);
+                              router.push({
+                                pathname: '/(tabs)/remote',
+                                params: {
+                                  resetAll: 'true',
+                                  resetNames: 'true', // Flag to reset names
+                                  keepToggleOff: 'true', // Flag to keep toggle off
+                                  changeOneFencer: 'true', // Flag to indicate changing one fencer
+                                  fencer1Name: fencer1Name as string, // Keep first fencer name
+                                }
+                              });
+                            }
+                          },
+                          {
+                            text: fencer2Name as string,
+                            onPress: () => {
+                              console.log(`🔄 User chose to keep second fencer (${fencer2Name})`);
+                              router.push({
+                                pathname: '/(tabs)/remote',
+                                params: {
+                                  resetAll: 'true',
+                                  resetNames: 'true', // Flag to reset names
+                                  keepToggleOff: 'true', // Flag to keep toggle off
+                                  changeOneFencer: 'true', // Flag to indicate changing one fencer
+                                  fencer2Name: fencer2Name as string, // Keep second fencer name
+                                }
+                              });
+                            }
+                          }
+                        ]
+                      );
                     }}
                   >
                     <Ionicons name="person-outline" size={20} color="white" />
@@ -1319,6 +1488,7 @@ export default function NeutralMatchSummary() {
                       router.push({
                         pathname: '/(tabs)/remote',
                         params: {
+                          resetAll: 'true',
                           resetNames: 'true', // Flag to reset names
                           keepToggleOff: 'true', // Flag to keep toggle off
                         }

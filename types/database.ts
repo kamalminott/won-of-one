@@ -3,7 +3,7 @@
 export interface Match {
   match_id: string;
   user_id: string;
-  event_id?: string;
+  event_id?: string; // UUID reference to fencing_event table (if applicable)
   event_date?: string;
   location?: string;
   match_type?: string;

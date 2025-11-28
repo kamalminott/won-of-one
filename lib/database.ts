@@ -2103,7 +2103,12 @@ export const fencingRemoteService = {
       .single();
 
     if (error) {
-      console.error('Error creating remote session:', error);
+      console.error('Error creating remote session:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: (error as any)?.code,
+      });
       return null;
     }
 

@@ -192,7 +192,21 @@ export default function MatchDetailsScreen() {
         userFencerName
       );
       console.log('📊 fetchScoreProgression received:', progression);
-      setScoreProgression(progression);
+      // Map progression to user/opponent orientation based on which fencer is the user
+      const mappedProgression = progression?.fencer1Data && progression?.fencer2Data
+        ? (isFencer1User
+            ? { userData: progression.fencer1Data, opponentData: progression.fencer2Data }
+            : { userData: progression.fencer2Data, opponentData: progression.fencer1Data })
+        : progression; // If already user/opponent shaped, keep as is
+      console.log('📊 fetchScoreProgression mapped:', {
+        isFencer1User,
+        isFencer2User,
+        userDataLength: mappedProgression.userData?.length,
+        opponentDataLength: mappedProgression.opponentData?.length,
+        userFirst: mappedProgression.userData?.[0],
+        opponentFirst: mappedProgression.opponentData?.[0],
+      });
+      setScoreProgression(mappedProgression);
     } catch (error) {
       console.error('Error fetching score progression:', error);
     }
@@ -375,30 +389,38 @@ export default function MatchDetailsScreen() {
   const leftIsUser = match ? isFencer1User : true;
   const rightIsUser = match ? isFencer2User : false;
   
-  // Map position-based scores (fencer_1 = left, fencer_2 = right)
-  // IMPORTANT: final_score and touches_against are entity-based (user/opponent), not position-based
-  // We need to map them to position-based scores based on which fencer is the user
-  // For now, use entity-based scores for display (will be corrected by MatchSummaryCardWithBorder)
-  // But we should ideally fetch period scores which are position-based
+  // Prefer progression totals when available; fallback to entity-based scores from DB/params
+  const progressionUserTotal = scoreProgression.userData.length > 0 ? scoreProgression.userData[scoreProgression.userData.length - 1].y : 0;
+  const progressionOpponentTotal = scoreProgression.opponentData.length > 0 ? scoreProgression.opponentData[scoreProgression.opponentData.length - 1].y : 0;
+  const dbUserScore = match ? (match.final_score || 0) : (params.youScore ? parseInt(params.youScore as string) : 0);
+  const dbOpponentScore = match ? (match.touches_against || 0) : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
+  const userScore = progressionUserTotal > 0 ? progressionUserTotal : dbUserScore;
+  const opponentScore = progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
+
+  // Map to left/right (positions) based on which fencer is the user
   const leftScore = match 
     ? (isFencer1User 
-      ? (match.final_score || 0)  // User is fencer_1 (left), so use user's score
+      ? userScore   // User is fencer_1 (left)
       : isFencer2User 
-      ? (match.touches_against || 0)  // User is fencer_2 (right), so fencer_1 (left) is opponent
-      : (match.final_score || 0)) // Fallback
+      ? opponentScore // User is fencer_2 (right), so left is opponent
+      : dbUserScore) // Fallback
     : (params.youScore ? parseInt(params.youScore as string) : 0);
   const rightScore = match
     ? (isFencer1User 
-      ? (match.touches_against || 0)  // User is fencer_1 (left), so fencer_2 (right) is opponent
+      ? opponentScore  // User is fencer_1 (left), right is opponent
       : isFencer2User 
-      ? (match.final_score || 0)  // User is fencer_2 (right), so use user's score
-      : (match.touches_against || 0)) // Fallback
+      ? userScore      // User is fencer_2 (right)
+      : dbOpponentScore) // Fallback
     : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
-  
+
   console.log('🔍 [Match History Details] Position-based scores:', {
     fromDatabase: {
       final_score: match?.final_score,
       touches_against: match?.touches_against
+    },
+    fromProgression: {
+      user: progressionUserTotal,
+      opponent: progressionOpponentTotal
     },
     entityMapping: {
       isFencer1User,
@@ -406,28 +428,12 @@ export default function MatchDetailsScreen() {
     },
     final: {
       left: leftScore,
-      right: rightScore
+      right: rightScore,
+      userScore,
+      opponentScore
     },
-    note: 'Mapped entity-based scores to position-based scores'
+    note: 'Mapped entity-based scores to position-based scores with progression fallback'
   });
-  
-  // For win/loss calculation, use entity-based logic (user vs opponent)
-  // If match data is available, use entity-based calculation
-  // Otherwise, use params (which are entity-based: youScore vs opponentScore)
-  const userScore = match 
-    ? (isFencer1User 
-      ? (match.final_score || 0) 
-      : isFencer2User 
-      ? (match.touches_against || 0) 
-      : (match.final_score || 0))
-    : (params.youScore ? parseInt(params.youScore as string) : 0);
-  const opponentScore = match
-    ? (isFencer1User 
-      ? (match.touches_against || 0) 
-      : isFencer2User 
-      ? (match.final_score || 0) 
-      : (match.touches_against || 0))
-    : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
   
   // Get user's name for labels (could be on left or right)
   const userFencerName = match
