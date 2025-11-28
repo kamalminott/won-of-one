@@ -94,7 +94,7 @@ export const subscriptionService = {
 
       // Set up listener for subscription updates
       if (Purchases) {
-        Purchases.addCustomerInfoUpdateListener(async (customerInfo) => {
+        Purchases.addCustomerInfoUpdateListener(async (customerInfo: CustomerInfo) => {
           console.log('📦 Subscription status updated');
           if (userId) {
             await subscriptionService.syncSubscriptionToSupabase(userId, customerInfo);
@@ -246,10 +246,10 @@ export const subscriptionService = {
    */
   parseCustomerInfo(customerInfo: CustomerInfo): SubscriptionInfo {
     // Check for active entitlements (you can define these in RevenueCat dashboard)
-    const activeEntitlements = Object.values(customerInfo.entitlements.active);
+    const activeEntitlements = Object.values((customerInfo as any).entitlements?.active || {});
     
     if (activeEntitlements.length > 0) {
-      const entitlement = activeEntitlements[0];
+      const entitlement = activeEntitlements[0] as any;
       const isTrial = entitlement.periodType === 'TRIAL';
       const expiresAt = entitlement.expirationDate 
         ? new Date(entitlement.expirationDate) 
@@ -266,8 +266,8 @@ export const subscriptionService = {
     }
 
     // Check if there are any expired entitlements
-    const allEntitlements = Object.values(customerInfo.entitlements.all);
-    const hasExpired = allEntitlements.some(e => !e.isActive);
+    const allEntitlements = Object.values((customerInfo as any).entitlements?.all || {});
+    const hasExpired = allEntitlements.some((e: any) => !e.isActive);
 
     return {
       status: hasExpired ? 'expired' : 'none',

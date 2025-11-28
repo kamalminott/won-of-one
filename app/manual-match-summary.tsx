@@ -1,7 +1,6 @@
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
@@ -70,11 +69,6 @@ export default function ManualMatchSummaryScreen() {
     fencer2Name: opponentName as string || 'Alex',
   };
 
-  const handleDone = () => {
-    // Navigate back to home or match history
-    router.push('/(tabs)');
-  };
-
   const handleDelete = () => {
     const matchId = params.matchId as string;
     
@@ -119,11 +113,20 @@ export default function ManualMatchSummaryScreen() {
   };
 
   const handleEdit = () => {
-    // Navigate back to add match with current data
+    const matchId = params.matchId as string;
+    
+    if (!matchId) {
+      console.log('No match ID provided for editing');
+      Alert.alert('Error', 'Cannot edit match: match ID not found');
+      return;
+    }
+
+    // Navigate to add match with current data and matchId for editing
     router.push({
       pathname: '/add-match',
       params: {
         editMode: 'true',
+        matchId: matchId,
         yourScore: yourScoreNum.toString(),
         opponentScore: opponentScoreNum.toString(),
         opponentName: opponentName as string,
@@ -178,9 +181,18 @@ export default function ManualMatchSummaryScreen() {
       flex: 1,
       textAlign: 'center',
     },
-    headerSpacer: {
-      width: width * 0.06,
-      height: width * 0.06,
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.03,
+    },
+    headerActionButton: {
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      backgroundColor: '#2A2A2A',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     content: {
       flex: 1,
@@ -223,27 +235,7 @@ export default function ManualMatchSummaryScreen() {
       fontFamily: 'Articulat CF',
       marginTop: height * 0.015, // 13px
       textAlign: 'left',
-    },
-    buttonsContainer: {
-      paddingTop: height * 0.031, // 26px
-      gap: height * 0.016, // 13px
-    },
-    doneButton: {
-      height: height * 0.059, // 50px
-      borderRadius: width * 0.041, // 16px
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: 'rgba(108, 92, 231, 0.25)',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 1,
-      shadowRadius: 14,
-      elevation: 8,
-    },
-    doneButtonText: {
-      fontSize: width * 0.041, // 16px
-      fontWeight: '700',
-      color: '#FFFFFF',
-      fontFamily: 'Articulat CF',
+      paddingBottom: height * 0.04, // Add bottom padding for scroll spacing
     },
     deleteButton: {
       height: height * 0.059, // 50px
@@ -253,12 +245,6 @@ export default function ManualMatchSummaryScreen() {
       backgroundColor: '#171717',
       borderWidth: 1,
       borderColor: '#FF7675',
-    },
-    deleteButtonText: {
-      fontSize: width * 0.041, // 16px
-      fontWeight: '700',
-      color: '#FF7675',
-      fontFamily: 'Articulat CF',
     },
   });
 
@@ -282,7 +268,14 @@ export default function ManualMatchSummaryScreen() {
 
           <Text style={styles.headerTitle}>Match Summary</Text>
 
-          <View style={styles.headerSpacer} />
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={handleEdit} style={styles.headerActionButton}>
+              <Ionicons name="create-outline" size={22} color="#4ECDC4" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleDelete} style={styles.headerActionButton}>
+              <Ionicons name="trash-outline" size={22} color="#FF7675" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView
@@ -303,22 +296,6 @@ export default function ManualMatchSummaryScreen() {
 
           {/* Source */}
           <Text style={styles.sourceText}>Source: Manual Entry</Text>
-
-          {/* Buttons */}
-          <View style={styles.buttonsContainer}>
-            <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
-              <LinearGradient
-                colors={['#6C5CE7', '#5741FF']}
-                style={[styles.doneButton, { width: '100%' }]}
-              >
-                <Text style={styles.doneButtonText}>Done</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-              <Text style={styles.deleteButtonText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
         </ScrollView>
       </SafeAreaView>
     </>

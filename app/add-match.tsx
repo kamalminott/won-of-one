@@ -109,6 +109,22 @@ export default function AddMatchScreen() {
     };
   }, [hasStartedForm, isSaving, opponentName, event, weaponType, notes]);
 
+  // Fetch match data when in edit mode to populate weaponType
+  useEffect(() => {
+    const fetchMatchData = async () => {
+      if (isEditMode && params.matchId) {
+        const matchId = params.matchId as string;
+        const match = await matchService.getMatchById(matchId);
+        if (match && match.weapon_type) {
+          // Capitalize first letter to match form format (Foil, Epee, Sabre)
+          const weaponTypeFormatted = match.weapon_type.charAt(0).toUpperCase() + match.weapon_type.slice(1).toLowerCase();
+          setWeaponType(weaponTypeFormatted);
+        }
+      }
+    };
+    fetchMatchData();
+  }, [isEditMode, params.matchId]);
+
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('en-US', {
       month: 'short',
@@ -186,7 +202,11 @@ export default function AddMatchScreen() {
 
     setIsSaving(true);
     try {
-      console.log('💾 Saving manual match...', {
+      const matchId = params.matchId as string;
+      const isEditing = isEditMode && matchId;
+      
+      console.log(isEditing ? '💾 Updating manual match...' : '💾 Saving manual match...', {
+        matchId: isEditing ? matchId : 'new',
         matchDate,
         opponentName,
         event,
@@ -196,27 +216,65 @@ export default function AddMatchScreen() {
         opponentScore
       });
 
-      // Save to database
-      const savedMatch = await matchService.createManualMatch({
-        userId: user.id,
-        opponentName: opponentName.trim(),
-        yourScore: parseInt(yourScore),
-        opponentScore: parseInt(opponentScore),
-        matchType: event === 'Training' ? 'training' : 'competition',
-        date: matchDate.toLocaleDateString('en-GB'),
-        time: matchDate.toLocaleTimeString('en-US', { 
+      let savedMatch: any = null;
+
+      if (isEditing) {
+        // Update existing match
+        const dateStr = matchDate.toLocaleDateString('en-GB');
+        const timeStr = matchDate.toLocaleTimeString('en-US', { 
           hour: 'numeric', 
           minute: '2-digit',
           hour12: true 
-        }),
-        notes: notes.trim() || undefined,
-        weaponType: weaponType,
-      });
+        });
+        
+        // Parse date and time to create ISO string
+        const [day, month, year] = dateStr.split('/');
+        const [hour, minute] = timeStr.replace(/[AP]M/i, '').split(':');
+        const isPM = timeStr.toUpperCase().includes('PM');
+        let hour24 = parseInt(hour);
+        if (isPM && hour24 !== 12) hour24 += 12;
+        if (!isPM && hour24 === 12) hour24 = 0;
+        
+        const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+        
+        const yourScoreNum = parseInt(yourScore);
+        const opponentScoreNum = parseInt(opponentScore);
+        const userDisplayName = userName || 'You';
+        
+        savedMatch = await matchService.updateMatch(matchId, {
+          final_score: yourScoreNum,
+          result: yourScoreNum > opponentScoreNum ? 'win' : 'loss',
+          score_diff: yourScoreNum - opponentScoreNum,
+          match_type: event === 'Training' ? 'training' : 'competition',
+          fencer_1_name: userDisplayName,
+          fencer_2_name: opponentName.trim(),
+          event_date: eventDateTime.toISOString(),
+          weapon_type: weaponType.toLowerCase(),
+          notes: notes.trim() || null,
+        });
+      } else {
+        // Create new match
+        savedMatch = await matchService.createManualMatch({
+          userId: user.id,
+          opponentName: opponentName.trim(),
+          yourScore: parseInt(yourScore),
+          opponentScore: parseInt(opponentScore),
+          matchType: event === 'Training' ? 'training' : 'competition',
+          date: matchDate.toLocaleDateString('en-GB'),
+          time: matchDate.toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit',
+            hour12: true 
+          }),
+          notes: notes.trim() || undefined,
+          weaponType: weaponType,
+        });
+      }
 
       if (savedMatch) {
-        console.log('✅ Match saved successfully:', savedMatch);
+        console.log(isEditing ? '✅ Match updated successfully:' : '✅ Match saved successfully:', savedMatch);
         
-        // Track match save success
+        // Track match save/update success
         analytics.matchSave({ 
           match_type: event === 'Training' ? 'training' : 'competition',
           weapon_type: weaponType
@@ -226,7 +284,7 @@ export default function AddMatchScreen() {
         router.push({
           pathname: '/manual-match-summary',
           params: {
-            matchId: savedMatch.match_id,
+            matchId: savedMatch.match_id || matchId,
             yourScore,
             opponentScore,
             opponentName,
@@ -243,12 +301,12 @@ export default function AddMatchScreen() {
         });
       } else {
         analytics.matchSaveFailure({ error_type: 'database_save_failed' });
-        Alert.alert('Error', 'Failed to save match. Please try again.');
+        Alert.alert('Error', isEditing ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error saving match:', error);
       analytics.matchSaveFailure({ error_type: 'unexpected_error' });
-      Alert.alert('Error', 'Failed to save match. Please try again.');
+      Alert.alert('Error', isEditMode && params.matchId ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.');
     } finally {
       setIsSaving(false);
     }

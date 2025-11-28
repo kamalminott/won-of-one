@@ -46,7 +46,7 @@ export const offlineRemoteService = {
             fencer_2_name: session.fencer_2_name || remoteData.fencer_2_name,
             score_1: session.score_1 || 0,
             score_2: session.score_2 || 0,
-            status: session.status || 'active',
+            status: (session as any).status || 'active',
             current_period: 1,
             match_time: 180,
             period_1_time: 0,
@@ -399,7 +399,7 @@ export const offlineRemoteService = {
             opponentName: match.opponentName,
             yourScore: match.youScore,
             opponentScore: match.opponentScore,
-            matchType: 'practice', // Default to practice
+            matchType: 'training', // Default to training
             date: match.date,
             time: new Date(match.queuedAt).toTimeString().split(' ')[0],
             notes: match.notes,
@@ -578,9 +578,14 @@ export const offlineRemoteService = {
       
       // Track sync failure
       analytics.syncFailure({ 
-        error_code: (error as Error)?.message || 'unknown_error',
+        error_code: (error as Error)?.message || 'unknown_error'
+      });
+      // Also log sync result for tracking queued ops
+      analytics.syncResult({
+        success: false,
         queued_ops: queuedOps,
-        duration_ms: duration 
+        duration_ms: duration,
+        error_code: (error as Error)?.message || 'unknown_error'
       });
       
       console.error('❌ Error syncing remote data:', error);

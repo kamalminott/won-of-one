@@ -1686,6 +1686,8 @@ $$;
     match_type?: string;
     fencer_1_name?: string; // Update fencer names to reflect current positions (after swaps)
     fencer_2_name?: string; // Update fencer names to reflect current positions (after swaps)
+    event_date?: string; // ISO string for event date/time
+    weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
   }): Promise<Match | null> {
     // First, try to get the match to check if it's anonymous (user_id is null)
     const { data: existingMatch } = await supabase
