@@ -5,7 +5,7 @@
  */
 
 import { analytics } from './analytics';
-import { fencingRemoteService, matchEventService, matchService, supabase } from './database';
+import { fencingRemoteService, matchEventService, matchPeriodService, matchService, supabase } from './database';
 import { networkService } from './networkService';
 import { offlineCache, PendingEvent, RemoteSession } from './offlineCache';
 
@@ -59,6 +59,8 @@ export const offlineRemoteService = {
           console.log('✅ Created online remote session and cached:', session.remote_id);
           return { remote_id: session.remote_id, is_offline: false };
         }
+        // If session is null, log and fall through to offline
+        console.log('⚠️ Online remote session creation returned null, falling back to offline.');
       } catch (error) {
         console.log('⚠️ Online creation failed, falling back to offline:', error);
         // Fall through to offline creation
@@ -442,13 +444,24 @@ export const offlineRemoteService = {
               
               // Validate that the match exists before creating the event
               if (matchId) {
-                const { data: matchExists } = await supabase
+                const { data: matchExists, error: matchExistsError, status } = await supabase
                   .from('match')
                   .select('match_id')
                   .eq('match_id', matchId)
-                  .single();
+                  .maybeSingle();
                 
-                if (!matchExists) {
+                if (matchExistsError) {
+                  // PGRST116 means multiple rows matched; treat as "exists" to avoid throwing
+                  if ((matchExistsError as any).code === 'PGRST116') {
+                    console.log(`⚠️ Multiple matches found for ${matchId} when checking existence; treating as exists`);
+                  } else {
+                    console.error(`❌ Error checking match existence for ${matchId}:`, matchExistsError);
+                    // Proceed; better to attempt sync than drop events
+                  }
+                }
+                
+                if (!matchExists && status === 406) {
+                  // maybeSingle returns 406 when no rows
                   console.log(`⚠️ Match ${matchId} not found, discarding event: ${event.event_type}`);
                   // Mark as synced to remove from queue (match no longer exists)
                   if (event.id) {
@@ -483,6 +496,26 @@ export const offlineRemoteService = {
                 }
               }
               
+              // Validate match_period_id before using it (prevent foreign key violations)
+              let validatedMatchPeriodId: string | null = null;
+              if (event.metadata?.match_period_id && matchId) {
+                try {
+                  // Check if the match period exists in the database
+                  const periods = await matchPeriodService.getMatchPeriods(matchId);
+                  const periodExists = periods.some(
+                    (p: any) => p.match_period_id === event.metadata?.match_period_id
+                  );
+                  if (periodExists) {
+                    validatedMatchPeriodId = event.metadata.match_period_id;
+                  } else {
+                    console.warn(`⚠️ Match period ${event.metadata.match_period_id} not found for match ${matchId}, setting to null`);
+                  }
+                } catch (error) {
+                  console.warn(`⚠️ Error validating match_period_id:`, error);
+                  // Set to null if validation fails
+                }
+              }
+              
               await matchEventService.createMatchEvent({
                 match_id: matchId || null,
                 fencing_remote_id: event.remote_id,
@@ -490,8 +523,8 @@ export const offlineRemoteService = {
                 event_time: event.event_time,
                 scoring_user_name: event.scoring_user_name,
                 match_time_elapsed: event.match_time_elapsed,
-                // ✅ Extract ALL fields from metadata:
-                match_period_id: event.metadata?.match_period_id || null,
+                // ✅ Extract ALL fields from metadata, with validated match_period_id:
+                match_period_id: validatedMatchPeriodId || undefined,
                 scoring_user_id: event.metadata?.scoring_user_id || null,
                 fencer_1_name: event.metadata?.fencer_1_name || null,
                 fencer_2_name: event.metadata?.fencer_2_name || null,

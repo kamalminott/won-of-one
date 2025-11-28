@@ -262,16 +262,15 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
           xAxisColor="rgba(255, 255, 255, 0.3)"
           yAxisColor="rgba(255, 255, 255, 0.3)"
           yAxisTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.025), marginRight: -(width * 0.02) }}
-          formatYLabel={(value) => Math.round(value).toString()}
+          formatYLabel={(value: number | string) => Math.round(Number(value)).toString()}
           xAxisLabelTextStyle={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: Math.round(width * 0.02) }}
           barBorderRadius={Math.round(width * 0.008)}
           maxValue={yAxisMaxValue}
-          yAxisSuffix=""
           noOfSections={Math.min(yAxisMaxValue, 5)}
           showYAxisIndices={true}
           yAxisIndicesColor="rgba(255, 255, 255, 0.3)"
           yAxisIndicesWidth={1}
-          onPress={(data: any, index: number) => handleBarPress(data, index)}
+          onPress={(data: any) => handleBarPress(data)}
         />
       </View>
       
