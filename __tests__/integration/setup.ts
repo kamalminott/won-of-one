@@ -3,6 +3,11 @@
  * Uses REAL Supabase database for accurate testing
  */
 
+// TypeScript type definitions for Jest globals
+declare const jest: {
+  fn: (implementation?: (...args: any[]) => any) => any;
+};
+
 // Suppress Expo warnings in integration tests
 (global as any).__ExpoImportMetaRegistry = {
   register: jest.fn(),

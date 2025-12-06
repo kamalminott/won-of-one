@@ -200,6 +200,19 @@ export default function AddMatchScreen() {
       return;
     }
 
+    // Validate that at least one score is above 0
+    const yourScoreNum = parseInt(yourScore) || 0;
+    const opponentScoreNum = parseInt(opponentScore) || 0;
+    
+    if (yourScoreNum === 0 && opponentScoreNum === 0) {
+      Alert.alert(
+        'Invalid Scores',
+        'At least one score must be above 0 to save the match.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
       const matchId = params.matchId as string;
@@ -237,8 +250,6 @@ export default function AddMatchScreen() {
         
         const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
         
-        const yourScoreNum = parseInt(yourScore);
-        const opponentScoreNum = parseInt(opponentScore);
         const userDisplayName = userName || 'You';
         
         savedMatch = await matchService.updateMatch(matchId, {
@@ -250,15 +261,15 @@ export default function AddMatchScreen() {
           fencer_2_name: opponentName.trim(),
           event_date: eventDateTime.toISOString(),
           weapon_type: weaponType.toLowerCase(),
-          notes: notes.trim() || null,
+          notes: notes.trim() || undefined,
         });
       } else {
         // Create new match
         savedMatch = await matchService.createManualMatch({
           userId: user.id,
           opponentName: opponentName.trim(),
-          yourScore: parseInt(yourScore),
-          opponentScore: parseInt(opponentScore),
+          yourScore: yourScoreNum,
+          opponentScore: opponentScoreNum,
           matchType: event === 'Training' ? 'training' : 'competition',
           date: matchDate.toLocaleDateString('en-GB'),
           time: matchDate.toLocaleTimeString('en-US', { 
@@ -296,6 +307,7 @@ export default function AddMatchScreen() {
               hour12: true 
             }),
             isWin: (parseInt(yourScore) > parseInt(opponentScore)).toString(),
+            fromAddMatch: 'true', // Flag to show Done button
             notes,
           }
         });
@@ -303,10 +315,31 @@ export default function AddMatchScreen() {
         analytics.matchSaveFailure({ error_type: 'database_save_failed' });
         Alert.alert('Error', isEditing ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error saving match:', error);
-      analytics.matchSaveFailure({ error_type: 'unexpected_error' });
-      Alert.alert('Error', isEditMode && params.matchId ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.');
+      
+      // Check for network-related errors
+      const isNetworkError = 
+        error?.message?.includes('Network request failed') ||
+        error?.message?.includes('network') ||
+        error?.code === 'NETWORK_ERROR' ||
+        error?.name === 'NetworkError';
+      
+      if (isNetworkError) {
+        analytics.matchSaveFailure({ error_type: 'network_error' });
+        Alert.alert(
+          'Network Error',
+          'Unable to save match. Please check your internet connection and try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        analytics.matchSaveFailure({ error_type: 'unexpected_error' });
+        Alert.alert(
+          'Error',
+          isEditMode && params.matchId ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     } finally {
       setIsSaving(false);
     }
@@ -462,18 +495,17 @@ export default function AddMatchScreen() {
       top: getDimension(0.06, height),
       left: 0,
       right: 0,
-      backgroundColor: Colors.dark.background,
+      backgroundColor: '#0F1112', // Darker, more opaque background to ensure nothing shows through
+      opacity: 1, // Explicitly set to 1 to ensure no transparency
       borderRadius: getDimension(0.02, width),
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.2)',
+      borderWidth: 0, // Remove border to eliminate purple outline
       maxHeight: getDimension(0.15, height),
       overflow: 'hidden',
-      zIndex: 1000,
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 3.84,
-      elevation: 5,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.7,
+      shadowRadius: 12,
+      elevation: 25, // Android elevation
     },
     dropdownOption: {
       flexDirection: 'row',
@@ -855,7 +887,16 @@ export default function AddMatchScreen() {
       left: 0,
       right: 0,
       bottom: 0,
-      zIndex: 999,
+      zIndex: 3000,
+    },
+    fullScreenBackdrop: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 2999, // Just below the dropdown options but above everything else
+      backgroundColor: 'transparent', // Transparent so it doesn't block the view
     },
     scoreInput: {
       fontSize: getDimension(0.07, width),
@@ -956,7 +997,7 @@ export default function AddMatchScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Event</Text>
-            <View style={styles.dropdownWrapper}>
+            <View style={[styles.dropdownWrapper, { zIndex: showEventDropdown ? 3000 : (showWeaponDropdown ? 100 : 1000) }]}>
               <TouchableOpacity 
                 style={styles.dropdownContainer}
                 onPress={() => {
@@ -975,46 +1016,38 @@ export default function AddMatchScreen() {
               
               {/* Event Dropdown Options */}
               {showEventDropdown && (
-                <>
-                  <View style={styles.dropdownOptions}>
-                    {['Training', 'Competition'].map((eventType) => (
-                      <TouchableOpacity
-                        key={eventType}
-                        style={[
-                          styles.dropdownOption,
-                          event === eventType && styles.dropdownOptionSelected
-                        ]}
-                        onPress={() => {
-                          setEvent(eventType);
-                          setShowEventDropdown(false);
-                        }}
-                      >
-                        <Text style={[
-                          styles.dropdownOptionText,
-                          event === eventType && styles.dropdownOptionTextSelected
-                        ]}>
-                          {eventType}
-                        </Text>
-                        {event === eventType && (
-                          <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  {/* Backdrop to close dropdown */}
-                  <TouchableOpacity
-                    style={styles.dropdownBackdrop}
-                    activeOpacity={1}
-                    onPress={() => setShowEventDropdown(false)}
-                  />
-                </>
+                <View style={[styles.dropdownOptions, { zIndex: 3001, elevation: 25 }]}>
+                  {['Training', 'Competition'].map((eventType) => (
+                    <TouchableOpacity
+                      key={eventType}
+                      style={[
+                        styles.dropdownOption,
+                        event === eventType && styles.dropdownOptionSelected
+                      ]}
+                      onPress={() => {
+                        setEvent(eventType);
+                        setShowEventDropdown(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.dropdownOptionText,
+                        event === eventType && styles.dropdownOptionTextSelected
+                      ]}>
+                        {eventType}
+                      </Text>
+                      {event === eventType && (
+                        <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
               )}
             </View>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Weapon Type</Text>
-            <View style={styles.dropdownWrapper}>
+            <View style={[styles.dropdownWrapper, { zIndex: showWeaponDropdown ? 3000 : (showEventDropdown ? 100 : 1000) }]}>
               <TouchableOpacity 
                 style={styles.dropdownContainer}
                 onPress={() => {
@@ -1033,39 +1066,31 @@ export default function AddMatchScreen() {
               
               {/* Weapon Dropdown Options */}
               {showWeaponDropdown && (
-                <>
-                  <View style={styles.dropdownOptions}>
-                    {['Foil', 'Sabre', 'Epee'].map((weapon) => (
-                      <TouchableOpacity
-                        key={weapon}
-                        style={[
-                          styles.dropdownOption,
-                          weaponType === weapon && styles.dropdownOptionSelected
-                        ]}
-                        onPress={() => {
-                          setWeaponType(weapon);
-                          setShowWeaponDropdown(false);
-                        }}
-                      >
-                        <Text style={[
-                          styles.dropdownOptionText,
-                          weaponType === weapon && styles.dropdownOptionTextSelected
-                        ]}>
-                          {weapon}
-                        </Text>
-                        {weaponType === weapon && (
-                          <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  {/* Backdrop to close dropdown */}
-                  <TouchableOpacity
-                    style={styles.dropdownBackdrop}
-                    activeOpacity={1}
-                    onPress={() => setShowWeaponDropdown(false)}
-                  />
-                </>
+                <View style={[styles.dropdownOptions, { zIndex: 3001, elevation: 25 }]}>
+                  {['Foil', 'Sabre', 'Epee'].map((weapon) => (
+                    <TouchableOpacity
+                      key={weapon}
+                      style={[
+                        styles.dropdownOption,
+                        weaponType === weapon && styles.dropdownOptionSelected
+                      ]}
+                      onPress={() => {
+                        setWeaponType(weapon);
+                        setShowWeaponDropdown(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.dropdownOptionText,
+                        weaponType === weapon && styles.dropdownOptionTextSelected
+                      ]}>
+                        {weapon}
+                      </Text>
+                      {weaponType === weapon && (
+                        <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
               )}
             </View>
           </View>
@@ -1176,6 +1201,18 @@ export default function AddMatchScreen() {
         </View>
         </TouchableWithoutFeedback>
         </ScrollView>
+        
+        {/* Full-screen backdrop to close dropdowns when clicking outside */}
+        {(showEventDropdown || showWeaponDropdown) && (
+          <TouchableOpacity
+            style={styles.fullScreenBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setShowEventDropdown(false);
+              setShowWeaponDropdown(false);
+            }}
+          />
+        )}
       </KeyboardAvoidingView>
 
       {/* Date Picker Modal */}

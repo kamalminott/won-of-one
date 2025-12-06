@@ -413,7 +413,7 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
-      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], matchData ? [matchData] : []);
+      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
       console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -563,7 +563,7 @@ export default function NeutralMatchSummary() {
         return 0;
       }
 
-      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], matchData ? [matchData] : []);
+      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
 
       if (!matchEvents || matchEvents.length === 0) {
         return 0;
@@ -727,7 +727,7 @@ export default function NeutralMatchSummary() {
           try {
             const { data: matchPeriods, error: periodsError } = await supabase
               .from('match_period')
-              .select('period_number, fencer_1_score, fencer_2_score')
+              .select('match_period_id, period_number, fencer_1_score, fencer_2_score')
               .eq('match_id', matchId as string)
               .order('period_number', { ascending: true });
 
@@ -802,7 +802,7 @@ export default function NeutralMatchSummary() {
                   console.warn('⚠️ Negative period deltas detected, recalculating touches by period from events');
                   const { data: periodEvents, error: periodEventsError } = await supabase
                     .from('match_event')
-                    .select('match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+                    .select('match_event_id, match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
                     .eq('match_id', matchId as string)
                     .order('timestamp', { ascending: true });
                   

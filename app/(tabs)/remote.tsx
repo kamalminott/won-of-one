@@ -75,6 +75,7 @@ export default function RemoteScreen() {
   const [scores, setScores] = useState({ fencerA: 0, fencerB: 0 });
   const scoresRef = useRef({ fencerA: 0, fencerB: 0 }); // Ref to track current scores for timer callbacks
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasMatchStarted, setHasMatchStarted] = useState(false); // Track if match has been started
   const [matchTime, setMatchTime] = useState(180); // 3 minutes in seconds
   const [period1Time, setPeriod1Time] = useState(0); // in seconds
   const [period2Time, setPeriod2Time] = useState(0); // in seconds
@@ -2714,7 +2715,6 @@ export default function RemoteScreen() {
   const [breakTimerRef, setBreakTimerRef] = useState<number | null>(null); // Break timer reference
   const [hasShownBreakPopup, setHasShownBreakPopup] = useState(false); // Flag to prevent multiple break popups
   const [isManualReset, setIsManualReset] = useState(false); // Flag to prevent auto-sync during manual reset
-  const [hasMatchStarted, setHasMatchStarted] = useState(false); // Track if match has been started
   const [isAssigningPriority, setIsAssigningPriority] = useState(false); // Track if priority is being assigned
   const [isChangingScore, setIsChangingScore] = useState(false); // Flag to prevent state restoration during score changes
   const [hasNavigatedAway, setHasNavigatedAway] = useState(false); // Flag to track if user has navigated away
@@ -3254,20 +3254,21 @@ export default function RemoteScreen() {
           setScores(prev => ({ ...prev, [entity]: newScore }));
           setScoreChangeCount(0); // Reset counter
           
+          // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
+          if (isPlaying) {
+            pauseTimer();
+          }
+          
           // Check if entity reached 15 points (match should end)
           if (newScore >= 15) {
             console.log(`🏁 ${entity} reached 15 points - match should end`);
             setIsCompletingMatch(true);
           }
           
-          // Create match event for the score - determine if entity is user or opponent
+          // Create match event in background (already queued locally, this is just for immediate DB sync)
           const entityIsUser = isEntityUser(entity);
-          await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore);
-          
-          // Pause timer if it's currently running
-          if (isPlaying) {
-            pauseTimer();
-          }
+          createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore)
+            .catch(error => console.error('Background event creation failed:', error));
         });
         setShowScoreWarning(true);
         return;
@@ -3276,13 +3277,21 @@ export default function RemoteScreen() {
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
       
-      // Update remote session scores (offline-capable) - map entities to left/right positions
+      // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
+      if (isPlaying) {
+        pauseTimer();
+      }
+      
+      // Fire async operations in background (events are already queued locally, so safe to fire-and-forget)
       if (remoteSession) {
         const leftEntity = getEntityAtPosition('left');
         const leftScore = leftEntity === entity ? newScore : (leftEntity === 'fencerA' ? scores.fencerA : scores.fencerB);
         const rightEntity = getEntityAtPosition('right');
         const rightScore = rightEntity === entity ? newScore : (rightEntity === 'fencerA' ? scores.fencerA : scores.fencerB);
-        await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, leftScore, rightScore);
+        
+        // Fire-and-forget: local cache is updated immediately, server sync happens in background
+        offlineRemoteService.updateRemoteScores(remoteSession.remote_id, leftScore, rightScore)
+          .catch(error => console.error('Background score update failed:', error));
       }
       
       logMatchEvent('score', entity, 'increase'); // Log the score increase
@@ -3293,14 +3302,10 @@ export default function RemoteScreen() {
         setIsCompletingMatch(true);
       }
       
-      // Create match event for the score - determine if entity is user or opponent
+      // Create match event in background (already queued locally via recordEvent, this is just for immediate DB sync)
       const entityIsUser = isEntityUser(entity);
-      await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore);
-      
-      // Pause timer if it's currently running
-      if (isPlaying) {
-        pauseTimer();
-      }
+      createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore)
+        .catch(error => console.error('Background event creation failed:', error));
       
       // Check if this is the first score during priority round
       if (isPriorityRound && !hasShownPriorityScorePopup) {
@@ -3573,19 +3578,22 @@ export default function RemoteScreen() {
           setScoreChangeCount(0); // Reset counter
           setIsChangingScore(false);
           
-          // Create cancellation event if we have an event ID to cancel
-          if (eventIdToCancel) {
-            await createCancellationEvent(entity, eventIdToCancel);
-            // Clear the tracked event ID since it's been cancelled
-            setRecentScoringEventIds(prev => ({
-              ...prev,
-              [entity]: null
-            }));
-          }
-          
-          // Pause timer if it's currently running
+          // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
           if (isPlaying) {
             pauseTimer();
+          }
+          
+          // Create cancellation event in background (fire-and-forget)
+          if (eventIdToCancel) {
+            createCancellationEvent(entity, eventIdToCancel)
+              .then(() => {
+                // Clear the tracked event ID since it's been cancelled
+                setRecentScoringEventIds(prev => ({
+                  ...prev,
+                  [entity]: null
+                }));
+              })
+              .catch(error => console.error('Background cancellation failed:', error));
           }
         });
         setShowScoreWarning(true);
@@ -3594,21 +3602,25 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
-      logMatchEvent('score', entity, 'decrease'); // Log the score decrease
       
-      // Create cancellation event if we have an event ID to cancel
-      if (eventIdToCancel) {
-        await createCancellationEvent(entity, eventIdToCancel);
-        // Clear the tracked event ID since it's been cancelled
-        setRecentScoringEventIds(prev => ({
-          ...prev,
-          [entity]: null
-        }));
-      }
-      
-      // Pause timer if it's currently running
+      // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
       if (isPlaying) {
         pauseTimer();
+      }
+      
+      logMatchEvent('score', entity, 'decrease'); // Log the score decrease
+      
+      // Create cancellation event in background (fire-and-forget)
+      if (eventIdToCancel) {
+        createCancellationEvent(entity, eventIdToCancel)
+          .then(() => {
+            // Clear the tracked event ID since it's been cancelled
+            setRecentScoringEventIds(prev => ({
+              ...prev,
+              [entity]: null
+            }));
+          })
+          .catch(error => console.error('Background cancellation failed:', error));
       }
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -3725,31 +3737,41 @@ export default function RemoteScreen() {
       // Mark that user is actively using the app
       isActivelyUsingAppRef.current = true;
       
-      // Create remote session when starting timer
-      const session = await ensureRemoteSession();
-      if (!session) {
-        console.log('❌ Failed to create remote session - cannot start match');
-        return;
-      }
-      
-      // Track match start
-      const isOffline = await networkService.isOnline().then(online => !online);
-      analytics.matchStart({ 
-        mode: 'remote', 
-        is_offline: isOffline,
-        remote_id: session.remote_id
-      });
-      
-      // Create match period only if one doesn't already exist (first time starting match)
-      if (!currentMatchPeriod) {
-        console.log('🆕 Creating new match period (first time starting match)');
-        analytics.matchSetupStart();
-        await createMatchPeriod(session, playClickTime);
-      } else {
-        console.log('⏯️ Match period already exists, resuming match');
-      }
+      // START TIMER IMMEDIATELY (before async operations for instant response)
       startTimer();
       setScoreChangeCount(0); // Reset score change counter when starting timer
+      
+      // Fire async operations in background (don't block timer start)
+      (async () => {
+        try {
+          // Create remote session when starting timer (in background)
+          const session = await ensureRemoteSession();
+          if (!session) {
+            console.log('❌ Failed to create remote session - will retry');
+            return;
+          }
+          
+          // Track match start (in background)
+          const isOffline = await networkService.isOnline().then(online => !online);
+          analytics.matchStart({ 
+            mode: 'remote', 
+            is_offline: isOffline,
+            remote_id: session.remote_id
+          });
+          
+          // Create match period only if one doesn't already exist (first time starting match)
+          if (!currentMatchPeriod) {
+            console.log('🆕 Creating new match period (first time starting match)');
+            analytics.matchSetupStart();
+            await createMatchPeriod(session, playClickTime);
+          } else {
+            console.log('⏯️ Match period already exists, resuming match');
+          }
+        } catch (error) {
+          console.error('❌ Error in background match setup:', error);
+          // Don't block timer - it's already running
+        }
+      })();
     }
   }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, validateFencerNames, openEditNamesPopup]);
 

@@ -16,7 +16,7 @@ interface AuthContextType {
   setProfileImage: (imageUri: string | null) => Promise<void>;
   loadProfileImage: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signUp: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
 }
 

@@ -2,8 +2,8 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "1.0.0",
-    "runtimeVersion": "1.0.0",
+    "version": "2.0.0",
+    "runtimeVersion": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
@@ -13,7 +13,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.kamalminott.wonofone",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
+        "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"]
       }
     },
     "android": {
@@ -22,7 +24,8 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "screenOrientation": "portrait"
     },
     "web": {
       "bundler": "metro",

@@ -192,21 +192,17 @@ export default function MatchDetailsScreen() {
         userFencerName
       );
       console.log('📊 fetchScoreProgression received:', progression);
-      // Map progression to user/opponent orientation based on which fencer is the user
-      const mappedProgression = progression?.fencer1Data && progression?.fencer2Data
-        ? (isFencer1User
-            ? { userData: progression.fencer1Data, opponentData: progression.fencer2Data }
-            : { userData: progression.fencer2Data, opponentData: progression.fencer1Data })
-        : progression; // If already user/opponent shaped, keep as is
+      // calculateScoreProgression already returns data in userData/opponentData format
+      // No mapping needed - use progression directly
       console.log('📊 fetchScoreProgression mapped:', {
         isFencer1User,
         isFencer2User,
-        userDataLength: mappedProgression.userData?.length,
-        opponentDataLength: mappedProgression.opponentData?.length,
-        userFirst: mappedProgression.userData?.[0],
-        opponentFirst: mappedProgression.opponentData?.[0],
+        userDataLength: progression.userData?.length,
+        opponentDataLength: progression.opponentData?.length,
+        userFirst: progression.userData?.[0],
+        opponentFirst: progression.opponentData?.[0],
       });
-      setScoreProgression(mappedProgression);
+      setScoreProgression(progression);
     } catch (error) {
       console.error('Error fetching score progression:', error);
     }

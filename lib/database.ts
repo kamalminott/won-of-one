@@ -43,6 +43,66 @@ const formatFullName = (firstName?: string, lastName?: string, fallbackEmail?: s
   return undefined;
 };
 
+// Ensure match events always have a usable, monotonic match_time_elapsed value
+const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null }>(events: T[]): T[] => {
+  if (!events || events.length === 0) return [];
+
+  const getMs = (ts?: string | null) => {
+    if (!ts) return null;
+    const ms = new Date(ts).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  };
+
+  const parseElapsed = (value?: number | null) => {
+    if (typeof value === 'number') return value;
+    if (value !== null && value !== undefined) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  const sorted = [...events].sort((a, b) => {
+    const aElapsed = parseElapsed(a.match_time_elapsed);
+    const bElapsed = parseElapsed(b.match_time_elapsed);
+
+    if (aElapsed !== null && bElapsed !== null) return aElapsed - bElapsed;
+    if (aElapsed !== null) return -1;
+    if (bElapsed !== null) return 1;
+
+    const aMs = getMs(a.timestamp) ?? 0;
+    const bMs = getMs(b.timestamp) ?? 0;
+    return aMs - bMs;
+  });
+
+  const firstTimestampMs = sorted
+    .map(ev => getMs(ev.timestamp))
+    .find(ms => ms !== null) ?? null;
+
+  let lastElapsed = 0;
+
+  return sorted.map((event, index) => {
+    let elapsed = parseElapsed(event.match_time_elapsed);
+
+    // Fill missing elapsed time using timestamps if available, otherwise ensure monotonic +1s
+    if (elapsed === null) {
+      const eventMs = getMs(event.timestamp);
+      if (eventMs !== null && firstTimestampMs !== null) {
+        elapsed = Math.max(0, Math.round((eventMs - firstTimestampMs) / 1000));
+      } else {
+        elapsed = index === 0 ? 0 : lastElapsed + 1;
+      }
+    }
+
+    if (elapsed < lastElapsed) {
+      elapsed = lastElapsed + 1;
+    }
+    lastElapsed = elapsed;
+
+    return { ...event, match_time_elapsed: elapsed };
+  });
+};
+
 // User-related helpers
 export const userService = {
   async getUserById(userId: string): Promise<AppUser | null> {
@@ -791,6 +851,17 @@ export const matchService = {
   }): Promise<Match | null> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
     
+    // Validate required fields
+    if (!userId) {
+      console.error('❌ Error: userId is required');
+      return null;
+    }
+    
+    if (!opponentName || opponentName.trim() === '') {
+      console.error('❌ Error: opponentName is required and cannot be empty');
+      return null;
+    }
+    
     // Parse date and time with validation
     const [day, month, year] = date.split('/');
     const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
@@ -832,17 +903,20 @@ export const matchService = {
       }
     }
     
+    // Normalize weapon type to lowercase
+    const normalizedWeaponType = weaponType ? weaponType.toLowerCase() : 'foil';
+    
     const insertData = {
       user_id: userId,
       fencer_1_name: 'You', // User is always fencer 1 in manual matches
-      fencer_2_name: opponentName,
+      fencer_2_name: opponentName.trim(),
       final_score: yourScore,
       // touches_against: opponentScore, // This is a generated column - will be calculated automatically
       event_date: eventDateTime.toISOString(),
       result: yourScore > opponentScore ? 'win' : 'loss',
       score_diff: yourScore - opponentScore,
       match_type: matchType,
-      weapon_type: weaponType || 'foil',
+      weapon_type: normalizedWeaponType,
       notes: notes || null,
       source: 'manual',
       is_complete: true,
@@ -850,14 +924,30 @@ export const matchService = {
 
     console.log('🔄 Creating manual match with data:', insertData);
 
-    const { data, error } = await supabase
-      .from('match')
-      .insert(insertData)
-      .select()
-      .single();
+    let data, error;
+    try {
+      const result = await supabase
+        .from('match')
+        .insert(insertData)
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    } catch (networkError: any) {
+      // Catch network-level errors (not Supabase errors)
+      console.error('❌ Network error creating manual match:', networkError);
+      throw new Error('Network request failed');
+    }
 
     if (error) {
       console.error('❌ Error creating manual match:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        insertData: JSON.stringify(insertData, null, 2)
+      });
       return null;
     }
 
@@ -1155,24 +1245,33 @@ $$;
         console.error('Error fetching all match events (debug):', allEventsError);
       }
       
-      // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
+      // 1. Get all match events (including cancellation events), keeping timestamp so we can rebuild elapsed time when missing
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
-      const { data: matchEvents, error: eventsError } = await supabase
+      const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp')
         .eq('match_id', matchId)
-        .not('match_time_elapsed', 'is', null) // Only events with stored time
-        .order('match_time_elapsed', { ascending: true });
+        .order('timestamp', { ascending: true });
       
       if (eventsError) {
         console.error('Error fetching match events for score progression:', eventsError);
         return { userData: [], opponentData: [] };
       }
 
-      if (!matchEvents || matchEvents.length === 0) {
-        console.log('No match events found for score progression calculation (with match_time_elapsed filter)');
-        console.log('🔍 DEBUG - This means all events have null match_time_elapsed, or no events exist');
+      if (!matchEventsRaw || matchEventsRaw.length === 0) {
+        console.log('No match events found for score progression calculation (with timestamp fallback)');
         return { userData: [], opponentData: [] };
+      }
+
+      // Fill in missing match_time_elapsed values so the chart can render (common in sabre/legacy matches)
+      const matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      const missingElapsedCount = matchEventsRaw.filter(ev => ev.match_time_elapsed === null || ev.match_time_elapsed === undefined).length;
+      if (missingElapsedCount > 0) {
+        console.log('⏱️ Filled missing match_time_elapsed values for score progression:', {
+          matchId,
+          missingElapsedCount,
+          totalEvents: matchEventsRaw.length,
+        });
       }
 
       // 2. Build a Set of cancelled event IDs from cancellation events
@@ -1905,23 +2004,33 @@ $$;
     try {
       console.log('📈 Calculating ANONYMOUS score progression for match:', matchId);
       
-      // 1. Get all match events (including cancellation events) ordered by match_time_elapsed
+      // 1. Get all match events (including cancellation events), keeping timestamp so we can rebuild elapsed time when missing
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
-      const { data: matchEvents, error: eventsError } = await supabase
+      const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp')
         .eq('match_id', matchId)
-        .not('match_time_elapsed', 'is', null) // Only events with stored time
-        .order('match_time_elapsed', { ascending: true });
+        .order('timestamp', { ascending: true });
       
       if (eventsError) {
         console.error('Error fetching match events for anonymous score progression:', eventsError);
         return { fencer1Data: [], fencer2Data: [] };
       }
 
-      if (!matchEvents || matchEvents.length === 0) {
+      if (!matchEventsRaw || matchEventsRaw.length === 0) {
         console.log('No match events found for anonymous score progression calculation');
         return { fencer1Data: [], fencer2Data: [] };
+      }
+
+      // Normalize missing elapsed values so the chart doesn't render blank when times weren't stored
+      const matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      const missingElapsedCount = matchEventsRaw.filter(ev => ev.match_time_elapsed === null || ev.match_time_elapsed === undefined).length;
+      if (missingElapsedCount > 0) {
+        console.log('⏱️ Filled missing match_time_elapsed values for anonymous score progression:', {
+          matchId,
+          missingElapsedCount,
+          totalEvents: matchEventsRaw.length,
+        });
       }
 
       // 2. Build a Set of cancelled event IDs from cancellation events

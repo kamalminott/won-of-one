@@ -1,20 +1,20 @@
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
+import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '@/contexts/AuthContext';
 
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
@@ -31,7 +31,11 @@ export default function ManualMatchSummaryScreen() {
     time,
     isWin = 'true',
     notes = '',
+    fromAddMatch,
   } = params;
+  
+  // Check if coming from add-match page (show Done button)
+  const showDoneButton = fromAddMatch === 'true';
 
   const yourScoreNum = parseInt(yourScore as string) || 0;
   const opponentScoreNum = parseInt(opponentScore as string) || 0;
@@ -142,6 +146,10 @@ export default function ManualMatchSummaryScreen() {
     router.back();
   };
 
+  const handleDone = () => {
+    router.push('/(tabs)');
+  };
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -237,6 +245,19 @@ export default function ManualMatchSummaryScreen() {
       textAlign: 'left',
       paddingBottom: height * 0.04, // Add bottom padding for scroll spacing
     },
+    doneButton: {
+      backgroundColor: '#6C5CE7',
+      paddingVertical: height * 0.015,
+      paddingHorizontal: width * 0.04,
+      borderRadius: width * 0.02,
+      alignItems: 'center',
+      width: '100%',
+    },
+    doneButtonText: {
+      color: 'white',
+      fontSize: Math.round(width * 0.04),
+      fontWeight: '600',
+    },
     deleteButton: {
       height: height * 0.059, // 50px
       borderRadius: width * 0.041, // 16px
@@ -290,13 +311,22 @@ export default function ManualMatchSummaryScreen() {
           <View style={styles.notesCard}>
             <Text style={styles.notesTitle}>Match Notes</Text>
             <Text style={styles.notesText}>
-              {notes || 'One disadvantage of Lorum Ipsum is that in Latin certain letters appear more frequently than others - which creates a distinct visual impression.'}
+              {notes || 'No match notes'}
             </Text>
           </View>
 
           {/* Source */}
           <Text style={styles.sourceText}>Source: Manual Entry</Text>
         </ScrollView>
+
+        {/* Done Button - Only show when coming from add-match page */}
+        {showDoneButton && (
+          <View style={{ paddingHorizontal: width * 0.04, paddingBottom: height * 0.02 }}>
+            <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </SafeAreaView>
     </>
   );
