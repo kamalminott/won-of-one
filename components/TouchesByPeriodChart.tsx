@@ -13,6 +13,7 @@ interface TouchesByPeriodChartProps {
   userLabel?: string;
   opponentLabel?: string;
   userPosition?: 'left' | 'right'; // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType?: string; // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }
 
 interface TooltipData {
@@ -30,7 +31,8 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   touchesByPeriod,
   userLabel = 'You',
   opponentLabel = 'Opponent',
-  userPosition // Position of user in match header (left = fencer_1, right = fencer_2)
+  userPosition, // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }) => {
   const { width, height } = useWindowDimensions();
   const [tooltip, setTooltip] = useState<TooltipData>({
@@ -162,7 +164,12 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   const userColor = '#FF7675';
   const opponentColor = '#00B894';
   
-  // Chart data for touches by period - always include all periods to keep ordering stable
+  // Check if this is a sabre match - hide Period 3 for sabre
+  const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
+  
+  // Chart data for touches by period
+  // For sabre: only show Period 1 and Period 2
+  // For foil/epee: show all 3 periods
   const chartData = [
     {
       value: data.period1.user > 0 ? data.period1.user : 0.1,
@@ -196,33 +203,44 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       period: 'P2',
       player: 'opponent'
     },
-    {
-      value: data.period3.user > 0 ? data.period3.user : 0.1,
-      originalValue: data.period3.user,
-      label: 'P3',
-      frontColor: userColor,
-      period: 'P3',
-      player: 'user'
-    },
-    {
-      value: data.period3.opponent > 0 ? data.period3.opponent : 0.1,
-      originalValue: data.period3.opponent,
-      label: 'P3',
-      frontColor: opponentColor,
-      period: 'P3',
-      player: 'opponent'
-    },
+    // Only include Period 3 for non-sabre matches
+    ...(isSabre ? [] : [
+      {
+        value: data.period3.user > 0 ? data.period3.user : 0.1,
+        originalValue: data.period3.user,
+        label: 'P3',
+        frontColor: userColor,
+        period: 'P3',
+        player: 'user'
+      },
+      {
+        value: data.period3.opponent > 0 ? data.period3.opponent : 0.1,
+        originalValue: data.period3.opponent,
+        label: 'P3',
+        frontColor: opponentColor,
+        period: 'P3',
+        player: 'opponent'
+      },
+    ]),
   ];
 
   // Calculate the maximum value for Y-axis scaling
-  const maxValue = Math.max(
-    data.period1.user,
-    data.period1.opponent,
-    data.period2.user,
-    data.period2.opponent,
-    data.period3.user,
-    data.period3.opponent
-  );
+  // For sabre, only consider periods 1 and 2
+  const maxValue = isSabre
+    ? Math.max(
+        data.period1.user,
+        data.period1.opponent,
+        data.period2.user,
+        data.period2.opponent
+      )
+    : Math.max(
+        data.period1.user,
+        data.period1.opponent,
+        data.period2.user,
+        data.period2.opponent,
+        data.period3.user,
+        data.period3.opponent
+      );
   
   // Set Y-axis maximum to the highest score, with a minimum of 1 for visibility
   // Ensure it's a whole number and round up to the next integer

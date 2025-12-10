@@ -113,6 +113,18 @@ export default function RemoteScreen() {
   const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'sabre'>('foil');
   const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
   
+  // Momentum tracking for Sabre Match Insights
+  const [momentumStreak, setMomentumStreak] = useState<{
+    lastScorer: 'fencerA' | 'fencerB' | null;
+    count: number;
+  }>({ lastScorer: null, count: 0 });
+  const previousScoresRef = useRef({ fencerA: 0, fencerB: 0 });
+  // Monotonic elapsed tracker for sabre (no timer) so events stay unique
+  const sabreElapsedRef = useRef(0);
+  
+  // Sabre-specific break tracking
+  const [breakTriggered, setBreakTriggered] = useState(false); // Track if break at 8 was offered
+  
   // Offline status indicators
   const [isOffline, setIsOffline] = useState(false);
   const [pendingMatchesCount, setPendingMatchesCount] = useState(0);
@@ -141,7 +153,7 @@ export default function RemoteScreen() {
       console.error('Error checking AsyncStorage:', error);
     }
   };
-  
+
   // Load stored images on component mount
   useEffect(() => {
     loadStoredImages();
@@ -743,6 +755,46 @@ export default function RemoteScreen() {
       };
     }
   }, [user?.id]);
+
+  // Track momentum for Sabre Match Insights
+  useEffect(() => {
+    if (selectedWeapon !== 'sabre' || !hasMatchStarted) {
+      // Reset momentum when not sabre or match hasn't started
+      setMomentumStreak({ lastScorer: null, count: 0 });
+      previousScoresRef.current = { fencerA: 0, fencerB: 0 };
+      return;
+    }
+
+    const prev = previousScoresRef.current;
+    const current = scores;
+
+    // Check which fencer scored (score increased)
+    if (current.fencerA > prev.fencerA) {
+      // Fencer A scored
+      setMomentumStreak(prevStreak => {
+        if (prevStreak.lastScorer === 'fencerA') {
+          return { ...prevStreak, count: prevStreak.count + 1 };
+        } else {
+          return { lastScorer: 'fencerA', count: 1 };
+        }
+      });
+    } else if (current.fencerB > prev.fencerB) {
+      // Fencer B scored
+      setMomentumStreak(prevStreak => {
+        if (prevStreak.lastScorer === 'fencerB') {
+          return { ...prevStreak, count: prevStreak.count + 1 };
+        } else {
+          return { lastScorer: 'fencerB', count: 1 };
+        }
+      });
+    } else if (current.fencerA < prev.fencerA || current.fencerB < prev.fencerB) {
+      // Score decreased - reset momentum
+      setMomentumStreak({ lastScorer: null, count: 0 });
+    }
+
+    // Update previous scores
+    previousScoresRef.current = { ...current };
+  }, [scores, selectedWeapon, hasMatchStarted]);
   
   // Monitor sync status - simplified, banner handles its own visibility
   // This effect just tracks sync state for display purposes
@@ -1335,6 +1387,7 @@ export default function RemoteScreen() {
     setPeriod1Time(0);
     setPeriod2Time(0);
     setPeriod3Time(0);
+    sabreElapsedRef.current = 0;
     
     // Reset fencer info to defaults
     if (showUserProfile && userDisplayName) {
@@ -1452,6 +1505,10 @@ export default function RemoteScreen() {
     fencerA: string | null;
     fencerB: string | null;
   }>({ fencerA: null, fencerB: null });
+  // Queue touches that happen before match_id/period exists (first sabre touch race)
+  const pendingTouchQueueRef = useRef<any[]>([]);
+  // Track latest match/period synchronously for immediate access in event creation
+  const currentMatchPeriodRef = useRef<any>(null);
   const [matchStartTime, setMatchStartTime] = useState<Date | null>(null);
   const [totalPausedTime, setTotalPausedTime] = useState<number>(0); // in milliseconds
   const [pauseStartTime, setPauseStartTime] = useState<Date | null>(null);
@@ -1475,13 +1532,84 @@ export default function RemoteScreen() {
     return Math.max(0, actualMatchTime);
   }, [matchStartTime, totalPausedTime]);
 
+  // Replay any queued touches once match/period IDs are available
+  const flushQueuedTouches = useCallback(async () => {
+    if (!currentMatchPeriod?.match_id || !remoteSession) return;
+    if (pendingTouchQueueRef.current.length === 0) return;
+
+    const queued = [...pendingTouchQueueRef.current];
+    pendingTouchQueueRef.current = [];
+
+    console.log('⏩ Replaying queued touches with match_id', {
+      count: queued.length,
+      match_id: currentMatchPeriod.match_id,
+      match_period_id: currentMatchPeriod.match_period_id || null,
+    });
+
+    const isOnline = await networkService.isOnline();
+
+    for (const item of queued) {
+      const enrichedEvent = {
+        ...item.baseEvent,
+        match_id: currentMatchPeriod.match_id,
+        match_period_id: currentMatchPeriod.match_period_id || null,
+        fencing_remote_id: remoteSession.remote_id,
+      };
+
+      // Always queue to offline cache with correct IDs
+      await offlineRemoteService.recordEvent({
+        remote_id: remoteSession.remote_id,
+        event_type: "touch",
+        scoring_user_name: enrichedEvent.scoring_user_name,
+        match_time_elapsed: enrichedEvent.match_time_elapsed,
+        metadata: {
+          match_id: enrichedEvent.match_id,
+          match_period_id: enrichedEvent.match_period_id,
+          scoring_user_id: enrichedEvent.scoring_user_id,
+          fencer_1_name: enrichedEvent.fencer_1_name,
+          fencer_2_name: enrichedEvent.fencer_2_name,
+          card_given: enrichedEvent.card_given,
+          score_diff: enrichedEvent.score_diff,
+          seconds_since_last_event: enrichedEvent.seconds_since_last_event,
+        }
+      });
+
+      // If online and not an offline session, also insert immediately
+      if (isOnline && !item.isOfflineSession) {
+        try {
+          await matchEventService.createMatchEvent(enrichedEvent);
+        } catch (err: any) {
+          const isForeignKeyError = err?.code === '23503' || 
+                                    err?.message?.includes('foreign key constraint') ||
+                                    err?.message?.includes('violates foreign key');
+          if (isForeignKeyError) {
+            console.log('⚠️ FK error while replaying queued touch, leaving in offline queue only');
+          } else {
+            console.error('❌ Error replaying queued touch:', err);
+          }
+        }
+      }
+    }
+  }, [currentMatchPeriod, remoteSession]);
+
+  // Whenever a match/period becomes available, replay any touches that were queued before IDs existed
+  useEffect(() => {
+    flushQueuedTouches();
+  }, [flushQueuedTouches]);
+  // Keep currentMatchPeriod in a ref so event creation can use it before state updates land
+  useEffect(() => {
+    currentMatchPeriodRef.current = currentMatchPeriod;
+  }, [currentMatchPeriod]);
+
   // Helper function to create match events with all required fields (now offline-capable)
   // Refactored to use entity-based parameters
   const createMatchEvent = async (
     scorer: 'user' | 'opponent', 
     cardGiven?: string, 
     scoringEntity?: 'fencerA' | 'fencerB', 
-    newScore?: number
+    newScore?: number,
+    sessionOverride?: any,
+    eventType: 'touch' | 'double' = 'touch'
   ) => {
     // Early return if reset is in progress
     if (isResetting) {
@@ -1489,14 +1617,18 @@ export default function RemoteScreen() {
       return;
     }
     
-    if (!remoteSession) {
+    // Use sessionOverride if provided, otherwise use remoteSession state
+    const activeSession = sessionOverride || remoteSession;
+    if (!activeSession) {
       console.log('❌ No remote session - cannot create match event');
       return;
     }
+    // Synchronously grab latest period if state hasn't updated yet
+    const effectivePeriod = currentMatchPeriod || currentMatchPeriodRef.current;
     
     // Check if we're offline or if this is an offline session
     const isOnline = await networkService.isOnline();
-    const isOfflineSession = remoteSession.remote_id.startsWith('offline_');
+    const isOfflineSession = activeSession.remote_id.startsWith('offline_');
     
     // Skip database check for offline sessions or when offline
     if (!isOfflineSession && isOnline) {
@@ -1504,7 +1636,7 @@ export default function RemoteScreen() {
       const { data: sessionCheck, error: sessionError } = await supabase
         .from('fencing_remote')
         .select('remote_id')
-        .eq('remote_id', remoteSession.remote_id)
+        .eq('remote_id', activeSession.remote_id)
         .single();
       
       if (sessionError || !sessionCheck) {
@@ -1635,6 +1767,13 @@ export default function RemoteScreen() {
       matchTimeElapsed = Math.max(0, Math.floor(actualMatchTimeMsFromStart / 1000));
     }
     
+    // For sabre (no timer), force a monotonic elapsed counter so each touch is unique
+    if (selectedWeapon === 'sabre') {
+      const nextSabreElapsed = Math.max(matchTimeElapsed, sabreElapsedRef.current + 1);
+      matchTimeElapsed = nextSabreElapsed;
+      sabreElapsedRef.current = nextSabreElapsed;
+    }
+    
     
     // Display the time elapsed that will be used for x-axis
     const minutes = Math.floor(matchTimeElapsed / 60);
@@ -1676,63 +1815,91 @@ export default function RemoteScreen() {
     console.log(`🎯 SCORING DEBUG: fencer1Name="${fencer1Name}", fencer2Name="${fencer2Name}"`);
     console.log(`🎯 SCORING DEBUG: scoringEntity="${scoringEntity}", newScore=${newScore}, fencerAScore=${currentFencerAScore}, fencerBScore=${currentFencerBScore}`);
 
+    // Build a canonical event payload we can queue or send immediately
+    const baseEvent = {
+      match_id: effectivePeriod?.match_id || null,
+      match_period_id: effectivePeriod?.match_period_id || null,
+      fencing_remote_id: activeSession.remote_id,
+      event_time: now.toISOString(),
+      event_type: eventType,
+      scoring_user_id: scorer === 'user' ? user?.id : null,
+      scoring_user_name: scoringUserName,
+      fencer_1_name: fencer1Name,
+      fencer_2_name: fencer2Name,
+      card_given: cardGiven || null,
+      score_diff: scoreDiff,
+      seconds_since_last_event: secondsSinceLastEvent,
+      match_time_elapsed: matchTimeElapsed
+    };
+
+    // If match_id isn't ready yet (common on very first sabre touch), queue and replay once created
+    if (!effectivePeriod?.match_id) {
+      pendingTouchQueueRef.current.push({
+        baseEvent,
+        scorer,
+        scoringEntity,
+        isOfflineSession,
+        queuedAt: now.toISOString(),
+      });
+      console.log('⏸️ Queued touch until match_id exists', {
+        queueLength: pendingTouchQueueRef.current.length,
+        match_time_elapsed: matchTimeElapsed,
+        scorer: scoringUserName,
+      });
+      setLastEventTime(now); // maintain elapsed calculations for subsequent touches
+      return;
+    }
+
     // Use offline service to record event (works online and offline)
     await offlineRemoteService.recordEvent({
-      remote_id: remoteSession.remote_id,
-      event_type: "touch",
+      remote_id: activeSession.remote_id,
+      event_type: eventType,
       scoring_user_name: scoringUserName,
       match_time_elapsed: matchTimeElapsed,
       metadata: {
-        match_id: currentMatchPeriod?.match_id || null,
-        match_period_id: currentMatchPeriod?.match_period_id || null,
-        scoring_user_id: scorer === 'user' ? user?.id : null,
-        fencer_1_name: fencer1Name,
-        fencer_2_name: fencer2Name,
-        card_given: cardGiven || null,
-        score_diff: scoreDiff,
-        seconds_since_last_event: secondsSinceLastEvent,
+        match_id: baseEvent.match_id,
+        match_period_id: baseEvent.match_period_id,
+        scoring_user_id: baseEvent.scoring_user_id,
+        fencer_1_name: baseEvent.fencer_1_name,
+        fencer_2_name: baseEvent.fencer_2_name,
+        card_given: baseEvent.card_given,
+        score_diff: baseEvent.score_diff,
+        seconds_since_last_event: baseEvent.seconds_since_last_event,
       }
     });
     
     // Also try to create via matchEventService if online and match exists (for immediate sync)
-    if (isOnline && !isOfflineSession && currentMatchPeriod?.match_id) {
+    if (isOnline && !isOfflineSession && effectivePeriod?.match_id) {
       try {
         // Verify match and remote session still exist before creating event
         // This prevents foreign key violations if reset was called during async operations
         const { data: matchCheck, error: matchError } = await supabase
           .from('match')
           .select('match_id')
-          .eq('match_id', currentMatchPeriod.match_id)
+          .eq('match_id', effectivePeriod.match_id)
           .single();
         
         const { data: remoteCheck, error: remoteError } = await supabase
           .from('fencing_remote')
           .select('remote_id')
-          .eq('remote_id', remoteSession.remote_id)
+          .eq('remote_id', activeSession.remote_id)
           .single();
         
         // Only create event if both match and remote session still exist
         if (!matchError && matchCheck && !remoteError && remoteCheck) {
-          const eventData = {
-            match_id: currentMatchPeriod.match_id,
-            fencing_remote_id: remoteSession.remote_id,
-            match_period_id: currentMatchPeriod.match_period_id || null,
-            event_time: now.toISOString(),
-            event_type: "touch",
-            scoring_user_id: scorer === 'user' ? user?.id : null,
-            scoring_user_name: scoringUserName,
-            fencer_1_name: fencer1Name,
-            fencer_2_name: fencer2Name,
-            card_given: cardGiven || null,
-            score_diff: scoreDiff,
-            seconds_since_last_event: secondsSinceLastEvent,
-            match_time_elapsed: matchTimeElapsed
-          };
+          const eventData = { ...baseEvent, match_id: effectivePeriod.match_id, match_period_id: effectivePeriod.match_period_id || null };
           const createdEvent = await matchEventService.createMatchEvent(eventData);
-          console.log('✅ Event created immediately (online)');
+          
+          // If creation failed (e.g., FK), leave it to the queued offline event to sync later
+          if (!createdEvent) {
+            console.log('⚠️ Match event creation deferred (FK or missing match), will sync from queue');
+            return;
+          }
+          
+          console.log('✅ Event created immediately (online, with match_id)');
           
           // Track the event ID for cancellation purposes
-          if (createdEvent && createdEvent.match_event_id && scoringEntity) {
+          if (createdEvent.match_event_id && scoringEntity) {
             setRecentScoringEventIds(prev => ({
               ...prev,
               [scoringEntity]: createdEvent.match_event_id
@@ -1743,8 +1910,17 @@ export default function RemoteScreen() {
           console.log('⚠️ Match or remote session no longer exists (likely reset), event already queued for sync');
           // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
         }
-      } catch (error) {
-        console.error('❌ Error creating match event immediately:', error);
+      } catch (error: any) {
+        // Check if this is a foreign key violation - if so, it's expected and already handled
+        const isForeignKeyError = error?.code === '23503' || 
+                                  error?.message?.includes('foreign key constraint') ||
+                                  error?.message?.includes('violates foreign key');
+        
+        if (isForeignKeyError) {
+          console.log('⚠️ Match or remote session no longer exists (foreign key violation), event already queued for sync');
+        } else {
+          console.error('❌ Error creating match event immediately:', error);
+        }
         // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
       }
     }
@@ -1918,6 +2094,9 @@ export default function RemoteScreen() {
         console.log('✅ Match period created successfully:', period);
         setCurrentMatchPeriod(period);
         setMatchId(period.match_id); // Store match ID safely
+        currentMatchPeriodRef.current = period; // Keep synchronous ref up to date
+        // Immediately flush any queued touches that were waiting for match_id/period
+        flushQueuedTouches();
         return period;
       } else {
         console.error('❌ Failed to create match period');
@@ -1984,6 +2163,18 @@ export default function RemoteScreen() {
     }
 
     try {
+      // Verify match exists before creating event
+      const { data: matchCheck, error: matchError } = await supabase
+        .from('match')
+        .select('match_id')
+        .eq('match_id', matchId)
+        .single();
+      
+      if (matchError || !matchCheck) {
+        console.log('⚠️ Match no longer exists, skipping priority winner event');
+        return;
+      }
+
       // Check if priority winner event already exists for this match
       const { data: existingEvent } = await supabase
         .from('match_event')
@@ -1997,18 +2188,49 @@ export default function RemoteScreen() {
         return;
       }
 
-      await matchEventService.createMatchEvent({
+      // Build event data, optionally including fencing_remote_id if session exists and is verified
+      const eventData: any = {
         match_id: matchId,
         event_type: 'priority_winner',
         event_time: new Date().toISOString(),
         scoring_user_name: winnerName,
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
-      });
+      };
+
+      // Only include fencing_remote_id if remote session exists and is verified
+      if (remoteSession?.remote_id) {
+        const { data: remoteCheck, error: remoteError } = await supabase
+          .from('fencing_remote')
+          .select('remote_id')
+          .eq('remote_id', remoteSession.remote_id)
+          .single();
+        
+        if (!remoteError && remoteCheck) {
+          eventData.fencing_remote_id = remoteSession.remote_id;
+        } else {
+          console.log('⚠️ Remote session not found in database, creating event without fencing_remote_id');
+        }
+      }
+
+      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      
+      if (!createdEvent) {
+        console.log('⚠️ Priority winner event creation failed (match may have been deleted)');
+        return;
+      }
       
       console.log('✅ Priority winner event created:', winnerName);
-    } catch (error) {
-      console.error('❌ Error creating priority winner event:', error);
+    } catch (error: any) {
+      const isForeignKeyError = error?.code === '23503' || 
+                                error?.message?.includes('foreign key constraint') ||
+                                error?.message?.includes('violates foreign key');
+      
+      if (isForeignKeyError) {
+        console.log('⚠️ Match no longer exists (foreign key violation), skipping priority winner event');
+      } else {
+        console.error('❌ Error creating priority winner event:', error);
+      }
     }
   };
 
@@ -2020,17 +2242,60 @@ export default function RemoteScreen() {
     }
 
     try {
-      await matchEventService.createMatchEvent({
+      // Verify match exists before creating event
+      const { data: matchCheck, error: matchError } = await supabase
+        .from('match')
+        .select('match_id')
+        .eq('match_id', matchId)
+        .single();
+      
+      if (matchError || !matchCheck) {
+        console.log('⚠️ Match no longer exists, skipping priority round start event');
+        return;
+      }
+
+      // Build event data, optionally including fencing_remote_id if session exists and is verified
+      const eventData: any = {
         match_id: matchId,
         event_type: 'priority_round_start',
         event_time: new Date().toISOString(),
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
-      });
+      };
+
+      // Only include fencing_remote_id if remote session exists and is verified
+      if (remoteSession?.remote_id) {
+        const { data: remoteCheck, error: remoteError } = await supabase
+          .from('fencing_remote')
+          .select('remote_id')
+          .eq('remote_id', remoteSession.remote_id)
+          .single();
+        
+        if (!remoteError && remoteCheck) {
+          eventData.fencing_remote_id = remoteSession.remote_id;
+        } else {
+          console.log('⚠️ Remote session not found in database, creating event without fencing_remote_id');
+        }
+      }
+
+      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      
+      if (!createdEvent) {
+        console.log('⚠️ Priority round start event creation failed (match may have been deleted)');
+        return;
+      }
       
       console.log('✅ Priority round start event created');
-    } catch (error) {
-      console.error('❌ Error creating priority round start event:', error);
+    } catch (error: any) {
+      const isForeignKeyError = error?.code === '23503' || 
+                                error?.message?.includes('foreign key constraint') ||
+                                error?.message?.includes('violates foreign key');
+      
+      if (isForeignKeyError) {
+        console.log('⚠️ Match no longer exists (foreign key violation), skipping priority round start event');
+      } else {
+        console.error('❌ Error creating priority round start event:', error);
+      }
     }
   };
 
@@ -2042,6 +2307,18 @@ export default function RemoteScreen() {
     }
 
     try {
+      // Verify match exists before creating event
+      const { data: matchCheck, error: matchError } = await supabase
+        .from('match')
+        .select('match_id')
+        .eq('match_id', matchId)
+        .single();
+      
+      if (matchError || !matchCheck) {
+        console.log('⚠️ Match no longer exists, skipping priority round end event');
+        return;
+      }
+
       // Check if priority round end event already exists for this match
       const { data: existingEvent } = await supabase
         .from('match_event')
@@ -2055,18 +2332,49 @@ export default function RemoteScreen() {
         return;
       }
 
-      await matchEventService.createMatchEvent({
+      // Build event data, optionally including fencing_remote_id if session exists and is verified
+      const eventData: any = {
         match_id: matchId,
         event_type: 'priority_round_end',
         event_time: new Date().toISOString(),
         scoring_user_name: winnerName,
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
-      });
+      };
+
+      // Only include fencing_remote_id if remote session exists and is verified
+      if (remoteSession?.remote_id) {
+        const { data: remoteCheck, error: remoteError } = await supabase
+          .from('fencing_remote')
+          .select('remote_id')
+          .eq('remote_id', remoteSession.remote_id)
+          .single();
+        
+        if (!remoteError && remoteCheck) {
+          eventData.fencing_remote_id = remoteSession.remote_id;
+        } else {
+          console.log('⚠️ Remote session not found in database, creating event without fencing_remote_id');
+        }
+      }
+
+      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      
+      if (!createdEvent) {
+        console.log('⚠️ Priority round end event creation failed (match may have been deleted)');
+        return;
+      }
       
       console.log('✅ Priority round end event created:', winnerName);
-    } catch (error) {
-      console.error('❌ Error creating priority round end event:', error);
+    } catch (error: any) {
+      const isForeignKeyError = error?.code === '23503' || 
+                                error?.message?.includes('foreign key constraint') ||
+                                error?.message?.includes('violates foreign key');
+      
+      if (isForeignKeyError) {
+        console.log('⚠️ Match no longer exists (foreign key violation), skipping priority round end event');
+      } else {
+        console.error('❌ Error creating priority round end event:', error);
+      }
     }
   };
 
@@ -2354,20 +2662,59 @@ export default function RemoteScreen() {
       const currentFencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
 
       // 1. Update match with final scores, completion status, and current fencer names (reflects any swaps)
+      // For Sabre: Calculate period and score_spp based on breakTriggered
+      let finalPeriodNumber = periodNumber;
+      let finalScoreSpp = scoreSpp;
+      let finalScoreByPeriod = scoreByPeriod;
+      
+      if (selectedWeapon === 'sabre') {
+        // Sabre: Period is 1 or 2 based on breakTriggered
+        finalPeriodNumber = breakTriggered ? 2 : 1;
+        // Calculate score_spp: finalScore / periodNumber
+        const maxScore = Math.max(actualFencerAScore, actualFencerBScore);
+        finalScoreSpp = finalPeriodNumber > 0 ? Math.round(maxScore / finalPeriodNumber) : 0;
+        // Calculate score_by_period for sabre (only 2 periods)
+        if (user?.id && showUserProfile) {
+          finalScoreByPeriod = {
+            period1: { user: touchesByPeriod.period1.user, opponent: touchesByPeriod.period1.opponent },
+            period2: { user: touchesByPeriod.period2.user, opponent: touchesByPeriod.period2.opponent },
+            period3: { user: 0, opponent: 0 } // Period 3 is empty for sabre
+          };
+        } else {
+          // Anonymous match - use match_period data
+          const { data: sabrePeriods } = await supabase
+            .from('match_period')
+            .select('fencer_1_score, fencer_2_score, period_number')
+            .eq('match_id', currentMatchPeriod.match_id)
+            .order('period_number', { ascending: true });
+          
+          if (sabrePeriods && sabrePeriods.length > 0) {
+            const period1Data = sabrePeriods.find(p => p.period_number === 1) || { fencer_1_score: 0, fencer_2_score: 0 };
+            const period2Data = sabrePeriods.find(p => p.period_number === 2) || { fencer_1_score: 0, fencer_2_score: 0 };
+            finalScoreByPeriod = {
+              period1: { user: period1Data.fencer_1_score, opponent: period1Data.fencer_2_score },
+              period2: { user: period2Data.fencer_1_score, opponent: period2Data.fencer_2_score },
+              period3: { user: 0, opponent: 0 }
+            };
+          }
+        }
+      }
+      
       const updatedMatch = await matchService.updateMatch(currentMatchPeriod.match_id, {
         final_score: finalScore,
         // touches_against is a generated column - don't set it explicitly
         result: result, // Will be 'win'/'loss' if user exists, null if no user
         score_diff: scoreDiff,
-        bout_length_s: matchDuration > 0 ? matchDuration : undefined,
+        bout_length_s: selectedWeapon === 'sabre' ? undefined : (matchDuration > 0 ? matchDuration : undefined), // undefined for sabre (NULL in database)
         yellow_cards: cards.fencerA.yellow + cards.fencerB.yellow,
         red_cards: cards.fencerA.red + cards.fencerB.red,
         is_complete: true, // Mark as complete
-        period_number: periodNumber,
-        score_spp: scoreSpp,
-        score_by_period: scoreByPeriod,
+        period_number: finalPeriodNumber,
+        score_spp: finalScoreSpp,
+        score_by_period: finalScoreByPeriod,
         fencer_1_name: currentFencer1Name, // Update to reflect current positions (after any swaps)
         fencer_2_name: currentFencer2Name, // Update to reflect current positions (after any swaps)
+        final_period: selectedWeapon === 'sabre' ? finalPeriodNumber : undefined, // Set final_period for sabre
       });
 
       let failedGoalData: any = null; // Declare in outer scope
@@ -2509,6 +2856,7 @@ export default function RemoteScreen() {
       setPreviousMatchState(null);
       setIsManualReset(false);
       setLastEventTime(null); // Reset event timing
+      sabreElapsedRef.current = 0; // Reset sabre elapsed counter after completion
       
       // Save completed match state instead of clearing it
       const completedMatchState = {
@@ -2689,6 +3037,7 @@ export default function RemoteScreen() {
       setIsBreakTime(false);
       setScoreChangeCount(0);
       setShowScoreWarning(false);
+      sabreElapsedRef.current = 0;
 
     } catch (error) {
       console.error('❌ Error completing offline match:', error);
@@ -3220,19 +3569,20 @@ export default function RemoteScreen() {
 
   // Unified score increment function (entity-based)
   const incrementScore = async (entity: 'fencerA' | 'fencerB') => {
-    setIsChangingScore(true);
-    setHasNavigatedAway(false); // Reset navigation flag when changing scores
-    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
-    
-    // Prevent score changes if match is being completed
-    if (isCompletingMatch) {
-      console.log('🚫 Score change blocked - match is being completed');
-      setIsChangingScore(false);
-      return;
-    }
-    
-    // Ensure remote session exists (create if first score)
-    const session = await ensureRemoteSession();
+    try {
+      setIsChangingScore(true);
+      setHasNavigatedAway(false); // Reset navigation flag when changing scores
+      isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
+      
+      // Prevent score changes if match is being completed
+      if (isCompletingMatch) {
+        console.log('🚫 Score change blocked - match is being completed');
+        setIsChangingScore(false);
+        return;
+      }
+      
+      // Ensure remote session exists (create if first score)
+      const session = await ensureRemoteSession();
     
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
@@ -3267,7 +3617,7 @@ export default function RemoteScreen() {
           
           // Create match event in background (already queued locally, this is just for immediate DB sync)
           const entityIsUser = isEntityUser(entity);
-          createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore)
+          createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session)
             .catch(error => console.error('Background event creation failed:', error));
         });
         setShowScoreWarning(true);
@@ -3304,7 +3654,7 @@ export default function RemoteScreen() {
       
       // Create match event in background (already queued locally via recordEvent, this is just for immediate DB sync)
       const entityIsUser = isEntityUser(entity);
-      createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore)
+      createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session)
         .catch(error => console.error('Background event creation failed:', error));
       
       // Check if this is the first score during priority round
@@ -3397,6 +3747,23 @@ export default function RemoteScreen() {
       // Not an active match - no warning needed, just update score
       setScores(prev => ({ ...prev, [entity]: newScore }));
       
+      // For Sabre: Set hasMatchStarted when first score is recorded and create Period 1
+      // Note: session is already created in incrementScore at line 3325, so we use that
+      if (selectedWeapon === 'sabre' && !hasMatchStarted && (scores.fencerA === 0 && scores.fencerB === 0)) {
+        setHasMatchStarted(true);
+        sabreElapsedRef.current = 0; // Reset sabre elapsed counter on first score
+        console.log('🏁 Sabre match started with first score');
+        // Create Period 1 for sabre match (use session from line 3325)
+        if (session && !currentMatchPeriod) {
+          const playClickTime = new Date().toISOString();
+          const period = await createMatchPeriod(session, playClickTime);
+          if (period) {
+            setCurrentMatchPeriod(period);
+            setMatchId(period.match_id || null);
+          }
+        }
+      }
+      
       // Update remote session scores (offline-capable) - map entities to left/right positions
       if (remoteSession) {
         const leftEntity = getEntityAtPosition('left');
@@ -3409,31 +3776,95 @@ export default function RemoteScreen() {
       logMatchEvent('score', entity, 'increase'); // Log the score increase
       setScoreChangeCount(0); // Reset counter for new match
       
-      // Check if entity reached 15 points (match should end)
-      if (newScore >= 15) {
+      // For Sabre: Check for break at 8 points
+      if (selectedWeapon === 'sabre' && (newScore === 8 || (entity === 'fencerB' ? scores.fencerA : scores.fencerB) === 8)) {
+        const scoreAt8 = newScore === 8 ? newScore : (entity === 'fencerB' ? scores.fencerA : scores.fencerB);
+        if (!breakTriggered && scoreAt8 === 8) {
+          console.log('🍃 Sabre break triggered at 8 points');
+          setBreakTriggered(true);
+          // Show break popup
+          Alert.alert(
+            'Break at 8 Points',
+            'Would you like to take a 1-minute break?',
+            [
+              {
+                text: 'Skip Break',
+                style: 'cancel',
+                onPress: async () => {
+                  // Period 2 starts immediately
+                  if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+                    await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                      end_time: new Date().toISOString(),
+                      fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                    });
+                    
+                    // Create Period 2
+                    const periodData = {
+                      match_id: currentMatchPeriod.match_id,
+                      period_number: 2,
+                      start_time: new Date().toISOString(),
+                      fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                      fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+                      fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+                    };
+                    const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                    if (newPeriodRecord) {
+                      setCurrentMatchPeriod(newPeriodRecord);
+                      setCurrentPeriod(2);
+                    }
+                  }
+                }
+              },
+              {
+                text: 'Take Break',
+                onPress: async () => {
+                  // Period 1 ends immediately
+                  if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+                    await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+                      end_time: new Date().toISOString(),
+                      fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                    });
+                  }
+                  // Start break timer
+                  startBreakTimer();
+                }
+              }
+            ]
+          );
+        }
+      }
+      
+      // Check if entity reached 15 points (match should end) - only for Foil/Epee
+      if (selectedWeapon !== 'sabre' && newScore >= 15) {
         console.log(`🏁 ${entity} reached 15 points - match should end`);
         setIsCompletingMatch(true);
       }
       
       // Create match event for the score - determine if entity is user or opponent
+      // For Sabre: match_time_elapsed should be NULL
       const entityIsUser = isEntityUser(entity);
-      await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore);
+      try {
+        await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session);
+      } catch (error) {
+        console.error('❌ Error creating match event in incrementScore:', error);
+        // Continue anyway - event might be queued via offline service
+      }
       
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     
     // Reset the flag after a short delay to allow state to settle
     setTimeout(() => setIsChangingScore(false), 100);
+    } catch (error) {
+      console.error('❌ Error in incrementScore:', error);
+      setIsChangingScore(false);
+      // Don't throw - we want to prevent unhandled promise rejections
+    }
   };
 
-  // Legacy functions for backward compatibility - now call unified function
-  const incrementAliceScore = async () => {
-    await incrementScore('fencerA');
-  };
-
-  const incrementBobScore = async () => {
-    await incrementScore('fencerB');
-  };
 
   // Helper function to create a cancellation event
   const createCancellationEvent = async (
@@ -3509,54 +3940,103 @@ export default function RemoteScreen() {
     const scoringUserName = entityIsUser ? fencer1Name : fencer2Name;
 
     // Check if we're online
-    const isOnline = await networkService.isOnline();
+    let isOnline = false;
+    try {
+      isOnline = await networkService.isOnline();
+    } catch (error) {
+      console.error('❌ Error checking network status:', error);
+      // Default to offline if we can't determine
+      isOnline = false;
+    }
+    
     const isOfflineSession = remoteSession.remote_id.startsWith('offline_');
 
     // Record cancellation event via offline service (works online and offline)
-    await offlineRemoteService.recordEvent({
-      remote_id: remoteSession.remote_id,
-      event_type: "cancel",
-      scoring_user_name: scoringUserName,
-      match_time_elapsed: matchTimeElapsed,
-      metadata: {
-        match_id: currentMatchPeriod.match_id,
-        match_period_id: currentMatchPeriod.match_period_id || null,
-        scoring_user_id: scorer === 'user' ? user?.id : null,
-        fencer_1_name: fencer1Name,
-        fencer_2_name: fencer2Name,
-        cancelled_event_id: cancelledEventId,
-      }
-    });
+    try {
+      await offlineRemoteService.recordEvent({
+        remote_id: remoteSession.remote_id,
+        event_type: "cancel",
+        scoring_user_name: scoringUserName,
+        match_time_elapsed: matchTimeElapsed,
+        metadata: {
+          match_id: currentMatchPeriod.match_id,
+          match_period_id: currentMatchPeriod.match_period_id || null,
+          scoring_user_id: scorer === 'user' ? user?.id : null,
+          fencer_1_name: fencer1Name,
+          fencer_2_name: fencer2Name,
+          cancelled_event_id: cancelledEventId,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error recording cancellation event via offline service:', error);
+      // Continue anyway - the event might still be queued
+    }
 
     // Also create via matchEventService if online
     if (isOnline && !isOfflineSession && currentMatchPeriod?.match_id) {
       try {
-        const eventData = {
-          match_id: currentMatchPeriod.match_id,
-          fencing_remote_id: remoteSession.remote_id,
-          match_period_id: currentMatchPeriod.match_period_id || null,
-          event_time: now.toISOString(),
-          event_type: "cancel",
-          scoring_user_id: scorer === 'user' ? user?.id : null,
-          scoring_user_name: scoringUserName,
-          fencer_1_name: fencer1Name,
-          fencer_2_name: fencer2Name,
-          cancelled_event_id: cancelledEventId,
-          match_time_elapsed: matchTimeElapsed
-        };
-        await matchEventService.createMatchEvent(eventData);
-        console.log('✅ Cancellation event created:', cancelledEventId);
-      } catch (error) {
-        console.error('❌ Error creating cancellation event:', error);
+        // Verify match and remote session still exist before creating event
+        // This prevents foreign key violations if reset was called during async operations
+        const { data: matchCheck, error: matchError } = await supabase
+          .from('match')
+          .select('match_id')
+          .eq('match_id', currentMatchPeriod.match_id)
+          .single();
+        
+        const { data: remoteCheck, error: remoteError } = await supabase
+          .from('fencing_remote')
+          .select('remote_id')
+          .eq('remote_id', remoteSession.remote_id)
+          .single();
+        
+        // Only create event if both match and remote session still exist
+        if (!matchError && matchCheck && !remoteError && remoteCheck) {
+          const eventData = {
+            match_id: currentMatchPeriod.match_id,
+            fencing_remote_id: remoteSession.remote_id,
+            match_period_id: currentMatchPeriod.match_period_id || null,
+            event_time: now.toISOString(),
+            event_type: "cancel",
+            scoring_user_id: scorer === 'user' ? user?.id : null,
+            scoring_user_name: scoringUserName,
+            fencer_1_name: fencer1Name,
+            fencer_2_name: fencer2Name,
+            cancelled_event_id: cancelledEventId,
+            match_time_elapsed: matchTimeElapsed
+          };
+          const createdEvent = await matchEventService.createMatchEvent(eventData);
+          
+          if (!createdEvent) {
+            console.log('⚠️ Cancellation event creation failed (match may have been deleted), event already queued for sync');
+            return; // Event is already queued via offlineRemoteService.recordEvent above
+          }
+          
+          console.log('✅ Cancellation event created:', cancelledEventId);
+        } else {
+          console.log('⚠️ Match or remote session no longer exists (likely reset), cancellation event already queued for sync');
+          // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
+        }
+      } catch (error: any) {
+        const isForeignKeyError = error?.code === '23503' || 
+                                  error?.message?.includes('foreign key constraint') ||
+                                  error?.message?.includes('violates foreign key');
+        
+        if (isForeignKeyError) {
+          console.log('⚠️ Match or remote session no longer exists (foreign key violation), cancellation event already queued for sync');
+        } else {
+          console.error('❌ Error creating cancellation event:', error);
+        }
+        // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
       }
     }
   };
 
   // Unified score decrement function (entity-based)
   const decrementScore = async (entity: 'fencerA' | 'fencerB') => {
-    setIsChangingScore(true);
-    setHasNavigatedAway(false); // Reset navigation flag when changing scores
-    isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
+    try {
+      setIsChangingScore(true);
+      setHasNavigatedAway(false); // Reset navigation flag when changing scores
+      isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
     
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
@@ -3603,6 +4083,15 @@ export default function RemoteScreen() {
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
       
+      // For Sabre: Reset breakTriggered if score goes below 8
+      if (selectedWeapon === 'sabre' && breakTriggered) {
+        const updatedScores = { ...scores, [entity]: newScore };
+        if (updatedScores.fencerA < 8 && updatedScores.fencerB < 8) {
+          setBreakTriggered(false);
+          console.log('🔄 Sabre breakTriggered reset - score below 8');
+        }
+      }
+      
       // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
       if (isPlaying) {
         pauseTimer();
@@ -3627,16 +4116,31 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      
+      // For Sabre: Reset breakTriggered if score goes below 8
+      if (selectedWeapon === 'sabre' && breakTriggered) {
+        const updatedScores = { ...scores, [entity]: newScore };
+        if (updatedScores.fencerA < 8 && updatedScores.fencerB < 8) {
+          setBreakTriggered(false);
+          console.log('🔄 Sabre breakTriggered reset - score below 8');
+        }
+      }
+      
       logMatchEvent('score', entity, 'decrease'); // Log the score decrease
       
       // Create cancellation event if we have an event ID to cancel
       if (eventIdToCancel) {
-        await createCancellationEvent(entity, eventIdToCancel);
-        // Clear the tracked event ID since it's been cancelled
-        setRecentScoringEventIds(prev => ({
-          ...prev,
-          [entity]: null
-        }));
+        try {
+          await createCancellationEvent(entity, eventIdToCancel);
+          // Clear the tracked event ID since it's been cancelled
+          setRecentScoringEventIds(prev => ({
+            ...prev,
+            [entity]: null
+          }));
+        } catch (error) {
+          console.error('❌ Error creating cancellation event in decrementScore:', error);
+          // Continue anyway - event might be queued via offline service
+        }
       }
       
       setScoreChangeCount(0); // Reset counter for new match
@@ -3645,18 +4149,13 @@ export default function RemoteScreen() {
     
     // Reset the flag after a short delay to allow state to settle
     setTimeout(() => setIsChangingScore(false), 100);
+    } catch (error) {
+      console.error('❌ Error in decrementScore:', error);
+      setIsChangingScore(false);
+      // Don't throw - we want to prevent unhandled promise rejections
+    }
   };
 
-  // Legacy functions for backward compatibility - now call unified function
-  const decrementAliceScore = async () => {
-    await decrementScore('fencerA');
-  };
-
-  const decrementBobScore = async () => {
-    await decrementScore('fencerB');
-  };
-  
-  // incrementBobScore and decrementBobScore are already defined above as wrappers
 
   const openEditNamesPopup = useCallback(() => {
     // Helper function to get name value - return empty string if it's the placeholder
@@ -3813,10 +4312,17 @@ export default function RemoteScreen() {
   const resetScores = useCallback(() => {
     setScores({ fencerA: 0, fencerB: 0 });
     setHasNavigatedAway(false); // Reset navigation flag
+    // For Sabre: Reset breakTriggered when scores reset
+    if (selectedWeapon === 'sabre') {
+      setBreakTriggered(false);
+      setMomentumStreak({ lastScorer: null, count: 0 });
+      previousScoresRef.current = { fencerA: 0, fencerB: 0 };
+      sabreElapsedRef.current = 0;
+    }
     logMatchEvent('score', 'fencerA', 'decrease'); // Log score reset
     logMatchEvent('score', 'fencerB', 'decrease'); // Log score reset
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+  }, [selectedWeapon]);
 
   const resetPeriod = useCallback(() => {
     setCurrentPeriod(1);
@@ -4094,10 +4600,14 @@ export default function RemoteScreen() {
     setScores({ fencerA: 0, fencerB: 0 }); // Reset scores
     setIsBreakTime(false); // Reset break state
     setBreakTimeRemaining(60); // Reset break timer
+    setBreakTriggered(false); // Reset sabre break trigger
+    setMomentumStreak({ lastScorer: null, count: 0 }); // Reset momentum tracking
+    previousScoresRef.current = { fencerA: 0, fencerB: 0 }; // Reset momentum ref
     setScoreChangeCount(0); // Reset score change counter
     setShowScoreWarning(false); // Reset warning popup
     setHasNavigatedAway(false); // Reset navigation flag
       setLastEventTime(null); // Reset event timing
+    sabreElapsedRef.current = 0; // Reset sabre elapsed counter
     setPendingScoreAction(null); // Reset pending action
     setPreviousMatchState(null); // Reset previous match state
     setRecentScoringEventIds({ fencerA: null, fencerB: null }); // Reset event tracking
@@ -4466,23 +4976,14 @@ export default function RemoteScreen() {
       await offlineRemoteService.updateRemoteScores(remoteSession.remote_id, leftScore, rightScore);
     }
 
-    // Determine which entity is user/opponent for event creation
-    // Create event for fencerA
-    const fencerAIsUser = isEntityUser('fencerA');
+    // Record a single double-hit event so progression can count both fencers at once
     await createMatchEvent(
-      fencerAIsUser ? 'user' : 'opponent',
-      undefined, // No card
-      'fencerA',
-      newFencerAScore
-    );
-
-    // Create event for fencerB
-    const fencerBIsUser = isEntityUser('fencerB');
-    await createMatchEvent(
-      fencerBIsUser ? 'user' : 'opponent',
-      undefined, // No card
-      'fencerB',
-      newFencerBScore
+      'user',               // scorer label not used for double scoring
+      undefined,            // No card
+      undefined,            // scoringEntity not needed for double
+      undefined,            // newScore not used for double
+      undefined,            // sessionOverride
+      'double'              // mark as double event
     );
 
     // Track analytics - use capture for custom event
@@ -5081,7 +5582,36 @@ export default function RemoteScreen() {
           setIsBreakTime(false);
           setBreakTimeRemaining(60);
           
-          // Increment period and create new period record
+          // For Sabre: Start Period 2 when break completes
+          if (selectedWeapon === 'sabre') {
+            // Period 1 should already be ended when break was taken
+            // Create Period 2 now
+            if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+              (async () => {
+                const periodData = {
+                  match_id: currentMatchPeriod.match_id,
+                  period_number: 2,
+                  start_time: new Date().toISOString(),
+                  fencer_1_score: scores.fencerA,
+                  fencer_2_score: scores.fencerB,
+                  fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+                  fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+                };
+                
+                const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+                if (newPeriodRecord) {
+                  setCurrentMatchPeriod(newPeriodRecord);
+                  setMatchId(newPeriodRecord.match_id);
+                  setCurrentPeriod(2);
+                  currentPeriodRef.current = 2;
+                }
+              })();
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            return 60;
+          }
+          
+          // For Foil/Epee: Increment period and create new period record
           const nextPeriod = Math.min(currentPeriod + 1, 3);
           
           // End current period and create new one
@@ -5537,6 +6067,36 @@ export default function RemoteScreen() {
       marginBottom: height * 0.003,
       marginTop: 0,
       width: '100%',
+    },
+    matchInsightsContainer: {
+      width: '100%',
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.005,
+      gap: height * 0.006,
+    },
+    insightItem: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: height * 0.005,
+    },
+    insightIcon: {
+      fontSize: width * 0.05,
+      marginRight: width * 0.03,
+      marginTop: height * 0.002,
+    },
+    insightContent: {
+      flex: 1,
+    },
+    insightLabel: {
+      fontSize: width * 0.03,
+      color: 'rgba(255, 255, 255, 0.6)',
+      fontWeight: '400',
+      marginBottom: height * 0.003,
+    },
+    insightValue: {
+      fontSize: width * 0.035,
+      color: 'white',
+      fontWeight: '600',
     },
     countdownDisplay: {
       alignItems: 'center',
@@ -6486,6 +7046,23 @@ export default function RemoteScreen() {
       };
     });
     
+    // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+    if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+      setHasMatchStarted(true);
+      console.log('🏁 Sabre match started with first yellow card');
+      // Ensure remote session exists
+      const session = await ensureRemoteSession();
+      // Create Period 1 for sabre match
+      if (session && !currentMatchPeriod) {
+        const playClickTime = new Date().toISOString();
+        const period = await createMatchPeriod(session, playClickTime);
+        if (period) {
+          setCurrentMatchPeriod(period);
+          setMatchId(period.match_id || null);
+        }
+      }
+    }
+    
     // Create match event for the yellow card
     await createMatchEvent('user', 'yellow');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -6525,6 +7102,23 @@ export default function RemoteScreen() {
       };
     });
     
+    // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+    if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+      setHasMatchStarted(true);
+      console.log('🏁 Sabre match started with first yellow card');
+      // Ensure remote session exists
+      const session = await ensureRemoteSession();
+      // Create Period 1 for sabre match
+      if (session && !currentMatchPeriod) {
+        const playClickTime = new Date().toISOString();
+        const period = await createMatchPeriod(session, playClickTime);
+        if (period) {
+          setCurrentMatchPeriod(period);
+          setMatchId(period.match_id || null);
+        }
+      }
+    }
+    
     // Create match event for the yellow card
     await createMatchEvent('opponent', 'yellow');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -6562,6 +7156,22 @@ export default function RemoteScreen() {
               if (isPlaying) {
                 pauseTimer();
               }
+              // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+              if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+                setHasMatchStarted(true);
+                console.log('🏁 Sabre match started with first red card');
+                // Ensure remote session exists
+                const session = await ensureRemoteSession();
+                // Create Period 1 for sabre match
+                if (session && !currentMatchPeriod) {
+                  const playClickTime = new Date().toISOString();
+                  const period = await createMatchPeriod(session, playClickTime);
+                  if (period) {
+                    setCurrentMatchPeriod(period);
+                    setMatchId(period.match_id || null);
+                  }
+                }
+              }
               const newRedCount = currentRedCount + 1;
               setCards(prev => ({
                 ...prev,
@@ -6596,6 +7206,22 @@ export default function RemoteScreen() {
       // Pause timer when card is issued
       if (isPlaying) {
         pauseTimer();
+      }
+      // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+      if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+        setHasMatchStarted(true);
+        console.log('🏁 Sabre match started with first red card');
+        // Ensure remote session exists
+        const session = await ensureRemoteSession();
+        // Create Period 1 for sabre match
+        if (session && !currentMatchPeriod) {
+          const playClickTime = new Date().toISOString();
+          const period = await createMatchPeriod(session, playClickTime);
+          if (period) {
+            setCurrentMatchPeriod(period);
+            setMatchId(period.match_id || null);
+          }
+        }
       }
       // First red card - add directly
       setCards(prev => ({
@@ -6645,6 +7271,22 @@ export default function RemoteScreen() {
               if (isPlaying) {
                 pauseTimer();
               }
+              // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+              if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+                setHasMatchStarted(true);
+                console.log('🏁 Sabre match started with first red card');
+                // Ensure remote session exists
+                const session = await ensureRemoteSession();
+                // Create Period 1 for sabre match
+                if (session && !currentMatchPeriod) {
+                  const playClickTime = new Date().toISOString();
+                  const period = await createMatchPeriod(session, playClickTime);
+                  if (period) {
+                    setCurrentMatchPeriod(period);
+                    setMatchId(period.match_id || null);
+                  }
+                }
+              }
               const newRedCount = currentRedCount + 1;
               setCards(prev => ({
                 ...prev,
@@ -6679,6 +7321,22 @@ export default function RemoteScreen() {
       // Pause timer when card is issued
       if (isPlaying) {
         pauseTimer();
+      }
+      // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
+      if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+        setHasMatchStarted(true);
+        console.log('🏁 Sabre match started with first red card');
+        // Ensure remote session exists
+        const session = await ensureRemoteSession();
+        // Create Period 1 for sabre match
+        if (session && !currentMatchPeriod) {
+          const playClickTime = new Date().toISOString();
+          const period = await createMatchPeriod(session, playClickTime);
+          if (period) {
+            setCurrentMatchPeriod(period);
+            setMatchId(period.match_id || null);
+          }
+        }
       }
       // First red card - add directly
       setCards(prev => ({
@@ -6775,7 +7433,7 @@ export default function RemoteScreen() {
       <View style={{ overflow: 'visible', position: 'relative' }}>
         {/* Period Label - Positioned outside card */}
         <View style={styles.timerLabel}>
-          <Text style={styles.timerLabelText}>Match Timer</Text>
+          <Text style={styles.timerLabelText}>{selectedWeapon === 'sabre' ? 'Match Insights' : 'Match Timer'}</Text>
         </View>
         
         <LinearGradient
@@ -6861,7 +7519,7 @@ export default function RemoteScreen() {
           )}
           
           <View style={styles.timerHeader}>
-          {!isPlaying && !hasMatchStarted && (
+          {!isPlaying && !hasMatchStarted && selectedWeapon !== 'sabre' && (
             <TouchableOpacity style={styles.editButton} onPress={handleEditTime}>
               <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
@@ -6936,8 +7594,68 @@ export default function RemoteScreen() {
             </View>
           )}
           
-          {/* Other Timer Displays - only show when NOT break time AND NOT injury time */}
-          {!isBreakTime && !isInjuryTimer && (
+          {/* Match Insights Display - Only for Sabre */}
+          {!isBreakTime && !isInjuryTimer && selectedWeapon === 'sabre' && (
+            <View style={styles.matchInsightsContainer}>
+              {/* Current Lead - Always show */}
+              <View style={styles.insightItem}>
+                <Text style={styles.insightIcon}>🎯</Text>
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightLabel}>Current Lead</Text>
+                  <Text style={styles.insightValue}>
+                    {!hasMatchStarted
+                      ? 'Match not started'
+                      : scores.fencerA === scores.fencerB
+                      ? 'Tied'
+                      : scores.fencerA > scores.fencerB
+                      ? `${fencerNames.fencerA} leading by ${scores.fencerA - scores.fencerB}`
+                      : `${fencerNames.fencerB} leading by ${scores.fencerB - scores.fencerA}`}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Momentum Indicator - Always show */}
+              <View style={styles.insightItem}>
+                <Text style={styles.insightIcon}>🔥</Text>
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightLabel}>Momentum</Text>
+                  <Text style={styles.insightValue}>
+                    {!hasMatchStarted || momentumStreak.count < 2 || !momentumStreak.lastScorer
+                      ? 'No active momentum'
+                      : `${fencerNames[momentumStreak.lastScorer]} on a streak (${momentumStreak.count} in a row)`}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Break Warning - Always show */}
+              <View style={styles.insightItem}>
+                <Text style={styles.insightIcon}>⚠️</Text>
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightLabel}>Break Warning</Text>
+                  <Text style={styles.insightValue}>
+                    {!hasMatchStarted
+                      ? 'Break at 8 points'
+                      : (() => {
+                          const pointsAwayFromBreakA = Math.max(0, 8 - scores.fencerA);
+                          const pointsAwayFromBreakB = Math.max(0, 8 - scores.fencerB);
+                          const closestPointsAway = Math.min(pointsAwayFromBreakA, pointsAwayFromBreakB);
+                          
+                          if (closestPointsAway === 0) {
+                            return 'Break at 8 points';
+                          }
+                          
+                          const closestFencer = pointsAwayFromBreakA <= pointsAwayFromBreakB ? 'fencerA' : 'fencerB';
+                          return `${fencerNames[closestFencer]} is ${closestPointsAway} point${closestPointsAway === 1 ? '' : 's'} away from break`;
+                        })()}
+                  </Text>
+                </View>
+              </View>
+
+            </View>
+          )}
+
+          {/* Other Timer Displays - only show when NOT break time AND NOT injury time - Hidden for Sabre */}
+          {!isBreakTime && !isInjuryTimer && selectedWeapon !== 'sabre' && (
             <>
               {/* Countdown Display - only shows when actively playing */}
               {isPlaying && (
@@ -7016,8 +7734,8 @@ export default function RemoteScreen() {
             </>
           )}
           
-          {/* Add Time Controls */}
-          {!isPlaying && timeRemaining === matchTime && !hasMatchStarted && (
+          {/* Add Time Controls - Hidden for Sabre */}
+          {!isPlaying && timeRemaining === matchTime && !hasMatchStarted && selectedWeapon !== 'sabre' && (
             <View style={styles.addTimeControls}>
               <TouchableOpacity 
                 style={styles.addTimeButton} 
@@ -7054,7 +7772,9 @@ export default function RemoteScreen() {
           </TouchableOpacity>
           <View style={styles.periodDisplay}>
             <Text style={styles.periodText}>Period</Text>
-            <Text style={styles.periodNumber}>{isPriorityRound ? 'P' : `${currentPeriod}/3`}</Text>
+            <Text style={styles.periodNumber}>
+              {isPriorityRound ? 'P' : selectedWeapon === 'sabre' ? `${breakTriggered ? 2 : 1}/2` : `${currentPeriod}/3`}
+            </Text>
           </View>
           <TouchableOpacity style={styles.periodButton} onPress={incrementPeriod}>
             <Ionicons name="add" size={16} color="white" />
@@ -7064,31 +7784,60 @@ export default function RemoteScreen() {
       </LinearGradient>
       </View>
 
-      {/* Match Status Display */}
-      <View style={styles.matchStatusContainer}>
-        <Text style={styles.matchStatusText}>
-          {isBreakTime ? '🍃 Break Time' : isPlaying ? '🟢 Match in Progress' : timeRemaining === 0 ? '🔴 Match Ended' : timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'}
-        </Text>
-        {isBreakTime && (
-          <Text style={styles.matchStatusSubtext}>
-            Break in progress
+      {/* Match Status Display - Show for Foil/Epee always, hidden for Sabre (shown inline with Fencers instead) */}
+      {selectedWeapon !== 'sabre' && (
+        <View style={styles.matchStatusContainer}>
+          <Text style={styles.matchStatusText}>
+            {isBreakTime ? '🍃 Break Time' : isPlaying ? '🟢 Match in Progress' : timeRemaining === 0 ? '🔴 Match Ended' : timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'}
           </Text>
-        )}
-      </View>
+          {isBreakTime && (
+            <Text style={styles.matchStatusSubtext}>
+              Break in progress
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
-            marginTop: (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0)
-              ? -(height * 0.02)  // Move up when match in progress and no cards
-              : -(height * 0.035)  // Original positioning for other states
+            marginTop: selectedWeapon === 'sabre' 
+              ? height * 0.02  // Proper spacing below Match Insights card for sabre
+              : (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0)
+                ? -(height * 0.02)  // Move up when match in progress and no cards
+                : -(height * 0.035)  // Original positioning for other states
           }]}>
-        <Text style={styles.fencersHeading}>Fencers</Text>
-        <TouchableOpacity 
-          style={styles.editNamesButton}
-          onPress={openEditNamesPopup}
-        >
-          <Ionicons name="pencil" size={16} color="white" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: width * 0.04 }}>
+          <Text style={[styles.fencersHeading, selectedWeapon === 'sabre' && !isBreakTime && { marginTop: 0, marginBottom: 0 }]}>Fencers</Text>
+          {/* Match status for Sabre - on same line as Fencers, matches matchStatusText style exactly */}
+          {selectedWeapon === 'sabre' && !isBreakTime && (
+            <Text style={[styles.matchStatusText, { 
+              textAlign: 'left', 
+              marginTop: 0, 
+              marginBottom: 0
+            }]}>
+              {!hasMatchStarted ? '⚪ Match Ready' : '🟢 Match in Progress'}
+            </Text>
+          )}
+        </View>
+        {selectedWeapon === 'sabre' ? (
+          <TouchableOpacity 
+            style={[styles.editNamesButton, { 
+              backgroundColor: '#FB5D5C',
+              width: width * 0.09,
+              height: width * 0.09,
+            }]}
+            onPress={() => setShowResetPopup(true)}
+          >
+            <Ionicons name="refresh" size={22} color="white" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={styles.editNamesButton}
+            onPress={openEditNamesPopup}
+          >
+            <Ionicons name="pencil" size={16} color="white" />
+          </TouchableOpacity>
+        )}
       </View>
       
       <View style={[
@@ -7096,6 +7845,10 @@ export default function RemoteScreen() {
         // Reduce margin when match is in progress and no cards issued
         (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
           marginBottom: height * 0.005, // Reduce margin from 0.015 to 0.005
+        } : {},
+        // Move fencer cards up and closer for sabre
+        selectedWeapon === 'sabre' ? {
+          marginTop: height * 0.01, // Reduced margin to bring cards closer to "Fencers" text
         } : {}
       ]}>
         {/* Alice's Card */}
@@ -7113,9 +7866,13 @@ export default function RemoteScreen() {
             width: width * 0.42, // Keep width at 0.42
             padding: width * 0.04, // Keep normal padding
             minHeight: height * 0.32, // Increase height from 0.25 to 0.32
+          } : {},
+          // Make fencer cards taller for sabre
+          selectedWeapon === 'sabre' ? {
+            minHeight: height * 0.32, // Increased height for sabre
           } : {}
         ]}>
-          {/* Sliding Switch - Top Left - Only show when toggle is on left card */}
+        {/* Sliding Switch - Top Left - Only show when toggle is on left card */}
           {toggleCardPosition === 'left' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
@@ -7336,9 +8093,13 @@ export default function RemoteScreen() {
             width: width * 0.42, // Keep width at 0.42
             padding: width * 0.04, // Keep normal padding
             minHeight: height * 0.32, // Increase height from 0.25 to 0.32
+          } : {},
+          // Make fencer cards taller for sabre
+          selectedWeapon === 'sabre' ? {
+            minHeight: height * 0.32, // Increased height for sabre
           } : {}
         ]}>
-          {/* Sliding Switch - Top Right - Only show when toggle is on right card */}
+        {/* Sliding Switch - Top Right - Only show when toggle is on right card */}
           {toggleCardPosition === 'right' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
@@ -7629,7 +8390,8 @@ export default function RemoteScreen() {
           justifyContent: 'space-between',
           width: '100%'
         }}>
-          {/* Play Button / Skip Button */}
+          {/* Play Button / Skip Button - Hidden for Sabre */}
+          {selectedWeapon !== 'sabre' && (
           <TouchableOpacity 
             style={{
               flex: 1,
@@ -7708,29 +8470,32 @@ export default function RemoteScreen() {
                (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? 'Resume' : 'Play'}
             </Text>
           </TouchableOpacity>
+          )}
           
-          {/* Reset Button */}
-                      <TouchableOpacity 
+          {/* Reset Button - Hidden for Sabre */}
+          {selectedWeapon !== 'sabre' && (
+            <TouchableOpacity 
               style={{
-              width: width * 0.15,
+                width: width * 0.15,
                 backgroundColor: '#FB5D5C',
-              paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
-              borderRadius: width * 0.05,
+                paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
+                borderRadius: width * 0.05,
                 alignItems: 'center',
                 justifyContent: 'center',
-              borderWidth: width * 0.005,
+                borderWidth: width * 0.005,
                 borderColor: 'transparent',
-              minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
-              shadowColor: '#6C5CE7',
-              shadowOffset: { width: 0, height: height * 0.005 },
-              shadowOpacity: 0.25,
-              shadowRadius: width * 0.035,
-              elevation: 8
-            }} 
-            onPress={resetTimer}
-          >
-            <Ionicons name="refresh" size={24} color="white" />
-          </TouchableOpacity>
+                minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
+                shadowColor: '#6C5CE7',
+                shadowOffset: { width: 0, height: height * 0.005 },
+                shadowOpacity: 0.25,
+                shadowRadius: width * 0.035,
+                elevation: 8
+              }} 
+              onPress={resetTimer}
+            >
+              <Ionicons name="refresh" size={24} color="white" />
+            </TouchableOpacity>
+          )}
         </View>
 
       </View>
@@ -7796,12 +8561,14 @@ export default function RemoteScreen() {
               }}>
                 <Text style={styles.saveButtonText}>Reset Scores</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={() => {
-                resetTime();
-                setShowResetPopup(false);
-              }}>
-                <Text style={styles.saveButtonText}>Reset Time</Text>
-              </TouchableOpacity>
+              {selectedWeapon !== 'sabre' && (
+                <TouchableOpacity style={styles.saveButton} onPress={() => {
+                  resetTime();
+                  setShowResetPopup(false);
+                }}>
+                  <Text style={styles.saveButtonText}>Reset Time</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.saveButton} onPress={() => {
                 resetPeriod();
                 setShowResetPopup(false);

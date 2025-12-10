@@ -8,8 +8,8 @@ import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, UIManager, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AddMatchScreen() {
@@ -78,6 +78,21 @@ export default function AddMatchScreen() {
   const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '0');
   const [isSaving, setIsSaving] = useState(false);
   const [hasStartedForm, setHasStartedForm] = useState(false);
+  
+  // Refs and positions for dropdowns (to render outside ScrollView)
+  const eventDropdownRef = useRef<View | null>(null);
+  const weaponDropdownRef = useRef<View | null>(null);
+  const [eventDropdownPosition, setEventDropdownPosition] = useState({ x: 0, y: 0, width: 0 });
+  const [weaponDropdownPosition, setWeaponDropdownPosition] = useState({ x: 0, y: 0, width: 0 });
+  
+  // Helper to measure dropdown position
+  const measureDropdownPosition = (ref: React.RefObject<View | null>, setPosition: (pos: { x: number; y: number; width: number }) => void) => {
+    if (ref.current) {
+      (ref.current as any).measureInWindow?.((x: number, y: number, width: number, height: number) => {
+        setPosition({ x, y: y + height, width });
+      });
+    }
+  };
 
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
@@ -507,6 +522,19 @@ export default function AddMatchScreen() {
       shadowRadius: 12,
       elevation: 25, // Android elevation
     },
+    dropdownOptionsModal: {
+      position: 'absolute',
+      backgroundColor: '#0F1112', // Fully opaque dark background
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 0,
+      maxHeight: getDimension(0.15, height),
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.7,
+      shadowRadius: 12,
+      elevation: 50, // Very high Android elevation
+    },
     dropdownOption: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -880,6 +908,7 @@ export default function AddMatchScreen() {
     },
     dropdownWrapper: {
       position: 'relative',
+      zIndex: 1, // Lower z-index since dropdowns render outside
     },
     dropdownBackdrop: {
       position: 'absolute',
@@ -997,9 +1026,25 @@ export default function AddMatchScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Event</Text>
-            <View style={[styles.dropdownWrapper, { zIndex: showEventDropdown ? 3000 : (showWeaponDropdown ? 100 : 1000) }]}>
+            <View 
+              ref={eventDropdownRef}
+              style={styles.dropdownWrapper}
+            >
               <TouchableOpacity 
                 style={styles.dropdownContainer}
+                onLayout={(e) => {
+                  const { x, y, width, height } = e.nativeEvent.layout;
+                  // Get screen position by measuring in window
+                  const node = findNodeHandle(eventDropdownRef.current);
+                  if (node && Platform.OS !== 'web') {
+                    UIManager.measureInWindow(node, (screenX, screenY, screenWidth, screenHeight) => {
+                      setEventDropdownPosition({ x: screenX, y: screenY + screenHeight, width: screenWidth });
+                    });
+                  } else {
+                    // Fallback: use layout values (less accurate but works)
+                    setEventDropdownPosition({ x, y: y + height, width });
+                  }
+                }}
                 onPress={() => {
                   setShowEventDropdown(!showEventDropdown);
                   setShowWeaponDropdown(false); // Close weapon dropdown
@@ -1013,43 +1058,30 @@ export default function AddMatchScreen() {
                   color="rgba(255, 255, 255, 0.7)" 
                 />
               </TouchableOpacity>
-              
-              {/* Event Dropdown Options */}
-              {showEventDropdown && (
-                <View style={[styles.dropdownOptions, { zIndex: 3001, elevation: 25 }]}>
-                  {['Training', 'Competition'].map((eventType) => (
-                    <TouchableOpacity
-                      key={eventType}
-                      style={[
-                        styles.dropdownOption,
-                        event === eventType && styles.dropdownOptionSelected
-                      ]}
-                      onPress={() => {
-                        setEvent(eventType);
-                        setShowEventDropdown(false);
-                      }}
-                    >
-                      <Text style={[
-                        styles.dropdownOptionText,
-                        event === eventType && styles.dropdownOptionTextSelected
-                      ]}>
-                        {eventType}
-                      </Text>
-                      {event === eventType && (
-                        <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
             </View>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Weapon Type</Text>
-            <View style={[styles.dropdownWrapper, { zIndex: showWeaponDropdown ? 3000 : (showEventDropdown ? 100 : 1000) }]}>
+            <View 
+              ref={weaponDropdownRef}
+              style={styles.dropdownWrapper}
+            >
               <TouchableOpacity 
                 style={styles.dropdownContainer}
+                onLayout={(e) => {
+                  const { x, y, width, height } = e.nativeEvent.layout;
+                  // Get screen position by measuring in window
+                  const node = findNodeHandle(weaponDropdownRef.current);
+                  if (node && Platform.OS !== 'web') {
+                    UIManager.measureInWindow(node, (screenX, screenY, screenWidth, screenHeight) => {
+                      setWeaponDropdownPosition({ x: screenX, y: screenY + screenHeight, width: screenWidth });
+                    });
+                  } else {
+                    // Fallback: use layout values (less accurate but works)
+                    setWeaponDropdownPosition({ x, y: y + height, width });
+                  }
+                }}
                 onPress={() => {
                   setShowWeaponDropdown(!showWeaponDropdown);
                   setShowEventDropdown(false); // Close event dropdown
@@ -1063,35 +1095,6 @@ export default function AddMatchScreen() {
                   color="rgba(255, 255, 255, 0.7)" 
                 />
               </TouchableOpacity>
-              
-              {/* Weapon Dropdown Options */}
-              {showWeaponDropdown && (
-                <View style={[styles.dropdownOptions, { zIndex: 3001, elevation: 25 }]}>
-                  {['Foil', 'Sabre', 'Epee'].map((weapon) => (
-                    <TouchableOpacity
-                      key={weapon}
-                      style={[
-                        styles.dropdownOption,
-                        weaponType === weapon && styles.dropdownOptionSelected
-                      ]}
-                      onPress={() => {
-                        setWeaponType(weapon);
-                        setShowWeaponDropdown(false);
-                      }}
-                    >
-                      <Text style={[
-                        styles.dropdownOptionText,
-                        weaponType === weapon && styles.dropdownOptionTextSelected
-                      ]}>
-                        {weapon}
-                      </Text>
-                      {weaponType === weapon && (
-                        <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
             </View>
           </View>
 
@@ -1213,6 +1216,100 @@ export default function AddMatchScreen() {
             }}
           />
         )}
+        
+        {/* Event Dropdown Modal - Rendered as Modal for production reliability */}
+        <Modal
+          visible={showEventDropdown}
+          transparent={true}
+          animationType="none"
+          onRequestClose={() => setShowEventDropdown(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowEventDropdown(false)}
+          >
+            <View style={[
+              styles.dropdownOptionsModal,
+              {
+                top: eventDropdownPosition.y || getDimension(0.3, height),
+                left: eventDropdownPosition.x || getDimension(0.04, width),
+                width: eventDropdownPosition.width || getDimension(0.92, width),
+              }
+            ]}>
+              {['Training', 'Competition'].map((eventType) => (
+                <TouchableOpacity
+                  key={eventType}
+                  style={[
+                    styles.dropdownOption,
+                    event === eventType && styles.dropdownOptionSelected
+                  ]}
+                  onPress={() => {
+                    setEvent(eventType);
+                    setShowEventDropdown(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.dropdownOptionText,
+                    event === eventType && styles.dropdownOptionTextSelected
+                  ]}>
+                    {eventType}
+                  </Text>
+                  {event === eventType && (
+                    <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+        
+        {/* Weapon Dropdown Modal - Rendered as Modal for production reliability */}
+        <Modal
+          visible={showWeaponDropdown}
+          transparent={true}
+          animationType="none"
+          onRequestClose={() => setShowWeaponDropdown(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowWeaponDropdown(false)}
+          >
+            <View style={[
+              styles.dropdownOptionsModal,
+              {
+                top: weaponDropdownPosition.y || getDimension(0.4, height),
+                left: weaponDropdownPosition.x || getDimension(0.04, width),
+                width: weaponDropdownPosition.width || getDimension(0.92, width),
+              }
+            ]}>
+              {['Foil', 'Sabre', 'Epee'].map((weapon) => (
+                <TouchableOpacity
+                  key={weapon}
+                  style={[
+                    styles.dropdownOption,
+                    weaponType === weapon && styles.dropdownOptionSelected
+                  ]}
+                  onPress={() => {
+                    setWeaponType(weapon);
+                    setShowWeaponDropdown(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.dropdownOptionText,
+                    weaponType === weapon && styles.dropdownOptionTextSelected
+                  ]}>
+                    {weapon}
+                  </Text>
+                  {weaponType === weapon && (
+                    <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </KeyboardAvoidingView>
 
       {/* Date Picker Modal */}

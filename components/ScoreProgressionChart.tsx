@@ -123,6 +123,7 @@ interface ScoreProgressionChartProps {
   userLabel?: string;
   opponentLabel?: string;
   userPosition?: 'left' | 'right'; // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType?: string; // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }
 
 export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
@@ -141,7 +142,8 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
   opponentScore = 0,
   userLabel = 'You',
   opponentLabel = 'Opponent',
-  userPosition // Position of user in match header (left = fencer_1, right = fencer_2)
+  userPosition, // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }) => {
   const { width, height: screenHeight } = useWindowDimensions();
 
@@ -196,39 +198,99 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
       console.log('📊 Duplicate user Y values:', userYValues.filter((value, index) => userYValues.indexOf(value) !== index));
       console.log('📊 Duplicate opponent Y values:', opponentYValues.filter((value, index) => opponentYValues.indexOf(value) !== index));
       
+      // Check if this is a sabre match - use touch numbers instead of time for x-axis
+      const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
+      
       // Convert legacy format directly to chart data, preserving actual Y values
-      const userSeries: ScoreSeries = scoreProgression.userData.map(point => {
-        // Handle time format like "00:08" or "(8:00)" 
-        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
-        const [minutes, seconds] = timeStr.split(':').map(Number);
-        const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
-        console.log(`📊 Converting user point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
-        return { x: totalSeconds, y: point.y };
-      });
-
-      const oppSeries: ScoreSeries = scoreProgression.opponentData.map(point => {
-        // Handle time format like "00:08" or "(8:00)"
-        const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
-        const [minutes, seconds] = timeStr.split(':').map(Number);
-        const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
-        console.log(`📊 Converting opponent point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
-        return { x: totalSeconds, y: point.y };
-      });
-
-      // Prepend starting point (0, 0) at time 0 to show the 0→1 transition for first score
-      // Find the earliest time point to use as the starting time
-      const initialTimes = [...userSeries.map(p => p.x), ...oppSeries.map(p => p.x)];
-      const earliestTime = initialTimes.length > 0 ? Math.min(...initialTimes) : 0;
-      const startTime = 0; // Always start at time 0 to show the 0→1 transition
+      let userSeries: ScoreSeries;
+      let oppSeries: ScoreSeries;
       
-      // Only add starting point if series don't already start at 0 with score 0
-      if (userSeries.length === 0 || userSeries[0].x !== startTime || userSeries[0].y !== 0) {
-        userSeries.unshift({ x: startTime, y: 0 });
+      if (isSabre) {
+        // For sabre: x-axis is touch number/event sequence (1, 2, 3, ...)
+        // Events are already in chronological order, so we can use their index as touch number
+        // Combine all events and interleave them by their original order
+        const allEvents: Array<{ x: string; y: number; isUser: boolean; originalIndex: number }> = [
+          ...scoreProgression.userData.map((p, idx) => ({ ...p, isUser: true, originalIndex: idx })),
+          ...scoreProgression.opponentData.map((p, idx) => ({ ...p, isUser: false, originalIndex: idx }))
+        ];
+        
+        // Sort by actual time value (MM:SS) or numeric value so the earliest touch is first
+        const parseTimeLabel = (label: string): number => {
+          const cleaned = label.replace(/[()]/g, '');
+          const parts = cleaned.split(':').map(Number);
+          if (parts.length === 2 && !parts.some(Number.isNaN)) {
+            return (parts[0] * 60) + parts[1];
+          }
+          const numeric = Number(cleaned);
+          return Number.isNaN(numeric) ? 0 : numeric;
+        };
+        
+        allEvents.sort((a, b) => {
+          const aSeconds = parseTimeLabel(a.x);
+          const bSeconds = parseTimeLabel(b.x);
+          if (aSeconds !== bSeconds) return aSeconds - bSeconds;
+          // Stable tie-breaker to preserve entry order when times are identical
+          return a.originalIndex - b.originalIndex;
+        });
+        console.log('📊 [SABRE] Combined events ordered for touch axis:', allEvents.map(ev => ({
+          x: ev.x,
+          y: ev.y,
+          isUser: ev.isUser,
+          originalIndex: ev.originalIndex,
+          timeSeconds: parseTimeLabel(ev.x)
+        })));
+        
+        // Build series with sequential touch numbers
+        userSeries = [{ x: 0, y: 0 }];
+        oppSeries = [{ x: 0, y: 0 }];
+        let touchNumber = 1;
+        let currentUserScore = 0;
+        let currentOppScore = 0;
+        
+        // Process events in order, assigning touch numbers
+        for (const event of allEvents) {
+          if (event.isUser) {
+            currentUserScore = event.y;
+          } else {
+            currentOppScore = event.y;
+          }
+          // Add point for both series at this touch number
+          userSeries.push({ x: touchNumber, y: currentUserScore });
+          oppSeries.push({ x: touchNumber, y: currentOppScore });
+          touchNumber++;
+        }
+      } else {
+        // For foil/epee: x-axis is time
+        userSeries = scoreProgression.userData.map(point => {
+          // Handle time format like "00:08" or "(8:00)" 
+          const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
+          const [minutes, seconds] = timeStr.split(':').map(Number);
+          const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
+          console.log(`📊 Converting user point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
+          return { x: totalSeconds, y: point.y };
+        });
+
+        oppSeries = scoreProgression.opponentData.map(point => {
+          // Handle time format like "00:08" or "(8:00)"
+          const timeStr = point.x.replace(/[()]/g, ''); // Remove parentheses if present
+          const [minutes, seconds] = timeStr.split(':').map(Number);
+          const totalSeconds = (minutes * 60) + seconds; // Convert to total seconds
+          console.log(`📊 Converting opponent point: "${point.x}" -> "${timeStr}" -> ${totalSeconds}s`);
+          return { x: totalSeconds, y: point.y };
+        });
+        
+        // Prepend starting point (0, 0) at time 0 to show the 0→1 transition for first score
+        const startTime = 0; // Always start at time 0 to show the 0→1 transition
+        
+        // Only add starting point if series don't already start at 0 with score 0
+        if (userSeries.length === 0 || userSeries[0].x !== startTime || userSeries[0].y !== 0) {
+          userSeries.unshift({ x: startTime, y: 0 });
+        }
+        if (oppSeries.length === 0 || oppSeries[0].x !== startTime || oppSeries[0].y !== 0) {
+          oppSeries.unshift({ x: startTime, y: 0 });
+        }
       }
-      if (oppSeries.length === 0 || oppSeries[0].x !== startTime || oppSeries[0].y !== 0) {
-        oppSeries.unshift({ x: startTime, y: 0 });
-      }
-      
+
       // Calculate gap series from the updated series (which now include starting points)
       const gapSeries: ScoreSeries = [];
       const allTimes = new Set([...userSeries.map(p => p.x), ...oppSeries.map(p => p.x)]);
@@ -268,7 +330,7 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
     }
     
     return buildScoreSeries([]);
-  }, [events, scoreProgression, userScore, opponentScore]);
+  }, [events, scoreProgression, userScore, opponentScore, weaponType]);
 
   // Track seen Y-axis labels to prevent duplicates
   // Use a unique key based on chart data to reset when data changes
@@ -389,10 +451,18 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
         console.log('📊 Sorted time points:', sortedTimePoints);
         
         // Create data for React Native Chart Kit with proper alignment
+        // For sabre, use touch numbers; for foil/epee, use time
+        const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
         const timeLabels = sortedTimePoints.map(time => {
-          const minutes = Math.floor(time / 60);
-          const seconds = Math.round(time % 60);
-          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+          if (isSabre) {
+            // For sabre: x-axis is touch number
+            return Math.round(time).toString();
+          } else {
+            // For foil/epee: x-axis is time
+            const minutes = Math.floor(time / 60);
+            const seconds = Math.round(time % 60);
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+          }
         });
         
         // Scrollable for > 9 data points, static for ≤ 9 data points
@@ -877,4 +947,3 @@ export const ScoreProgressionChart: React.FC<ScoreProgressionChartProps> = ({
 // Export the utility function for external use
 export { buildScoreSeries };
 export type { BuildScoreSeriesResult, ScoreSeries, ScoringEvent };
-

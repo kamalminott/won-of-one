@@ -434,116 +434,162 @@ export const offlineRemoteService = {
 
       const syncedEventIds: string[] = [];
 
-      // Sync each session's events
+      // Sync each session's events (non-offline remotes only)
       for (const [remoteId, events] of Object.entries(eventsBySession)) {
-        // Only sync if remote_id is not offline-generated (skip offline sessions)
-        if (!remoteId.startsWith('offline_')) {
-          for (const event of events) {
-            try {
-              const matchId = event.metadata?.match_id;
-              
-              // Validate that the match exists before creating the event
-              if (matchId) {
-                const { data: matchExists, error: matchExistsError, status } = await supabase
-                  .from('match')
-                  .select('match_id')
-                  .eq('match_id', matchId)
-                  .maybeSingle();
-                
-                if (matchExistsError) {
-                  // PGRST116 means multiple rows matched; treat as "exists" to avoid throwing
-                  if ((matchExistsError as any).code === 'PGRST116') {
-                    console.log(`⚠️ Multiple matches found for ${matchId} when checking existence; treating as exists`);
-                  } else {
-                    console.error(`❌ Error checking match existence for ${matchId}:`, matchExistsError);
-                    // Proceed; better to attempt sync than drop events
-                  }
-                }
-                
-                if (!matchExists && status === 406) {
-                  // maybeSingle returns 406 when no rows
-                  console.log(`⚠️ Match ${matchId} not found, discarding event: ${event.event_type}`);
-                  // Mark as synced to remove from queue (match no longer exists)
-                  if (event.id) {
-                    syncedEventIds.push(event.id);
-                  }
-                  continue;
-                }
+        if (remoteId.startsWith('offline_')) {
+          console.log(`⚠️ Skipping events for offline session: ${remoteId} (no remote_id in database)`);
+          continue;
+        }
+
+        for (const event of events) {
+          const matchId = event.metadata?.match_id;
+
+          // Ensure match exists before attempting insert; if not, retry later
+          if (matchId) {
+            const { data: matchExists, error: matchExistsError, status } = await supabase
+              .from('match')
+              .select('match_id')
+              .eq('match_id', matchId)
+              .maybeSingle();
+
+            if (matchExistsError && (matchExistsError as any).code !== 'PGRST116') {
+              console.error(`❌ Error checking match existence for ${matchId}:`, matchExistsError);
+              continue; // retry later
+            }
+
+            if (!matchExists && status === 406) {
+              console.log(`⚠️ Match ${matchId} not found yet, keeping event queued: ${event.event_type}`);
+              continue;
+            }
+
+            // If the match truly doesn't exist anymore (deleted), drop all events for it
+            if (!matchExists && !matchExistsError && status !== 406) {
+              console.log(`⚠️ Match ${matchId} appears deleted. Dropping queued events for this match.`);
+              if (event.id) {
+                syncedEventIds.push(event.id);
               }
-              
-              // Check for duplicate event before creating
-              // Duplicate = same match_id, match_time_elapsed, scoring_user_name, and event_type
-              if (matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
-                const { data: existingEvent, error: checkError } = await supabase
-                  .from('match_event')
-                  .select('match_event_id')
-                  .eq('match_id', matchId)
-                  .eq('match_time_elapsed', event.match_time_elapsed)
-                  .eq('scoring_user_name', event.scoring_user_name)
-                  .eq('event_type', event.event_type)
-                  .maybeSingle();
-                
-                if (checkError) {
-                  console.error(`❌ Error checking for duplicate event:`, checkError);
-                  // Continue to create event anyway (better to have duplicate than lose data)
-                } else if (existingEvent) {
-                  console.log(`🔄 Duplicate event detected during sync, skipping: match_id=${matchId}, time=${event.match_time_elapsed}s, scorer=${event.scoring_user_name}, type=${event.event_type}`);
-                  // Mark as synced since the event already exists
-                  if (event.id) {
-                    syncedEventIds.push(event.id);
-                  }
-                  continue;
+              continue;
+            }
+          }
+
+          // Check for duplicate event before creating
+          if (matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
+            const { data: existingEvent, error: checkError } = await supabase
+              .from('match_event')
+              .select('match_event_id, event_time, timestamp')
+              .eq('match_id', matchId)
+              .eq('match_time_elapsed', event.match_time_elapsed)
+              .eq('scoring_user_name', event.scoring_user_name)
+              .eq('event_type', event.event_type)
+              .maybeSingle();
+            
+            if (checkError) {
+              console.error(`❌ Error checking for duplicate event:`, checkError);
+              // keep event; retry later
+              continue;
+            } else if (existingEvent) {
+              // Only treat as duplicate if event_time matches to the second as well
+              const existingEventTime = (existingEvent as any)?.event_time;
+              const incomingEventTime = event.event_time || null;
+              const sameEventTime = existingEventTime && incomingEventTime
+                ? existingEventTime === incomingEventTime
+                : false;
+
+              if (!sameEventTime) {
+                console.log(`ℹ️ Same elapsed/scorer found but different event_time, allowing insert`, {
+                  matchId,
+                  match_time_elapsed: event.match_time_elapsed,
+                  scorer: event.scoring_user_name,
+                  existingEventTime,
+                  incomingEventTime,
+                });
+              } else {
+                console.log(`🔄 Duplicate event detected during sync, skipping: match_id=${matchId}, time=${event.match_time_elapsed}s, scorer=${event.scoring_user_name}, type=${event.event_type}`);
+                if (event.id) {
+                  syncedEventIds.push(event.id);
                 }
+                continue;
               }
-              
-              // Validate match_period_id before using it (prevent foreign key violations)
-              let validatedMatchPeriodId: string | null = null;
-              if (event.metadata?.match_period_id && matchId) {
-                try {
-                  // Check if the match period exists in the database
-                  const periods = await matchPeriodService.getMatchPeriods(matchId);
-                  const periodExists = periods.some(
-                    (p: any) => p.match_period_id === event.metadata?.match_period_id
-                  );
-                  if (periodExists) {
-                    validatedMatchPeriodId = event.metadata.match_period_id;
-                  } else {
-                    console.warn(`⚠️ Match period ${event.metadata.match_period_id} not found for match ${matchId}, setting to null`);
-                  }
-                } catch (error) {
-                  console.warn(`⚠️ Error validating match_period_id:`, error);
-                  // Set to null if validation fails
-                }
-              }
-              
-              await matchEventService.createMatchEvent({
-                match_id: matchId || null,
-                fencing_remote_id: event.remote_id,
-                event_type: event.event_type,
-                event_time: event.event_time,
-                scoring_user_name: event.scoring_user_name,
-                match_time_elapsed: event.match_time_elapsed,
-                // ✅ Extract ALL fields from metadata, with validated match_period_id:
-                match_period_id: validatedMatchPeriodId || undefined,
-                scoring_user_id: event.metadata?.scoring_user_id || null,
-                fencer_1_name: event.metadata?.fencer_1_name || null,
-                fencer_2_name: event.metadata?.fencer_2_name || null,
-                card_given: event.metadata?.card_given || null,
-                score_diff: event.metadata?.score_diff || null,
-                seconds_since_last_event: event.metadata?.seconds_since_last_event || null,
+            }
+          }
+
+          // Additional duplicate guard using event_time second precision
+          if (matchId && event.scoring_user_name && event.event_time) {
+            const compositeTimeKey = event.event_time;
+            const { data: existingComposite, error: compositeError } = await supabase
+              .from('match_event')
+              .select('match_event_id')
+              .eq('match_id', matchId)
+              .eq('event_type', event.event_type)
+              .eq('scoring_user_name', event.scoring_user_name)
+              .eq('event_time', compositeTimeKey)
+              .maybeSingle();
+
+            if (compositeError) {
+              console.error('❌ Error checking composite duplicate:', {
+                matchId,
+                eventTime: compositeTimeKey,
+                error: compositeError,
               });
-              
+              continue;
+            }
+
+            if (existingComposite) {
+              console.log(`🔄 Composite duplicate (event_time) detected, skipping: match_id=${matchId}, event_time=${compositeTimeKey}, scorer=${event.scoring_user_name}, type=${event.event_type}`);
+              if (event.id) {
+                syncedEventIds.push(event.id);
+              }
+              continue;
+            }
+          }
+
+          // Validate match_period_id before using it (prevent foreign key violations)
+          let validatedMatchPeriodId: string | null = null;
+          if (event.metadata?.match_period_id && matchId) {
+            try {
+              const periods = await matchPeriodService.getMatchPeriods(matchId);
+              const periodExists = periods.some(
+                (p: any) => p.match_period_id === event.metadata?.match_period_id
+              );
+              if (periodExists) {
+                validatedMatchPeriodId = event.metadata.match_period_id;
+              } else {
+                console.warn(`⚠️ Match period ${event.metadata.match_period_id} not found for match ${matchId}, setting to null`);
+              }
+            } catch (error) {
+              console.warn(`⚠️ Error validating match_period_id:`, error);
+            }
+          }
+
+          try {
+            const created = await matchEventService.createMatchEvent({
+              match_id: matchId || null,
+              fencing_remote_id: event.remote_id,
+              event_type: event.event_type,
+              event_time: event.event_time,
+              scoring_user_name: event.scoring_user_name,
+              match_time_elapsed: event.match_time_elapsed,
+              match_period_id: validatedMatchPeriodId || undefined,
+              scoring_user_id: event.metadata?.scoring_user_id || null,
+              fencer_1_name: event.metadata?.fencer_1_name || null,
+              fencer_2_name: event.metadata?.fencer_2_name || null,
+              card_given: event.metadata?.card_given || null,
+              score_diff: event.metadata?.score_diff || null,
+              seconds_since_last_event: event.metadata?.seconds_since_last_event || null,
+            });
+
+            if (created) {
               if (event.id) {
                 syncedEventIds.push(event.id);
               }
               console.log(`✅ Synced event: ${event.event_type}`);
-            } catch (error) {
-              console.error(`❌ Error syncing event:`, error);
-              // Keep in queue for retry
+            } else {
+              console.log('⚠️ Event insert deferred (missing match or FK), will retry later');
             }
+          } catch (error) {
+            console.error(`❌ Error syncing event:`, error);
+            // keep in queue
           }
-        } else {
-          console.log(`⚠️ Skipping events for offline session: ${remoteId} (no remote_id in database)`);
         }
       }
 

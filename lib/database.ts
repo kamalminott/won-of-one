@@ -44,10 +44,11 @@ const formatFullName = (firstName?: string, lastName?: string, fallbackEmail?: s
 };
 
 // Ensure match events always have a usable, monotonic match_time_elapsed value
-const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null }>(events: T[]): T[] => {
+const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null; event_time?: string | null }>(events: T[]): T[] => {
   if (!events || events.length === 0) return [];
 
-  const getMs = (ts?: string | null) => {
+  const getMs = (ev: T) => {
+    const ts = ev.timestamp || ev.event_time;
     if (!ts) return null;
     const ms = new Date(ts).getTime();
     return Number.isFinite(ms) ? ms : null;
@@ -70,13 +71,13 @@ const normalizeEventsForProgression = <T extends { match_time_elapsed?: number |
     if (aElapsed !== null) return -1;
     if (bElapsed !== null) return 1;
 
-    const aMs = getMs(a.timestamp) ?? 0;
-    const bMs = getMs(b.timestamp) ?? 0;
+    const aMs = getMs(a) ?? 0;
+    const bMs = getMs(b) ?? 0;
     return aMs - bMs;
   });
 
   const firstTimestampMs = sorted
-    .map(ev => getMs(ev.timestamp))
+    .map(ev => getMs(ev))
     .find(ms => ms !== null) ?? null;
 
   let lastElapsed = 0;
@@ -86,7 +87,7 @@ const normalizeEventsForProgression = <T extends { match_time_elapsed?: number |
 
     // Fill missing elapsed time using timestamps if available, otherwise ensure monotonic +1s
     if (elapsed === null) {
-      const eventMs = getMs(event.timestamp);
+      const eventMs = getMs(event);
       if (eventMs !== null && firstTimestampMs !== null) {
         elapsed = Math.max(0, Math.round((eventMs - firstTimestampMs) / 1000));
       } else {
@@ -94,7 +95,8 @@ const normalizeEventsForProgression = <T extends { match_time_elapsed?: number |
       }
     }
 
-    if (elapsed < lastElapsed) {
+    // Ensure strictly increasing elapsed to keep progression/x-axis stable (prevents sabre touches from sharing 0s)
+    if (elapsed <= lastElapsed) {
       elapsed = lastElapsed + 1;
     }
     lastElapsed = elapsed;
@@ -1065,11 +1067,16 @@ $$;
 
   // Get match by ID
   async getMatchById(matchId: string): Promise<Match | null> {
-    const { data, error } = await supabase
+    const { data, error, status } = await supabase
       .from('match')
       .select('*')
       .eq('match_id', matchId)
-      .single();
+      .maybeSingle();
+
+    if (status === 406 || (!data && !error)) {
+      console.warn('⚠️ Match not found for match_id:', matchId);
+      return null;
+    }
 
     if (error) {
       console.error('Error fetching match:', error);
@@ -1249,8 +1256,9 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time')
         .eq('match_id', matchId)
+        .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
       
       if (eventsError) {
@@ -1300,9 +1308,10 @@ $$;
       console.log('📈 USER vs OPPONENT - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
       console.log('📈 USER vs OPPONENT - Match events found:', matchEvents.length);
 
-      // 4. Deduplicate only exact duplicate IDs so rapid same-second touches are not dropped
-      // (previously we deduped by time+scorer which incorrectly removed valid same-second touches)
+      // 4. Deduplicate: keep by ID, and also collapse identical scorer/type at same elapsed and timestamp second
+      // This catches legacy offline/online double writes for sabre where match_time_elapsed was null
       const seenEvents = new Set<string>();
+      const seenComposite = new Set<string>();
       const duplicateEvents: string[] = [];
       
       const uniqueEvents = matchEvents.filter(event => {
@@ -1328,6 +1337,19 @@ $$;
         if (eventKey) {
           seenEvents.add(eventKey);
         }
+
+        // Composite dedupe for identical scorer/type at same elapsed+time (handles sabre double writes)
+        const elapsedKey = event.match_time_elapsed !== null && event.match_time_elapsed !== undefined
+          ? Math.round(event.match_time_elapsed)
+          : -1;
+        const timeKey = (event.event_time || event.timestamp || '').slice(0, 19) || 'noTime';
+        const compositeKey = `${event.scoring_user_name || 'unknown'}|${event.event_type}|${elapsedKey}|${timeKey}`;
+        if (seenComposite.has(compositeKey)) {
+          duplicateEvents.push(event.match_event_id || compositeKey);
+          console.log(`🔄 Composite duplicate detected and skipped: ${compositeKey}`);
+          return false;
+        }
+        seenComposite.add(compositeKey);
         return true;
       });
 
@@ -1338,14 +1360,42 @@ $$;
       console.log(`📊 After deduplication: ${uniqueEvents.length} unique events (removed ${matchEvents.length - uniqueEvents.length} duplicates)`);
 
       // 5. Process unique events using stored match_time_elapsed, filtering out cancelled events
-      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
+      // Order events deterministically: prefer event_time, then timestamp, then match_time_elapsed, then ID
+      const orderedEvents = [...uniqueEvents].sort((a, b) => {
+        const aTime = (a.event_time || a.timestamp) ?? '';
+        const bTime = (b.event_time || b.timestamp) ?? '';
+        if (aTime && bTime && aTime !== bTime) return aTime < bTime ? -1 : 1;
+        const aElapsed = a.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+        const bElapsed = b.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+        if (aElapsed !== bElapsed) return aElapsed - bElapsed;
+        const aId = a.match_event_id || '';
+        const bId = b.match_event_id || '';
+        return aId.localeCompare(bId);
+      });
+
+      console.log('📊 [PROGRESSION ORDER] Ordered scoring events (x-axis source data):', orderedEvents.map(ev => ({
+        id: ev.match_event_id,
+        scorer: ev.scoring_user_name,
+        type: ev.event_type,
+        elapsed: ev.match_time_elapsed,
+        event_time: ev.event_time,
+        timestamp: ev.timestamp
+      })));
+
       let userData: {x: string, y: number}[] = [];
       let opponentData: {x: string, y: number}[] = [];
       
       let userScore = 0;
       let opponentScore = 0;
+      let lastSeconds = 0;
 
-      for (const event of uniqueEvents) {
+      for (const event of orderedEvents) {
+        // Only count scoring touches; ignore cards/other events
+        const isDoubleTouch = event.event_type === 'double' || event.event_type === 'double_touch' || event.event_type === 'double_hit';
+        const isSingleTouch = event.event_type === 'touch';
+        if (!isSingleTouch && !isDoubleTouch) {
+          continue;
+        }
 
         const displaySeconds = event.match_time_elapsed || 0;
         
@@ -1353,6 +1403,17 @@ $$;
         const minutes = Math.floor(displaySeconds / 60);
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        console.log('⏱️ [PROGRESSION X-AXIS] event→point', {
+          id: event.match_event_id,
+          scorer: event.scoring_user_name,
+          elapsed: event.match_time_elapsed,
+          event_time: event.event_time,
+          timestamp: event.timestamp,
+          xLabel: timeString,
+          userScoreBefore: userScore,
+          opponentScoreBefore: opponentScore,
+        });
+        lastSeconds = displaySeconds;
 
         // Determine which fencer scored based on event's stored fencer names (handles swaps correctly)
         // Events store fencer_1_name and fencer_2_name at the time of the event
@@ -1441,6 +1502,45 @@ $$;
         : isUserFencer2
         ? (matchData.final_score || 0)
         : (matchData.touches_against || 0); // Fallback
+
+      // If progression is short, pad with a final point at +1s so chart reaches the saved final
+      if (userData.length > 0 || opponentData.length > 0) {
+        if (userData.length === 0 && finalUserScore > 0) {
+          const padSeconds = lastSeconds + 1;
+          const minutes = Math.floor(padSeconds / 60);
+          const seconds = padSeconds % 60;
+          const padLabel = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          userData.push({ x: padLabel, y: finalUserScore });
+          userScore = finalUserScore;
+          console.log('📈 Padding empty user progression to final score:', { padLabel, finalUserScore });
+        } else if (userData.length > 0 && (userData[userData.length - 1].y < finalUserScore)) {
+          const padSeconds = lastSeconds + 1;
+          const minutes = Math.floor(padSeconds / 60);
+          const seconds = padSeconds % 60;
+          const padLabel = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          userData.push({ x: padLabel, y: finalUserScore });
+          userScore = finalUserScore;
+          console.log('📈 Padding user progression to final score:', { padLabel, finalUserScore });
+        }
+
+        if (opponentData.length === 0 && finalOpponentScore > 0) {
+          const padSeconds = lastSeconds + 1;
+          const minutes = Math.floor(padSeconds / 60);
+          const seconds = padSeconds % 60;
+          const padLabel = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          opponentData.push({ x: padLabel, y: finalOpponentScore });
+          opponentScore = finalOpponentScore;
+          console.log('📈 Padding empty opponent progression to final score:', { padLabel, finalOpponentScore });
+        } else if (opponentData.length > 0 && (opponentData[opponentData.length - 1].y < finalOpponentScore)) {
+          const padSeconds = lastSeconds + 1;
+          const minutes = Math.floor(padSeconds / 60);
+          const seconds = padSeconds % 60;
+          const padLabel = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          opponentData.push({ x: padLabel, y: finalOpponentScore });
+          opponentScore = finalOpponentScore;
+          console.log('📈 Padding opponent progression to final score:', { padLabel, finalOpponentScore });
+        }
+      }
 
       // Get the last Y values from progression
       const lastUserY = userData.length > 0 ? userData[userData.length - 1].y : 0;
@@ -2008,8 +2108,9 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time')
         .eq('match_id', matchId)
+        .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
       
       if (eventsError) {
@@ -2059,9 +2160,10 @@ $$;
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
-      // 4. Deduplicate events by (match_time_elapsed, scoring_user_name, event_type)
-      // This prevents duplicate events from being counted multiple times
+      // 4. Deduplicate events
+      // Use match_event_id when available, and collapse identical scorer/type at same elapsed+time (legacy offline duplicates)
       const seenEvents = new Set<string>();
+      const seenComposite = new Set<string>();
       const duplicateEvents: string[] = [];
       
       const uniqueEvents = matchEvents.filter(event => {
@@ -2076,9 +2178,10 @@ $$;
           return false;
         }
 
-        // Create unique key: match_time_elapsed + scoring_user_name + event_type
-        // This ensures we only count one event per time/scorer combination
-        const eventKey = `${event.match_time_elapsed}_${event.scoring_user_name}_${event.event_type}`;
+        // Prefer match_event_id; fallback to elapsed+timestamp+scorer+type when missing
+        const eventKey = event.match_event_id
+          ? `id_${event.match_event_id}`
+          : `${event.match_time_elapsed}_${event.timestamp || event.event_time || 'no_ts'}_${event.scoring_user_name}_${event.event_type}`;
         
         if (seenEvents.has(eventKey)) {
           duplicateEvents.push(event.match_event_id || 'unknown');
@@ -2087,6 +2190,20 @@ $$;
         }
         
         seenEvents.add(eventKey);
+
+        // Composite dedupe for identical scorer/type at same elapsed+time (legacy sabre/offline double writes)
+        const elapsedKey = event.match_time_elapsed !== null && event.match_time_elapsed !== undefined
+          ? Math.round(event.match_time_elapsed)
+          : -1;
+        const timeKey = (event.event_time || event.timestamp || '').slice(0, 19) || 'noTime';
+        const compositeKey = `${event.scoring_user_name || 'unknown'}|${event.event_type}|${elapsedKey}|${timeKey}`;
+        if (seenComposite.has(compositeKey)) {
+          duplicateEvents.push(event.match_event_id || compositeKey);
+          console.log(`🔄 Composite duplicate detected and skipped: ${compositeKey}`);
+          return false;
+        }
+        seenComposite.add(compositeKey);
+
         return true;
       });
 
@@ -2097,14 +2214,42 @@ $$;
       console.log(`📊 After deduplication: ${uniqueEvents.length} unique events (removed ${matchEvents.length - uniqueEvents.length} duplicates)`);
 
       // 5. Process unique events using stored match_time_elapsed
-      // Use event's stored fencer_1_name/fencer_2_name to correctly handle swaps
+      // Order events deterministically: prefer event_time, then timestamp, then match_time_elapsed, then ID
+      const orderedEvents = [...uniqueEvents].sort((a, b) => {
+        const aTime = (a.event_time || a.timestamp) ?? '';
+        const bTime = (b.event_time || b.timestamp) ?? '';
+        if (aTime && bTime && aTime !== bTime) return aTime < bTime ? -1 : 1;
+        const aElapsed = a.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+        const bElapsed = b.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+        if (aElapsed !== bElapsed) return aElapsed - bElapsed;
+        const aId = a.match_event_id || '';
+        const bId = b.match_event_id || '';
+        return aId.localeCompare(bId);
+      });
+
+      console.log('📊 [ANON PROGRESSION ORDER] Ordered scoring events (x-axis source data):', orderedEvents.map(ev => ({
+        id: ev.match_event_id,
+        scorer: ev.scoring_user_name,
+        type: ev.event_type,
+        elapsed: ev.match_time_elapsed,
+        event_time: ev.event_time,
+        timestamp: ev.timestamp
+      })));
+
       let fencer1Data: {x: string, y: number}[] = [];
       let fencer2Data: {x: string, y: number}[] = [];
       
       let fencer1Score = 0;
       let fencer2Score = 0;
+      let lastSeconds = 0;
 
-      for (const event of uniqueEvents) {
+      for (const event of orderedEvents) {
+        // Only count scoring touches; ignore cards/other events (include epee double hits)
+        const isDoubleTouch = event.event_type === 'double' || event.event_type === 'double_touch' || event.event_type === 'double_hit';
+        const isSingleTouch = event.event_type === 'touch';
+        if (!isSingleTouch && !isDoubleTouch) {
+          continue;
+        }
 
         const displaySeconds = event.match_time_elapsed || 0;
         
@@ -2112,62 +2257,71 @@ $$;
         const minutes = Math.floor(displaySeconds / 60);
         const seconds = displaySeconds % 60;
         const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        console.log('⏱️ [ANON PROGRESSION X-AXIS] event→point', {
+          id: event.match_event_id,
+          scorer: event.scoring_user_name,
+          elapsed: event.match_time_elapsed,
+          event_time: event.event_time,
+          timestamp: event.timestamp,
+          xLabel: timeString,
+          fencer1ScoreBefore: fencer1Score,
+          fencer2ScoreBefore: fencer2Score,
+        });
+        lastSeconds = displaySeconds;
 
         // Determine which fencer scored based on event's stored fencer names (handles swaps correctly)
         // Events store fencer_1_name and fencer_2_name at the time of the event
         // Match table stores final fencer_1_name and fencer_2_name (after any swaps)
         // We need to map the event's fencer to the final match fencer based on entity identity
         
-        let isFencer1Scored = false;
-        
-        if (event.fencer_1_name && event.fencer_2_name) {
-          // Use event's stored fencer names to determine which entity scored
-          // Then map to final match fencer names
-          if (event.scoring_user_name === event.fencer_1_name) {
-            // Fencer 1 scored at the time of event
-            // Check if this entity is fencer_1 or fencer_2 in the final match
-            if (event.fencer_1_name === matchData.fencer_1_name) {
-              // Same entity, still fencer_1 (no swap or swapped back)
-              isFencer1Scored = true;
-            } else if (event.fencer_1_name === matchData.fencer_2_name) {
-              // Entity swapped - was fencer_1, now fencer_2
-              isFencer1Scored = false;
+        const resolveScorerIsFencer1 = () => {
+          let isFencer1Scored = false;
+          if (event.fencer_1_name && event.fencer_2_name) {
+            if (event.scoring_user_name === event.fencer_1_name) {
+              if (event.fencer_1_name === matchData.fencer_1_name) {
+                isFencer1Scored = true;
+              } else if (event.fencer_1_name === matchData.fencer_2_name) {
+                isFencer1Scored = false;
+              } else {
+                isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+              }
+            } else if (event.scoring_user_name === event.fencer_2_name) {
+              if (event.fencer_2_name === matchData.fencer_2_name) {
+                isFencer1Scored = false;
+              } else if (event.fencer_2_name === matchData.fencer_1_name) {
+                isFencer1Scored = true;
+              } else {
+                isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
+              }
             } else {
-              // Fallback: try direct match
-              isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
-            }
-          } else if (event.scoring_user_name === event.fencer_2_name) {
-            // Fencer 2 scored at the time of event
-            // Check if this entity is fencer_1 or fencer_2 in the final match
-            if (event.fencer_2_name === matchData.fencer_2_name) {
-              // Same entity, still fencer_2 (no swap or swapped back)
-              isFencer1Scored = false;
-            } else if (event.fencer_2_name === matchData.fencer_1_name) {
-              // Entity swapped - was fencer_2, now fencer_1
-              isFencer1Scored = true;
-            } else {
-              // Fallback: try direct match
               isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
             }
           } else {
-            // Fallback: try direct match with match table names
             isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
           }
-        } else {
-          // Fallback: try direct match with match table names
-          isFencer1Scored = event.scoring_user_name === matchData.fencer_1_name;
-        }
+          return isFencer1Scored;
+        };
 
-        if (isFencer1Scored) {
+        if (isDoubleTouch) {
+          // Epee double: increment both fencers
           fencer1Score++;
-          const dataPoint = { x: timeString, y: fencer1Score };
-          fencer1Data.push(dataPoint);
-          console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score} at ${timeString}`);
-        } else {
           fencer2Score++;
-          const dataPoint = { x: timeString, y: fencer2Score };
-          fencer2Data.push(dataPoint);
-          console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score} at ${timeString}`);
+          fencer1Data.push({ x: timeString, y: fencer1Score });
+          fencer2Data.push({ x: timeString, y: fencer2Score });
+          console.log(`📈 ✅ Double touch counted: fencer1=${fencer1Score}, fencer2=${fencer2Score} at ${timeString}`);
+        } else {
+          const isFencer1Scored = resolveScorerIsFencer1();
+          if (isFencer1Scored) {
+            fencer1Score++;
+            const dataPoint = { x: timeString, y: fencer1Score };
+            fencer1Data.push(dataPoint);
+            console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score} at ${timeString}`);
+          } else {
+            fencer2Score++;
+            const dataPoint = { x: timeString, y: fencer2Score };
+            fencer2Data.push(dataPoint);
+            console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score} at ${timeString}`);
+          }
         }
       }
 
@@ -2190,6 +2344,22 @@ $$;
           difference: { fencer1: lastFencer1Y - finalFencer1Score, fencer2: lastFencer2Y - finalFencer2Score }
         });
         // Do not mutate progression to match finals; keep progression as truth for charting
+      }
+
+      // Pad progression to reach saved finals if events are short (common when an event failed to write)
+      if (lastFencer1Y < finalFencer1Score || lastFencer2Y < finalFencer2Score) {
+        const padSeconds = lastSeconds + 1;
+        const minutes = Math.floor(padSeconds / 60);
+        const seconds = padSeconds % 60;
+        const padLabel = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        if (lastFencer1Y < finalFencer1Score) {
+          fencer1Data.push({ x: padLabel, y: finalFencer1Score });
+          console.log('📈 Padding fencer 1 progression to final score:', { padLabel, finalFencer1Score });
+        }
+        if (lastFencer2Y < finalFencer2Score) {
+          fencer2Data.push({ x: padLabel, y: finalFencer2Score });
+          console.log('📈 Padding fencer 2 progression to final score:', { padLabel, finalFencer2Score });
+        }
       }
 
       return {
@@ -2572,6 +2742,34 @@ export const matchEventService = {
 
   // Create a match event
   async createMatchEvent(eventData: Partial<MatchEvent>): Promise<MatchEvent | null> {
+    // If a match_id is provided, ensure it exists; if not, return null so caller can retry/queue
+    if (eventData.match_id) {
+      const { data: matchExists, error: matchError, status } = await supabase
+        .from('match')
+        .select('match_id')
+        .eq('match_id', eventData.match_id)
+        .maybeSingle();
+
+      const notFound = (!matchExists && status === 406);
+      const fatalError = matchError && (matchError as any).code !== 'PGRST116';
+
+      if (fatalError) {
+        console.warn('⚠️ matchEventService.createMatchEvent: error checking match existence, aborting insert so caller can retry', {
+          match_id: eventData.match_id,
+          error: matchError,
+        });
+        return null;
+      }
+
+      if (notFound) {
+        console.warn('⚠️ matchEventService.createMatchEvent: match not found, aborting insert so caller can retry once match exists', {
+          match_id: eventData.match_id,
+          status,
+        });
+        return null;
+      }
+    }
+
     const { data, error } = await supabase
       .from('match_event')
       .insert(eventData)

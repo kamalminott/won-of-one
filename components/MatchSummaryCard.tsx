@@ -32,6 +32,7 @@ interface MatchSummaryCardProps {
   userLabel?: string;
   opponentLabel?: string;
   userPosition?: 'left' | 'right'; // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType?: string; // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }
 
 export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
@@ -53,7 +54,8 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   onNotesPress,
   userLabel = 'You',
   opponentLabel = 'Opponent',
-  userPosition // Position of user in match header (left = fencer_1, right = fencer_2)
+  userPosition, // Position of user in match header (left = fencer_1, right = fencer_2)
+  weaponType // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }) => {
   const { width, height } = useWindowDimensions();
   
@@ -155,6 +157,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
         userLabel={userLabel}
         opponentLabel={opponentLabel}
         userPosition={userPosition}
+        weaponType={weaponType}
       />
       
       {/* Touches by Period Chart and Key Stats Card - Side by Side */}
@@ -164,6 +167,7 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
           userLabel={userLabel}
           opponentLabel={opponentLabel}
           userPosition={userPosition}
+          weaponType={weaponType}
         />
         <KeyStatsCard 
           bestRun={bestRun} 

@@ -105,8 +105,6 @@ export default function MatchSummaryScreen() {
         
         if (isOffline) {
           // Use params data directly for offline matches
-          console.log('📱 Loading offline match from params');
-          
           const matchFromParams: Match = {
             match_id: params.matchId as string,
             user_id: user?.id || '',
@@ -152,21 +150,22 @@ export default function MatchSummaryScreen() {
         // Online match - fetch from database
         try {
           const matchData = await matchService.getMatchById(params.matchId as string);
-          console.log('📊 Fetched match data for summary:', matchData);
-          console.log('⏱️ ACTUAL MATCH DURATION (bout_length_s):', matchData?.bout_length_s, 'seconds');
-          console.log('⏱️ MATCH DURATION FORMATTED:', matchData?.bout_length_s ? `${Math.floor(matchData.bout_length_s / 60)}:${(matchData.bout_length_s % 60).toString().padStart(2, '0')}` : 'N/A');
+          if (!matchData) {
+            console.warn('⚠️ Match not found, showing missing match state', params.matchId);
+            setMatch(null);
+            setLoading(false);
+            return;
+          }
           setMatch(matchData);
           
           // Load existing notes if available
           if (matchData?.notes) {
-            console.log('📝 Loading existing notes:', matchData.notes);
             setNotes(matchData.notes);
           }
           
           // Load match type from database
           if (matchData?.match_type) {
             const type = matchData.match_type.toLowerCase() === 'training' ? 'training' : 'competition';
-            console.log('🏷️ Loading match type from database:', type);
             setMatchType(type);
           }
           
@@ -193,7 +192,6 @@ export default function MatchSummaryScreen() {
               userFencerName,
               params.remoteId as string // Pass the remoteId to help find events
             );
-            console.log('🏃 Calculated best run:', calculatedBestRun);
             setBestRun(calculatedBestRun);
 
             // Use calculateAnonymousScoreProgression to get position-based data directly from database
@@ -202,19 +200,11 @@ export default function MatchSummaryScreen() {
             const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
               params.matchId as string
             );
-            console.log('📈 [MATCH SUMMARY] Calculated position-based score progression:', {
-              fencer1DataLength: calculatedScoreProgression.fencer1Data.length,
-              fencer2DataLength: calculatedScoreProgression.fencer2Data.length,
-              fencer1FirstPoint: calculatedScoreProgression.fencer1Data[0],
-              fencer2FirstPoint: calculatedScoreProgression.fencer2Data[0],
-              fencer1LastPoint: calculatedScoreProgression.fencer1Data[calculatedScoreProgression.fencer1Data.length - 1],
-              fencer2LastPoint: calculatedScoreProgression.fencer2Data[calculatedScoreProgression.fencer2Data.length - 1],
-            });
-            // Map progression to user/opponent based on which fencer is the user
-            // Map progression to user/opponent based on which fencer is the user
-            const scoreProgData = isFencer1User ? {
-              userData: calculatedScoreProgression.fencer1Data, // user on left
-              opponentData: calculatedScoreProgression.fencer2Data
+        // Map progression to user/opponent based on which fencer is the user
+        // Map progression to user/opponent based on which fencer is the user
+        const scoreProgData = isFencer1User ? {
+          userData: calculatedScoreProgression.fencer1Data, // user on left
+          opponentData: calculatedScoreProgression.fencer2Data
             } : {
               userData: calculatedScoreProgression.fencer2Data, // user on right
               opponentData: calculatedScoreProgression.fencer1Data
@@ -372,17 +362,14 @@ export default function MatchSummaryScreen() {
 
   const handleEdit = () => {
     // TODO: Implement edit functionality
-    console.log('Edit match');
   };
 
   const handleSeeFullSummary = () => {
     // TODO: Navigate to full summary
-    console.log('See full summary');
   };
 
   const handleCancelMatch = async () => {
     if (!match?.match_id) {
-      console.log('No match ID available for deletion');
       return;
     }
 
@@ -400,14 +387,10 @@ export default function MatchSummaryScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('🗑️ Canceling and deleting match:', match.match_id);
-              
               // Delete the match from the database
               const success = await matchService.deleteMatch(match.match_id);
               
               if (success) {
-                console.log('✅ Match deleted successfully');
-                
                 // Navigate back to home screen
                 router.replace('/(tabs)');
               } else {
@@ -426,19 +409,15 @@ export default function MatchSummaryScreen() {
 
   const handleSaveMatch = async () => {
     if (!match || !user?.id) {
-      console.log('No match or user data available for saving');
       return;
     }
 
     try {
-      console.log('💾 Saving match and updating goals...');
-      
       // Update match type in the database
       if (match.match_id) {
         await matchService.updateMatch(match.match_id, { 
           match_type: matchType 
         });
-        console.log(`✅ Match type updated to: ${matchType}`);
       }
       
       // Check if completed goal info was passed from remote.tsx (for remote matches)
@@ -446,7 +425,6 @@ export default function MatchSummaryScreen() {
       if (hasCompletedGoalFromRemote) {
         try {
           const goalData = JSON.parse(params.completedGoalData as string);
-          console.log('🎉 Showing celebration for completed goal from remote:', goalData);
           setCompletedGoal(goalData);
           // Get the goal ID from the active goals
           const activeGoals = await goalService.getActiveGoals(user.id);
@@ -474,12 +452,10 @@ export default function MatchSummaryScreen() {
           match.final_score || 0,
           match.touches_against || 0
         );
-        console.log('✅ Goals updated successfully');
         
         // Check if any goals were completed
         if (result.completedGoals && result.completedGoals.length > 0) {
           // Show celebration for the first completed goal
-          console.log('🎉 Showing celebration for completed goal:', result.completedGoals[0]);
           const goalData = result.completedGoals[0];
           setCompletedGoal(goalData);
           // Store the goal ID from the activeGoals list
@@ -508,7 +484,6 @@ export default function MatchSummaryScreen() {
         }
       } else if (hasFailedGoalFromRemote) {
         // Remote match with failed goal - pass through to home screen
-        console.log('🔄 Passing failed goal from remote to home screen');
         router.push({
           pathname: '/(tabs)',
           params: {
@@ -519,7 +494,6 @@ export default function MatchSummaryScreen() {
         });
         return; // Don't navigate normally
       } else {
-        console.log('ℹ️ Skipping goal update - match already complete or anonymous');
       }
       
       // Navigate back to home page
@@ -545,7 +519,6 @@ export default function MatchSummaryScreen() {
     
     // Deactivate the completed goal
     if (completedGoalId) {
-      console.log('🔒 Deactivating completed goal:', completedGoalId);
       await goalService.deactivateGoal(completedGoalId);
     }
     
@@ -566,7 +539,6 @@ export default function MatchSummaryScreen() {
     
     // Deactivate the completed goal
     if (completedGoalId) {
-      console.log('🔒 Deactivating completed goal:', completedGoalId);
       await goalService.deactivateGoal(completedGoalId);
     }
     
@@ -584,11 +556,9 @@ export default function MatchSummaryScreen() {
   const handleSaveNotes = async () => {
     if (match?.match_id) {
       try {
-        console.log('💾 Saving notes to database:', notes);
         await matchService.updateMatch(match.match_id, {
           notes: notes
         });
-        console.log('✅ Notes saved successfully');
       } catch (error) {
         console.error('❌ Error saving notes:', error);
       }
@@ -638,17 +608,6 @@ export default function MatchSummaryScreen() {
     ? normalizeName(match.fencer_2_name) === normalizedUserName
     : false;
 
-  console.log('🔍 Match Summary - User identification:', {
-    userName,
-    normalizedUserName,
-    fencer1Name: match?.fencer_1_name,
-    fencer2Name: match?.fencer_2_name,
-    normalizedFencer1: match?.fencer_1_name ? normalizeName(match.fencer_1_name) : 'N/A',
-    normalizedFencer2: match?.fencer_2_name ? normalizeName(match.fencer_2_name) : 'N/A',
-    isFencer1User,
-    isFencer2User
-  });
-
   // Progression totals (already mapped to user/opponent orientation)
   const progressionUserTotal = scoreProgression.userData.length > 0
     ? scoreProgression.userData[scoreProgression.userData.length - 1].y
@@ -661,11 +620,16 @@ export default function MatchSummaryScreen() {
   const dbFencer1Score = match?.final_score || 0;      // left
   const dbFencer2Score = match?.touches_against || 0;  // right
 
+  // Map DB totals to user/opponent orientation
+  const dbUserScore = isFencer1User ? dbFencer1Score : isFencer2User ? dbFencer2Score : dbFencer1Score;
+  const dbOpponentScore = isFencer1User ? dbFencer2Score : isFencer2User ? dbFencer1Score : dbFencer2Score;
+
+  // If progression totals don't match DB, prefer DB to avoid undercounted progressions (e.g., sabre deduping)
+  const progressionMatchesDb = progressionUserTotal === dbUserScore && progressionOpponentTotal === dbOpponentScore;
+
   // Derive user/opponent scores with orientation; prefer progression totals when available
-  const fallbackUserScore = isFencer1User ? dbFencer1Score : isFencer2User ? dbFencer2Score : dbFencer1Score;
-  const fallbackOpponentScore = isFencer1User ? dbFencer2Score : isFencer2User ? dbFencer1Score : dbFencer2Score;
-  const userScoreFinal = progressionUserTotal > 0 ? progressionUserTotal : fallbackUserScore;
-  const opponentScoreFinal = progressionOpponentTotal > 0 ? progressionOpponentTotal : fallbackOpponentScore;
+  const userScoreFinal = progressionMatchesDb && progressionUserTotal > 0 ? progressionUserTotal : dbUserScore;
+  const opponentScoreFinal = progressionMatchesDb && progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
 
   // Map to header positions (fencer_1 = left, fencer_2 = right)
   const fencer1ScoreFinal = isFencer1User ? userScoreFinal : opponentScoreFinal;
@@ -695,22 +659,6 @@ export default function MatchSummaryScreen() {
     fencer1Score: fencer1ScoreFinal,
     fencer2Score: fencer2ScoreFinal,
   } : null;
-
-  // Log position-based scores calculation for debugging
-  if (matchData) {
-    console.log('📊 [MATCH SUMMARY] Calculating position-based scores:', {
-      matchId: match?.match_id,
-      fromDatabase: {
-        final_score: match?.final_score,
-        touches_against: match?.touches_against,
-      },
-      calculated: {
-        fencer1Score: matchData.fencer1Score,
-        fencer2Score: matchData.fencer2Score,
-      },
-      note: 'Position-mapped from entity scores using which fencer is the user (handles side swaps)'
-    });
-  }
 
   const styles = StyleSheet.create({
     container: {
@@ -922,105 +870,34 @@ export default function MatchSummaryScreen() {
           />
 
         {/* Match Summary Card */}
-        <MatchSummaryCard
-          onEdit={handleEdit}
-          onSeeFullSummary={handleSeeFullSummary}
-          onCancelMatch={handleCancelMatch}
-          onSaveMatch={handleSaveMatch}
-          // Use position-based data directly (same as header approach)
-          // scoreProgression is already position-based: userData = fencer_1 (left), opponentData = fencer_2 (right)
-          scoreProgression={(() => {
-            console.log('📊 [MATCH SUMMARY] Passing scoreProgression to chart:', {
-              userDataLength: scoreProgression.userData.length,
-              opponentDataLength: scoreProgression.opponentData.length,
-              userDataFirst: scoreProgression.userData[0],
-              opponentDataFirst: scoreProgression.opponentData[0],
-              userDataLast: scoreProgression.userData[scoreProgression.userData.length - 1],
-              opponentDataLast: scoreProgression.opponentData[scoreProgression.opponentData.length - 1],
-            });
-            return scoreProgression;
-          })()}
-          // Pass position-based scores to match the header and labels
-          // fencer1Score = score of fencer_1 (left position), fencer2Score = score of fencer_2 (right position)
-          userScore={(() => {
-            const score = matchData?.fencer1Score || 0;
-            console.log('📊 [MATCH SUMMARY] Passing userScore to chart:', {
-              score,
-              source: 'matchData.fencer1Score',
-              matchDataFencer1Score: matchData?.fencer1Score,
-              matchFinalScore: match?.final_score,
-              matchTouchesAgainst: match?.touches_against,
-            });
-            return score;
-          })()}
-          opponentScore={(() => {
-            const score = matchData?.fencer2Score || 0;
-            console.log('📊 [MATCH SUMMARY] Passing opponentScore to chart:', {
-              score,
-              source: 'matchData.fencer2Score',
-              matchDataFencer2Score: matchData?.fencer2Score,
-              matchFinalScore: match?.final_score,
-              matchTouchesAgainst: match?.touches_against,
-            });
-            return score;
-          })()}
-          bestRun={bestRun}
-          yellowCards={match?.yellow_cards || 0}
-          redCards={match?.red_cards || 0}
-          matchDurationSeconds={(() => {
-            const progressionDuration = getProgressionDurationSeconds();
-            const boutLength = match?.bout_length_s || 0;
-            const duration = Math.max(boutLength, progressionDuration);
-            console.log('⏱️ [MATCH SUMMARY] Passing duration to KeyStatsCard:', { boutLength, progressionDuration, duration });
-            return duration;
-          })()}
-          // touchesByPeriod is position-based from match_period table (same approach as neutral match summary)
-          touchesByPeriod={(() => {
-            console.log('📊 [MATCH SUMMARY] Passing touchesByPeriod to chart:', {
-              period1: touchesByPeriod.period1,
-              period2: touchesByPeriod.period2,
-              period3: touchesByPeriod.period3,
-            });
-            return touchesByPeriod;
-          })()}
-          notes={notes}
-          onNotesChange={handleNotesChange}
-          onNotesPress={handleNotesPress}
-          // Pass position-based labels to match the header display - EXACT same approach as header
-          // Header uses: match.fencer1Name (fencer_1_name) and match.fencer2Name (fencer_2_name) from database
-          // So we use the exact same values here
-          userLabel={(() => {
-            const label = getFirstName(match?.fencer_1_name) || 'Fencer 1';
-            console.log('📊 [MATCH SUMMARY] userLabel (fencer_1_name):', label, 'from database:', match?.fencer_1_name);
-            return label;
-          })()}
-          opponentLabel={(() => {
-            const label = getFirstName(match?.fencer_2_name) || 'Fencer 2';
-            console.log('📊 [MATCH SUMMARY] opponentLabel (fencer_2_name):', label, 'from database:', match?.fencer_2_name);
-            return label;
-          })()}
-          // Determine user position by checking which database name matches the user's name
-          userPosition={(() => {
-            const position = match?.fencer_1_name && userName && normalizeName(match.fencer_1_name) === normalizeName(userName)
-              ? 'left'  // User is fencer_1 (left position)
-              : match?.fencer_2_name && userName && normalizeName(match.fencer_2_name) === normalizeName(userName)
-              ? 'right' // User is fencer_2 (right position)
-              : 'left';  // Fallback
-            console.log('📊 [MATCH SUMMARY] userPosition calculation:', {
-              position,
-              userName,
-              normalizedUserName: normalizeName(userName),
-              fencer1Name: match?.fencer_1_name,
-              normalizedFencer1: match?.fencer_1_name ? normalizeName(match.fencer_1_name) : 'N/A',
-              fencer2Name: match?.fencer_2_name,
-              normalizedFencer2: match?.fencer_2_name ? normalizeName(match.fencer_2_name) : 'N/A',
-              isFencer1User,
-              isFencer2User,
-              matchId: match?.match_id
-            });
-            return position;
-          })()}
-        />
+          <MatchSummaryCard
+            onEdit={handleEdit}
+            onSeeFullSummary={handleSeeFullSummary}
+            onCancelMatch={handleCancelMatch}
+            onSaveMatch={handleSaveMatch}
+            scoreProgression={scoreProgression}
+            userScore={matchData?.fencer1Score || 0}
+            opponentScore={matchData?.fencer2Score || 0}
+            bestRun={bestRun}
+            yellowCards={match?.yellow_cards || 0}
+            redCards={match?.red_cards || 0}
+            matchDurationSeconds={Math.max(match?.bout_length_s || 0, getProgressionDurationSeconds())}
+            touchesByPeriod={touchesByPeriod}
+            notes={notes}
+            onNotesChange={handleNotesChange}
+            onNotesPress={handleNotesPress}
+            userLabel={getFirstName(match?.fencer_1_name) || 'Fencer 1'}
+            opponentLabel={getFirstName(match?.fencer_2_name) || 'Fencer 2'}
+            weaponType={match?.weapon_type}
+            userPosition={(() => {
+              const position = match?.fencer_1_name && userName && normalizeName(match.fencer_1_name) === normalizeName(userName)
+                ? 'left'
+                : match?.fencer_2_name && userName && normalizeName(match.fencer_2_name) === normalizeName(userName)
+                ? 'right'
+                : 'left';
+              return position;
+            })()}
+          />
       </ScrollView>
 
       {/* Notes Modal */}
