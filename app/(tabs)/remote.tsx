@@ -4315,19 +4315,46 @@ export default function RemoteScreen() {
   }, [selectedWeapon]);
 
   const resetPeriod = useCallback(() => {
+    // Stop any running timers for a clean restart
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (breakTimerRef) {
+      clearInterval(breakTimerRef);
+      setBreakTimerRef(null);
+    }
+    if (injuryTimerRef) {
+      clearInterval(injuryTimerRef);
+      setInjuryTimerRef(null);
+    }
+
+    setIsPlaying(false);
+    setHasMatchStarted(false);
+    setIsBreakTime(false);
+    setBreakTimeRemaining(60);
     setCurrentPeriod(1);
     setIsPriorityRound(false); // Reset priority round
     setHasShownPriorityScorePopup(false); // Reset priority popup flag
     setPriorityFencer(null); // Reset priority fencer
     setPriorityLightPosition(null); // Reset priority light
+    setPeriod1Time(0);
+    setPeriod2Time(0);
+    setPeriod3Time(0);
+    setTimeRemaining(matchTime); // Reset timer to configured match length
+    setIsManualReset(true); // Prevent auto-sync from assuming an in-progress match
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+  }, [breakTimerRef, injuryTimerRef, matchTime]);
 
   const resetTime = useCallback(() => {
     // Stop timer if running
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+    if (breakTimerRef) {
+      clearInterval(breakTimerRef);
+      setBreakTimerRef(null);
     }
     setIsPlaying(false);
     setHasMatchStarted(false); // Reset match started state
@@ -4357,7 +4384,7 @@ export default function RemoteScreen() {
     setPreviousMatchState(null); // Reset previous match state
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsManualReset(true); // Set flag to prevent auto-sync
-  }, []);
+  }, [breakTimerRef]);
 
   // Helper function to perform the actual reset
   const performResetAll = useCallback(async (keepOpponentName: boolean = false) => {
@@ -4366,6 +4393,7 @@ export default function RemoteScreen() {
     const currentToggleState = showUserProfile;
     // Store the current weapon selection to preserve it after reset
     const currentWeapon = selectedWeapon;
+    let resetErrored = false;
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
       setIsCompletingMatch(false); // Reset the completion flag
@@ -4451,230 +4479,103 @@ export default function RemoteScreen() {
           console.error('❌ Error during incomplete records cleanup:', error);
         }
       }
-      
-      // 3. Clean up any orphaned records (match_period, match_event, fencing_remote)
-      console.log('🧹 Running comprehensive orphaned records cleanup...');
-      try {
-        // Clean up orphaned match_period records
-        const { data: allPeriods, error: periodsError } = await supabase
-          .from('match_period')
-          .select('match_period_id, match_id');
-        
-        if (periodsError) {
-          console.error('❌ Error fetching match periods:', periodsError);
-        } else if (allPeriods && allPeriods.length > 0) {
-          const { data: existingMatches, error: matchesError } = await supabase
-            .from('match')
-            .select('match_id');
-          
-          if (matchesError) {
-            console.error('❌ Error fetching existing matches:', matchesError);
-          } else {
-            const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
-            const orphanedPeriods = allPeriods.filter(period => !existingMatchIds.has(period.match_id));
-            
-            if (orphanedPeriods.length > 0) {
-              console.log('🗑️ Found orphaned match_period records:', orphanedPeriods.length);
-              const { error: deleteError } = await supabase
-                .from('match_period')
-                .delete()
-                .in('match_period_id', orphanedPeriods.map(p => p.match_period_id));
-              
-              if (deleteError) {
-                console.error('❌ Error deleting orphaned periods:', deleteError);
-              } else {
-                console.log('✅ Cleaned up orphaned match_period records');
-              }
-            } else {
-              console.log('✅ No orphaned match_period records found');
-            }
-          }
-        }
-
-        // Clean up orphaned match_event records (those without valid match_id or fencing_remote_id)
-        const { data: allEvents, error: eventsError } = await supabase
-          .from('match_event')
-          .select('match_event_id, match_id, fencing_remote_id');
-        
-        if (eventsError) {
-          console.error('❌ Error fetching match events:', eventsError);
-        } else if (allEvents && allEvents.length > 0) {
-          // Get all existing match_ids and fencing_remote_ids
-          const { data: existingMatches } = await supabase.from('match').select('match_id');
-          const { data: existingRemotes } = await supabase.from('fencing_remote').select('remote_id');
-          
-          const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
-          const existingRemoteIds = new Set(existingRemotes?.map(r => r.remote_id) || []);
-          
-          // Find orphaned events (events with match_id or fencing_remote_id not in their respective tables)
-          const orphanedEvents = allEvents.filter(event => 
-            (event.match_id && !existingMatchIds.has(event.match_id)) ||
-            (event.fencing_remote_id && !existingRemoteIds.has(event.fencing_remote_id))
-          );
-          
-          if (orphanedEvents.length > 0) {
-            console.log('🗑️ Found orphaned match_event records:', orphanedEvents.length);
-            const { error: deleteError } = await supabase
-              .from('match_event')
-              .delete()
-              .in('match_event_id', orphanedEvents.map(e => e.match_event_id));
-            
-            if (deleteError) {
-              console.error('❌ Error deleting orphaned events:', deleteError);
-            } else {
-              console.log('✅ Cleaned up orphaned match_event records');
-            }
-          } else {
-            console.log('✅ No orphaned match_event records found');
-          }
-        }
-
-        // Clean up orphaned fencing_remote records (those without linked matches)
-        const { data: allRemotes, error: remotesError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id, linked_match_id');
-        
-        if (remotesError) {
-          console.error('❌ Error fetching fencing_remote records:', remotesError);
-        } else if (allRemotes && allRemotes.length > 0) {
-          const { data: existingMatches } = await supabase.from('match').select('match_id');
-          const existingMatchIds = new Set(existingMatches?.map(m => m.match_id) || []);
-          
-          // Find orphaned remotes (remotes with linked_match_id not in match table)
-          const orphanedRemotes = allRemotes.filter(remote => 
-            remote.linked_match_id && !existingMatchIds.has(remote.linked_match_id)
-          );
-          
-          if (orphanedRemotes.length > 0) {
-            console.log('🗑️ Found orphaned fencing_remote records:', orphanedRemotes.length);
-            const { error: deleteError } = await supabase
-              .from('fencing_remote')
-              .delete()
-              .in('remote_id', orphanedRemotes.map(r => r.remote_id));
-            
-            if (deleteError) {
-              console.error('❌ Error deleting orphaned remotes:', deleteError);
-            } else {
-              console.log('✅ Cleaned up orphaned fencing_remote records');
-            }
-          } else {
-            console.log('✅ No orphaned fencing_remote records found');
-          }
-        }
-        
-      } catch (error) {
-        console.error('❌ Error during comprehensive cleanup:', error);
+    } catch (error) {
+      console.error('❌ Error during Reset All:', error);
+      resetErrored = true;
+      // Still reset UI state even if database cleanup fails
+      // ... (fallback UI reset logic could go here)
+    } finally {
+      // Always reset timers and UI state, even if cleanup fails
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-      
-      // 2. Stop all timers
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (breakTimerRef) {
-      clearInterval(breakTimerRef);
-    }
+      if (breakTimerRef) {
+        clearInterval(breakTimerRef);
+      }
       if (injuryTimerRef) {
         clearInterval(injuryTimerRef);
         setInjuryTimerRef(null);
       }
-      
-      // 3. Reset all UI state
-    setIsPlaying(false);
-    isPlayingRef.current = false; // Update ref
-    setHasMatchStarted(false); // Reset match started state
-    setCurrentPeriod(1); // Reset to period 1
-    currentPeriodRef.current = 1; // Reset ref
-    setMatchTime(180); // 3 minutes in seconds
-    setTimeRemaining(180); // Same as matchTime = no paused state
-    setScores({ fencerA: 0, fencerB: 0 }); // Reset scores
-    setIsBreakTime(false); // Reset break state
-    setBreakTimeRemaining(60); // Reset break timer
-    setBreakTriggered(false); // Reset sabre break trigger
-    setMomentumStreak({ lastScorer: null, count: 0 }); // Reset momentum tracking
-    previousScoresRef.current = { fencerA: 0, fencerB: 0 }; // Reset momentum ref
-    setScoreChangeCount(0); // Reset score change counter
-    setShowScoreWarning(false); // Reset warning popup
-    setHasNavigatedAway(false); // Reset navigation flag
-      setLastEventTime(null); // Reset event timing
-    sabreElapsedRef.current = 0; // Reset sabre elapsed counter
-    setPendingScoreAction(null); // Reset pending action
-    setPreviousMatchState(null); // Reset previous match state
-    setRecentScoringEventIds({ fencerA: null, fencerB: null }); // Reset event tracking
 
-    setPriorityLightPosition(null); // Reset priority light
-    setPriorityFencer(null); // Reset priority fencer
-    setShowPriorityPopup(false); // Reset priority popup
-    setIsPriorityRound(false); // Reset priority round
-    setHasShownPriorityScorePopup(false); // Reset priority score popup flag
-    setIsAssigningPriority(false); // Reset priority assignment state
-    
-    // Reset the card state structure
-    setCards({ fencerA: { yellow: 0, red: 0 }, fencerB: { yellow: 0, red: 0 } });
-    
-    // Reset injury timer state
-    setIsInjuryTimer(false);
-    setInjuryTimeRemaining(300);
-    
-    // Reset fencer names based on keepOpponentName flag
-    if (keepOpponentName) {
-      // Keep opponent's name, only reset user's name if needed
-      if (showUserProfile && userDisplayName) {
-        if (toggleCardPosition === 'left') {
-          // User is on left (fencerA), keep fencerB's name
-          setFencerNames({ 
-            fencerA: userDisplayName, 
-            fencerB: fencerNames.fencerB // Keep current opponent name
-          });
-        } else {
-          // User is on right (fencerB), keep fencerA's name
-          setFencerNames({ 
-            fencerA: fencerNames.fencerA, // Keep current opponent name
-            fencerB: userDisplayName 
-          });
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      setHasMatchStarted(false);
+      setCurrentPeriod(1);
+      currentPeriodRef.current = 1;
+      setMatchTime(180);
+      setTimeRemaining(180);
+      setScores({ fencerA: 0, fencerB: 0 });
+      setIsBreakTime(false);
+      setBreakTimeRemaining(60);
+      setBreakTriggered(false);
+      setMomentumStreak({ lastScorer: null, count: 0 });
+      previousScoresRef.current = { fencerA: 0, fencerB: 0 };
+      setScoreChangeCount(0);
+      setShowScoreWarning(false);
+      setHasNavigatedAway(false);
+      setLastEventTime(null);
+      sabreElapsedRef.current = 0;
+      setPendingScoreAction(null);
+      setPreviousMatchState(null);
+      setRecentScoringEventIds({ fencerA: null, fencerB: null });
+
+      setPriorityLightPosition(null);
+      setPriorityFencer(null);
+      setShowPriorityPopup(false);
+      setIsPriorityRound(false);
+      setHasShownPriorityScorePopup(false);
+      setIsAssigningPriority(false);
+
+      setCards({ fencerA: { yellow: 0, red: 0 }, fencerB: { yellow: 0, red: 0 } });
+      
+      setIsInjuryTimer(false);
+      setInjuryTimeRemaining(300);
+
+      if (keepOpponentName) {
+        if (showUserProfile && userDisplayName) {
+          if (toggleCardPosition === 'left') {
+            setFencerNames({ 
+              fencerA: userDisplayName, 
+              fencerB: fencerNames.fencerB
+            });
+          } else {
+            setFencerNames({ 
+              fencerA: fencerNames.fencerA,
+              fencerB: userDisplayName 
+            });
+          }
         }
       } else {
-        // Both names are opponents, keep both
-        // Don't reset names at all
-      }
-    } else {
-      // Reset fencer names to defaults
-      if (showUserProfile && userDisplayName) {
-        if (toggleCardPosition === 'left') {
-          setFencerNames({ 
-            fencerA: userDisplayName, 
-            fencerB: 'Tap to add name' 
-          });
+        if (showUserProfile && userDisplayName) {
+          if (toggleCardPosition === 'left') {
+            setFencerNames({ 
+              fencerA: userDisplayName, 
+              fencerB: 'Tap to add name' 
+            });
+          } else {
+            setFencerNames({ 
+              fencerA: 'Tap to add name', 
+              fencerB: userDisplayName 
+            });
+          }
         } else {
           setFencerNames({ 
             fencerA: 'Tap to add name', 
-            fencerB: userDisplayName 
+            fencerB: 'Tap to add name' 
           });
         }
-      } else {
-        setFencerNames({ 
-          fencerA: 'Tap to add name', 
-          fencerB: 'Tap to add name' 
-        });
       }
-    }
-    
-    // Reset fencer positions
-    setFencerPositions({ fencerA: 'left', fencerB: 'right' });
-    // Preserve the toggle state (ON stays ON, OFF stays OFF)
-    setShowUserProfile(currentToggleState);
-    // Preserve the weapon selection (Foil, Epee, or Sabre stays the same)
-    setSelectedWeapon(currentWeapon);
-    
-      console.log('✅ Reset All completed successfully');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsManualReset(true); // Set flag to prevent auto-sync
       
-    } catch (error) {
-      console.error('❌ Error during Reset All:', error);
-      // Still reset UI state even if database cleanup fails
-      // ... (fallback UI reset logic could go here)
-    } finally {
+      setFencerPositions({ fencerA: 'left', fencerB: 'right' });
+      setShowUserProfile(currentToggleState);
+      setSelectedWeapon(currentWeapon);
+
+      if (!resetErrored) {
+        console.log('✅ Reset All completed successfully');
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setIsManualReset(true); // Set flag to prevent auto-sync
       setIsResetting(false); // Always clear reset flag
     }
   }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, toggleCardPosition, selectedWeapon]);
