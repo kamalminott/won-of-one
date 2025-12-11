@@ -151,6 +151,49 @@ export default function RootLayout() {
     return () => clearTimeout(timeoutId);
   }, []);
 
+  // Set up global error handler for PostHog error tracking
+  React.useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Web platform doesn't use ErrorUtils
+      return;
+    }
+
+    const globalErrorUtils = (global as any).ErrorUtils;
+    const hasErrorUtils =
+      globalErrorUtils &&
+      typeof globalErrorUtils.getGlobalHandler === 'function' &&
+      typeof globalErrorUtils.setGlobalHandler === 'function';
+
+    if (!hasErrorUtils) {
+      console.warn('⚠️ Global ErrorUtils not available; skipping PostHog error handler setup.');
+      return;
+    }
+
+    const originalHandler = globalErrorUtils.getGlobalHandler();
+    
+    globalErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+      // Capture exception in PostHog
+      if (analytics && typeof analytics.captureException === 'function') {
+        analytics.captureException(error, {
+          isFatal: isFatal ?? false,
+          source: 'global_error_handler',
+        });
+      }
+      
+      // Call original handler
+      if (originalHandler) {
+        originalHandler(error, isFatal);
+      }
+    });
+    
+    // Cleanup
+    return () => {
+      if (originalHandler) {
+        globalErrorUtils.setGlobalHandler(originalHandler);
+      }
+    };
+  }, []);
+
   // Check for OTA updates on app launch
   React.useEffect(() => {
     async function checkForUpdates() {

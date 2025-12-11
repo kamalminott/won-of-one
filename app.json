@@ -17,8 +17,12 @@
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
         "NSPhotoLibraryUsageDescription": "Allow Won Of One to access your photo library so you can attach screenshots to bug reports.",
         "NSPhotoLibraryAddUsageDescription": "Allow Won Of One to save screenshots to your photo library when needed.",
-        "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
-        "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"]
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait"
+        ]
       }
     },
     "android": {
@@ -46,7 +50,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true

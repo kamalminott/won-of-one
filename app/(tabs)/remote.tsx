@@ -4163,27 +4163,17 @@ export default function RemoteScreen() {
       return name === 'Tap to add name' ? '' : name;
     };
     
-    // Auto-fill user's name when toggle is on, based on card position
-    if (showUserProfile) {
-      const userPosition = toggleCardPosition;
-      const userEntity = getEntityAtPosition(userPosition);
-      const opponentPosition = userPosition === 'left' ? 'right' : 'left';
-      const opponentEntity = getEntityAtPosition(opponentPosition);
-      
-      if (userEntity === 'fencerA') {
-        setEditFencerAName(userDisplayName); // User is fencerA
-        setEditFencerBName(getNameValue(getNameByEntity('fencerB'))); // Opponent is fencerB
-      } else {
-        setEditFencerAName(getNameValue(getNameByEntity('fencerA'))); // Opponent is fencerA
-        setEditFencerBName(userDisplayName); // User is fencerB
-      }
-    } else {
-      setEditFencerAName(getNameValue(getNameByEntity('fencerA'))); // Empty if placeholder
-      setEditFencerBName(getNameValue(getNameByEntity('fencerB'))); // Empty if placeholder
-    }
+    // Map inputs to the visible cards (left/right) so swapped positions stay correct
+    const leftEntity = getEntityAtPosition('left');
+    const rightEntity = getEntityAtPosition('right');
+    const leftIsUser = showUserProfile && toggleCardPosition === 'left';
+    const rightIsUser = showUserProfile && toggleCardPosition === 'right';
+
+    setEditFencerAName(leftIsUser ? userDisplayName : getNameValue(getNameByEntity(leftEntity))); // Left card
+    setEditFencerBName(rightIsUser ? userDisplayName : getNameValue(getNameByEntity(rightEntity))); // Right card
     setShowEditNamesPopup(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [fencerNames, showUserProfile, userDisplayName, toggleCardPosition, getEntityAtPosition, getNameByEntity]);
+  }, [getEntityAtPosition, getNameByEntity, showUserProfile, toggleCardPosition, userDisplayName]);
 
   const togglePlay = useCallback(async () => {
     if (isPlaying) {
@@ -4829,60 +4819,63 @@ export default function RemoteScreen() {
   }, [showUserProfile, toggleCardPosition, openEditNamesPopup, getEntityAtPosition]);
 
   const saveFencerName = useCallback(() => {
-    if (editFencerAName.trim() && editFencerBName.trim()) {
-      // Preserve user's name when toggle is on, based on card position
+    const trimmedLeft = editFencerAName.trim();
+    const trimmedRight = editFencerBName.trim();
+
+    if (trimmedLeft && trimmedRight) {
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+
+      // Preserve user's name when toggle is on, based on current card position
       if (showUserProfile) {
         const userPosition = toggleCardPosition;
-        const userEntity = getEntityAtPosition(userPosition);
-        const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
+        const opponentPosition = userPosition === 'left' ? 'right' : 'left';
+        const userEntity = userPosition === 'left' ? leftEntity : rightEntity;
+        const opponentEntity = opponentPosition === 'left' ? leftEntity : rightEntity;
+        const opponentName = opponentPosition === 'left' ? trimmedLeft : trimmedRight;
+
+        setFencerNames(prev => ({
+          ...prev,
+          [userEntity]: userDisplayName, // Keep user's name on their current card
+          [opponentEntity]: opponentName // Update the visible opponent card
+        }));
+      } else {
+        const newNames = {
+          ...fencerNames,
+          [leftEntity]: trimmedLeft,
+          [rightEntity]: trimmedRight
+        };
+        console.log('💾 [saveFencerName] Setting fencer names state:', newNames, {
+          currentState: fencerNames,
+          keepToggleOff: params.keepToggleOff
+        });
         
-        if (userEntity === 'fencerA') {
-          setFencerNames({
-            fencerA: userDisplayName, // Keep user's name
-            fencerB: editFencerBName.trim() // Save opponent's name
-          });
-        } else {
-          setFencerNames({
-            fencerA: editFencerAName.trim(), // Save opponent's name
-            fencerB: userDisplayName // Keep user's name
+        // Lock keep-toggle-off flows BEFORE state update to prevent overwrites
+        if (params.keepToggleOff === 'true') {
+          keepToggleOffLockedRef.current = true;
+          keepToggleOffLockedNamesRef.current = { ...newNames };
+          console.log('🔒 [saveFencerName] Locked keepToggleOff BEFORE state update', {
+            lockedNames: keepToggleOffLockedNamesRef.current
           });
         }
-    } else {
-      const newNames = {
-        fencerA: editFencerAName.trim(),
-        fencerB: editFencerBName.trim()
-      };
-      console.log('💾 [saveFencerName] Setting fencer names state:', newNames, {
-        currentState: fencerNames,
-        keepToggleOff: params.keepToggleOff
-      });
-      
-      // Lock keep-toggle-off flows BEFORE state update to prevent overwrites
-      if (params.keepToggleOff === 'true') {
-        keepToggleOffLockedRef.current = true;
-        keepToggleOffLockedNamesRef.current = { ...newNames };
-        console.log('🔒 [saveFencerName] Locked keepToggleOff BEFORE state update', {
-          lockedNames: keepToggleOffLockedNamesRef.current
-        });
+        
+        // Update state - this should trigger re-render
+        setFencerNames(newNames);
+        
+        // Verify state was set (in next tick)
+        setTimeout(() => {
+          console.log('✅ [saveFencerName] State update completed, verifying...', {
+            expected: newNames,
+            // Note: Can't read state here, but this confirms the update was called
+          });
+        }, 0);
       }
-      
-      // Update state - this should trigger re-render
-      setFencerNames(newNames);
-      
-      // Verify state was set (in next tick)
-      setTimeout(() => {
-        console.log('✅ [saveFencerName] State update completed, verifying...', {
-          expected: newNames,
-          // Note: Can't read state here, but this confirms the update was called
-        });
-      }, 0);
-    }
       setShowEditNamesPopup(false);
       setEditFencerAName('');
       setEditFencerBName('');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [editFencerAName, editFencerBName, showUserProfile, userDisplayName, toggleCardPosition, getEntityAtPosition, params.keepToggleOff]);
+  }, [editFencerAName, editFencerBName, fencerNames, showUserProfile, userDisplayName, toggleCardPosition, getEntityAtPosition, params.keepToggleOff]);
 
   const cancelEditName = useCallback(() => {
     setShowEditNamesPopup(false);

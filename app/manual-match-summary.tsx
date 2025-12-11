@@ -2,9 +2,9 @@ import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   Alert,
   ScrollView,
@@ -15,6 +15,7 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { analytics } from '@/lib/analytics';
 
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
@@ -72,6 +73,12 @@ export default function ManualMatchSummaryScreen() {
     fencer1Name: userDisplayName, // Use actual user name instead of "You"
     fencer2Name: opponentName as string || 'Alex',
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('ManualMatchSummary');
+    }, [])
+  );
 
   const handleDelete = () => {
     const matchId = params.matchId as string;

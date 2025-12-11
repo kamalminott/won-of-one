@@ -426,6 +426,36 @@ export const analytics = {
     }
   },
 
+  progressTargetModalOpen: (props?: { activity_type?: string; source?: 'splash' | 'edit' | 'completion' }) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('progress_target_modal_open', props || {});
+      __DEV__ && console.log('📊 PostHog: progress_target_modal_open', props || '');
+    } catch (error) {
+      console.error('PostHog progressTargetModalOpen error:', error);
+    }
+  },
+
+  progressTargetModalClose: (props: { saved: boolean; activity_type?: string; target_sessions?: number }) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('progress_target_modal_close', props);
+      __DEV__ && console.log('📊 PostHog: progress_target_modal_close', props);
+    } catch (error) {
+      console.error('PostHog progressTargetModalClose error:', error);
+    }
+  },
+
+  progressTargetModalAbandon: (props?: { activity_type?: string; time_open_seconds?: number }) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('progress_target_modal_abandon', props || {});
+      __DEV__ && console.log('📊 PostHog: progress_target_modal_abandon', props || '');
+    } catch (error) {
+      console.error('PostHog progressTargetModalAbandon error:', error);
+    }
+  },
+
   // Match History
   matchSelected: (props: { match_id: string }) => {
     if (!isAvailable || !posthogInstance) return;
@@ -621,6 +651,37 @@ export const analytics = {
       console.error('PostHog bugReport error:', error);
     }
   },
+
+  // Exception capture method
+  captureException: (error: Error, props?: Record<string, any>) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      // PostHog React Native v4 uses captureException method
+      if (typeof (posthogInstance as any).captureException === 'function') {
+        (posthogInstance as any).captureException(error, props);
+        __DEV__ && console.log('📊 PostHog: Exception captured', error.message, props || '');
+        // Flush immediately for exceptions
+        if (posthogInstance.flush) {
+          posthogInstance.flush();
+        }
+      } else {
+        // Fallback: capture as event if captureException not available
+        posthogInstance.capture('exception', {
+          error_message: error.message,
+          error_stack: error.stack || '',
+          error_name: error.name,
+          ...props,
+        });
+        __DEV__ && console.log('📊 PostHog: Exception captured (fallback)', error.message);
+        // Flush immediately for exceptions
+        if (posthogInstance.flush) {
+          posthogInstance.flush();
+        }
+      }
+    } catch (err) {
+      console.error('PostHog captureException error:', err);
+    }
+  },
 };
 
 // Export PostHog configuration for use in PostHogProvider
@@ -645,4 +706,13 @@ export const POSTHOG_CONFIG = {
   // Keyboard interactions may not be captured
   // Expo Go is NOT supported - requires development build
   // Note: properties are registered separately via posthog.register() in PostHogConnector
+  
+  // Error tracking configuration
+  errorTracking: {
+    autocapture: {
+      uncaughtExceptions: true,
+      unhandledRejections: true,
+      console: ['error', 'warn'],
+    },
+  },
 };
