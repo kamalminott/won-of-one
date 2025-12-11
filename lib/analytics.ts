@@ -590,6 +590,37 @@ export const analytics = {
       console.error('PostHog logout error:', error);
     }
   },
+
+  // Bug Reporting
+  bugReport: (props: {
+    description: string;
+    category?: 'crash' | 'ui' | 'feature' | 'performance' | 'sync' | 'other';
+    screenshot_uri?: string;
+    user_email?: string;
+    steps_to_reproduce?: string;
+    device_info?: {
+      os?: string;
+      os_version?: string;
+      device_model?: string;
+      app_version?: string;
+      build_number?: string;
+    };
+  }) => {
+    if (!isAvailable || !posthogInstance) return;
+    try {
+      posthogInstance.capture('bug_report', {
+        ...props,
+        timestamp: new Date().toISOString(),
+      });
+      __DEV__ && console.log('📊 PostHog: bug_report', props);
+      // Flush immediately for bug reports
+      if (posthogInstance.flush) {
+        posthogInstance.flush();
+      }
+    } catch (error) {
+      console.error('PostHog bugReport error:', error);
+    }
+  },
 };
 
 // Export PostHog configuration for use in PostHogProvider

@@ -1,5 +1,7 @@
 import { BackButton } from '@/components/BackButton';
+import { BugReportModal } from '@/components/BugReportModal';
 import { useAuth } from '@/contexts/AuthContext';
+import { accountService } from '@/lib/database';
 import { analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +9,7 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Safely import expo-updates (may not be available in dev mode)
 let Updates: typeof import('expo-updates') | null = null;
@@ -19,7 +22,7 @@ try {
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<{
     updateId: string | null;
@@ -50,6 +53,9 @@ export default function SettingsScreen() {
     willAutoRefresh: false,
     lastRefreshTime: null,
   });
+
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showBugReportModal, setShowBugReportModal] = useState(false);
 
   // Track screen view
   useFocusEffect(
@@ -228,9 +234,76 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteAccount = () => {
-    analytics.accountDeleted();
-    // TODO: Implement delete account logic
-    console.log('Delete account pressed');
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to delete your account? This action cannot be undone and will permanently remove all your data including matches, goals, and diary entries.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Yes, Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user?.id) {
+              Alert.alert('Error', 'No user found. Please try logging out and back in.');
+              return;
+            }
+
+            setIsDeletingAccount(true);
+            analytics.accountDeleted();
+
+            try {
+              // Delete all user data from database
+              const result = await accountService.deleteAccount(user.id);
+
+              if (!result.success) {
+                Alert.alert(
+                  'Error',
+                  `Failed to delete account: ${result.error || 'Unknown error'}. Please contact support.`
+                );
+                setIsDeletingAccount(false);
+                return;
+              }
+
+              // Clear AsyncStorage
+              try {
+                await AsyncStorage.clear();
+                console.log('✅ AsyncStorage cleared');
+              } catch (storageError) {
+                console.error('❌ Error clearing AsyncStorage:', storageError);
+                // Continue even if AsyncStorage clear fails
+              }
+
+              // Sign out the user
+              await signOut();
+
+              // Show success message and navigate to login
+              Alert.alert(
+                'Account Deleted',
+                'Your account and all associated data have been permanently deleted.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => {
+                      router.replace('/login');
+                    },
+                  },
+                ]
+              );
+            } catch (error: any) {
+              console.error('❌ Error during account deletion:', error);
+              Alert.alert(
+                'Error',
+                `An error occurred while deleting your account: ${error.message || 'Unknown error'}. Please contact support.`
+              );
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const styles = StyleSheet.create({
@@ -457,11 +530,18 @@ export default function SettingsScreen() {
             
             <View style={styles.separator} />
             
-            <TouchableOpacity style={styles.settingRow} onPress={handleDeleteAccount}>
+            <TouchableOpacity 
+              style={styles.settingRow} 
+              onPress={handleDeleteAccount}
+              disabled={isDeletingAccount}
+            >
               <View style={styles.iconContainer}>
                 <Ionicons name="trash-outline" size={width * 0.06} color="#FFFFFF" />
               </View>
               <Text style={styles.optionText}>Delete Account</Text>
+              {isDeletingAccount && (
+                <ActivityIndicator size="small" color="#6C5CE7" style={{ marginLeft: width * 0.02 }} />
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -582,7 +662,33 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Support Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Support</Text>
+          <View style={[styles.card, styles.matchDefaultsCard]}>
+            <TouchableOpacity 
+              style={[styles.settingRow, styles.settingRowLast]} 
+              onPress={() => {
+                analytics.capture('bug_report_opened');
+                setShowBugReportModal(true);
+              }}
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="bug" size={width * 0.06} color="#6C5CE7" />
+              </View>
+              <Text style={styles.optionText}>Report a Bug</Text>
+              <Ionicons name="chevron-forward" size={width * 0.05} color="#9D9D9D" />
+            </TouchableOpacity>
+          </View>
+        </View>
       </ScrollView>
+
+      {/* Bug Report Modal */}
+      <BugReportModal
+        visible={showBugReportModal}
+        onClose={() => setShowBugReportModal(false)}
+      />
     </View>
   );
 }

@@ -617,12 +617,11 @@ export default function MatchSummaryScreen() {
     : 0;
 
   // Fallbacks from DB (position-based)
-  const dbFencer1Score = match?.final_score || 0;      // left
-  const dbFencer2Score = match?.touches_against || 0;  // right
+  const hasKnownUser = isFencer1User || isFencer2User;
 
-  // Map DB totals to user/opponent orientation
-  const dbUserScore = isFencer1User ? dbFencer1Score : isFencer2User ? dbFencer2Score : dbFencer1Score;
-  const dbOpponentScore = isFencer1User ? dbFencer2Score : isFencer2User ? dbFencer1Score : dbFencer2Score;
+  // DB totals are stored in user/opponent orientation (final_score = user, touches_against = opponent)
+  const dbUserScore = match?.final_score ?? 0;
+  const dbOpponentScore = match?.touches_against ?? 0;
 
   // If progression totals don't match DB, prefer DB to avoid undercounted progressions (e.g., sabre deduping)
   const progressionMatchesDb = progressionUserTotal === dbUserScore && progressionOpponentTotal === dbOpponentScore;
@@ -632,8 +631,24 @@ export default function MatchSummaryScreen() {
   const opponentScoreFinal = progressionMatchesDb && progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
 
   // Map to header positions (fencer_1 = left, fencer_2 = right)
-  const fencer1ScoreFinal = isFencer1User ? userScoreFinal : opponentScoreFinal;
-  const fencer2ScoreFinal = isFencer1User ? opponentScoreFinal : userScoreFinal;
+  const fencer1ScoreFinal = hasKnownUser
+    ? (isFencer1User ? userScoreFinal : opponentScoreFinal)
+    : (match?.final_score ?? userScoreFinal);
+  const fencer2ScoreFinal = hasKnownUser
+    ? (isFencer1User ? opponentScoreFinal : userScoreFinal)
+    : (match?.touches_against ?? opponentScoreFinal);
+
+  const userPosition = isFencer1User ? 'left' : isFencer2User ? 'right' : 'left';
+  const userLabelForCard = isFencer1User
+    ? getFirstName(match?.fencer_1_name) || 'Fencer 1'
+    : isFencer2User
+    ? getFirstName(match?.fencer_2_name) || 'Fencer 2'
+    : getFirstName(match?.fencer_1_name) || 'Fencer 1';
+  const opponentLabelForCard = isFencer1User
+    ? getFirstName(match?.fencer_2_name) || 'Fencer 2'
+    : isFencer2User
+    ? getFirstName(match?.fencer_1_name) || 'Fencer 1'
+    : getFirstName(match?.fencer_2_name) || 'Fencer 2';
 
   const matchData = match ? {
     id: match.match_id,
@@ -876,8 +891,8 @@ export default function MatchSummaryScreen() {
             onCancelMatch={handleCancelMatch}
             onSaveMatch={handleSaveMatch}
             scoreProgression={scoreProgression}
-            userScore={matchData?.fencer1Score || 0}
-            opponentScore={matchData?.fencer2Score || 0}
+            userScore={userScoreFinal}
+            opponentScore={opponentScoreFinal}
             bestRun={bestRun}
             yellowCards={match?.yellow_cards || 0}
             redCards={match?.red_cards || 0}
@@ -886,17 +901,10 @@ export default function MatchSummaryScreen() {
             notes={notes}
             onNotesChange={handleNotesChange}
             onNotesPress={handleNotesPress}
-            userLabel={getFirstName(match?.fencer_1_name) || 'Fencer 1'}
-            opponentLabel={getFirstName(match?.fencer_2_name) || 'Fencer 2'}
+            userLabel={userLabelForCard}
+            opponentLabel={opponentLabelForCard}
             weaponType={match?.weapon_type}
-            userPosition={(() => {
-              const position = match?.fencer_1_name && userName && normalizeName(match.fencer_1_name) === normalizeName(userName)
-                ? 'left'
-                : match?.fencer_2_name && userName && normalizeName(match.fencer_2_name) === normalizeName(userName)
-                ? 'right'
-                : 'left';
-              return position;
-            })()}
+            userPosition={userPosition}
           />
       </ScrollView>
 

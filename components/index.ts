@@ -1,3 +1,4 @@
+export { BugReportModal } from './BugReportModal';
 export { default as BounceBackTimeCard } from './BounceBackTimeCard';
 export { Collapsible } from './Collapsible';
 export { DefeatPill } from './DefeatPill';
@@ -26,6 +27,7 @@ export { default as SwipeToDeleteCard } from './SwipeToDeleteCard';
 export { ThemedText } from './ThemedText';
 export { ThemedView } from './ThemedView';
 export { default as TimeLeadingCard } from './TimeLeadingCard';
+export { default as ScoreBasedLeadingCard } from './ScoreBasedLeadingCard';
 export { ToggleSwitch } from './ToggleSwitch';
 export { TouchesByPeriodChart } from './TouchesByPeriodChart';
 export { TouchTimelineChart } from './TouchTimelineChart';
