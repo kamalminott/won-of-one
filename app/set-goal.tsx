@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 
 import { GoalCard } from '@/components/GoalCard';
@@ -8,12 +8,19 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService } from '@/lib/database';
 import { SimpleGoal } from '@/types/database';
+import { analytics } from '@/lib/analytics';
 
 export default function SetGoalScreen() {
   const { width, height } = useWindowDimensions();
   const { user, loading } = useAuth();
   const [goals, setGoals] = useState<SimpleGoal[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('SetGoal');
+    }, [])
+  );
 
   // Fetch user's goals when component mounts
   useEffect(() => {

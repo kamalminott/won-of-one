@@ -36,6 +36,11 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   const [showWeekDropdown, setShowWeekDropdown] = useState(false);
   const [sessionCount, setSessionCount] = useState(3);
   
+  // Track modal state for analytics
+  const [modalOpenTime, setModalOpenTime] = useState<number | null>(null);
+  const [modalSource, setModalSource] = useState<'splash' | 'edit' | 'completion' | 'unknown'>('unknown');
+  const [modalSaved, setModalSaved] = useState(false);
+  
   // Counter state for animated text
   const [counterText, setCounterText] = useState('1');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -495,8 +500,9 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         
         // Update the activity type in the component state
         setSelectedActivity(selectedActivity);
-        // Close modal first for immediate feedback
-        setShowModal(false);
+        // Close modal with tracking (saved = true)
+        setModalSaved(true);
+        closeModalWithTracking(true, sessionCount);
         setShowEditModal(false);
         // Refresh progress in background
         await fetchProgress();
@@ -527,9 +533,42 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     
     if (result) {
       await fetchProgress();
-      setShowModal(false);
+      setModalSaved(true);
+      closeModalWithTracking(true, 0); // Clearing target
       onDataUpdate?.();
     }
+  };
+
+  // Helper function to close modal with tracking
+  const closeModalWithTracking = (saved: boolean, targetSessions?: number) => {
+    if (modalOpenTime) {
+      const timeOpenSeconds = Math.floor((Date.now() - modalOpenTime) / 1000);
+      
+      if (saved) {
+        analytics.progressTargetModalClose({
+          saved: true,
+          activity_type: selectedActivity,
+          target_sessions: targetSessions || sessionCount,
+        });
+      } else {
+        // Track abandonment if modal was open for more than 2 seconds
+        if (timeOpenSeconds > 2) {
+          analytics.progressTargetModalAbandon({
+            activity_type: selectedActivity,
+            time_open_seconds: timeOpenSeconds,
+          });
+        }
+        analytics.progressTargetModalClose({
+          saved: false,
+          activity_type: selectedActivity,
+        });
+      }
+    }
+    
+    setShowModal(false);
+    setModalOpenTime(null);
+    setModalSaved(false);
+    setModalSource('unknown');
   };
 
   // Handle edit target button press
@@ -537,6 +576,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     if (current > 0) {
       setShowWarningDialog(true);
     } else {
+      setModalSource('edit');
+      setModalSaved(false);
+      setModalOpenTime(Date.now());
+      analytics.progressTargetModalOpen({ 
+        activity_type: selectedActivity, 
+        source: 'edit' 
+      });
       setShowEditModal(true);
     }
   };
@@ -739,6 +785,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   const handleSetCustomTarget = () => {
     console.log('🎯 User selected: Set custom target');
     setShowCompletionModal(false);
+    setModalSource('completion');
+    setModalSaved(false);
+    setModalOpenTime(Date.now());
+    analytics.progressTargetModalOpen({ 
+      activity_type: selectedActivity, 
+      source: 'completion' 
+    });
     setShowModal(true);
   };
 
@@ -1789,6 +1842,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                 style={styles.setTargetButton}
                 onPress={() => {
                   setSelectedActivity(activityType); // Reset to default activity type
+                  setModalSource('splash');
+                  setModalSaved(false);
+                  setModalOpenTime(Date.now());
+                  analytics.progressTargetModalOpen({ 
+                    activity_type: activityType, 
+                    source: 'splash' 
+                  });
                   setShowModal(true);
                 }}
                 activeOpacity={0.8}
@@ -1813,7 +1873,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         visible={showModal}
         animationType="slide"
         presentationStyle="overFullScreen"
-        onRequestClose={() => setShowModal(false)}
+        onRequestClose={() => closeModalWithTracking(false)}
       >
         <TouchableOpacity 
           style={styles.modalContainer}
@@ -1827,7 +1887,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               style={[styles.headerButton, { position: 'absolute', left: width * 0.04, top: height * 0.085 }]}
-              onPress={() => setShowModal(false)}
+              onPress={() => closeModalWithTracking(false)}
             >
               <Ionicons name="arrow-back" size={width * 0.048} color="#FFFFFF" />
             </TouchableOpacity>
@@ -1849,7 +1909,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               <Text style={styles.sectionTitle}>Set Weekly Target</Text>
               <TouchableOpacity 
                 style={styles.closeButton}
-                onPress={() => setShowModal(false)}
+                onPress={() => closeModalWithTracking(false)}
               >
                 <Ionicons name="close" size={width * 0.04} color="#FFFFFF" />
               </TouchableOpacity>

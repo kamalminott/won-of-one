@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useState, useCallback } from 'react';
 import {
   SafeAreaView,
   StatusBar,
@@ -15,11 +15,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
+import { analytics } from '@/lib/analytics';
 
 export default function ForgotPasswordScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('jondoe@gmail.com');
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('ForgotPassword');
+    }, [])
+  );
 
   const handleBack = () => {
     router.back();

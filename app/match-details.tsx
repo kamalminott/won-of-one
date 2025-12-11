@@ -1,6 +1,6 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useCallback } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import { TouchTimelineChart } from '@/components/TouchTimelineChart';
 import { useAuth } from '@/contexts/AuthContext';
 
 import { Colors } from '@/constants/Colors';
+import { analytics } from '@/lib/analytics';
 
 interface MatchDetailsProps {
   matchId: string;
@@ -40,6 +41,12 @@ export default function MatchDetailsScreen() {
     matchType: params.matchType as string || 'Training',
     location: params.location as string || 'Metro Field House'
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('MatchDetails');
+    }, [])
+  );
 
   const handleBack = () => {
     router.back();
