@@ -474,26 +474,84 @@ export const offlineRemoteService = {
 
           // Check for duplicate event before creating
           if (matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
-            const { data: existingEvent, error: checkError } = await supabase
+            // #region agent log
+            console.log('[DEBUG] Duplicate check query params:', {
+              matchId,
+              match_time_elapsed: event.match_time_elapsed,
+              scoring_user_name: event.scoring_user_name,
+              event_type: event.event_type,
+              event_time: event.event_time
+            });
+            // #endregion
+            
+            // Use limit(2) to detect multiple matches instead of maybeSingle()
+            const { data: existingEvents, error: checkError } = await supabase
               .from('match_event')
               .select('match_event_id, event_time, timestamp')
               .eq('match_id', matchId)
               .eq('match_time_elapsed', event.match_time_elapsed)
               .eq('scoring_user_name', event.scoring_user_name)
               .eq('event_type', event.event_type)
-              .maybeSingle();
+              .limit(2);
+            
+            // #region agent log
+            console.log('[DEBUG] Duplicate check query result:', {
+              checkError: checkError ? { code: checkError.code, message: checkError.message, details: checkError.details } : null,
+              existingEventsCount: existingEvents?.length || 0,
+              existingEvents: existingEvents?.map(e => ({ id: e.match_event_id, event_time: e.event_time, timestamp: e.timestamp })) || []
+            });
+            // #endregion
             
             if (checkError) {
               console.error(`❌ Error checking for duplicate event:`, checkError);
+              // #region agent log
+              console.log('[DEBUG] Duplicate check error path:', {
+                errorCode: checkError.code,
+                errorMessage: checkError.message
+              });
+              // #endregion
               // keep event; retry later
               continue;
-            } else if (existingEvent) {
-              // Only treat as duplicate if event_time matches to the second as well
-              const existingEventTime = (existingEvent as any)?.event_time;
+            } else if (existingEvents && existingEvents.length > 0) {
+              // Handle multiple matches - check if any match by event_time
+              const existingEvent = existingEvents[0];
+              
+              // #region agent log
+              console.log('[DEBUG] Multiple matches detected:', {
+                matchesCount: existingEvents.length,
+                firstMatch: existingEvent,
+                allMatches: existingEvents
+              });
+              // #endregion
+              
+              // If multiple matches found, check if any match by event_time
+              let matchingEvent = null;
               const incomingEventTime = event.event_time || null;
+              
+              if (incomingEventTime) {
+                // Try to find exact match by event_time
+                matchingEvent = existingEvents.find(e => e.event_time === incomingEventTime);
+              }
+              
+              // If no exact match by event_time, use first match
+              if (!matchingEvent) {
+                matchingEvent = existingEvent;
+              }
+              
+              // Only treat as duplicate if event_time matches to the second as well
+              const existingEventTime = (matchingEvent as any)?.event_time;
               const sameEventTime = existingEventTime && incomingEventTime
                 ? existingEventTime === incomingEventTime
                 : false;
+              
+              // #region agent log
+              console.log('[DEBUG] Duplicate check comparison:', {
+                sameEventTime,
+                existingEventTime,
+                incomingEventTime,
+                matchesCount: existingEvents.length
+              });
+              // #endregion
 
               if (!sameEventTime) {
                 console.log(`ℹ️ Same elapsed/scorer found but different event_time, allowing insert`, {

@@ -1,4 +1,4 @@
-import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, TimeLeadingCard } from '@/components';
+import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, ScoreBasedLeadingCard, TimeLeadingCard } from '@/components';
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
@@ -43,6 +43,11 @@ export default function NeutralMatchSummary() {
     fencer2: number;
     tied: number;
   }>({ fencer1: 0, fencer2: 0, tied: 100 });
+  const [scoreBasedLeading, setScoreBasedLeading] = useState<{
+    fencer1: number;
+    fencer2: number;
+    tied: number;
+  }>({ fencer1: 0, fencer2: 0, tied: 100 });
   const [bounceBackTimes, setBounceBackTimes] = useState<{
     fencer1: number;
     fencer2: number;
@@ -69,10 +74,10 @@ export default function NeutralMatchSummary() {
   // Function to calculate longest runs from match events
   const calculateLongestRuns = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
-      // Get match data to get final fencer names (handles swaps)
+      // Get match data to get final fencer names (handles swaps) and weapon type
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name')
+        .select('fencer_1_name, fencer_2_name, weapon_type')
         .eq('match_id', matchId)
         .single();
 
@@ -84,6 +89,10 @@ export default function NeutralMatchSummary() {
       // Use final fencer names from database (reflects positions after swaps)
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+      
+      // Check if this is an epee match
+      const weaponType = (matchData.weapon_type || '').toLowerCase();
+      const isEpee = weaponType === 'epee';
 
       const { data: matchEvents, error } = await supabase
         .from('match_event')
@@ -118,6 +127,19 @@ export default function NeutralMatchSummary() {
         // Skip cancelled events
         if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
           continue;
+        }
+
+        // For epee matches, check if this is a double hit
+        if (isEpee) {
+          const eventType = (event.event_type || '').toLowerCase();
+          const isDoubleHit = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+          
+          if (isDoubleHit) {
+            // Double hit breaks the streak for both fencers
+            fencer1CurrentRun = 0;
+            fencer2CurrentRun = 0;
+            continue; // Skip to next event
+          }
         }
 
         // Determine which fencer scored using entity-based logic (handles swaps)
@@ -174,7 +196,9 @@ export default function NeutralMatchSummary() {
       console.log('📊 Calculated longest runs:', {
         fencer1: fencer1LongestRun,
         fencer2: fencer2LongestRun,
-        totalEvents: matchEvents.length
+        totalEvents: matchEvents.length,
+        isEpee,
+        weaponType
       });
 
       return {
@@ -380,6 +404,202 @@ export default function NeutralMatchSummary() {
     return normalized;
   };
 
+  // Function to calculate score-based leading percentages from match events (for sabre)
+  const calculateScoreBasedLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
+    try {
+      // Get match data to get final fencer names (handles swaps)
+      const { data: matchData, error: matchError } = await supabase
+        .from('match')
+        .select('fencer_1_name, fencer_2_name')
+        .eq('match_id', matchId)
+        .single();
+
+      if (matchError || !matchData) {
+        console.error('Error fetching match data for score-based leading:', matchError);
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      // Use final fencer names from database (reflects positions after swaps)
+      const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
+      const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+      
+      console.log('🔍 SCORE-BASED LEADING DEBUG - Starting calculation for matchId:', matchId);
+      console.log('🔍 SCORE-BASED LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
+
+      // If sabre, reuse the already deduped/ordered progression to avoid duplicate/timestamp issues
+      const weaponType = (matchData as any)?.weapon_type || params.weaponType || '';
+      const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
+      if (isSabre) {
+        const progression = await matchService.calculateAnonymousScoreProgression(matchId);
+
+        // Convert progression points into a single ordered list of scoring events
+        const parseTimeToSeconds = (label: string) => {
+          const cleaned = label.replace(/[()]/g, '');
+          const [m, s] = cleaned.split(':').map(Number);
+          if (Number.isNaN(m) || Number.isNaN(s)) return 0;
+          return m * 60 + s;
+        };
+
+        const combined = [
+          ...progression.fencer1Data.map(p => ({ time: parseTimeToSeconds(p.x), scorer: finalFencer1Name, y: p.y })),
+          ...progression.fencer2Data.map(p => ({ time: parseTimeToSeconds(p.x), scorer: finalFencer2Name, y: p.y }))
+        ].sort((a, b) => a.time - b.time);
+
+        if (combined.length === 0) {
+          return { fencer1: 0, fencer2: 0, tied: 100 };
+        }
+
+        let f1Score = 0;
+        let f2Score = 0;
+        let f1Lead = 0;
+        let f2Lead = 0;
+        let ties = 0;
+
+        for (const ev of combined) {
+          if (ev.scorer === finalFencer1Name) {
+            f1Score = Math.max(f1Score, ev.y);
+          } else {
+            f2Score = Math.max(f2Score, ev.y);
+          }
+          if (f1Score > f2Score) f1Lead++;
+          else if (f2Score > f1Score) f2Lead++;
+          else ties++;
+        }
+
+        const total = f1Lead + f2Lead + ties;
+        const f1Pct = total ? Math.round((f1Lead / total) * 100) : 0;
+        const f2Pct = total ? Math.round((f2Lead / total) * 100) : 0;
+        const tiePct = 100 - f1Pct - f2Pct;
+
+        console.log('📊 SCORE-BASED LEADING (sabre via progression):', {
+          fencer1: f1Pct,
+          fencer2: f2Pct,
+          tied: tiePct,
+          counts: { f1Lead, f2Lead, ties },
+          totalEvents: total,
+          finalScores: { f1Score, f2Score }
+        });
+
+        return { fencer1: f1Pct, fencer2: f2Pct, tied: tiePct };
+      }
+      
+      // For sabre, order by timestamp (not match_time_elapsed which is NULL)
+      const { data: matchEventsRaw, error } = await supabase
+        .from('match_event')
+        .select('scoring_user_name, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .eq('match_id', matchId)
+        .order('timestamp', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for score-based leading:', error);
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      const matchEvents = matchEventsRaw || [];
+      console.log('🔍 SCORE-BASED LEADING DEBUG - Match events found:', matchEvents?.length || 0);
+
+      if (!matchEvents || matchEvents.length === 0) {
+        console.log('🔍 SCORE-BASED LEADING DEBUG - No events found, returning default values');
+        return { fencer1: 0, fencer2: 0, tied: 100 };
+      }
+
+      // Build cancelled event IDs set
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
+      let fencer1Score = 0;
+      let fencer2Score = 0;
+      let fencer1LeadingCount = 0;
+      let fencer2LeadingCount = 0;
+      let tiedCount = 0;
+
+      // Process each scoring event chronologically
+      for (const event of matchEvents) {
+        // Skip cancelled events
+        if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
+          continue;
+        }
+        
+        // Determine which fencer scored using entity-based logic (handles swaps)
+        let isFencer1Scored = false;
+        
+        if (event.fencer_1_name && event.fencer_2_name) {
+          // Use event's stored fencer names to determine which entity scored
+          if (event.scoring_user_name === event.fencer_1_name) {
+            // Fencer 1 scored at the time of event
+            if (event.fencer_1_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else if (event.fencer_1_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else if (event.scoring_user_name === event.fencer_2_name) {
+            // Fencer 2 scored at the time of event
+            if (event.fencer_2_name === finalFencer2Name) {
+              isFencer1Scored = false;
+            } else if (event.fencer_2_name === finalFencer1Name) {
+              isFencer1Scored = true;
+            } else {
+              isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+            }
+          } else {
+            isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+          }
+        } else {
+          isFencer1Scored = event.scoring_user_name === finalFencer1Name;
+        }
+        
+        // Update scores FIRST
+        if (isFencer1Scored) {
+          fencer1Score++;
+        } else {
+          fencer2Score++;
+        }
+        
+        // Determine who is leading AFTER this event (based on updated scores)
+        if (fencer1Score > fencer2Score) {
+          fencer1LeadingCount++;
+        } else if (fencer2Score > fencer1Score) {
+          fencer2LeadingCount++;
+        } else {
+          tiedCount++;
+        }
+      }
+
+      // Calculate percentages
+      const totalEvents = fencer1LeadingCount + fencer2LeadingCount + tiedCount;
+      const fencer1Percentage = totalEvents > 0 ? Math.round((fencer1LeadingCount / totalEvents) * 100) : 0;
+      const fencer2Percentage = totalEvents > 0 ? Math.round((fencer2LeadingCount / totalEvents) * 100) : 0;
+      const tiedPercentage = 100 - fencer1Percentage - fencer2Percentage;
+
+      console.log('📊 Calculated score-based leading:', {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage,
+        totalEvents,
+        fencer1LeadingCount,
+        fencer2LeadingCount,
+        tiedCount,
+        finalFencer1Score: fencer1Score,
+        finalFencer2Score: fencer2Score
+      });
+
+      return {
+        fencer1: fencer1Percentage,
+        fencer2: fencer2Percentage,
+        tied: tiedPercentage
+      };
+    } catch (error) {
+      console.error('Error calculating score-based leading:', error);
+      return { fencer1: 0, fencer2: 0, tied: 100 };
+    }
+  };
+
   // Function to calculate time leading percentages from match events
   const calculateTimeLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
@@ -536,10 +756,10 @@ export default function NeutralMatchSummary() {
   // Function to calculate lead changes from match events
   const calculateLeadChanges = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
-      // Get match data to get final fencer names (handles swaps)
+      // Get match data to get final fencer names and weapon type (handles swaps)
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name')
+        .select('fencer_1_name, fencer_2_name, weapon_type')
         .eq('match_id', matchId)
         .single();
 
@@ -551,19 +771,77 @@ export default function NeutralMatchSummary() {
       // Use final fencer names from database (reflects positions after swaps)
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
+      
+      // Check if this is a sabre match
+      const weaponType = matchData.weapon_type || 'foil';
+      const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
 
+      // For sabre, reuse the already-deduped progression to avoid duplicate/queued event ordering issues
+      if (isSabre) {
+        const progression = await matchService.calculateAnonymousScoreProgression(matchId);
+        const parseTime = (label: string) => {
+          const cleaned = label.replace(/[()]/g, '');
+          const [m, s] = cleaned.split(':').map(Number);
+          if (Number.isNaN(m) || Number.isNaN(s)) return 0;
+          return m * 60 + s;
+        };
+
+        const events = [
+          ...progression.fencer1Data.map(p => ({ time: parseTime(p.x), scorer: finalFencer1Name, y: p.y })),
+          ...progression.fencer2Data.map(p => ({ time: parseTime(p.x), scorer: finalFencer2Name, y: p.y })),
+        ].sort((a, b) => a.time - b.time);
+
+        let f1Score = 0;
+        let f2Score = 0;
+        let lastLeader: string | null = null;
+        let leadChanges = 0;
+
+        for (const ev of events) {
+          if (ev.scorer === finalFencer1Name) {
+            f1Score = Math.max(f1Score, ev.y);
+          } else {
+            f2Score = Math.max(f2Score, ev.y);
+          }
+
+          let newLeader: string | null = null;
+          if (f1Score > f2Score) newLeader = finalFencer1Name;
+          else if (f2Score > f1Score) newLeader = finalFencer2Name;
+
+          if (newLeader && lastLeader && newLeader !== lastLeader) {
+            leadChanges++;
+          }
+          if (newLeader) lastLeader = newLeader;
+        }
+
+        console.log('📊 Calculated sabre lead changes from progression:', leadChanges);
+        return leadChanges;
+      }
+
+      // For sabre, order by timestamp; for foil/epee, order by match_time_elapsed
       const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, match_time_elapsed, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
         .eq('match_id', matchId)
-        .order('match_time_elapsed', { ascending: true });
+        .order(isSabre ? 'timestamp' : 'match_time_elapsed', { ascending: true });
 
       if (error) {
         console.error('Error fetching match events for lead changes:', error);
         return 0;
       }
 
-      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
+      // For sabre, sort by timestamp directly; for foil/epee, use normalizeEventsForTiming
+      let matchEvents;
+      if (isSabre) {
+        // For sabre, sort by timestamp (match_time_elapsed is NULL)
+        matchEvents = (matchEventsRaw || []).sort((a, b) => {
+          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return aTime - bTime;
+        });
+      } else {
+        // For foil/epee, use normalizeEventsForTiming
+        matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
+      }
 
       if (!matchEvents || matchEvents.length === 0) {
         return 0;
@@ -708,6 +986,43 @@ export default function NeutralMatchSummary() {
             return;
           }
           
+          // Helper to clamp padded progressions to the scores shown in the header/periods
+          const clampToHeaderTotals = (
+            progression: { userData: { x: string; y: number }[]; opponentData: { x: string; y: number }[] },
+            headerFencer1Score: number,
+            headerFencer2Score: number
+          ) => {
+            const userLast = progression.userData[progression.userData.length - 1];
+            const oppLast = progression.opponentData[progression.opponentData.length - 1];
+
+            const userClamped = userLast && userLast.y > headerFencer1Score;
+            const oppClamped = oppLast && oppLast.y > headerFencer2Score;
+
+            if (userClamped) {
+              console.log('📉 [NEUTRAL SUMMARY] Suppressing padded user progression to header total', {
+                from: userLast.y,
+                to: headerFencer1Score,
+                headerFencer1Score
+              });
+              progression.userData = [
+                ...progression.userData.slice(0, -1),
+                { ...userLast, y: headerFencer1Score }
+              ];
+            }
+            if (oppClamped) {
+              console.log('📉 [NEUTRAL SUMMARY] Suppressing padded opponent progression to header total', {
+                from: oppLast.y,
+                to: headerFencer2Score,
+                headerFencer2Score
+              });
+              progression.opponentData = [
+                ...progression.opponentData.slice(0, -1),
+                { ...oppLast, y: headerFencer2Score }
+              ];
+            }
+            return progression;
+          };
+
           // Online match - fetch from database
           // The database should have the updated fencer names reflecting any swaps
           // Add a small delay to ensure database update has propagated (if just completed)
@@ -738,6 +1053,8 @@ export default function NeutralMatchSummary() {
 
             if (matchPeriods && matchPeriods.length > 0) {
               console.log('📊 Found match periods:', matchPeriods);
+              let localFinalFencer1Score = 0;
+              let localFinalFencer2Score = 0;
               
               // Initialize with zeros
               // Note: Chart component expects 'user' and 'opponent', but for neutral matches these represent fencer1 and fencer2
@@ -753,9 +1070,11 @@ export default function NeutralMatchSummary() {
               // Get final period scores for header display (position-based, reflects swaps)
               const finalPeriod = sortedPeriods[sortedPeriods.length - 1];
               if (finalPeriod) {
+                localFinalFencer1Score = finalPeriod.fencer_1_score || 0;
+                localFinalFencer2Score = finalPeriod.fencer_2_score || 0;
                 setFinalPeriodScores({
-                  fencer1Score: finalPeriod.fencer_1_score || 0,
-                  fencer2Score: finalPeriod.fencer_2_score || 0,
+                  fencer1Score: localFinalFencer1Score,
+                  fencer2Score: localFinalFencer2Score,
                 });
                 console.log('📊 Final period scores for header:', {
                   fencer1Score: finalPeriod.fencer_1_score,
@@ -861,9 +1180,19 @@ export default function NeutralMatchSummary() {
                 console.log('📊 Using actual period scores from database:', touchesByPeriodData);
                 setTouchesByPeriod(touchesByPeriodData);
               }
-              
               // Also fetch score progression data
               if (data && data.fencer_1_name) {
+                const headerFencer1Score =
+                  localFinalFencer1Score ||
+                  finalPeriodScores?.fencer1Score ||
+                  data?.final_score ||
+                  parseInt(fencer1Score as string || '0');
+                const headerFencer2Score =
+                  localFinalFencer2Score ||
+                  finalPeriodScores?.fencer2Score ||
+                  data?.touches_against ||
+                  parseInt(fencer2Score as string || '0');
+
                 try {
                   const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
                     matchId as string
@@ -880,15 +1209,15 @@ export default function NeutralMatchSummary() {
                     fencer1DataLength: calculatedScoreProgression.fencer1Data.length,
                     fencer2DataLength: calculatedScoreProgression.fencer2Data.length
                   });
-                  
+
                   if (hasFencer1Data && hasFencer2Data) {
                     console.log('📈 Using real anonymous score progression data from database');
                     // Convert to the format expected by the chart component
                     // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
-                    const scoreProgression = {
+                    const scoreProgression = clampToHeaderTotals({
                       userData: calculatedScoreProgression.fencer1Data, // fencer1 -> userData
                       opponentData: calculatedScoreProgression.fencer2Data // fencer2 -> opponentData
-                    };
+                    }, headerFencer1Score, headerFencer2Score);
                     setScoreProgression(scoreProgression);
                   } else {
                     console.log('📈 Anonymous score progression data incomplete, using real data where available');
@@ -919,10 +1248,10 @@ export default function NeutralMatchSummary() {
                     }
                     
                     // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
-                    const mixedScoreProgression = {
+                    const mixedScoreProgression = clampToHeaderTotals({
                       userData: finalFencer1Data, // fencer1 -> userData
                       opponentData: finalFencer2Data // fencer2 -> opponentData
-                    };
+                    }, headerFencer1Score, headerFencer2Score);
                     
                     console.log('📈 Using mixed anonymous score progression (real + fallback):', mixedScoreProgression);
                     setScoreProgression(mixedScoreProgression);
@@ -938,7 +1267,7 @@ export default function NeutralMatchSummary() {
                   const finalTime = `${Math.floor(matchDurationNum/60)}:${(matchDurationNum%60).toString().padStart(2, '0')}`;
                   
                   // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
-                  const fallbackScoreProgression = {
+                  const fallbackScoreProgression = clampToHeaderTotals({
                     userData: [
                       { x: "0:00", y: 0 },
                       { x: finalTime, y: fencer1ScoreNum } // fencer1 -> userData
@@ -947,7 +1276,7 @@ export default function NeutralMatchSummary() {
                       { x: "0:00", y: 0 },
                       { x: finalTime, y: fencer2ScoreNum } // fencer2 -> opponentData
                     ]
-                  };
+                  }, headerFencer1Score, headerFencer2Score);
                   
                   console.log('📈 ERROR: Simple fallback score progression:', fallbackScoreProgression);
                   setScoreProgression(fallbackScoreProgression);
@@ -979,22 +1308,43 @@ export default function NeutralMatchSummary() {
           }
         }
 
-        // Calculate lead changes, time leading, bounce back times, and longest runs
+        // Calculate lead changes, time leading (or score-based leading for sabre), bounce back times, and longest runs
         if (matchId) {
           try {
             // Get final fencer names from database (handles swaps)
             const finalFencer1Name = matchData?.fencer_1_name || (fencer1Name as string) || 'Fencer 1';
             const finalFencer2Name = matchData?.fencer_2_name || (fencer2Name as string) || 'Fencer 2';
             
+            // Check if this is a sabre match
+            const weaponType = matchData?.weapon_type || 'foil';
+            const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
+            
             const calculatedLeadChanges = await calculateLeadChanges(matchId as string, finalFencer1Name, finalFencer2Name);
             setLeadChanges(calculatedLeadChanges);
             
-            const calculatedTimeLeading = await calculateTimeLeading(matchId as string, finalFencer1Name, finalFencer2Name);
-            console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
-            setTimeLeading(calculatedTimeLeading);
+            // For sabre, calculate score-based leading; for foil/epee, calculate time leading
+            if (isSabre) {
+              const calculatedScoreBasedLeading = await calculateScoreBasedLeading(matchId as string, finalFencer1Name, finalFencer2Name);
+              console.log('🔍 SCORE-BASED LEADING DEBUG - Setting state with calculated values:', calculatedScoreBasedLeading);
+              setScoreBasedLeading(calculatedScoreBasedLeading);
+              // Set time leading to default for sabre (won't be displayed)
+              setTimeLeading({ fencer1: 0, fencer2: 0, tied: 100 });
+            } else {
+              const calculatedTimeLeading = await calculateTimeLeading(matchId as string, finalFencer1Name, finalFencer2Name);
+              console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
+              setTimeLeading(calculatedTimeLeading);
+              // Set score-based leading to default for foil/epee (won't be displayed)
+              setScoreBasedLeading({ fencer1: 0, fencer2: 0, tied: 100 });
+            }
             
-            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string, finalFencer1Name, finalFencer2Name);
-            setBounceBackTimes(calculatedBounceBackTimes);
+            // Bounce back times only for foil/epee (time-based metric)
+            if (!isSabre) {
+              const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string, finalFencer1Name, finalFencer2Name);
+              setBounceBackTimes(calculatedBounceBackTimes);
+            } else {
+              // Set to default for sabre (won't be displayed)
+              setBounceBackTimes({ fencer1: 0, fencer2: 0 });
+            }
             
             const calculatedLongestRuns = await calculateLongestRuns(matchId as string, finalFencer1Name, finalFencer2Name);
             setLongestRuns(calculatedLongestRuns);
@@ -1116,6 +1466,10 @@ export default function NeutralMatchSummary() {
   const matchDurationNum = parseInt(matchDuration as string) || 0;
   const fencer1CardsData = fencer1Cards ? JSON.parse(fencer1Cards as string) : { yellow: 0, red: 0 };
   const fencer2CardsData = fencer2Cards ? JSON.parse(fencer2Cards as string) : { yellow: 0, red: 0 };
+  
+  // Check if this is a sabre match
+  const weaponType = matchData?.weapon_type || 'foil';
+  const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
 
   // Extract first names only - use final names from database
   const fencer1FirstName = finalFencer1Name.split(' ')[0];
@@ -1200,7 +1554,9 @@ export default function NeutralMatchSummary() {
                 {/* Score Container */}
                 <View style={styles.scoreContainer}>
                   <Text style={styles.scoreText}>{fencer1ScoreDisplay} - {fencer2ScoreDisplay}</Text>
-                  <Text style={styles.durationText}>Duration: {formatTime(matchDurationNum)}</Text>
+                  <Text style={styles.durationText}>
+                    Duration: {isSabre ? 'N/A' : formatTime(matchDurationNum)}
+                  </Text>
                   <View style={styles.trophyPill}>
                     <Ionicons name="trophy-outline" size={16} color="#FFFFFF" />
                     <Text 
@@ -1253,15 +1609,17 @@ export default function NeutralMatchSummary() {
               </View>
             </View>
 
-            <View style={styles.metaItem}>
-              <View style={styles.metaIcon}>
-                <Ionicons name="time" size={20} color="white" />
+            {!isSabre && (
+              <View style={styles.metaItem}>
+                <View style={styles.metaIcon}>
+                  <Ionicons name="time" size={20} color="white" />
+                </View>
+                <View style={styles.metaContent}>
+                  <Text style={styles.metaValue}>{formatTime(matchDurationNum)}</Text>
+                  <Text style={styles.metaLabel}>Duration</Text>
+                </View>
               </View>
-              <View style={styles.metaContent}>
-                <Text style={styles.metaValue}>{formatTime(matchDurationNum)}</Text>
-                <Text style={styles.metaLabel}>Duration</Text>
-              </View>
-            </View>
+            )}
           </View>
 
           {/* Touches by Period Chart Card */}
@@ -1273,6 +1631,7 @@ export default function NeutralMatchSummary() {
               userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
               opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
               userPosition="left" // For neutral matches, use 'left' to ensure fencer1 is red and fencer2 is green
+              weaponType={weaponType} // Pass weapon type to handle sabre (hides period 3)
             />
           </View>
         </View>
@@ -1288,6 +1647,7 @@ export default function NeutralMatchSummary() {
             userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
             opponentLabel={finalFencer2Name} // fencer2 label (chart prop name is opponentLabel)
             userPosition="left" // For neutral matches, use 'left' to ensure fencer1 is red and fencer2 is green
+            weaponType={weaponType} // Pass weapon type to handle sabre (uses touch numbers for x-axis)
             styleOverrides={{
               container: {
                 marginHorizontal: 0, // Remove chart's own margin - wrapper handles it
@@ -1296,27 +1656,37 @@ export default function NeutralMatchSummary() {
           />
         </View>
 
-        {/* Two Column Layout for Lead Changes and Time Leading */}
+        {/* Two Column Layout for Lead Changes and Time Leading / Score-Based Leading */}
         <View style={styles.twoColumnContainer}>
           {/* Lead Changes Card */}
           <LeadChangesCard leadChanges={leadChanges} />
 
-          {/* Time Leading Card */}
-          <TimeLeadingCard 
-            fencer1Name={finalFencer1Name}
-            fencer2Name={finalFencer2Name}
-            timeLeading={timeLeading}
-          />
+          {/* Time Leading Card (for foil/epee) or Score-Based Leading Card (for sabre) */}
+          {isSabre ? (
+            <ScoreBasedLeadingCard 
+              fencer1Name={finalFencer1Name}
+              fencer2Name={finalFencer2Name}
+              scoreBasedLeading={scoreBasedLeading}
+            />
+          ) : (
+            <TimeLeadingCard 
+              fencer1Name={finalFencer1Name}
+              fencer2Name={finalFencer2Name}
+              timeLeading={timeLeading}
+            />
+          )}
         </View>
 
-        {/* Two Column Layout for Bounce Back and Longest Run */}
+        {/* Two Column Layout for Bounce Back (foil/epee only) and Longest Run */}
         <View style={styles.twoColumnContainer}>
-          {/* Bounce Back Time Card */}
-          <BounceBackTimeCard 
-            fencer1Name={finalFencer1Name}
-            fencer2Name={finalFencer2Name}
-            bounceBackTimes={bounceBackTimes}
-          />
+          {/* Bounce Back Time Card - Only show for foil/epee (time-based metric) */}
+          {!isSabre && (
+            <BounceBackTimeCard 
+              fencer1Name={finalFencer1Name}
+              fencer2Name={finalFencer2Name}
+              bounceBackTimes={bounceBackTimes}
+            />
+          )}
 
           {/* Longest Run Card */}
           <LongestRunCard 

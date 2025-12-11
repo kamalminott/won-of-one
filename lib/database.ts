@@ -1091,6 +1091,20 @@ $$;
     try {
       console.log('🏃 Calculating best run for match:', matchId, 'user:', userName);
       
+      // Fetch weapon type so we can handle epee double hits correctly
+      const { data: matchMeta, error: matchMetaError } = await supabase
+        .from('match')
+        .select('weapon_type')
+        .eq('match_id', matchId)
+        .maybeSingle();
+
+      if (matchMetaError) {
+        console.error('Error fetching match metadata for best run:', matchMetaError);
+      }
+
+      const weaponType = (matchMeta?.weapon_type || '').toLowerCase();
+      const isEpee = weaponType === 'epee';
+
       // Debug: Check what events exist in the database
       const { data: allEvents, error: allEventsError } = await supabase
         .from('match_event')
@@ -1196,6 +1210,17 @@ $$;
         if (eventPeriod !== currentPeriod) {
           // Period changed - just update tracking, don't reset run
           currentPeriod = eventPeriod;
+        }
+
+        // In epee, a double hit should break the streak for both fencers
+        const eventType = (event.event_type || '').toLowerCase();
+        const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+        if ((isEpee || !weaponType) && isDoubleTouch) {
+          if (currentRun > 0) {
+            runDetails.push(`Run of ${currentRun} ended by double touch in period ${eventPeriod}`);
+          }
+          currentRun = 0;
+          continue;
         }
 
         if (event.scoring_user_name === userName) {
@@ -2335,6 +2360,7 @@ $$;
 
       const lastFencer1Y = fencer1Data.length > 0 ? fencer1Data[fencer1Data.length - 1].y : 0;
       const lastFencer2Y = fencer2Data.length > 0 ? fencer2Data[fencer2Data.length - 1].y : 0;
+      const progressionExceedsFinals = lastFencer1Y > finalFencer1Score || lastFencer2Y > finalFencer2Score;
 
       if (lastFencer1Y !== finalFencer1Score || lastFencer2Y !== finalFencer2Score) {
         console.warn(`⚠️ Anonymous score progression mismatch detected!`, {
@@ -2347,7 +2373,10 @@ $$;
       }
 
       // Pad progression to reach saved finals if events are short (common when an event failed to write)
-      if (lastFencer1Y < finalFencer1Score || lastFencer2Y < finalFencer2Score) {
+      // Only pad when progression is below or equal to finals for BOTH fencers; if one side already exceeds,
+      // finals are likely user-oriented or swapped, so we keep progression as-is.
+      const canPadSafely = !progressionExceedsFinals;
+      if (canPadSafely && (lastFencer1Y < finalFencer1Score || lastFencer2Y < finalFencer2Score)) {
         const padSeconds = lastSeconds + 1;
         const minutes = Math.floor(padSeconds / 60);
         const seconds = padSeconds % 60;
@@ -3587,6 +3616,227 @@ export const priorityAnalyticsService = {
     } catch (error) {
       console.error('Error getting recent priority rounds:', error);
       return [];
+    }
+  }
+};
+
+// Account deletion service
+export const accountService = {
+  /**
+   * Delete all user data and account
+   * This function deletes all user-related data from the database in the correct order
+   * to handle foreign key constraints, then deletes the auth user account.
+   */
+  async deleteAccount(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('🗑️ Starting account deletion for user:', userId);
+
+      // Get all matches for this user first (needed for deleting related events and periods)
+      const { data: userMatches, error: matchesError } = await supabase
+        .from('match')
+        .select('match_id')
+        .eq('user_id', userId);
+
+      if (matchesError) {
+        console.error('❌ Error fetching user matches:', matchesError);
+        return { success: false, error: matchesError.message };
+      }
+
+      const matchIds = userMatches?.map(m => m.match_id) || [];
+      console.log(`📋 Found ${matchIds.length} matches to delete`);
+
+      // Delete in order (handle foreign keys):
+      // 1. Delete match events (by match_id or user_id)
+      if (matchIds.length > 0) {
+        const { error: eventsError } = await supabase
+          .from('match_event')
+          .delete()
+          .in('match_id', matchIds);
+        
+        if (eventsError) {
+          console.error('❌ Error deleting match events:', eventsError);
+          // Continue - some events might not have match_id
+        }
+
+        // Also delete events by user_id (for events that might not have match_id yet)
+        const { error: eventsByUserIdError } = await supabase
+          .from('match_event')
+          .delete()
+          .eq('user_id', userId);
+        
+        if (eventsByUserIdError) {
+          console.error('❌ Error deleting match events by user_id:', eventsByUserIdError);
+        }
+      } else {
+        // Delete events by user_id if no matches found
+        const { error: eventsByUserIdError } = await supabase
+          .from('match_event')
+          .delete()
+          .eq('user_id', userId);
+        
+        if (eventsByUserIdError) {
+          console.error('❌ Error deleting match events by user_id:', eventsByUserIdError);
+        }
+      }
+
+      // 2. Delete match periods (by match_id)
+      if (matchIds.length > 0) {
+        const { error: periodsError } = await supabase
+          .from('match_period')
+          .delete()
+          .in('match_id', matchIds);
+        
+        if (periodsError) {
+          console.error('❌ Error deleting match periods:', periodsError);
+          return { success: false, error: periodsError.message };
+        }
+      }
+
+      // 3. Delete matches
+      const { error: matchesDeleteError } = await supabase
+        .from('match')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (matchesDeleteError) {
+        console.error('❌ Error deleting matches:', matchesDeleteError);
+        return { success: false, error: matchesDeleteError.message };
+      }
+
+      // 4. Get all weekly targets for this user (needed for deleting session logs)
+      const { data: weeklyTargets, error: targetsError } = await supabase
+        .from('weekly_target')
+        .select('target_id')
+        .eq('user_id', userId);
+
+      if (targetsError) {
+        console.error('❌ Error fetching weekly targets:', targetsError);
+        // Continue - might not have any targets
+      }
+
+      const targetIds = weeklyTargets?.map(t => t.target_id) || [];
+
+      // 5. Delete weekly session logs (by target_id)
+      if (targetIds.length > 0) {
+        const { error: sessionLogsError } = await supabase
+          .from('weekly_session_log')
+          .delete()
+          .in('target_id', targetIds);
+        
+        if (sessionLogsError) {
+          console.error('❌ Error deleting weekly session logs:', sessionLogsError);
+          // Continue - not critical
+        }
+      }
+
+      // 6. Delete weekly targets
+      const { error: targetsDeleteError } = await supabase
+        .from('weekly_target')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (targetsDeleteError) {
+        console.error('❌ Error deleting weekly targets:', targetsDeleteError);
+        return { success: false, error: targetsDeleteError.message };
+      }
+
+      // 7. Delete weekly completion history
+      const { error: historyError } = await supabase
+        .from('weekly_completion_history')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (historyError) {
+        console.error('❌ Error deleting weekly completion history:', historyError);
+        return { success: false, error: historyError.message };
+      }
+
+      // 8. Delete goals
+      const { error: goalsError } = await supabase
+        .from('goal')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (goalsError) {
+        console.error('❌ Error deleting goals:', goalsError);
+        return { success: false, error: goalsError.message };
+      }
+
+      // 9. Delete diary entries
+      const { error: diaryError } = await supabase
+        .from('diary_entry')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (diaryError) {
+        console.error('❌ Error deleting diary entries:', diaryError);
+        return { success: false, error: diaryError.message };
+      }
+
+      // 10. Delete match approvals
+      const { error: approvalsError } = await supabase
+        .from('match_approval')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (approvalsError) {
+        console.error('❌ Error deleting match approvals:', approvalsError);
+        // Continue - not critical
+      }
+
+      // 11. Delete fencing remote sessions (by referee_id)
+      const { error: remoteError } = await supabase
+        .from('fencing_remote')
+        .delete()
+        .eq('referee_id', userId);
+      
+      if (remoteError) {
+        console.error('❌ Error deleting fencing remote sessions:', remoteError);
+        // Continue - not critical
+      }
+
+      // 12. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
+      const { error: subscriptionsError } = await supabase
+        .from('user_subscriptions')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (subscriptionsError) {
+        console.error('❌ Error deleting user subscriptions:', subscriptionsError);
+        // Continue - might not have subscription
+      }
+
+      // 13. Delete app_user record
+      const { error: appUserError } = await supabase
+        .from('app_user')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (appUserError) {
+        console.error('❌ Error deleting app_user:', appUserError);
+        return { success: false, error: appUserError.message };
+      }
+
+      // 14. Delete auth user account via RPC function
+      const { data: deleteAuthResult, error: authError } = await supabase
+        .rpc('delete_user_account', { target_user_id: userId });
+      
+      if (authError) {
+        console.error('❌ Error deleting auth user:', authError);
+        return { success: false, error: `Failed to delete auth account: ${authError.message}` };
+      }
+
+      if (!deleteAuthResult || !deleteAuthResult.success) {
+        const errorMsg = deleteAuthResult?.error || 'Unknown error deleting auth account';
+        console.error('❌ Auth deletion failed:', errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      console.log('✅ Account deletion completed successfully');
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Unexpected error during account deletion:', error);
+      return { success: false, error: error.message || 'Unknown error occurred' };
     }
   }
 };

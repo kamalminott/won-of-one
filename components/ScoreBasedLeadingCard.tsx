@@ -1,0 +1,233 @@
+import React from 'react';
+import { Dimensions, StyleSheet, Text, View } from 'react-native';
+
+// CircularProgressWithChild with fallback
+const USE_NATIVE_CIRCULAR_PROGRESS = false; // Disabled until build issue is resolved
+
+let CircularProgressWithChild: any;
+
+if (USE_NATIVE_CIRCULAR_PROGRESS) {
+  try {
+    const module = require('react-native-circular-progress-indicator');
+    CircularProgressWithChild = module.CircularProgressWithChild || module.default;
+  } catch (e) {
+    CircularProgressWithChild = null;
+  }
+}
+
+// Fallback component
+if (!USE_NATIVE_CIRCULAR_PROGRESS || !CircularProgressWithChild) {
+  CircularProgressWithChild = ({ value = 0, radius = 40, children, activeStrokeColor, ...props }: any) => {
+    const size = radius * 2;
+    const progress = Math.min(Math.max(value, 0), 100);
+    
+    return (
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+        <View style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: radius,
+          borderWidth: props.activeStrokeWidth || 4,
+          borderColor: props.inActiveStrokeColor || '#393939',
+        }} />
+        {progress > 0 && (
+          <View style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: radius,
+            borderWidth: props.activeStrokeWidth || 4,
+            borderColor: 'transparent',
+            borderTopColor: progress > 0 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderRightColor: progress > 25 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderBottomColor: progress > 50 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            borderLeftColor: progress > 75 ? (activeStrokeColor || '#FFFFFF') : 'transparent',
+            transform: [{ rotate: '-90deg' }],
+          }} />
+        )}
+        <View style={{ zIndex: 1 }}>{children}</View>
+      </View>
+    );
+  };
+}
+
+const { width } = Dimensions.get('window');
+
+interface ScoreBasedLeadingCardProps {
+  fencer1Name: string;
+  fencer2Name: string;
+  scoreBasedLeading: {
+    fencer1: number;
+    fencer2: number;
+    tied: number;
+  };
+}
+
+export default function ScoreBasedLeadingCard({ 
+  fencer1Name, 
+  fencer2Name, 
+  scoreBasedLeading 
+}: ScoreBasedLeadingCardProps) {
+  // Extract first names only
+  const fencer1FirstName = fencer1Name.split(' ')[0];
+  const fencer2FirstName = fencer2Name.split(' ')[0];
+
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statTitle} numberOfLines={1}>Score-Based Leading</Text>
+      <View style={styles.scoreBasedLeadingContent}>
+        {/* Circular Progress Indicators */}
+        <View style={styles.circularProgressRow}>
+          <View style={styles.circularProgressContainer}>
+            <CircularProgressWithChild
+              value={scoreBasedLeading.fencer1}
+              radius={width * 0.055}
+              duration={1500}
+              maxValue={100}
+              activeStrokeColor={'#FF7675'}
+              inActiveStrokeColor={'#393939'}
+              strokeLinecap={'round'}
+              activeStrokeWidth={width * 0.012}
+              inActiveStrokeWidth={width * 0.008}
+            >
+              <Text style={styles.percentageText}>{scoreBasedLeading.fencer1}%</Text>
+            </CircularProgressWithChild>
+            {/* Legend below circle */}
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#FF7675' }]} />
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer1FirstName}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.circularProgressContainer}>
+            <CircularProgressWithChild
+              value={scoreBasedLeading.fencer2}
+              radius={width * 0.055}
+              duration={1500}
+              maxValue={100}
+              activeStrokeColor={'#00B894'}
+              inActiveStrokeColor={'#393939'}
+              strokeLinecap={'round'}
+              activeStrokeWidth={width * 0.012}
+              inActiveStrokeWidth={width * 0.008}
+            >
+              <Text style={styles.percentageText}>{scoreBasedLeading.fencer2}%</Text>
+            </CircularProgressWithChild>
+            {/* Legend below circle */}
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#00B894' }]} />
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {fencer2FirstName}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.circularProgressContainer}>
+            <CircularProgressWithChild
+              value={scoreBasedLeading.tied}
+              radius={width * 0.055}
+              duration={1500}
+              maxValue={100}
+              activeStrokeColor={'#FFFFFF'}
+              inActiveStrokeColor={'#393939'}
+              strokeLinecap={'round'}
+              activeStrokeWidth={width * 0.012}
+              inActiveStrokeWidth={width * 0.008}
+            >
+              <Text style={styles.percentageText}>{scoreBasedLeading.tied}%</Text>
+            </CircularProgressWithChild>
+            {/* Legend below circle */}
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#FFFFFF' }]} />
+              <Text 
+                style={styles.legendText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                Tied
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  statCard: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: width * 0.05,
+    padding: width * 0.05,
+    marginBottom: width * 0.04,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: width * 0.01 },
+    shadowOpacity: 0.04,
+    shadowRadius: width * 0.075,
+    elevation: 8,
+    width: '48%',
+    height: width * 0.35,
+  },
+  statTitle: {
+    fontFamily: 'Articulat CF',
+    fontSize: width * 0.03,
+    fontWeight: '500',
+    color: 'white',
+    marginBottom: width * 0.04,
+  },
+  scoreBasedLeadingContent: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingVertical: width * 0.03,
+    paddingHorizontal: 0,
+  },
+  circularProgressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-start',
+    width: '100%',
+    paddingHorizontal: 0,
+    gap: width * 0.02, // Add spacing between circles
+  },
+  circularProgressContainer: {
+    alignItems: 'center',
+    minWidth: width * 0.08,
+    maxWidth: width * 0.1,
+  },
+  percentageText: {
+    fontSize: width * 0.0275,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: width * 0.02,
+    gap: width * 0.015,
+  },
+  legendDot: {
+    width: width * 0.02,
+    height: width * 0.02,
+    borderRadius: width * 0.01,
+  },
+  legendText: {
+    fontSize: width * 0.0225,
+    color: '#FFFFFF',
+    fontWeight: '400',
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+});
+
