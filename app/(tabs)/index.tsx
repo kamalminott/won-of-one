@@ -19,7 +19,7 @@ import { SimpleGoal, SimpleMatch } from '@/types/database';
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
-  const { user, loading, signOut, userName, profileImage } = useAuth();
+  const { user, loading, signOut, userName, profileImage, isPasswordRecovery } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   
@@ -66,6 +66,13 @@ export default function HomeScreen() {
       router.replace('/login');
     }
   }, [user, loading]);
+
+  // If the app is in password recovery mode, force the reset screen so users cannot bypass it
+  useEffect(() => {
+    if (isPasswordRecovery) {
+      router.replace('/reset-password');
+    }
+  }, [isPasswordRecovery]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed

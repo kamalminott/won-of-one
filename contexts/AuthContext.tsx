@@ -2,13 +2,15 @@ import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session, User } from '@supabase/supabase-js';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 
 // Define the shape of our authentication context
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  isPasswordRecovery: boolean;
   userName: string;
   setUserName: (name: string) => Promise<void>;
   loadUserName: () => Promise<void>;
@@ -18,6 +20,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
+  setIsPasswordRecovery: (value: boolean) => void;
 }
 
 // Create the context with default values
@@ -25,6 +28,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   loading: true,
+  isPasswordRecovery: false,
   userName: '',
   setUserName: async () => {},
   loadUserName: async () => {},
@@ -34,6 +38,7 @@ const AuthContext = createContext<AuthContextType>({
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
   signOut: async () => {},
+  setIsPasswordRecovery: () => {},
 });
 
 // Custom hook to use the auth context
@@ -54,6 +59,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecoveryState] = useState(false);
+  const isPasswordRecoveryRef = useRef(false);
+  const setIsPasswordRecovery = (value: boolean) => {
+    setIsPasswordRecoveryState(value);
+    isPasswordRecoveryRef.current = value;
+  };
   const [userName, setUserNameState] = useState<string>('');
   const [profileImage, setProfileImageState] = useState<string | null>(null);
 
@@ -155,6 +166,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Get initial session with enhanced error handling
     const getInitialSession = async () => {
       console.log('🔍 [AUTH] Checking for existing session on app start...');
+      setIsPasswordRecovery(false);
       
       try {
         // Check AsyncStorage directly for debugging
@@ -235,10 +247,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       async (event, session) => {
         console.log('🔄 Auth state change:', event, session?.user?.id || 'no user');
         
-        // Handle token refresh events
-        if (event === 'TOKEN_REFRESHED') {
+        if (event === 'PASSWORD_RECOVERY') {
+          console.log('🔐 Password recovery event detected - limiting access until reset completes');
+          setIsPasswordRecovery(true);
+          setSession(session);
+          setUser(null);
+          setLoading(false);
+          try {
+            router.replace('/reset-password');
+          } catch (error) {
+            console.warn('⚠️ Unable to navigate to reset-password:', error);
+          }
+          return;
+        }
+        
+        // Handle token refresh events (only care during normal auth)
+        if (event === 'TOKEN_REFRESHED' && !isPasswordRecoveryRef.current) {
           console.log('✅ Token refreshed successfully');
-          // Track successful token refresh for analytics
           try {
             const { analytics } = await import('@/lib/analytics');
             analytics.capture('token_refresh_success');
@@ -250,7 +275,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // Handle token refresh errors (when user is signed out unexpectedly)
         if (event === 'SIGNED_OUT' && !session) {
           console.log('⚠️ User signed out - possible token refresh failure or manual logout');
-          // Track sign out event for analytics
           try {
             const { analytics } = await import('@/lib/analytics');
             analytics.capture('user_signed_out', { reason: 'token_expired_or_manual' });
@@ -259,9 +283,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         }
         
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          setIsPasswordRecovery(false);
+          
+          try {
+            const { subscriptionService } = await import('@/lib/subscriptionService');
+            await subscriptionService.logOut();
+          } catch (error) {
+            console.error('❌ Error logging out RevenueCat user:', error);
+          }
+          return;
+        }
+
+        // During recovery, keep the user null so the app never treats this as a full login
         setSession(session);
-        setUser(session?.user ?? null);
+        setUser(isPasswordRecoveryRef.current ? null : session?.user ?? null);
         setLoading(false);
+
+        if (isPasswordRecoveryRef.current) {
+          return;
+        }
 
         // Link RevenueCat user when user logs in
         if (session?.user?.id) {
@@ -440,6 +484,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     session,
     loading,
+    isPasswordRecovery,
     userName,
     setUserName,
     loadUserName,
@@ -449,6 +494,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signIn,
     signUp,
     signOut,
+    setIsPasswordRecovery,
   };
 
   return (

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
   StatusBar,
@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 
 import { BackButton } from '@/components/BackButton';
+import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 
@@ -27,6 +28,7 @@ export default function ResetPasswordScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
+  const { setIsPasswordRecovery } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +36,7 @@ export default function ResetPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSessionSet, setIsSessionSet] = useState(false);
+  const processedTokenRef = useRef<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -41,31 +44,85 @@ export default function ResetPasswordScreen() {
     }, [])
   );
 
-  // Handle deep link with tokens from Supabase
+  const extractTokensFromUrl = useCallback((url?: string | null) => {
+    if (!url) {
+      return { accessToken: undefined, refreshToken: undefined, type: undefined };
+    }
+
+    const parsedUrl = url.includes('#') ? url.replace('#', '?') : url;
+    const parsed = Linking.parse(parsedUrl);
+    const queryParams = parsed.queryParams || {};
+
+    return {
+      accessToken: queryParams.access_token as string | undefined,
+      refreshToken: queryParams.refresh_token as string | undefined,
+      type: queryParams.type as string | undefined,
+    };
+  }, []);
+
+  const handleRecoveryTokens = useCallback(
+    async (accessToken?: string, refreshToken?: string, type?: string) => {
+      if (!accessToken || !refreshToken) {
+        return false;
+      }
+
+      // Only handle password recovery links so we don't treat other auth flows as a login
+      if (type && type !== 'recovery') {
+        return false;
+      }
+
+      const tokenKey = `${accessToken}:${refreshToken}`;
+      if (processedTokenRef.current === tokenKey) {
+        return true;
+      }
+
+      processedTokenRef.current = tokenKey;
+
+      try {
+        setIsPasswordRecovery(true);
+      } catch (error) {
+        console.warn('⚠️ Unable to set password recovery flag:', error);
+      }
+
+      console.log('🔑 Setting session from password reset link...');
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (error) {
+        console.error('❌ Error setting session:', error);
+        setErrorMessage('Invalid or expired reset link. Please request a new one.');
+        analytics.capture('password_reset_token_error', { message: error.message });
+        return false;
+      }
+
+      console.log('✅ Session set successfully');
+      setIsSessionSet(true);
+      setErrorMessage(null);
+      return true;
+    },
+    [setIsPasswordRecovery]
+  );
+
+  // Handle deep link with tokens from Supabase (including cold starts)
   useEffect(() => {
     const handleDeepLink = async () => {
       try {
-        // Check if we have tokens in URL params (from deep link)
         const accessToken = params.access_token as string | undefined;
         const refreshToken = params.refresh_token as string | undefined;
+        const type = params.type as string | undefined;
 
-        if (accessToken && refreshToken) {
-          console.log('🔑 Setting session from password reset link...');
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
+        let processed = await handleRecoveryTokens(accessToken, refreshToken, type);
 
-          if (error) {
-            console.error('❌ Error setting session:', error);
-            setErrorMessage('Invalid or expired reset link. Please request a new one.');
-            analytics.capture('password_reset_token_error', { message: error.message });
-          } else {
-            console.log('✅ Session set successfully');
-            setIsSessionSet(true);
-            setErrorMessage(null);
-          }
-        } else {
+        // Cold starts sometimes don't populate params, so also check the initial URL
+        if (!processed) {
+          const initialUrl = await Linking.getInitialURL();
+          const tokens = extractTokensFromUrl(initialUrl);
+          processed = await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type);
+        }
+
+        if (!processed) {
           // Check if we already have a session (user might have navigated here directly)
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
@@ -81,44 +138,19 @@ export default function ResetPasswordScreen() {
     };
 
     handleDeepLink();
-  }, [params]);
+  }, [params, extractTokensFromUrl, handleRecoveryTokens]);
 
   // Listen for deep links when app is already open
   useEffect(() => {
     const subscription = Linking.addEventListener('url', async (event) => {
-      const { url } = event;
-      console.log('🔗 Deep link received:', url);
-
-      // Parse Supabase URL (they use # instead of ?)
-      const parsedUrl = url.includes('#') ? url.replace('#', '?') : url;
-      const parsed = Linking.parse(parsedUrl);
-      const queryParams = parsed.queryParams || {};
-
-      const accessToken = queryParams.access_token as string | undefined;
-      const refreshToken = queryParams.refresh_token as string | undefined;
-
-      if (accessToken && refreshToken) {
-        console.log('🔑 Setting session from deep link...');
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-
-        if (error) {
-          console.error('❌ Error setting session:', error);
-          setErrorMessage('Invalid or expired reset link. Please request a new one.');
-        } else {
-          console.log('✅ Session set successfully from deep link');
-          setIsSessionSet(true);
-          setErrorMessage(null);
-        }
-      }
+      const tokens = extractTokensFromUrl(event.url);
+      await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type);
     });
 
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [extractTokensFromUrl, handleRecoveryTokens]);
 
   const handleBack = () => {
     router.push('/login');
@@ -177,9 +209,10 @@ export default function ResetPasswordScreen() {
           [
             {
               text: 'OK',
-              onPress: () => {
+              onPress: async () => {
                 // Sign out to clear the temporary session
-                supabase.auth.signOut();
+                await supabase.auth.signOut();
+                setIsPasswordRecovery(false);
                 router.replace('/login');
               },
             },
@@ -487,4 +520,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Linking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import React, { useState, useCallback } from 'react';
@@ -64,7 +65,8 @@ export default function ForgotPasswordScreen() {
       const rawRedirect =
         (Constants.expoConfig as any)?.extra?.supabaseRedirectTo ||
         process.env.EXPO_PUBLIC_SUPABASE_REDIRECT_TO;
-      const redirectTo = rawRedirect ? rawRedirect.trim() : '';
+      const fallbackRedirect = Linking.createURL('/reset-password');
+      const redirectTo = (rawRedirect ? rawRedirect.trim() : '') || fallbackRedirect;
       let options: { redirectTo: string } | undefined;
       if (redirectTo) {
         try {
