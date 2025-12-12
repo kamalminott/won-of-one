@@ -11,6 +11,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
 
 // Safely import expo-updates for automatic update checking
 let Updates: typeof import('expo-updates') | null = null;
@@ -235,6 +237,42 @@ export default function RootLayout() {
     // Check for updates after a short delay to not block app startup
     const timeoutId = setTimeout(checkForUpdates, 2000);
     return () => clearTimeout(timeoutId);
+  }, []);
+
+  // Route password recovery deep links directly to reset screen (before any tab render)
+  React.useEffect(() => {
+    const handleRecoveryLink = (url?: string | null) => {
+      if (!url) return false;
+      const parsedUrl = url.includes('#') ? url.replace('#', '?') : url;
+      const parsed = Linking.parse(parsedUrl);
+      const qp = parsed.queryParams || {};
+      const accessToken = qp.access_token as string | undefined;
+      const refreshToken = qp.refresh_token as string | undefined;
+      const type = qp.type as string | undefined;
+
+      if (type === 'recovery' && accessToken && refreshToken) {
+        router.replace({
+          pathname: '/reset-password',
+          params: {
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            type: 'recovery',
+          },
+        });
+        return true;
+      }
+      return false;
+    };
+
+    // Handle cold start
+    Linking.getInitialURL().then((url) => handleRecoveryLink(url));
+
+    // Handle in-app deep link events
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleRecoveryLink(event.url);
+    });
+
+    return () => subscription.remove();
   }, []);
 
   if (!loaded) {
