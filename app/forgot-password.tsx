@@ -67,6 +67,7 @@ export default function ForgotPasswordScreen() {
         process.env.EXPO_PUBLIC_SUPABASE_REDIRECT_TO;
       const fallbackRedirect = Linking.createURL('/reset-password');
       const redirectTo = (rawRedirect ? rawRedirect.trim() : '') || fallbackRedirect;
+      console.log('🔗 Password reset redirectTo:', redirectTo);
       let options: { redirectTo: string } | undefined;
       if (redirectTo) {
         try {
