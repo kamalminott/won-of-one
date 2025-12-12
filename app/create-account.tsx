@@ -8,6 +8,7 @@ import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert, KeyboardAvoidingView,
+  Linking,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -321,7 +322,30 @@ export default function CreateAccountScreen() {
           {agreeToTerms && <Ionicons name="checkmark" size={width * 0.04} color="white" />}
         </View>
             <Text style={[styles.termsText, { fontSize: width * 0.035 }]}>
-              I agree to the <Text style={styles.termsLink}>Terms and Conditions</Text>
+              I agree to the{' '}
+              <Text 
+                style={styles.termsLink}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Linking.openURL('https://kamalminott.github.io/won-of-one/terms-of-service.html').catch(err => 
+                    console.error('Failed to open terms of service:', err)
+                  );
+                }}
+              >
+                Terms and Conditions
+              </Text>
+              {' '}and{' '}
+              <Text 
+                style={styles.termsLink}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Linking.openURL('https://kamalminott.github.io/won-of-one/privacy-policy.html').catch(err => 
+                    console.error('Failed to open privacy policy:', err)
+                  );
+                }}
+              >
+                Privacy Policy
+              </Text>
             </Text>
           </TouchableOpacity>
         </View>

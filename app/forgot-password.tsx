@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
+import Constants from 'expo-constants';
 import React, { useState, useCallback } from 'react';
 import {
   SafeAreaView,
@@ -16,11 +17,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { analytics } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
 
 export default function ForgotPasswordScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [email, setEmail] = useState('jondoe@gmail.com');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -36,12 +41,71 @@ export default function ForgotPasswordScreen() {
     router.push('/login');
   };
 
+  const validateEmail = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    // Basic email validation
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  };
+
+  const handleSendReset = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!validateEmail(trimmedEmail)) {
+      setErrorMessage('Enter a valid email address');
+      setStatusMessage(null);
+      return;
+    }
+
+    setLoading(true);
+    setStatusMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const rawRedirect =
+        (Constants.expoConfig as any)?.extra?.supabaseRedirectTo ||
+        process.env.EXPO_PUBLIC_SUPABASE_REDIRECT_TO;
+      const redirectTo = rawRedirect ? rawRedirect.trim() : '';
+      let options: { redirectTo: string } | undefined;
+      if (redirectTo) {
+        try {
+          // Validate URL format to avoid Supabase errors on bad redirect values
+          new URL(redirectTo);
+          options = { redirectTo };
+        } catch (e) {
+          console.warn('⚠️ Invalid redirectTo for reset password, ignoring:', redirectTo);
+        }
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        trimmedEmail,
+        options
+      );
+
+      if (error) {
+        console.error('❌ Error sending reset link:', error);
+        setErrorMessage(error.message || 'Unable to send reset link. Please try again.');
+        analytics.capture('forgot_password_error', { message: error.message });
+      } else {
+        setStatusMessage('Reset link sent! Check your email for instructions.');
+        analytics.capture('forgot_password_reset_requested');
+      }
+    } catch (err: any) {
+      console.error('❌ Unexpected error sending reset link:', err);
+      setErrorMessage('Something went wrong. Please try again.');
+      analytics.capture('forgot_password_error', { message: err?.message || 'unexpected_error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isSendDisabled = !validateEmail(email) || loading;
+
   return (
     <SafeAreaView style={[styles.container, { 
       paddingTop: insets.top, 
       paddingBottom: insets.bottom 
     }]}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#212121" />
       
       {/* Header Background */}
       <View style={[styles.headerBackground, {
@@ -125,19 +189,37 @@ export default function ForgotPasswordScreen() {
         </View>
 
         {/* Send Reset Link Button */}
-        <TouchableOpacity style={[styles.sendButtonContainer, { marginBottom: height * 0.04 }]}>
+        <TouchableOpacity 
+          style={[styles.sendButtonContainer, { marginBottom: height * 0.02 }]}
+          onPress={handleSendReset}
+          disabled={isSendDisabled}
+        >
           <LinearGradient
             colors={['#6C5CE7', '#5741FF']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={[styles.sendButton, {
               height: height * 0.06,
-              borderRadius: width * 0.04
+              borderRadius: width * 0.04,
+              opacity: isSendDisabled ? 0.6 : 1
             }]}
           >
-            <Text style={[styles.sendButtonText, { fontSize: width * 0.04 }]}>Send Reset Link</Text>
+            <Text style={[styles.sendButtonText, { fontSize: width * 0.04 }]}>
+              {loading ? 'Sending...' : 'Send Reset Link'}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
+
+        {statusMessage && (
+          <Text style={[styles.statusText, { fontSize: width * 0.035, marginBottom: height * 0.02 }]}>
+            {statusMessage}
+          </Text>
+        )}
+        {errorMessage && (
+          <Text style={[styles.errorText, { fontSize: width * 0.035, marginBottom: height * 0.02 }]}>
+            {errorMessage}
+          </Text>
+        )}
 
         {/* Back to Login Link */}
         <TouchableOpacity style={styles.backToLoginContainer} onPress={handleBackToLogin}>
@@ -151,7 +233,7 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#171717',
+    backgroundColor: '#212121', // Match header background to cover status bar area
   },
   headerBackground: {
     backgroundColor: '#212121',
@@ -246,5 +328,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FF7675',
     textDecorationLine: 'underline',
+  },
+  statusText: {
+    color: '#00B894',
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#EF4444',
+    textAlign: 'center',
   },
 });

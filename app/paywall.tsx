@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -268,8 +269,29 @@ export default function PaywallScreen() {
 
           {/* Terms */}
           <Text style={[styles.termsText, { fontSize: width * 0.03 }]}>
-            By continuing, you agree to our Terms of Service and Privacy Policy.
-            Your subscription will auto-renew unless cancelled at least 24 hours before the end of the trial period.
+            By continuing, you agree to our{' '}
+            <Text 
+              style={{ color: '#6C5CE7', textDecorationLine: 'underline' }}
+              onPress={() => {
+                Linking.openURL('https://kamalminott.github.io/won-of-one/terms-of-service.html').catch(err => 
+                  console.error('Failed to open terms of service:', err)
+                );
+              }}
+            >
+              Terms of Service
+            </Text>
+            {' '}and{' '}
+            <Text 
+              style={{ color: '#6C5CE7', textDecorationLine: 'underline' }}
+              onPress={() => {
+                Linking.openURL('https://kamalminott.github.io/won-of-one/privacy-policy.html').catch(err => 
+                  console.error('Failed to open privacy policy:', err)
+                );
+              }}
+            >
+              Privacy Policy
+            </Text>
+            . Your subscription will auto-renew unless cancelled at least 24 hours before the end of the trial period.
           </Text>
         </ScrollView>
       </SafeAreaView>

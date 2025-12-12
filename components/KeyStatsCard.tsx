@@ -16,6 +16,7 @@ interface KeyStatsCardProps {
   redCards?: number;
   matchDurationSeconds?: number;
   customStyle?: object;
+  heightOverride?: number;
 }
 
 export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
@@ -24,7 +25,8 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
   yellowCards = 0,
   redCards = 0,
   matchDurationSeconds = 0,
-  customStyle = {}
+  customStyle = {},
+  heightOverride
 }) => {
   // Format match duration from seconds to MM:SS
   const formatMatchTime = (seconds: number): string => {
@@ -43,6 +45,9 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
 
   const displayStats = stats || defaultStats;
   const { width, height } = useWindowDimensions();
+  const statsCount = displayStats.length || 1;
+  const baseHeight = height * 0.22;
+  const containerHeight = heightOverride || (baseHeight * Math.max(1, statsCount / 3));
 
   // Custom overlapping cards icon component
   const OverlappingCardsIcon = () => {
@@ -90,7 +95,7 @@ export const KeyStatsCard: React.FC<KeyStatsCardProps> = ({
       padding: width * 0.04,
       marginHorizontal: 0, // No margin - rowContainer handles alignment
       flex: 1,
-      height: height * 0.22,
+      height: containerHeight,
       marginBottom: height * 0.01,
       borderWidth: 1,
       borderColor: Colors.glassyGradient.borderColor,

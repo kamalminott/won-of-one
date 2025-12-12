@@ -1246,6 +1246,72 @@ $$;
     }
   },
 
+  // Count double touches for a match (used for epee stats)
+  async calculateDoubleTouchCount(matchId: string): Promise<number> {
+    try {
+      const { data: matchEventsRaw, error: eventsError } = await supabase
+        .from('match_event')
+        .select('match_event_id, event_type, cancelled_event_id, match_time_elapsed, event_time, timestamp')
+        .eq('match_id', matchId)
+        .order('event_time', { ascending: true })
+        .order('timestamp', { ascending: true });
+
+      if (eventsError) {
+        console.error('Error fetching match events for double touch count:', eventsError);
+        return 0;
+      }
+
+      if (!matchEventsRaw || matchEventsRaw.length === 0) {
+        console.log('No match events found for double touch count');
+        return 0;
+      }
+
+      // Track cancelled events so we don't count them
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEventsRaw) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
+      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
+      const seenKeys = new Set<string>();
+      let doubleTouchCount = 0;
+
+      for (const event of matchEventsRaw) {
+        // Skip the cancel events themselves
+        if ((event.event_type || '').toLowerCase() === 'cancel') {
+          continue;
+        }
+
+        // Skip events that were cancelled
+        if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+          continue;
+        }
+
+        // Dedupe identical events (handles offline/legacy duplicates)
+        const dedupeKey = event.match_event_id
+          ? `id_${event.match_event_id}`
+          : `${event.event_type || 'unknown'}_${event.event_time || event.timestamp || 'noTime'}_${event.match_time_elapsed ?? 'noElapsed'}`;
+        if (seenKeys.has(dedupeKey)) {
+          continue;
+        }
+        seenKeys.add(dedupeKey);
+
+        const eventType = (event.event_type || '').toLowerCase();
+        if (doubleTypes.has(eventType)) {
+          doubleTouchCount++;
+        }
+      }
+
+      console.log('📊 Double touch count calculated:', doubleTouchCount);
+      return doubleTouchCount;
+    } catch (error) {
+      console.error('Error calculating double touch count:', error);
+      return 0;
+    }
+  },
+
   // Calculate score progression data for chart (for user vs opponent matches)
   async calculateScoreProgression(matchId: string, userName: string, remoteId?: string): Promise<{
     userData: {x: string, y: number}[],

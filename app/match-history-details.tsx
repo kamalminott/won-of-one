@@ -32,7 +32,8 @@ export default function MatchDetailsScreen() {
   const [matchInsights, setMatchInsights] = useState({
     avgTimeBetweenTouches: '22s',
     longestScoringDrought: '45s',
-    touchStreaks: '3 in a row'
+    touchStreaks: '3 in a row',
+    doubleTouches: '0'
   });
   
   const [matchNotes, setMatchNotes] = useState('');
@@ -76,14 +77,60 @@ export default function MatchDetailsScreen() {
         return;
       }
 
-      // Calculate average time between touches
+      // Build cancelled set and filter to scoring events only, excluding cancelled
+      const cancelledEventIds = new Set<string>();
+      for (const event of matchEvents) {
+        if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
+      const scoringTypes = new Set(['touch', 'double', 'double_touch', 'double_hit']);
+      const scoringEvents = matchEvents
+        .filter(ev => {
+          const type = (ev.event_type || '').toLowerCase();
+          if (type === 'cancel') return false;
+          if (ev.match_event_id && cancelledEventIds.has(ev.match_event_id)) return false;
+          return scoringTypes.has(type);
+        })
+        .sort((a, b) => {
+          const aElapsed = typeof a.match_time_elapsed === 'number' ? a.match_time_elapsed : null;
+          const bElapsed = typeof b.match_time_elapsed === 'number' ? b.match_time_elapsed : null;
+          if (aElapsed !== null && bElapsed !== null && aElapsed !== bElapsed) {
+            return aElapsed - bElapsed;
+          }
+          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return aTime - bTime;
+        });
+
+      if (scoringEvents.length === 0) {
+        setMatchInsights({
+          avgTimeBetweenTouches: 'No data',
+          longestScoringDrought: 'No data',
+          touchStreaks: 'No data',
+          doubleTouches: '0'
+        });
+        return;
+      }
+
+      const getSeconds = (event: any) => {
+        if (typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
+        if (event.timestamp) {
+          const ms = new Date(event.timestamp).getTime();
+          return Number.isFinite(ms) ? Math.round(ms / 1000) : 0;
+        }
+        return 0;
+      };
+
+      // Calculate average time between scoring touches
       let totalTimeBetweenTouches = 0;
       let touchCount = 0;
 
-      for (let i = 1; i < matchEvents.length; i++) {
-        const currentEvent = new Date(matchEvents[i].timestamp);
-        const previousEvent = new Date(matchEvents[i - 1].timestamp);
-        const timeDiff = (currentEvent.getTime() - previousEvent.getTime()) / 1000; // Convert to seconds
+      for (let i = 1; i < scoringEvents.length; i++) {
+        const currentSeconds = getSeconds(scoringEvents[i]);
+        const previousSeconds = getSeconds(scoringEvents[i - 1]);
+        const timeDiff = Math.max(0, currentSeconds - previousSeconds);
         
         totalTimeBetweenTouches += timeDiff;
         touchCount++;
@@ -94,22 +141,30 @@ export default function MatchDetailsScreen() {
       // Debug: Log all events to see what we're working with
       console.log('🔍 Match Events Debug:', {
         totalEvents: matchEvents.length,
+        scoringEvents: scoringEvents.length,
+        cancelled: cancelledEventIds.size,
         userName: userName,
-        eventScorers: matchEvents.map(e => e.scoring_user_name),
-        uniqueScorers: [...new Set(matchEvents.map(e => e.scoring_user_name))]
+        eventScorers: scoringEvents.map(e => e.scoring_user_name),
+        uniqueScorers: [...new Set(scoringEvents.map(e => e.scoring_user_name))]
       });
 
       // Calculate longest scoring drought (longest time between ANY scoring events)
       let longestDrought = 0;
+      let doubleTouchCount = 0;
       
-      if (matchEvents.length > 1) {
-        for (let i = 1; i < matchEvents.length; i++) {
-          const currentEvent = new Date(matchEvents[i].timestamp);
-          const previousEvent = new Date(matchEvents[i - 1].timestamp);
-          const timeDiff = (currentEvent.getTime() - previousEvent.getTime()) / 1000;
+      if (scoringEvents.length > 1) {
+        for (let i = 1; i < scoringEvents.length; i++) {
+          const currentSeconds = getSeconds(scoringEvents[i]);
+          const previousSeconds = getSeconds(scoringEvents[i - 1]);
+          const timeDiff = Math.max(0, currentSeconds - previousSeconds);
           
           if (timeDiff > longestDrought) {
             longestDrought = timeDiff;
+          }
+
+          const eventType = (scoringEvents[i].event_type || '').toLowerCase();
+          if (eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit') {
+            doubleTouchCount++;
           }
         }
       }
@@ -158,7 +213,8 @@ export default function MatchDetailsScreen() {
       setMatchInsights({
         avgTimeBetweenTouches: `${avgTime}s`,
         longestScoringDrought: longestDrought > 0 ? `${Math.round(longestDrought)}s` : 'No data',
-        touchStreaks: maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data'
+        touchStreaks: maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data',
+        doubleTouches: `${doubleTouchCount}`
       });
 
     } catch (error) {
@@ -171,7 +227,7 @@ export default function MatchDetailsScreen() {
     if (!match?.match_id) return;
     
     try {
-      // Determine which fencer is the user (for calculations)
+      // Determine which fencer is the user (for mapping)
       const normalizedUserName = normalizeName(userName);
       const isFencer1User = normalizedUserName && match.fencer_1_name
         ? normalizeName(match.fencer_1_name) === normalizedUserName
@@ -179,30 +235,59 @@ export default function MatchDetailsScreen() {
       const isFencer2User = normalizedUserName && match.fencer_2_name
         ? normalizeName(match.fencer_2_name) === normalizedUserName
         : false;
-      
-      // Use the actual user's name for calculations (could be fencer_1 or fencer_2)
-      const userFencerName = isFencer1User 
-        ? (match.fencer_1_name || 'You')
-        : isFencer2User 
-        ? (match.fencer_2_name || 'You')
-        : (match.fencer_1_name || 'You'); // Fallback to fencer_1 if no user match
-      
-      const progression = await matchService.calculateScoreProgression(
-        match.match_id, 
-        userFencerName
+
+      // Use anonymous progression to avoid relying on name matching (handles epee double touches and swapped fencers)
+      const progression = await matchService.calculateAnonymousScoreProgression(
+        match.match_id
       );
-      console.log('📊 fetchScoreProgression received:', progression);
-      // calculateScoreProgression already returns data in userData/opponentData format
-      // No mapping needed - use progression directly
-      console.log('📊 fetchScoreProgression mapped:', {
+      const mappedProgression = isFencer1User
+        ? { userData: progression.fencer1Data, opponentData: progression.fencer2Data }
+        : isFencer2User
+        ? { userData: progression.fencer2Data, opponentData: progression.fencer1Data }
+        : { userData: progression.fencer1Data, opponentData: progression.fencer2Data };
+
+      console.log('📊 fetchScoreProgression (anonymous) mapped:', {
         isFencer1User,
         isFencer2User,
-        userDataLength: progression.userData?.length,
-        opponentDataLength: progression.opponentData?.length,
-        userFirst: progression.userData?.[0],
-        opponentFirst: progression.opponentData?.[0],
+        userDataLength: mappedProgression.userData?.length,
+        opponentDataLength: mappedProgression.opponentData?.length,
+        userFirst: mappedProgression.userData?.[0],
+        opponentFirst: mappedProgression.opponentData?.[0],
       });
-      setScoreProgression(progression);
+
+      // Align progression with DB totals when they don't match (avoid inflated scores from duplicate/double events)
+      const dbUserScore = match?.final_score ?? 0;
+      const dbOpponentScore = match?.touches_against ?? 0;
+      const progressionUserTotal = mappedProgression.userData.length > 0 ? mappedProgression.userData[mappedProgression.userData.length - 1].y : 0;
+      const progressionOpponentTotal = mappedProgression.opponentData.length > 0 ? mappedProgression.opponentData[mappedProgression.opponentData.length - 1].y : 0;
+      const progressionMatchesDb = progressionUserTotal === dbUserScore && progressionOpponentTotal === dbOpponentScore;
+
+      const trimProgression = (data: { x: string; y: number }[], maxY: number) => {
+        const filtered = data.filter(point => point.y <= maxY);
+        if (filtered.length === 0) {
+          return maxY > 0 ? [{ x: '00:00', y: 0 }] : [];
+        }
+        return filtered;
+      };
+
+      const alignedProgression = progressionMatchesDb ? mappedProgression : {
+        userData: trimProgression(mappedProgression.userData, dbUserScore),
+        opponentData: trimProgression(mappedProgression.opponentData, dbOpponentScore),
+      };
+
+      if (!progressionMatchesDb) {
+        console.warn('⚠️ [Match History Details] Progression totals differ from DB, aligning to DB scores', {
+          matchId: match.match_id,
+          progressionUserTotal,
+          progressionOpponentTotal,
+          dbUserScore,
+          dbOpponentScore,
+          userTrimmed: alignedProgression.userData.length,
+          opponentTrimmed: alignedProgression.opponentData.length,
+        });
+      }
+
+      setScoreProgression(alignedProgression);
     } catch (error) {
       console.error('Error fetching score progression:', error);
     }
@@ -384,14 +469,16 @@ export default function MatchDetailsScreen() {
   // Otherwise, assume user is on left (old behavior before swaps were tracked)
   const leftIsUser = match ? isFencer1User : true;
   const rightIsUser = match ? isFencer2User : false;
+  const weaponType = match?.weapon_type || (params.weaponType as string | undefined);
   
   // Prefer progression totals when available; fallback to entity-based scores from DB/params
   const progressionUserTotal = scoreProgression.userData.length > 0 ? scoreProgression.userData[scoreProgression.userData.length - 1].y : 0;
   const progressionOpponentTotal = scoreProgression.opponentData.length > 0 ? scoreProgression.opponentData[scoreProgression.opponentData.length - 1].y : 0;
   const dbUserScore = match ? (match.final_score || 0) : (params.youScore ? parseInt(params.youScore as string) : 0);
   const dbOpponentScore = match ? (match.touches_against || 0) : (params.opponentScore ? parseInt(params.opponentScore as string) : 0);
-  const userScore = progressionUserTotal > 0 ? progressionUserTotal : dbUserScore;
-  const opponentScore = progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
+  const progressionMatchesDb = progressionUserTotal === dbUserScore && progressionOpponentTotal === dbOpponentScore;
+  const userScore = progressionMatchesDb && progressionUserTotal > 0 ? progressionUserTotal : dbUserScore;
+  const opponentScore = progressionMatchesDb && progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
 
   // Map to left/right (positions) based on which fencer is the user
   const leftScore = match 
@@ -623,6 +710,7 @@ export default function MatchDetailsScreen() {
               userLabel={getFirstName(userFencerName) || userName || 'You'}
               opponentLabel={getFirstName(opponentFencerName) || 'Opponent'}
               userPosition={isFencer1User ? 'left' : isFencer2User ? 'right' : 'left'}
+              weaponType={weaponType}
             />
           </View>
 
@@ -637,9 +725,13 @@ export default function MatchDetailsScreen() {
               <Text style={styles.insightLabel}>Longest Scoring Drought</Text>
               <Text style={styles.insightValue}>{matchInsights.longestScoringDrought}</Text>
             </View>
-            <View style={[styles.insightRow, styles.insightRowLast]}>
+            <View style={styles.insightRow}>
               <Text style={styles.insightLabel}>Touch Streaks</Text>
               <Text style={styles.insightValue}>{matchInsights.touchStreaks}</Text>
+            </View>
+            <View style={[styles.insightRow, styles.insightRowLast]}>
+              <Text style={styles.insightLabel}>Double Touches</Text>
+              <Text style={styles.insightValue}>{matchInsights.doubleTouches}</Text>
             </View>
           </View>
 

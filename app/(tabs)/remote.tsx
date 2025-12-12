@@ -4532,42 +4532,30 @@ export default function RemoteScreen() {
       setIsInjuryTimer(false);
       setInjuryTimeRemaining(300);
 
-      if (keepOpponentName) {
-        if (showUserProfile && userDisplayName) {
-          if (toggleCardPosition === 'left') {
-            setFencerNames({ 
-              fencerA: userDisplayName, 
-              fencerB: fencerNames.fencerB
-            });
-          } else {
-            setFencerNames({ 
-              fencerA: fencerNames.fencerA,
-              fencerB: userDisplayName 
-            });
-          }
-        }
+      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
+      if (keepOpponentName && showUserProfile && userDisplayName) {
+        // Preserve opponent name tied to the non-user entity, regardless of card position
+        setFencerNames({
+          [userEntity]: userDisplayName,
+          [opponentEntity]: fencerNames[opponentEntity] || 'Tap to add name'
+        });
+      } else if (showUserProfile && userDisplayName) {
+        // Reset opponent to placeholder; keep user on their entity (position-agnostic)
+        setFencerNames({
+          [userEntity]: userDisplayName,
+          [opponentEntity]: 'Tap to add name'
+        });
       } else {
-        if (showUserProfile && userDisplayName) {
-          if (toggleCardPosition === 'left') {
-            setFencerNames({ 
-              fencerA: userDisplayName, 
-              fencerB: 'Tap to add name' 
-            });
-          } else {
-            setFencerNames({ 
-              fencerA: 'Tap to add name', 
-              fencerB: userDisplayName 
-            });
-          }
-        } else {
-          setFencerNames({ 
-            fencerA: 'Tap to add name', 
-            fencerB: 'Tap to add name' 
-          });
-        }
+        setFencerNames({ 
+          fencerA: 'Tap to add name', 
+          fencerB: 'Tap to add name' 
+        });
       }
       
       setFencerPositions({ fencerA: 'left', fencerB: 'right' });
+      // Align toggle card with the user entity after reset (prevents showing user on both cards)
+      const userTogglePosition = userEntity === 'fencerA' ? 'left' : 'right';
+      setToggleCardPosition(userTogglePosition);
       setShowUserProfile(currentToggleState);
       setSelectedWeapon(currentWeapon);
 
@@ -4578,7 +4566,7 @@ export default function RemoteScreen() {
       setIsManualReset(true); // Set flag to prevent auto-sync
       setIsResetting(false); // Always clear reset flag
     }
-  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, toggleCardPosition, selectedWeapon]);
+  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, selectedWeapon, userEntity]);
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {

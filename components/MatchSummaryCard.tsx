@@ -20,6 +20,8 @@ interface MatchSummaryCardProps {
   bestRun?: number;
   yellowCards?: number;
   redCards?: number;
+  highestMomentum?: number;
+  doubleTouchCount?: number;
   matchDurationSeconds?: number;
   touchesByPeriod?: {
     period1: { user: number; opponent: number };
@@ -47,6 +49,8 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   bestRun = 0,
   yellowCards = 0,
   redCards = 0,
+  highestMomentum = 0,
+  doubleTouchCount = 0,
   matchDurationSeconds = 0,
   touchesByPeriod,
   notes = '',
@@ -70,6 +74,21 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
     scoreProgressionOpponentDataLength: scoreProgression?.opponentData?.length || 0,
   });
 
+  const normalizedWeaponType = weaponType?.toLowerCase();
+  const isSabreWeapon = normalizedWeaponType === 'sabre' || normalizedWeaponType === 'saber';
+  const isEpeeWeapon = normalizedWeaponType === 'epee';
+  const sabreStats = isSabreWeapon ? [
+    { icon: 'flame', text: `${bestRun} Streak` },
+    { icon: 'card', text: `${yellowCards}Y or ${redCards}R Cards` },
+    { icon: 'trending-up', text: `${highestMomentum} Momentum` },
+  ] : undefined;
+  const epeeStats = isEpeeWeapon ? [
+    { icon: 'flame', text: `${bestRun} Streak` },
+    { icon: 'swap-horizontal', text: `${doubleTouchCount} Double Touches` },
+    { icon: 'card', text: `${yellowCards}Y or ${redCards}R Cards` },
+    { icon: 'time', text: `${matchDurationSeconds} Time` },
+  ] : undefined;
+
   // Sample data for charts
   const lineChartData = [
     { value: 0, dataPointText: '0' },
@@ -84,6 +103,11 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
     { value: 6, label: 'P2' },
     { value: 8, label: 'P3' },
   ];
+  const statsForWeapon = sabreStats || epeeStats;
+  const defaultStatsLength = 3;
+  const statsCount = statsForWeapon ? statsForWeapon.length : defaultStatsLength;
+  const baseHeight = height * 0.22;
+  const cardHeight = baseHeight * Math.max(1, statsCount / 3);
 
   const styles = StyleSheet.create({
     container: {
@@ -168,12 +192,15 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
           opponentLabel={opponentLabel}
           userPosition={userPosition}
           weaponType={weaponType}
+          heightOverride={cardHeight}
         />
         <KeyStatsCard 
           bestRun={bestRun} 
           yellowCards={yellowCards}
           redCards={redCards}
           matchDurationSeconds={matchDurationSeconds}
+          stats={statsForWeapon}
+          heightOverride={cardHeight}
         />
       </View>
       
