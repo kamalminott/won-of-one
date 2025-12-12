@@ -56,13 +56,17 @@ export default function ResetPasswordScreen() {
     return {
       accessToken: queryParams.access_token as string | undefined,
       refreshToken: queryParams.refresh_token as string | undefined,
+      code: queryParams.code as string | undefined,
       type: queryParams.type as string | undefined,
     };
   }, []);
 
   const handleRecoveryTokens = useCallback(
-    async (accessToken?: string, refreshToken?: string, type?: string) => {
-      if (!accessToken || !refreshToken) {
+    async (accessToken?: string, refreshToken?: string, type?: string, code?: string) => {
+      const hasTokenPair = !!accessToken && !!refreshToken;
+      const hasCode = !!code;
+
+      if (!hasTokenPair && !hasCode) {
         return false;
       }
 
@@ -71,7 +75,7 @@ export default function ResetPasswordScreen() {
         return false;
       }
 
-      const tokenKey = `${accessToken}:${refreshToken}`;
+      const tokenKey = hasTokenPair ? `${accessToken}:${refreshToken}` : `code:${code}`;
       if (processedTokenRef.current === tokenKey) {
         return true;
       }
@@ -84,20 +88,35 @@ export default function ResetPasswordScreen() {
         console.warn('⚠️ Unable to set password recovery flag:', error);
       }
 
-      console.log('🔑 Setting session from password reset link...');
-      const { error } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
+      try {
+        if (hasTokenPair) {
+          console.log('🔑 Setting session from password reset link (access/refresh)...');
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken as string,
+            refresh_token: refreshToken as string,
+          });
 
-      if (error) {
-        console.error('❌ Error setting session:', error);
+          if (error) {
+            throw error;
+          }
+        } else if (hasCode) {
+          console.log('🔑 Exchanging PKCE code for session (password recovery)...');
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code as string);
+          if (error) {
+            throw error;
+          }
+          if (!data.session) {
+            throw new Error('No session returned from code exchange');
+          }
+        }
+      } catch (error: any) {
+        console.error('❌ Error setting recovery session:', error);
         setErrorMessage('Invalid or expired reset link. Please request a new one.');
-        analytics.capture('password_reset_token_error', { message: error.message });
+        analytics.capture('password_reset_token_error', { message: error?.message || 'unknown_error' });
         return false;
       }
 
-      console.log('✅ Session set successfully');
+      console.log('✅ Recovery session set successfully');
       setIsSessionSet(true);
       setErrorMessage(null);
       return true;
@@ -112,14 +131,15 @@ export default function ResetPasswordScreen() {
         const accessToken = params.access_token as string | undefined;
         const refreshToken = params.refresh_token as string | undefined;
         const type = params.type as string | undefined;
+        const code = params.code as string | undefined;
 
-        let processed = await handleRecoveryTokens(accessToken, refreshToken, type);
+        let processed = await handleRecoveryTokens(accessToken, refreshToken, type, code);
 
         // Cold starts sometimes don't populate params, so also check the initial URL
         if (!processed) {
           const initialUrl = await Linking.getInitialURL();
           const tokens = extractTokensFromUrl(initialUrl);
-          processed = await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type);
+          processed = await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type, tokens.code);
         }
 
         if (!processed) {
@@ -144,7 +164,7 @@ export default function ResetPasswordScreen() {
   useEffect(() => {
     const subscription = Linking.addEventListener('url', async (event) => {
       const tokens = extractTokensFromUrl(event.url);
-      await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type);
+      await handleRecoveryTokens(tokens.accessToken, tokens.refreshToken, tokens.type, tokens.code);
     });
 
     return () => {

@@ -249,13 +249,19 @@ export default function RootLayout() {
       const accessToken = qp.access_token as string | undefined;
       const refreshToken = qp.refresh_token as string | undefined;
       const type = qp.type as string | undefined;
+      const code = qp.code as string | undefined;
 
-      if (type === 'recovery' && accessToken && refreshToken) {
+      const isRecovery = type === 'recovery' || !type;
+      const hasTokens = accessToken && refreshToken;
+      const hasCode = !!code;
+
+      if (isRecovery && (hasTokens || hasCode)) {
         router.replace({
           pathname: '/reset-password',
           params: {
             access_token: accessToken,
             refresh_token: refreshToken,
+            code,
             type: 'recovery',
           },
         });
