@@ -13,6 +13,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 
 // Safely import expo-updates for automatic update checking
 let Updates: typeof import('expo-updates') | null = null;
@@ -239,9 +240,9 @@ export default function RootLayout() {
     return () => clearTimeout(timeoutId);
   }, []);
 
-  // Route password recovery deep links directly to reset screen (before any tab render)
+  // Route password recovery and email confirmation deep links directly (before any tab render)
   React.useEffect(() => {
-    const handleRecoveryLink = (url?: string | null) => {
+    const handleAuthLink = async (url?: string | null) => {
       if (!url) return false;
       const parsedUrl = url.includes('#') ? url.replace('#', '?') : url;
       const parsed = Linking.parse(parsedUrl);
@@ -254,6 +255,21 @@ export default function RootLayout() {
       const isRecovery = type === 'recovery' || !type;
       const hasTokens = accessToken && refreshToken;
       const hasCode = !!code;
+      const isEmailConfirm = type === 'signup' || type === 'email_confirm';
+
+      // Handle email confirmation: show success and send to login (no auto-login)
+      if (isEmailConfirm) {
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          console.warn('⚠️ Error signing out after email confirm:', error);
+        }
+        router.replace({
+          pathname: '/login',
+          params: { verification: 'success' },
+        });
+        return true;
+      }
 
       if (isRecovery && (hasTokens || hasCode)) {
         router.replace({
@@ -271,11 +287,11 @@ export default function RootLayout() {
     };
 
     // Handle cold start
-    Linking.getInitialURL().then((url) => handleRecoveryLink(url));
+    Linking.getInitialURL().then((url) => handleAuthLink(url));
 
     // Handle in-app deep link events
     const subscription = Linking.addEventListener('url', (event) => {
-      handleRecoveryLink(event.url);
+      handleAuthLink(event.url);
     });
 
     return () => subscription.remove();

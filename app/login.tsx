@@ -2,7 +2,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useState } from 'react';
 import {
@@ -27,7 +27,9 @@ export default function LoginScreen() {
   
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
   const { signIn } = useAuth();
+  const hasShownVerification = React.useRef(false);
 
   // Track screen view
   useFocusEffect(
@@ -35,6 +37,19 @@ export default function LoginScreen() {
       analytics.screen('Login');
     }, [])
   );
+
+  // Show verification success message if coming from email confirm link
+  useEffect(() => {
+    if (params.verification === 'success' && !hasShownVerification.current) {
+      hasShownVerification.current = true;
+      Alert.alert(
+        'Email verified',
+        'Your email has been confirmed. Please sign in with your credentials.'
+      );
+      // Clear the param so the alert doesn't reappear on back nav
+      router.setParams({ verification: undefined });
+    }
+  }, [params.verification]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
