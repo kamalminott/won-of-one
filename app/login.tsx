@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     Alert, KeyboardAvoidingView,
     Platform,
@@ -38,18 +38,30 @@ export default function LoginScreen() {
     }, [])
   );
 
-  // Show verification success message if coming from email confirm link
+  // Show verification success/error message if coming from email confirm link
   useEffect(() => {
-    if (params.verification === 'success' && !hasShownVerification.current) {
+    if (params.verification && !hasShownVerification.current) {
       hasShownVerification.current = true;
-      Alert.alert(
-        'Email verified',
-        'Your email has been confirmed. Please sign in with your credentials.'
-      );
+      
+      if (params.verification === 'success') {
+        Alert.alert(
+          'Email verified',
+          'Your email has been confirmed. Please sign in with your credentials.'
+        );
+      } else if (params.verification === 'error') {
+        const errorMsg = params.error === 'invalid_link' 
+          ? 'The confirmation link is invalid or has expired. Please request a new confirmation email.'
+          : params.error === 'invalid_code'
+          ? 'The confirmation code is invalid or has expired. Please request a new confirmation email.'
+          : 'There was an error verifying your email. Please try again.';
+        
+        Alert.alert('Verification Failed', errorMsg);
+      }
+      
       // Clear the param so the alert doesn't reappear on back nav
-      router.setParams({ verification: undefined });
+      router.setParams({ verification: undefined, error: undefined });
     }
-  }, [params.verification]);
+  }, [params.verification, params.error]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
