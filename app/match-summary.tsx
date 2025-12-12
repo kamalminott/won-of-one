@@ -23,6 +23,8 @@ export default function MatchSummaryScreen() {
   const { user, userName, profileImage } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [bestRun, setBestRun] = useState<number>(0);
+  const [highestMomentum, setHighestMomentum] = useState<number>(0);
+  const [doubleTouchCount, setDoubleTouchCount] = useState<number>(0);
   const [scoreProgression, setScoreProgression] = useState<{
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
@@ -141,6 +143,8 @@ export default function MatchSummaryScreen() {
           
           // Simplified stats for offline matches (no event data available)
           setBestRun(0);
+          setHighestMomentum(0);
+          setDoubleTouchCount(0);
           setScoreProgression({ userData: [], opponentData: [] });
           
           setLoading(false);
@@ -193,6 +197,17 @@ export default function MatchSummaryScreen() {
               params.remoteId as string // Pass the remoteId to help find events
             );
             setBestRun(calculatedBestRun);
+            const sabreWeaponType = matchData.weapon_type || (params.weaponType as string | undefined);
+            const sabreMomentum = isSabreWeapon(sabreWeaponType)
+              ? (calculatedBestRun >= 2 ? calculatedBestRun : 0)
+              : 0;
+            setHighestMomentum(sabreMomentum);
+            if (isEpeeWeapon(matchData.weapon_type)) {
+              const calculatedDoubleTouches = await matchService.calculateDoubleTouchCount(params.matchId as string);
+              setDoubleTouchCount(calculatedDoubleTouches);
+            } else {
+              setDoubleTouchCount(0);
+            }
 
             // Use calculateAnonymousScoreProgression to get position-based data directly from database
             // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
@@ -576,6 +591,15 @@ export default function MatchSummaryScreen() {
     return fullName.trim().split(' ')[0];
   };
 
+  const isSabreWeapon = (weapon?: string | null) => {
+    const normalized = (weapon || '').toLowerCase();
+    return normalized === 'sabre' || normalized === 'saber';
+  };
+  const isEpeeWeapon = (weapon?: string | null) => {
+    const normalized = (weapon || '').toLowerCase();
+    return normalized === 'epee';
+  };
+
   // Prepare match data for MatchSummaryStats
   const normalizeName = (value?: string | null) => {
     if (!value) return '';
@@ -649,6 +673,7 @@ export default function MatchSummaryScreen() {
     : isFencer2User
     ? getFirstName(match?.fencer_1_name) || 'Fencer 1'
     : getFirstName(match?.fencer_2_name) || 'Fencer 2';
+  const weaponType = match?.weapon_type || (params.weaponType as string | undefined);
 
   const matchData = match ? {
     id: match.match_id,
@@ -896,6 +921,8 @@ export default function MatchSummaryScreen() {
             bestRun={bestRun}
             yellowCards={match?.yellow_cards || 0}
             redCards={match?.red_cards || 0}
+            highestMomentum={highestMomentum}
+            doubleTouchCount={doubleTouchCount}
             matchDurationSeconds={Math.max(match?.bout_length_s || 0, getProgressionDurationSeconds())}
             touchesByPeriod={touchesByPeriod}
             notes={notes}
@@ -903,7 +930,7 @@ export default function MatchSummaryScreen() {
             onNotesPress={handleNotesPress}
             userLabel={userLabelForCard}
             opponentLabel={opponentLabelForCard}
-            weaponType={match?.weapon_type}
+            weaponType={weaponType}
             userPosition={userPosition}
           />
       </ScrollView>

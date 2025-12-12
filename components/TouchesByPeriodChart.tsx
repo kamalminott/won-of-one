@@ -5,6 +5,7 @@ import { BarChart } from 'react-native-gifted-charts';
 interface TouchesByPeriodChartProps {
   title?: string;
   customStyle?: object;
+  heightOverride?: number;
   touchesByPeriod?: {
     period1: { user: number; opponent: number };
     period2: { user: number; opponent: number };
@@ -28,6 +29,7 @@ interface TooltipData {
 export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   title = 'Touches by Period',
   customStyle = {},
+  heightOverride,
   touchesByPeriod,
   userLabel = 'You',
   opponentLabel = 'Opponent',
@@ -35,6 +37,8 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
   weaponType // Weapon type: 'foil', 'epee', 'sabre', 'saber'
 }) => {
   const { width, height } = useWindowDimensions();
+  const containerHeight = heightOverride || (height * 0.22);
+  const chartHeight = Math.max(height * 0.12, containerHeight - height * 0.12); // leave more space for title/legend
   const [tooltip, setTooltip] = useState<TooltipData>({
     visible: false,
     x: 0,
@@ -85,7 +89,7 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       padding: width * 0.04,
       marginHorizontal: 0, // No margin - rowContainer handles alignment
       flex: 1,
-      height: height * 0.22,
+      height: containerHeight,
       marginBottom: height * 0.01,
       overflow: 'hidden',
     },
@@ -272,7 +276,7 @@ export const TouchesByPeriodChart: React.FC<TouchesByPeriodChartProps> = ({
       <View style={styles.chartContainer}>
         <BarChart
           data={chartData}
-          height={height * 0.12}
+          height={chartHeight}
           width={width * 0.35}
           barWidth={Math.round(width * 0.035)}
           spacing={Math.round(width * 0.02)}

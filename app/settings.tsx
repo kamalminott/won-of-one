@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -55,6 +55,7 @@ export default function SettingsScreen() {
   });
 
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
 
   // Track screen view
@@ -222,10 +223,29 @@ export default function SettingsScreen() {
     router.push('/(tabs)/profile');
   };
 
-  const handleLogOut = () => {
+  const handleLogOut = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
     analytics.logout();
-    // TODO: Implement logout logic
-    console.log('Log out pressed');
+    try {
+      // Clear critical local state so the next user starts fresh
+      await AsyncStorage.multiRemove([
+        'ongoing_match_state',
+        'user_name',
+        'user_profile_image',
+      ]);
+
+      // Sign out via AuthContext (supabase + auth state)
+      await signOut();
+
+      // Send user to login screen
+      router.replace('/login');
+    } catch (error) {
+      console.error('❌ Error during logout:', error);
+      Alert.alert('Logout Failed', 'Something went wrong while logging out. Please try again.');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   const handleSwitchAccount = () => {
@@ -512,11 +532,12 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Authentication & Account</Text>
           <View style={[styles.card, styles.authCard]}>
-            <TouchableOpacity style={styles.settingRow} onPress={handleLogOut}>
+            <TouchableOpacity style={styles.settingRow} onPress={handleLogOut} disabled={isLoggingOut}>
               <View style={styles.iconContainer}>
                 <Ionicons name="log-out-outline" size={width * 0.06} color="#FFFFFF" />
               </View>
-              <Text style={styles.optionText}>Log Out</Text>
+              <Text style={styles.optionText}>{isLoggingOut ? 'Logging Out...' : 'Log Out'}</Text>
+              {isLoggingOut && <ActivityIndicator size="small" color="#FFFFFF" />}
             </TouchableOpacity>
             
             <View style={styles.separator} />
@@ -668,7 +689,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Support</Text>
           <View style={[styles.card, styles.matchDefaultsCard]}>
             <TouchableOpacity 
-              style={[styles.settingRow, styles.settingRowLast]} 
+              style={styles.settingRow} 
               onPress={() => {
                 analytics.capture('bug_report_opened');
                 setShowBugReportModal(true);
@@ -678,6 +699,44 @@ export default function SettingsScreen() {
                 <Ionicons name="bug" size={width * 0.06} color="#6C5CE7" />
               </View>
               <Text style={styles.optionText}>Report a Bug</Text>
+              <Ionicons name="chevron-forward" size={width * 0.05} color="#9D9D9D" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Legal Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Legal</Text>
+          <View style={[styles.card, styles.matchDefaultsCard]}>
+            <TouchableOpacity 
+              style={styles.settingRow} 
+              onPress={() => {
+                Linking.openURL('https://kamalminott.github.io/won-of-one/privacy-policy.html').catch(err => 
+                  console.error('Failed to open privacy policy:', err)
+                );
+              }}
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="shield-checkmark-outline" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Privacy Policy</Text>
+              <Ionicons name="chevron-forward" size={width * 0.05} color="#9D9D9D" />
+            </TouchableOpacity>
+            
+            <View style={styles.separator} />
+            
+            <TouchableOpacity 
+              style={[styles.settingRow, styles.settingRowLast]} 
+              onPress={() => {
+                Linking.openURL('https://kamalminott.github.io/won-of-one/terms-of-service.html').catch(err => 
+                  console.error('Failed to open terms of service:', err)
+                );
+              }}
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="document-text-outline" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Terms of Service</Text>
               <Ionicons name="chevron-forward" size={width * 0.05} color="#9D9D9D" />
             </TouchableOpacity>
           </View>
