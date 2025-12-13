@@ -251,23 +251,101 @@ export default function RootLayout() {
       const refreshToken = qp.refresh_token as string | undefined;
       const type = qp.type as string | undefined;
       const code = qp.code as string | undefined;
+      const token = qp.token as string | undefined;
+      const path = parsed.path || '';
 
-      const isRecovery = type === 'recovery' || !type;
+      const isResetPath = typeof path === 'string' && path.includes('reset-password');
+      const isRecovery = type === 'recovery' || isResetPath;
       const hasTokens = accessToken && refreshToken;
       const hasCode = !!code;
-      const isEmailConfirm = type === 'signup' || type === 'email_confirm';
+      const hasToken = !!token;
+      const isEmailConfirm =
+        type === 'signup' ||
+        type === 'email_confirm' ||
+        type === 'invite' ||
+        (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
 
-      // Handle email confirmation: show success and send to login (no auto-login)
-      if (isEmailConfirm) {
+      // Handle email confirmation: verify email and then redirect to login
+      if (isEmailConfirm && (hasTokens || hasCode || hasToken)) {
         try {
+          console.log('📧 Handling email confirmation...', { hasTokens, hasCode, type });
+          
+          // Email confirmation links typically have tokens - set session to verify
+          if (hasTokens && accessToken && refreshToken) {
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            
+            if (sessionError) {
+              console.error('❌ Error setting session for email confirmation:', sessionError);
+              router.replace({
+                pathname: '/login',
+                params: { verification: 'error', error: 'invalid_link' },
+              });
+              return true;
+            }
+            
+            console.log('✅ Email confirmed via session', sessionData?.user?.email);
+          } 
+          // Some confirmation links might use a code/token parameter
+          else if (hasCode || token) {
+            // Try to verify using the code or token as a token hash
+            const verifyToken = token || code;
+            const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+              token_hash: verifyToken,
+              type: 'email',
+            });
+            
+            if (verifyError) {
+              console.error('❌ Error verifying email with code:', verifyError);
+              // If OTP verification fails, try setting session if we have tokens
+              if (accessToken && refreshToken) {
+                const { error: sessionError } = await supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                });
+                if (sessionError) {
+                  router.replace({
+                    pathname: '/login',
+                    params: { verification: 'error', error: 'invalid_link' },
+                  });
+                  return true;
+                }
+                console.log('✅ Email confirmed via session (fallback)');
+              } else {
+                router.replace({
+                  pathname: '/login',
+                  params: { verification: 'error', error: 'invalid_code' },
+                });
+                return true;
+              }
+            } else {
+              console.log('✅ Email confirmed via code', verifyData?.user?.email);
+            }
+          } else {
+            console.warn('⚠️ Email confirmation link missing tokens or code');
+            router.replace({
+              pathname: '/login',
+              params: { verification: 'error', error: 'missing_tokens' },
+            });
+            return true;
+          }
+          
+          // Sign out after verification (user needs to log in with their credentials)
           await supabase.auth.signOut();
-        } catch (error) {
-          console.warn('⚠️ Error signing out after email confirm:', error);
+          
+          router.replace({
+            pathname: '/login',
+            params: { verification: 'success' },
+          });
+        } catch (error: any) {
+          console.error('❌ Error handling email confirmation:', error);
+          router.replace({
+            pathname: '/login',
+            params: { verification: 'error', error: error?.message || 'unknown_error' },
+          });
         }
-        router.replace({
-          pathname: '/login',
-          params: { verification: 'success' },
-        });
         return true;
       }
 
