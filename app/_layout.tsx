@@ -252,12 +252,18 @@ export default function RootLayout() {
       const type = qp.type as string | undefined;
       const code = qp.code as string | undefined;
       const token = qp.token as string | undefined;
+      const path = parsed.path || '';
 
-      const isRecovery = type === 'recovery' || !type;
+      const isResetPath = typeof path === 'string' && path.includes('reset-password');
+      const isRecovery = type === 'recovery' || isResetPath;
       const hasTokens = accessToken && refreshToken;
       const hasCode = !!code;
       const hasToken = !!token;
-      const isEmailConfirm = type === 'signup' || type === 'email_confirm';
+      const isEmailConfirm =
+        type === 'signup' ||
+        type === 'email_confirm' ||
+        type === 'invite' ||
+        (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
 
       // Handle email confirmation: verify email and then redirect to login
       if (isEmailConfirm && (hasTokens || hasCode || hasToken)) {
