@@ -266,9 +266,16 @@ export default function RootLayout() {
         (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
 
       // Handle email confirmation: verify email and then redirect to login (never log in)
-      if (isEmailConfirm && (hasTokens || hasCode || hasToken)) {
+      if (isEmailConfirm) {
         try {
           console.log('📧 Handling email confirmation...', { hasTokens, hasCode, hasToken, type });
+
+          // Clear any existing session first to avoid auto-login
+          try {
+            await supabase.auth.signOut();
+          } catch (signOutErr) {
+            console.warn('⚠️ Error signing out before verification:', signOutErr);
+          }
 
           // Prefer OTP verification to avoid creating a session
           const verifyToken = (token || code || '') as string;
