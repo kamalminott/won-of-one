@@ -265,18 +265,44 @@ export default function RootLayout() {
         type === 'invite' ||
         (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
 
-      // Handle email confirmation: verify email and then redirect to login
+      // Handle email confirmation: verify email and then redirect to login (never log in)
       if (isEmailConfirm && (hasTokens || hasCode || hasToken)) {
         try {
-          console.log('📧 Handling email confirmation...', { hasTokens, hasCode, type });
-          
-          // Email confirmation links typically have tokens - set session to verify
-          if (hasTokens && accessToken && refreshToken) {
-            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+          console.log('📧 Handling email confirmation...', { hasTokens, hasCode, hasToken, type });
+
+          // Prefer OTP verification to avoid creating a session
+          const verifyToken = (token || code || '') as string;
+          if (verifyToken) {
+            // Try signup first, then email_confirm as fallback
+            const verifySignup = await supabase.auth.verifyOtp({
+              token_hash: verifyToken,
+              type: 'signup',
+            });
+            if (verifySignup.error) {
+              console.warn('⚠️ Signup verify failed, trying email_confirm:', verifySignup.error);
+              const verifyEmail = await supabase.auth.verifyOtp({
+                token_hash: verifyToken,
+                type: 'email',
+              });
+              if (verifyEmail.error) {
+                console.error('❌ Error verifying email with token:', verifyEmail.error);
+                router.replace({
+                  pathname: '/login',
+                  params: { verification: 'error', error: 'invalid_code' },
+                });
+                return true;
+              } else {
+                console.log('✅ Email confirmed via token (email_confirm)');
+              }
+            } else {
+              console.log('✅ Email confirmed via token (signup)');
+            }
+          } else if (hasTokens && accessToken && refreshToken) {
+            // Fallback: if only access/refresh tokens were provided, do NOT keep session
+            const { error: sessionError } = await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
             });
-            
             if (sessionError) {
               console.error('❌ Error setting session for email confirmation:', sessionError);
               router.replace({
@@ -285,44 +311,7 @@ export default function RootLayout() {
               });
               return true;
             }
-            
-            console.log('✅ Email confirmed via session', sessionData?.user?.email);
-          } 
-          // Some confirmation links might use a code/token parameter
-          else if (hasCode || token) {
-            // Try to verify using the code or token as a token hash
-            const verifyToken = token || code;
-            const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-              token_hash: verifyToken,
-              type: 'email',
-            });
-            
-            if (verifyError) {
-              console.error('❌ Error verifying email with code:', verifyError);
-              // If OTP verification fails, try setting session if we have tokens
-              if (accessToken && refreshToken) {
-                const { error: sessionError } = await supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                });
-                if (sessionError) {
-                  router.replace({
-                    pathname: '/login',
-                    params: { verification: 'error', error: 'invalid_link' },
-                  });
-                  return true;
-                }
-                console.log('✅ Email confirmed via session (fallback)');
-              } else {
-                router.replace({
-                  pathname: '/login',
-                  params: { verification: 'error', error: 'invalid_code' },
-                });
-                return true;
-              }
-            } else {
-              console.log('✅ Email confirmed via code', verifyData?.user?.email);
-            }
+            console.log('✅ Email confirmed via session (fallback)');
           } else {
             console.warn('⚠️ Email confirmation link missing tokens or code');
             router.replace({
@@ -331,10 +320,10 @@ export default function RootLayout() {
             });
             return true;
           }
-          
-          // Sign out after verification (user needs to log in with their credentials)
+
+          // Always sign out to prevent auto-login after confirmation
           await supabase.auth.signOut();
-          
+
           router.replace({
             pathname: '/login',
             params: { verification: 'success' },
