@@ -71,6 +71,8 @@ export default function AddMatchScreen() {
   const [weaponType, setWeaponType] = useState('Foil');
   const [showWeaponDropdown, setShowWeaponDropdown] = useState(false);
   const [notes, setNotes] = useState(params.notes as string || '');
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [tempNotes, setTempNotes] = useState(params.notes as string || '');
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [editingScore, setEditingScore] = useState<'your' | 'opponent' | null>(null);
   const [tempScore, setTempScore] = useState('');
@@ -196,6 +198,20 @@ export default function AddMatchScreen() {
     } else {
       setShowTimePicker(true);
     }
+  };
+
+  const openNotesModal = () => {
+    setTempNotes(notes);
+    setShowNotesModal(true);
+  };
+
+  const handleSaveNotesModal = () => {
+    setNotes(tempNotes.trim());
+    setShowNotesModal(false);
+  };
+
+  const handleCancelNotesModal = () => {
+    setShowNotesModal(false);
   };
 
   const handleSaveMatch = async () => {
@@ -676,6 +692,55 @@ export default function AddMatchScreen() {
       justifyContent: 'center',
       alignItems: 'center',
     },
+    modalContent: {
+      borderRadius: getDimension(0.03, width),
+      padding: getDimension(0.04, width),
+      width: getDimension(0.9, width),
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: getDimension(0.02, height),
+    },
+    closeButton: {
+      padding: getDimension(0.01, width),
+    },
+    textInput: {
+      color: 'white',
+      fontSize: getDimension(0.04, width),
+      textAlignVertical: 'top',
+      padding: getDimension(0.03, width),
+      borderRadius: getDimension(0.02, width),
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    characterCount: {
+      marginTop: getDimension(0.01, height),
+      alignSelf: 'flex-end',
+      color: 'rgba(255, 255, 255, 0.7)',
+      fontSize: getDimension(0.035, width),
+    },
+    buttonContainer: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      marginTop: getDimension(0.02, height),
+    },
+    cancelButton: {
+      paddingVertical: getDimension(0.015, height),
+      paddingHorizontal: getDimension(0.04, width),
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.3)',
+      backgroundColor: 'transparent',
+    },
+    cancelButtonText: {
+      color: 'white',
+      fontWeight: '600',
+      fontSize: getDimension(0.04, width),
+    },
     modalContainer: {
       backgroundColor: Colors.dark.background,
       borderRadius: getDimension(0.03, width),
@@ -1100,15 +1165,23 @@ export default function AddMatchScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Notes</Text>
-            <TextInput
-              style={styles.inputField}
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Add match notes..."
-              placeholderTextColor="rgba(255, 255, 255, 0.5)"
-              multiline
-              numberOfLines={3}
-            />
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={openNotesModal}
+              style={[styles.inputField, { justifyContent: 'center' }]}
+            >
+              <Text
+                style={{
+                  color: notes ? '#FFFFFF' : 'rgba(255, 255, 255, 0.5)',
+                  fontSize: getDimension(0.04, width),
+                  lineHeight: getDimension(0.055, width),
+                  fontWeight: '500',
+                }}
+                numberOfLines={3}
+              >
+                {notes || 'Add match notes...'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1657,6 +1730,65 @@ export default function AddMatchScreen() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Notes Modal */}
+      <Modal
+        visible={showNotesModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCancelNotesModal}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            Keyboard.dismiss();
+            handleCancelNotesModal();
+          }}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
+            style={{ flex: 1, justifyContent: 'center' }}
+          >
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.modalContainer}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.05)']}
+                  style={[styles.modalContent, { borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.15)' }]}
+                >
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Match Notes</Text>
+                    <TouchableOpacity onPress={handleCancelNotesModal} style={styles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={[styles.textInput, { minHeight: 140 }]}
+                      value={tempNotes}
+                      onChangeText={setTempNotes}
+                      placeholder="Add match notes..."
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      multiline
+                      maxLength={500}
+                      autoFocus
+                    />
+                    <Text style={styles.characterCount}>{tempNotes.length}/500</Text>
+                  </View>
+
+                  <View style={styles.buttonContainer}>
+                    <TouchableOpacity onPress={handleSaveNotesModal} style={styles.cancelButton}>
+                      <Text style={styles.cancelButtonText}>Save</Text>
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
         </TouchableOpacity>
       </Modal>
     </SafeAreaView>
