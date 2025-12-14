@@ -8,7 +8,7 @@ import { SimpleMatch } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   SafeAreaView,
@@ -151,6 +151,55 @@ export default function RecentMatchesScreen() {
     notes: simpleMatch.notes ?? '',
   });
 
+  // --- Grouping helpers ---
+  const parseMatchDate = (dateString: string): Date | null => {
+    if (!dateString || dateString.trim() === '') return null;
+
+    // DD/MM/YYYY support
+    if (dateString.includes('/') && dateString.split('/').length === 3) {
+      const [dayStr, monthStr, yearStr] = dateString.split('/');
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const year = parseInt(yearStr, 10);
+      const parsed = new Date(year, month, day);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    const parsed = new Date(dateString);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const getDateKey = (date: Date | null): string => {
+    if (!date) return 'unknown';
+    return date.toISOString().slice(0, 10); // YYYY-MM-DD
+  };
+
+  const formatHeaderLabel = (dateKey: string): string => {
+    if (dateKey === 'unknown') return 'Unknown Date';
+    const date = new Date(`${dateKey}T00:00:00`);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    const sameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+
+    if (sameDay(date, today)) return 'Today';
+    if (sameDay(date, yesterday)) return 'Yesterday';
+
+    const opts: Intl.DateTimeFormatOptions = {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+    };
+    if (date.getFullYear() !== today.getFullYear()) {
+      opts.year = 'numeric';
+    }
+    return date.toLocaleDateString(undefined, opts);
+  };
+
   // Filter matches based on search query, selected type, win/loss, and date range
   const filterMatches = () => {
     let filtered = allMatches;
@@ -180,6 +229,31 @@ export default function RecentMatchesScreen() {
 
     setMatches(filtered);
   };
+
+  const groupedMatches = useMemo(() => {
+    if (!matches || matches.length === 0) return [];
+
+    // Sort newest first by date
+    const sorted = [...matches].sort((a, b) => {
+      const da = parseMatchDate(a.date)?.getTime() ?? 0;
+      const db = parseMatchDate(b.date)?.getTime() ?? 0;
+      return db - da;
+    });
+
+    const groups: { key: string; label: string; items: Match[] }[] = [];
+    sorted.forEach((match) => {
+      const dateKey = getDateKey(parseMatchDate(match.date));
+      const label = formatHeaderLabel(dateKey);
+      const existing = groups.find((g) => g.key === dateKey);
+      if (existing) {
+        existing.items.push(match);
+      } else {
+        groups.push({ key: dateKey, label, items: [match] });
+      }
+    });
+
+    return groups;
+  }, [matches]);
 
   // Fetch matches data
   const fetchMatches = async () => {
@@ -391,6 +465,16 @@ export default function RecentMatchesScreen() {
     },
     matchesList: {
       paddingHorizontal: width * 0.04,
+    },
+    groupContainer: {
+      marginBottom: height * 0.03,
+    },
+    groupHeader: {
+      fontSize: width * 0.04,
+      fontWeight: '700',
+      color: 'rgba(255, 255, 255, 0.8)',
+      marginBottom: height * 0.012,
+      letterSpacing: 0.5,
     },
     loadingContainer: {
       flex: 1,
@@ -764,13 +848,18 @@ export default function RecentMatchesScreen() {
             <Text style={styles.loadingText}>No matches found</Text>
           </View>
         ) : (
-          matches.map((match) => (
-            <RecentMatchCard 
-              key={match.id}
-              match={match} 
-              onDelete={handleDeleteMatch}
-              editMode={editMode}
-            />
+          groupedMatches.map((group) => (
+            <View key={group.key} style={styles.groupContainer}>
+              <Text style={styles.groupHeader}>{group.label.toUpperCase()}</Text>
+              {group.items.map((match) => (
+                <RecentMatchCard 
+                  key={match.id}
+                  match={match} 
+                  onDelete={handleDeleteMatch}
+                  editMode={editMode}
+                />
+              ))}
+            </View>
           ))
         )}
       </ScrollView>
