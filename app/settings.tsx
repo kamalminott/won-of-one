@@ -361,6 +361,9 @@ export default function SettingsScreen() {
       paddingHorizontal: width * 0.04,
       paddingTop: height * 0.02,
     },
+    contentContainer: {
+      paddingBottom: height * 0.04,
+    },
     section: {
       marginBottom: height * 0.03,
     },
@@ -494,7 +497,14 @@ export default function SettingsScreen() {
         <View style={{ width: width * 0.06 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={[
+          styles.contentContainer,
+          { paddingBottom: insets.bottom + height * 0.12 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Haptics Section */}
         <View style={styles.section}>
           <View style={[styles.card, styles.hapticsCard]}>

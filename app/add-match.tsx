@@ -34,33 +34,72 @@ export default function AddMatchScreen() {
   // Check if we're in edit mode
   const isEditMode = params.editMode === 'true';
   
-  // Initialize state with params if in edit mode
-  const [matchDate, setMatchDate] = useState(() => {
-    if (isEditMode && params.date && params.time) {
-      // Parse date and time from params
-      const dateStr = params.date as string;
-      const timeStr = params.time as string;
-      // Simple parsing - you might want to make this more robust
-      const [day, month, year] = dateStr.split('/');
-      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-      
-      // Parse time
+  // Parse date/time from params with fallbacks
+  const parseInitialDateTime = () => {
+    const dateStr = params.date as string | undefined;
+    const timeStr = params.time as string | undefined;
+    const eventDateStr = params.eventDate as string | undefined;
+
+    const now = new Date();
+    if (!isEditMode) {
+      return now;
+    }
+
+    // If an ISO event date was provided, use it first
+    if (eventDateStr) {
+      const isoDate = new Date(eventDateStr);
+      if (!isNaN(isoDate.getTime())) {
+        return isoDate;
+      }
+    }
+
+    if (!dateStr) {
+      return now;
+    }
+
+    // Try DD/MM/YYYY first
+    let parsed: Date | null = null;
+    if (dateStr.includes('/') && dateStr.split('/').length === 3) {
+      const [dayStr, monthStr, yearStr] = dateStr.split('/');
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const year = parseInt(yearStr, 10);
+      const candidate = new Date(year, month, day);
+      if (!isNaN(candidate.getTime())) {
+        parsed = candidate;
+      }
+    }
+
+    // Fallback: try native Date parsing (ISO or other)
+    if (!parsed) {
+      const candidate = new Date(dateStr);
+      if (!isNaN(candidate.getTime())) {
+        parsed = candidate;
+      }
+    }
+
+    if (!parsed) {
+      return now;
+    }
+
+    // Apply time if provided
+    if (timeStr) {
       const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
       if (timeMatch) {
-        let hours = parseInt(timeMatch[1]);
-        const minutes = parseInt(timeMatch[2]);
+        let hours = parseInt(timeMatch[1], 10);
+        const minutes = parseInt(timeMatch[2], 10);
         const ampm = timeMatch[3].toUpperCase();
-        
         if (ampm === 'PM' && hours !== 12) hours += 12;
         if (ampm === 'AM' && hours === 12) hours = 0;
-        
-        date.setHours(hours, minutes);
+        parsed.setHours(hours, minutes, 0, 0);
       }
-      
-      return date;
     }
-    return new Date();
-  });
+
+    return parsed;
+  };
+
+  // Initialize state with params if in edit mode
+  const [matchDate, setMatchDate] = useState(() => parseInitialDateTime());
   
   const [showCalendar, setShowCalendar] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -132,10 +171,36 @@ export default function AddMatchScreen() {
       if (isEditMode && params.matchId) {
         const matchId = params.matchId as string;
         const match = await matchService.getMatchById(matchId);
-        if (match && match.weapon_type) {
-          // Capitalize first letter to match form format (Foil, Epee, Sabre)
-          const weaponTypeFormatted = match.weapon_type.charAt(0).toUpperCase() + match.weapon_type.slice(1).toLowerCase();
-          setWeaponType(weaponTypeFormatted);
+        if (match) {
+          if (match.weapon_type) {
+            // Capitalize first letter to match form format (Foil, Epee, Sabre)
+            const weaponTypeFormatted = match.weapon_type.charAt(0).toUpperCase() + match.weapon_type.slice(1).toLowerCase();
+            setWeaponType(weaponTypeFormatted);
+          }
+
+          // Use event_date from DB to preserve original date/time
+          if (match.event_date) {
+            const dbDate = new Date(match.event_date);
+            if (!isNaN(dbDate.getTime())) {
+              setMatchDate(dbDate);
+              setCurrentMonth(dbDate);
+            }
+          }
+
+          // Ensure scores/opponent names are hydrated if params were missing
+          if (!opponentName && match.fencer_2_name) {
+            setOpponentName(match.fencer_2_name);
+          }
+          if (!notes && match.notes) {
+            setNotes(match.notes);
+            setTempNotes(match.notes);
+          }
+          if ((!params.yourScore || !params.opponentScore) && match.final_score !== undefined && match.score_diff !== undefined) {
+            const yourScoreNum = match.final_score;
+            const opponentScoreNum = match.final_score - match.score_diff;
+            setYourScore(yourScoreNum.toString());
+            setOpponentScore(opponentScoreNum.toString());
+          }
         }
       }
     };
@@ -143,7 +208,8 @@ export default function AddMatchScreen() {
   }, [isEditMode, params.matchId]);
 
   const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', {
+    const safe = isNaN(date.getTime()) ? new Date() : date;
+    return safe.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -248,6 +314,7 @@ export default function AddMatchScreen() {
     try {
       const matchId = params.matchId as string;
       const isEditing = isEditMode && matchId;
+      const safeDate = isNaN(matchDate.getTime()) ? new Date() : matchDate;
       
       console.log(isEditing ? '💾 Updating manual match...' : '💾 Saving manual match...', {
         matchId: isEditing ? matchId : 'new',
@@ -263,23 +330,23 @@ export default function AddMatchScreen() {
       let savedMatch: any = null;
 
       if (isEditing) {
-        // Update existing match
-        const dateStr = matchDate.toLocaleDateString('en-GB');
-        const timeStr = matchDate.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit',
-          hour12: true 
-        });
-        
-        // Parse date and time to create ISO string
-        const [day, month, year] = dateStr.split('/');
-        const [hour, minute] = timeStr.replace(/[AP]M/i, '').split(':');
-        const isPM = timeStr.toUpperCase().includes('PM');
-        let hour24 = parseInt(hour);
-        if (isPM && hour24 !== 12) hour24 += 12;
-        if (!isPM && hour24 === 12) hour24 = 0;
-        
-        const eventDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(minute));
+    // Update existing match
+    const dateStr = safeDate.toLocaleDateString('en-GB');
+    const timeStr = safeDate.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    
+    // Parse date and time to create ISO string
+    const [day, month, year] = dateStr.split('/');
+    const [hour, minute] = timeStr.replace(/[AP]M/i, '').split(':');
+    const isPM = timeStr.toUpperCase().includes('PM');
+    let hour24 = parseInt(hour, 10);
+    if (isPM && hour24 !== 12) hour24 += 12;
+    if (!isPM && hour24 === 12) hour24 = 0;
+    
+    const eventDateTime = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), hour24, parseInt(minute, 10));
         
         const userDisplayName = userName || 'You';
         
@@ -302,8 +369,8 @@ export default function AddMatchScreen() {
           yourScore: yourScoreNum,
           opponentScore: opponentScoreNum,
           matchType: event === 'Training' ? 'training' : 'competition',
-          date: matchDate.toLocaleDateString('en-GB'),
-          time: matchDate.toLocaleTimeString('en-US', { 
+          date: safeDate.toLocaleDateString('en-GB'),
+          time: safeDate.toLocaleTimeString('en-US', { 
             hour: 'numeric', 
             minute: '2-digit',
             hour12: true 
