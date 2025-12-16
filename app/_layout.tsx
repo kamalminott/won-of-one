@@ -1,19 +1,17 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import { useEffect } from 'react';
 import { analytics, POSTHOG_CONFIG } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import * as Application from 'expo-application';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import { useFonts } from 'expo-font';
+import * as Linking from 'expo-linking';
+import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as Application from 'expo-application';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
-import { supabase } from '@/lib/supabase';
 
 // Safely import expo-updates for automatic update checking
 let Updates: typeof import('expo-updates') | null = null;

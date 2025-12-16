@@ -331,7 +331,7 @@ export default function ManualMatchSummaryScreen() {
         {showDoneButton && (
           <View style={{ 
             paddingHorizontal: width * 0.04, 
-            paddingBottom: Math.max(insets.bottom, height * 0.02)
+            paddingBottom: Math.max(insets.bottom, height * 0.02) + height * 0.01
           }}>
             <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
               <Text style={styles.doneButtonText}>Done</Text>

@@ -712,7 +712,7 @@ export const POSTHOG_CONFIG = {
     autocapture: {
       uncaughtExceptions: true,
       unhandledRejections: true,
-      console: ['error', 'warn'],
+      console: ['error', 'warn'] as Array<'debug' | 'log' | 'info' | 'warn' | 'error'>,
     },
   },
 };
