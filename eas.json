@@ -29,5 +29,13 @@
   },
   "submit": {
     "production": {}
+  },
+  "update": {
+    "production": {
+      "channel": "production"
+    },
+    "preview": {
+      "channel": "preview"
+    }
   }
 }

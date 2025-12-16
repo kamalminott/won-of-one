@@ -218,9 +218,9 @@ export default function RootLayout() {
         if (update.isAvailable) {
           console.log('✅ Update available, downloading...');
           await Updates.fetchUpdateAsync();
-          console.log('✅ Update downloaded, will apply on next app restart');
-          // Note: We don't auto-reload here to avoid disrupting the user
-          // The update will be applied on the next app launch
+          console.log('✅ Update downloaded, reloading app to apply update...');
+          // Automatically reload to apply the update immediately
+          await Updates.reloadAsync();
         } else {
           console.log('✅ App is up to date');
         }
