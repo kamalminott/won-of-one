@@ -1,7 +1,7 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
@@ -12,6 +12,7 @@ import { matchService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 
 import { Colors } from '@/constants/Colors';
+import { Ionicons } from '@expo/vector-icons';
 
 interface MatchDetailsProps {
   matchId: string;
@@ -546,6 +547,46 @@ export default function MatchDetailsScreen() {
     router.back();
   };
 
+  const handleDelete = () => {
+    const matchId = (params.matchId as string) || match?.match_id;
+
+    if (!matchId) {
+      console.log('No match ID provided for deletion');
+      Alert.alert('Error', 'Cannot delete match: match ID not found');
+      return;
+    }
+
+    Alert.alert(
+      'Delete Match',
+      'Are you sure you want to delete this match? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🗑️ Deleting match:', matchId);
+              const success = await matchService.deleteMatch(matchId);
+
+              if (success) {
+                console.log('✅ Match deleted successfully');
+                Alert.alert('Success', 'Match deleted successfully');
+                router.push('/(tabs)');
+              } else {
+                console.error('❌ Failed to delete match');
+                Alert.alert('Error', 'Failed to delete match. Please try again.');
+              }
+            } catch (error) {
+              console.error('❌ Error deleting match:', error);
+              Alert.alert('Error', 'Failed to delete match. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -571,6 +612,19 @@ export default function MatchDetailsScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+    },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.03,
+    },
+    headerActionButton: {
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      backgroundColor: '#2A2A2A',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     title: {
       fontSize: width * 0.05,
@@ -679,6 +733,11 @@ export default function MatchDetailsScreen() {
           <View style={styles.headerContent}>
             <BackButton onPress={handleBack} />
             <Text style={styles.title}>Match History Details</Text>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleDelete} style={styles.headerActionButton}>
+                <Ionicons name="trash-outline" size={22} color="#FF7675" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 

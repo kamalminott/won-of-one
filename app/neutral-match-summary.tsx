@@ -771,7 +771,7 @@ export default function NeutralMatchSummary() {
       // Use final fencer names from database (reflects positions after swaps)
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
-      
+
       // Check if this is a sabre match
       const weaponType = matchData.weapon_type || 'foil';
       const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
@@ -1022,7 +1022,7 @@ export default function NeutralMatchSummary() {
             }
             return progression;
           };
-
+          
           // Online match - fetch from database
           // The database should have the updated fencer names reflecting any swaps
           // Add a small delay to ensure database update has propagated (if just completed)
@@ -1209,7 +1209,7 @@ export default function NeutralMatchSummary() {
                     fencer1DataLength: calculatedScoreProgression.fencer1Data.length,
                     fencer2DataLength: calculatedScoreProgression.fencer2Data.length
                   });
-
+                  
                   if (hasFencer1Data && hasFencer2Data) {
                     console.log('📈 Using real anonymous score progression data from database');
                     // Convert to the format expected by the chart component
@@ -1330,17 +1330,17 @@ export default function NeutralMatchSummary() {
               // Set time leading to default for sabre (won't be displayed)
               setTimeLeading({ fencer1: 0, fencer2: 0, tied: 100 });
             } else {
-              const calculatedTimeLeading = await calculateTimeLeading(matchId as string, finalFencer1Name, finalFencer2Name);
-              console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
-              setTimeLeading(calculatedTimeLeading);
+            const calculatedTimeLeading = await calculateTimeLeading(matchId as string, finalFencer1Name, finalFencer2Name);
+            console.log('🔍 TIME LEADING DEBUG - Setting state with calculated values:', calculatedTimeLeading);
+            setTimeLeading(calculatedTimeLeading);
               // Set score-based leading to default for foil/epee (won't be displayed)
               setScoreBasedLeading({ fencer1: 0, fencer2: 0, tied: 100 });
             }
             
             // Bounce back times only for foil/epee (time-based metric)
             if (!isSabre) {
-              const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string, finalFencer1Name, finalFencer2Name);
-              setBounceBackTimes(calculatedBounceBackTimes);
+            const calculatedBounceBackTimes = await calculateBounceBackTimes(matchId as string, finalFencer1Name, finalFencer2Name);
+            setBounceBackTimes(calculatedBounceBackTimes);
             } else {
               // Set to default for sabre (won't be displayed)
               setBounceBackTimes({ fencer1: 0, fencer2: 0 });
@@ -1610,15 +1610,15 @@ export default function NeutralMatchSummary() {
             </View>
 
             {!isSabre && (
-              <View style={styles.metaItem}>
-                <View style={styles.metaIcon}>
-                  <Ionicons name="time" size={20} color="white" />
-                </View>
-                <View style={styles.metaContent}>
-                  <Text style={styles.metaValue}>{formatTime(matchDurationNum)}</Text>
-                  <Text style={styles.metaLabel}>Duration</Text>
-                </View>
+            <View style={styles.metaItem}>
+              <View style={styles.metaIcon}>
+                <Ionicons name="time" size={20} color="white" />
               </View>
+              <View style={styles.metaContent}>
+                <Text style={styles.metaValue}>{formatTime(matchDurationNum)}</Text>
+                <Text style={styles.metaLabel}>Duration</Text>
+              </View>
+            </View>
             )}
           </View>
 
@@ -1669,11 +1669,11 @@ export default function NeutralMatchSummary() {
               scoreBasedLeading={scoreBasedLeading}
             />
           ) : (
-            <TimeLeadingCard 
-              fencer1Name={finalFencer1Name}
-              fencer2Name={finalFencer2Name}
-              timeLeading={timeLeading}
-            />
+          <TimeLeadingCard 
+            fencer1Name={finalFencer1Name}
+            fencer2Name={finalFencer2Name}
+            timeLeading={timeLeading}
+          />
           )}
         </View>
 
@@ -1681,11 +1681,11 @@ export default function NeutralMatchSummary() {
         <View style={styles.twoColumnContainer}>
           {/* Bounce Back Time Card - Only show for foil/epee (time-based metric) */}
           {!isSabre && (
-            <BounceBackTimeCard 
-              fencer1Name={finalFencer1Name}
-              fencer2Name={finalFencer2Name}
-              bounceBackTimes={bounceBackTimes}
-            />
+          <BounceBackTimeCard 
+            fencer1Name={finalFencer1Name}
+            fencer2Name={finalFencer2Name}
+            bounceBackTimes={bounceBackTimes}
+          />
           )}
 
           {/* Longest Run Card */}

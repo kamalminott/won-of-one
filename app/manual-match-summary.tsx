@@ -14,13 +14,14 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analytics } from '@/lib/analytics';
 
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
   const { userName } = useAuth();
+  const insets = useSafeAreaInsets();
   
   // Extract parameters from navigation
   const {
@@ -328,7 +329,10 @@ export default function ManualMatchSummaryScreen() {
 
         {/* Done Button - Only show when coming from add-match page */}
         {showDoneButton && (
-          <View style={{ paddingHorizontal: width * 0.04, paddingBottom: height * 0.02 }}>
+          <View style={{ 
+            paddingHorizontal: width * 0.04, 
+            paddingBottom: Math.max(insets.bottom, height * 0.02)
+          }}>
             <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
               <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>

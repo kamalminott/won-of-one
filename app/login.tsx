@@ -44,10 +44,10 @@ export default function LoginScreen() {
       hasShownVerification.current = true;
       
       if (params.verification === 'success') {
-        Alert.alert(
-          'Email verified',
-          'Your email has been confirmed. Please sign in with your credentials.'
-        );
+      Alert.alert(
+        'Email verified',
+        'Your email has been confirmed. Please sign in with your credentials.'
+      );
       } else if (params.verification === 'error') {
         const errorMsg = params.error === 'invalid_link' 
           ? 'The confirmation link is invalid or has expired. Please request a new confirmation email.'
