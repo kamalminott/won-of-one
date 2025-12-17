@@ -30,12 +30,21 @@ export default function MatchDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const { userName, profileImage, user } = useAuth();
   const params = useLocalSearchParams();
-  const [matchInsights, setMatchInsights] = useState({
-    avgTimeBetweenTouches: '22s',
-    longestScoringDrought: '45s',
-    touchStreaks: '3 in a row',
-    doubleTouches: '0'
-  });
+  type MatchInsights = {
+    avgTimeBetweenTouches: string;
+    longestScoringDrought: string;
+    touchStreaks: string;
+    doubleTouches: string;
+  };
+
+  const EMPTY_MATCH_INSIGHTS: MatchInsights = {
+    avgTimeBetweenTouches: 'No data',
+    longestScoringDrought: 'No data',
+    touchStreaks: 'No data',
+    doubleTouches: '0',
+  };
+
+  const [matchInsights, setMatchInsights] = useState<MatchInsights>(EMPTY_MATCH_INSIGHTS);
   
   const [matchNotes, setMatchNotes] = useState('');
   const [match, setMatch] = useState<any>(null);
@@ -63,7 +72,10 @@ export default function MatchDetailsScreen() {
 
   // Calculate match insights from real data
   const calculateMatchInsights = async () => {
-    if (!match?.match_id) return;
+    if (!match?.match_id) {
+      setMatchInsights(EMPTY_MATCH_INSIGHTS);
+      return;
+    }
     
     try {
       // Get match events for this match
@@ -73,8 +85,15 @@ export default function MatchDetailsScreen() {
         .eq('match_id', match.match_id)
         .order('timestamp', { ascending: true });
 
-      if (error || !matchEvents || matchEvents.length === 0) {
+      if (error) {
+        console.error('Error fetching match events for insights calculation:', error);
+        setMatchInsights(EMPTY_MATCH_INSIGHTS);
+        return;
+      }
+
+      if (!matchEvents || matchEvents.length === 0) {
         console.log('No match events found for insights calculation');
+        setMatchInsights(EMPTY_MATCH_INSIGHTS);
         return;
       }
 
@@ -106,16 +125,19 @@ export default function MatchDetailsScreen() {
         });
 
       if (scoringEvents.length === 0) {
-        setMatchInsights({
-          avgTimeBetweenTouches: 'No data',
-          longestScoringDrought: 'No data',
-          touchStreaks: 'No data',
-          doubleTouches: '0'
-        });
+        setMatchInsights(EMPTY_MATCH_INSIGHTS);
         return;
       }
 
+      const allHaveElapsed = scoringEvents.every(e => typeof e.match_time_elapsed === 'number');
+      const firstTimestampMs = scoringEvents[0]?.timestamp ? new Date(scoringEvents[0].timestamp).getTime() : null;
+
       const getSeconds = (event: any) => {
+        if (allHaveElapsed && typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
+        if (event.timestamp && firstTimestampMs !== null) {
+          const ms = new Date(event.timestamp).getTime();
+          return Number.isFinite(ms) ? Math.max(0, Math.round((ms - firstTimestampMs) / 1000)) : 0;
+        }
         if (typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
         if (event.timestamp) {
           const ms = new Date(event.timestamp).getTime();
@@ -125,6 +147,7 @@ export default function MatchDetailsScreen() {
       };
 
       // Calculate average time between scoring touches
+      const canComputeIntervals = scoringEvents.length > 1;
       let totalTimeBetweenTouches = 0;
       let touchCount = 0;
 
@@ -151,7 +174,8 @@ export default function MatchDetailsScreen() {
 
       // Calculate longest scoring drought (longest time between ANY scoring events)
       let longestDrought = 0;
-      let doubleTouchCount = 0;
+      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
+      const doubleTouchCount = scoringEvents.filter(ev => doubleTypes.has((ev.event_type || '').toLowerCase())).length;
       
       if (scoringEvents.length > 1) {
         for (let i = 1; i < scoringEvents.length; i++) {
@@ -161,11 +185,6 @@ export default function MatchDetailsScreen() {
           
           if (timeDiff > longestDrought) {
             longestDrought = timeDiff;
-          }
-
-          const eventType = (scoringEvents[i].event_type || '').toLowerCase();
-          if (eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit') {
-            doubleTouchCount++;
           }
         }
       }
@@ -186,10 +205,22 @@ export default function MatchDetailsScreen() {
 
       console.log('🔍 Checking userName variations:', userNameVariations);
 
-      for (const event of matchEvents) {
-        const isUserScoring = userNameVariations.some(variation => 
-          event.scoring_user_name === variation
-        );
+      const normalizedUserVariations = userNameVariations.map(variation => normalizeName(variation));
+
+      for (const event of scoringEvents) {
+        const eventType = (event.event_type || '').toLowerCase();
+
+        // In epee, a double touch should break the streak (it doesn't belong to either fencer)
+        if (doubleTypes.has(eventType)) {
+          currentStreak = 0;
+          lastScorerWasUser = false;
+          continue;
+        }
+
+        const scorerName = normalizeName(event.scoring_user_name);
+        const isUserScoring = scorerName
+          ? normalizedUserVariations.some(variation => scorerName === variation)
+          : false;
         
         if (isUserScoring) {
           if (lastScorerWasUser) {
@@ -212,14 +243,15 @@ export default function MatchDetailsScreen() {
       });
       
       setMatchInsights({
-        avgTimeBetweenTouches: `${avgTime}s`,
-        longestScoringDrought: longestDrought > 0 ? `${Math.round(longestDrought)}s` : 'No data',
+        avgTimeBetweenTouches: canComputeIntervals ? `${avgTime}s` : 'No data',
+        longestScoringDrought: canComputeIntervals ? `${Math.round(longestDrought)}s` : 'No data',
         touchStreaks: maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data',
         doubleTouches: `${doubleTouchCount}`
       });
 
     } catch (error) {
       console.error('Error calculating match insights:', error);
+      setMatchInsights(EMPTY_MATCH_INSIGHTS);
     }
   };
 

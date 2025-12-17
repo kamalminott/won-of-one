@@ -111,6 +111,8 @@ export default function RemoteScreen() {
   
   // Weapon selection state
   const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'sabre'>('foil');
+  const preferredWeaponRef = useRef<'foil' | 'epee' | 'sabre'>('foil');
+  const weaponSelectionLockedRef = useRef(false);
   const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
   
   // Momentum tracking for Sabre Match Insights
@@ -164,35 +166,59 @@ export default function RemoteScreen() {
   // Load user's preferred weapon from profile
   useEffect(() => {
     const loadPreferredWeapon = async () => {
+      const normalizePreferredWeapon = (value: string | null | undefined) => {
+        const normalized = (value || '').toLowerCase();
+        if (normalized === 'saber') return 'sabre';
+        if (normalized === 'foil' || normalized === 'epee' || normalized === 'sabre') return normalized;
+        return null;
+      };
+
+      const shouldAutoApply = () => {
+        return (
+          !weaponSelectionLockedRef.current &&
+          !hasMatchStarted &&
+          !isPlaying &&
+          scores.fencerA === 0 &&
+          scores.fencerB === 0 &&
+          currentPeriod === 1
+        );
+      };
+
+      const setPreferredWeapon = (weapon: 'foil' | 'epee' | 'sabre') => {
+        preferredWeaponRef.current = weapon;
+        if (shouldAutoApply()) {
+          setSelectedWeapon(weapon);
+        }
+      };
+
+      // First try cached value (works offline and updates instantly)
+      try {
+        const cached = await AsyncStorage.getItem('preferred_weapon');
+        const cachedWeapon = normalizePreferredWeapon(cached);
+        if (cachedWeapon) {
+          setPreferredWeapon(cachedWeapon);
+        }
+      } catch (error) {
+        console.error('Error loading cached preferred weapon:', error);
+      }
+
       if (!user?.id) {
         // Default to foil if no user
-        setSelectedWeapon('foil');
+        setPreferredWeapon('foil');
         return;
       }
 
       try {
         const userData = await userService.getUserById(user.id);
-        if (userData?.preferred_weapon) {
-          // Validate weapon type
-          const weapon = userData.preferred_weapon.toLowerCase();
-          if (weapon === 'foil' || weapon === 'epee' || weapon === 'sabre' || weapon === 'saber') {
-            // Normalize 'saber' to 'sabre' for consistency
-            const normalizedWeapon = weapon === 'saber' ? 'sabre' : weapon;
-            setSelectedWeapon(normalizedWeapon as 'foil' | 'epee' | 'sabre');
-            // console.log('✅ Loaded preferred weapon from profile:', weapon);
-          } else {
-            // console.log('⚠️ Invalid weapon type in profile, defaulting to foil');
-            setSelectedWeapon('foil');
-          }
-        } else {
-          // Default to foil if no preference set
-          setSelectedWeapon('foil');
-          // console.log('ℹ️ No preferred weapon in profile, defaulting to foil');
-        }
+        const preferredWeapon = normalizePreferredWeapon(userData?.preferred_weapon) || 'foil';
+        await AsyncStorage.setItem('preferred_weapon', preferredWeapon);
+        setPreferredWeapon(preferredWeapon);
       } catch (error) {
         console.error('Error loading preferred weapon:', error);
-        // Default to foil on error
-        setSelectedWeapon('foil');
+        // Fallback to the last known preference; otherwise foil
+        if (!preferredWeaponRef.current) {
+          setPreferredWeapon('foil');
+        }
       }
     };
 
@@ -257,6 +283,51 @@ export default function RemoteScreen() {
         changeOneFencerAppliedRef.current = false;
       };
     }, [])
+  );
+
+  // Refresh cached preferred weapon on focus so changes on the Profile page apply to new matches
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      const normalizePreferredWeapon = (value: string | null | undefined) => {
+        const normalized = (value || '').toLowerCase();
+        if (normalized === 'saber') return 'sabre';
+        if (normalized === 'foil' || normalized === 'epee' || normalized === 'sabre') return normalized;
+        return null;
+      };
+
+      const shouldAutoApply = () => {
+        return (
+          !weaponSelectionLockedRef.current &&
+          !hasMatchStarted &&
+          !isPlaying &&
+          scores.fencerA === 0 &&
+          scores.fencerB === 0 &&
+          currentPeriod === 1
+        );
+      };
+
+      const refresh = async () => {
+        try {
+          const cached = await AsyncStorage.getItem('preferred_weapon');
+          const cachedWeapon = normalizePreferredWeapon(cached);
+          if (!cachedWeapon || cancelled) return;
+
+          preferredWeaponRef.current = cachedWeapon;
+          if (shouldAutoApply()) {
+            setSelectedWeapon(cachedWeapon);
+          }
+        } catch (error) {
+          console.error('Error refreshing cached preferred weapon:', error);
+        }
+      };
+
+      refresh();
+      return () => {
+        cancelled = true;
+      };
+    }, [currentPeriod, hasMatchStarted, isPlaying, scores.fencerA, scores.fencerB])
   );
 
   // If coming from neutral summary with resetAll flag, fully reset state/persistence once per focus, then apply incoming name params
@@ -2525,9 +2596,11 @@ export default function RemoteScreen() {
       const actualFencerAScore = finalFencerAScore !== undefined ? finalFencerAScore : scoresRef.current.fencerA;
       const actualFencerBScore = finalFencerBScore !== undefined ? finalFencerBScore : scoresRef.current.fencerB;
 
-      // Pre-compute position-based scores (reflects swaps) for anonymous saves
-      const leftScore = getScoreByPosition('left'); // Score of entity currently on left (position-based)
-      const rightScore = getScoreByPosition('right'); // Score of entity currently on right (position-based)
+      // Pre-compute position-based scores (reflects swaps) from the latest ref to avoid stale state
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+      const leftScoreLatest = leftEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore; // Score of entity currently on left
+      const rightScoreLatest = rightEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore; // Score of entity currently on right
 
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their entity and result
@@ -2541,8 +2614,8 @@ export default function RemoteScreen() {
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
         // User toggle is off OR no registered user - record position-based scores so names stay aligned after swaps
-        finalScore = leftScore;
-        touchesAgainst = rightScore;
+        finalScore = leftScoreLatest;
+        touchesAgainst = rightScoreLatest;
         scoreDiff = null; // No score_diff when no user is present
         result = null; // No win/loss determination
       }
@@ -2556,8 +2629,8 @@ export default function RemoteScreen() {
       
       await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
         end_time: matchCompletionTime,
-        fencer_1_score: leftScore, // Position-based: score of entity currently on left
-        fencer_2_score: rightScore, // Position-based: score of entity currently on right
+        fencer_1_score: leftScoreLatest, // Position-based: score of entity currently on left
+        fencer_2_score: rightScoreLatest, // Position-based: score of entity currently on right
         fencer_1_cards: leftCards.yellow + leftCards.red, // Position-based: cards of entity currently on left
         fencer_2_cards: rightCards.yellow + rightCards.red, // Position-based: cards of entity currently on right
         timestamp: matchCompletionTime,
@@ -2653,8 +2726,6 @@ export default function RemoteScreen() {
       });
 
       // Get current fencer names based on positions (handles swaps correctly)
-      const leftEntity = getEntityAtPosition('left');
-      const rightEntity = getEntityAtPosition('right');
       // Use isEntityUser to correctly identify which entity is the user (not which position)
       const leftIsUser = showUserProfile && isEntityUser(leftEntity);
       const rightIsUser = showUserProfile && isEntityUser(rightEntity);
@@ -2773,8 +2844,8 @@ export default function RemoteScreen() {
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - go to regular match summary
         // Use position-based names and scores (reflects any swaps) - these match what's in the database
-        const leftScore = getScoreByPosition('left'); // Score of entity currently on left
-        const rightScore = getScoreByPosition('right'); // Score of entity currently on right
+        const leftScore = leftScoreLatest; // Score of entity currently on left
+        const rightScore = rightScoreLatest; // Score of entity currently on right
         const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
         const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
         
@@ -2810,8 +2881,8 @@ export default function RemoteScreen() {
       } else {
         // User toggle is off OR no registered user - go to neutral match summary
         // Use position-based names and scores (reflects any swaps) - these match what's in the database
-        const leftScore = getScoreByPosition('left'); // Score of entity currently on left
-        const rightScore = getScoreByPosition('right'); // Score of entity currently on right
+        const leftScore = leftScoreLatest; // Score of entity currently on left
+        const rightScore = rightScoreLatest; // Score of entity currently on right
         const leftCards = getCardsByPosition('left'); // Cards of entity currently on left
         const rightCards = getCardsByPosition('right'); // Cards of entity currently on right
         
@@ -2841,6 +2912,8 @@ export default function RemoteScreen() {
       setScores({ fencerA: 0, fencerB: 0 });
       setCards({ fencerA: { yellow: 0, red: 0 }, fencerB: { yellow: 0, red: 0 } });
       setCurrentPeriod(1);
+      weaponSelectionLockedRef.current = false;
+      setSelectedWeapon(preferredWeaponRef.current);
           setTimeRemaining(matchTime);
     setIsPlaying(false);
     setPriorityFencer(null);
@@ -2903,9 +2976,11 @@ export default function RemoteScreen() {
       let touchesAgainst: number;
       let scoreDiff: number | null;
 
-      // Position-based scores (reflect swaps) for anonymous saves
-      const leftScore = getScoreByPosition('left');
-      const rightScore = getScoreByPosition('right');
+      // Position-based scores (reflect swaps) for anonymous saves, pulled from latest ref to avoid stale state
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+      const leftScoreLatest = leftEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore;
+      const rightScoreLatest = rightEntity === 'fencerA' ? actualFencerAScore : actualFencerBScore;
 
       if (user?.id && showUserProfile) {
         // User is registered AND toggle is on - determine their entity and result
@@ -2919,8 +2994,8 @@ export default function RemoteScreen() {
         result = userScore > opponentScore ? 'win' : 'loss';
       } else {
         // User toggle is off OR no registered user - record as anonymous match
-        finalScore = leftScore;
-        touchesAgainst = rightScore;
+        finalScore = leftScoreLatest;
+        touchesAgainst = rightScoreLatest;
         scoreDiff = null;
         result = null;
       }
@@ -2971,8 +3046,7 @@ export default function RemoteScreen() {
       });
 
       // Get current fencer names based on positions (handles swaps correctly)
-      const leftEntity = getEntityAtPosition('left');
-      const rightEntity = getEntityAtPosition('right');
+      // (leftEntity/rightEntity already computed above)
       // Use isEntityUser to correctly identify which entity is the user (not which position)
       const leftIsUser = showUserProfile && isEntityUser(leftEntity);
       const rightIsUser = showUserProfile && isEntityUser(rightEntity);
@@ -2989,8 +3063,8 @@ export default function RemoteScreen() {
         remoteId: remoteSession.remote_id,
         isOffline: 'true', // Flag to indicate offline match
         // Pass all match state for display (position-based to match names)
-        aliceScore: leftScore.toString(), // Score of fencer on left (fencer1)
-        bobScore: rightScore.toString(), // Score of fencer on right (fencer2)
+        aliceScore: leftScoreLatest.toString(), // Score of fencer on left (fencer1)
+        bobScore: rightScoreLatest.toString(), // Score of fencer on right (fencer2)
         aliceCards: JSON.stringify(leftCards),
         bobCards: JSON.stringify(rightCards),
         matchDuration: matchDuration.toString(),
@@ -3026,6 +3100,8 @@ export default function RemoteScreen() {
       setScores({ fencerA: 0, fencerB: 0 });
       setCards({ fencerA: { yellow: 0, red: 0 }, fencerB: { yellow: 0, red: 0 } });
       setCurrentPeriod(1);
+      weaponSelectionLockedRef.current = false;
+      setSelectedWeapon(preferredWeaponRef.current);
       setTimeRemaining(matchTime);
       setIsPlaying(false);
       setPriorityFencer(null);
@@ -4391,8 +4467,6 @@ export default function RemoteScreen() {
     setIsResetting(true); // Block new operations during reset
     // Store the current toggle state to preserve it after reset
     const currentToggleState = showUserProfile;
-    // Store the current weapon selection to preserve it after reset
-    const currentWeapon = selectedWeapon;
     let resetErrored = false;
     try {
       console.log('🔄 Starting Reset All - cleaning up database records...');
@@ -4532,6 +4606,16 @@ export default function RemoteScreen() {
       setIsInjuryTimer(false);
       setInjuryTimeRemaining(300);
 
+      // Hard stop any lingering local caches so a new match cannot inherit stale state
+      try {
+        await offlineCache.clearActiveRemoteSession();
+        await offlineCache.clearPendingRemoteEvents();
+        await AsyncStorage.removeItem('ongoing_match_state');
+        console.log('🧹 Cleared offline caches and ongoing match state');
+      } catch (cacheErr) {
+        console.error('❌ Error clearing offline caches during reset:', cacheErr);
+      }
+
       const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
       if (keepOpponentName && showUserProfile && userDisplayName) {
         // Preserve opponent name tied to the non-user entity, regardless of card position
@@ -4557,7 +4641,8 @@ export default function RemoteScreen() {
       const userTogglePosition = userEntity === 'fencerA' ? 'left' : 'right';
       setToggleCardPosition(userTogglePosition);
       setShowUserProfile(currentToggleState);
-      setSelectedWeapon(currentWeapon);
+      weaponSelectionLockedRef.current = false;
+      setSelectedWeapon(preferredWeaponRef.current);
 
       if (!resetErrored) {
         console.log('✅ Reset All completed successfully');
@@ -4566,7 +4651,7 @@ export default function RemoteScreen() {
       setIsManualReset(true); // Set flag to prevent auto-sync
       setIsResetting(false); // Always clear reset flag
     }
-  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, selectedWeapon, userEntity]);
+  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, userEntity]);
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {
@@ -6273,7 +6358,7 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     fencerScore: {
-      fontSize: width * 0.105, // Smaller font on Nexus S, minimum 32px
+      fontSize: width * 0.13,
       fontWeight: '700',
       color: 'white',
       marginBottom: height * 0.015,
@@ -6283,9 +6368,9 @@ export default function RemoteScreen() {
       gap: width * 0.035,
     },
     scoreButton: {
-      width: width * 0.12, // Smaller buttons on Nexus S
-      height: width * 0.12, // Smaller buttons on Nexus S
-      borderRadius: width * 0.06,
+      width: width * 0.145,
+      height: width * 0.145,
+      borderRadius: width * 0.0725,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -6581,26 +6666,26 @@ export default function RemoteScreen() {
     },
 
     // Add Time Controls
-    addTimeControls: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      marginTop: height * 0.02, // Increased from 0.005 to move buttons down
-      marginBottom: height * 0.01, // Smaller margin on Nexus S
-      width: '100%',
-    },
-    addTimeButton: {
-      backgroundColor: Colors.purple.primary,
-      borderRadius: width * 0.03,
-      paddingHorizontal: width * 0.04, // Smaller padding on Nexus S
-      paddingVertical: height * 0.008, // Smaller padding on Nexus S
-      minWidth: width * 0.18, // Smaller width on Nexus S
-      alignItems: 'center',
-    },
-    addTimeButtonText: {
-      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
-      fontWeight: '600',
-      color: 'white',
-    },
+	    addTimeControls: {
+	      flexDirection: 'row',
+	      justifyContent: 'space-around',
+	      marginTop: height * 0.02, // Increased from 0.005 to move buttons down
+	      marginBottom: height * 0.01, // Smaller margin on Nexus S
+	      width: '100%',
+	    },
+	    addTimeButton: {
+	      backgroundColor: Colors.purple.primary,
+	      borderRadius: width * 0.03,
+	      paddingHorizontal: width * 0.04, // Smaller padding on Nexus S
+	      paddingVertical: height * 0.008, // Smaller padding on Nexus S
+	      minWidth: width * 0.18, // Smaller width on Nexus S
+	      alignItems: 'center',
+	    },
+	    addTimeButtonText: {
+	      fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
+	      fontWeight: '600',
+	      color: 'white',
+	    },
 
 
     countdownWarningText: {
@@ -7273,6 +7358,12 @@ export default function RemoteScreen() {
   const rightYellowCards = cards[rightEntity].yellow === 1 ? [1] : [];
   const rightRedCards = cards[rightEntity].red > 0 ? [cards[rightEntity].red] : [];
 
+  const isNonSabreTimerReady =
+    selectedWeapon !== 'sabre' &&
+    !hasMatchStarted &&
+    !isPlaying &&
+    timeRemaining === matchTime;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.container}>
@@ -7334,6 +7425,7 @@ export default function RemoteScreen() {
                     selectedWeapon === 'foil' && styles.weaponButtonSelected
                   ]}
                   onPress={() => {
+                    weaponSelectionLockedRef.current = true;
                     setSelectedWeapon('foil');
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
@@ -7357,6 +7449,7 @@ export default function RemoteScreen() {
                     selectedWeapon === 'epee' && styles.weaponButtonSelected
                   ]}
                   onPress={() => {
+                    weaponSelectionLockedRef.current = true;
                     setSelectedWeapon('epee');
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
@@ -7380,6 +7473,7 @@ export default function RemoteScreen() {
                     selectedWeapon === 'sabre' && styles.weaponButtonSelected
                   ]}
                   onPress={() => {
+                    weaponSelectionLockedRef.current = true;
                     setSelectedWeapon('sabre');
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
@@ -7616,35 +7710,35 @@ export default function RemoteScreen() {
             </>
           )}
           
-          {/* Add Time Controls - Hidden for Sabre */}
-          {!isPlaying && timeRemaining === matchTime && !hasMatchStarted && selectedWeapon !== 'sabre' && (
-            <View style={styles.addTimeControls}>
-              <TouchableOpacity 
-                style={styles.addTimeButton} 
-                onPress={() => addTime(30)}
-              >
-                <Text style={styles.addTimeButtonText}>+30s</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.addTimeButton} 
-                onPress={() => addTime(60)}
-              >
-                <Text style={styles.addTimeButtonText}>+1m</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.addTimeButton, { backgroundColor: Colors.gray.medium }]} 
-                onPress={() => subtractTime(60)}
-              >
-                <Text style={styles.addTimeButtonText}>-1m</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.addTimeButton, { backgroundColor: Colors.gray.medium }]} 
-                onPress={() => subtractTime(30)}
-              >
-                <Text style={styles.addTimeButtonText}>-30s</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+		          {/* Add Time Controls - Hidden for Sabre */}
+		          {!isPlaying && timeRemaining === matchTime && !hasMatchStarted && selectedWeapon !== 'sabre' && (
+		            <View style={styles.addTimeControls}>
+		              <TouchableOpacity 
+		                style={styles.addTimeButton} 
+		                onPress={() => addTime(30)}
+		              >
+		                <Text style={styles.addTimeButtonText}>+30s</Text>
+		              </TouchableOpacity>
+		              <TouchableOpacity 
+		                style={styles.addTimeButton} 
+		                onPress={() => addTime(60)}
+		              >
+		                <Text style={styles.addTimeButtonText}>+1m</Text>
+		              </TouchableOpacity>
+		              <TouchableOpacity 
+		                style={[styles.addTimeButton, { backgroundColor: Colors.gray.medium }]} 
+		                onPress={() => subtractTime(60)}
+		              >
+		                <Text style={styles.addTimeButtonText}>-1m</Text>
+		              </TouchableOpacity>
+		              <TouchableOpacity 
+		                style={[styles.addTimeButton, { backgroundColor: Colors.gray.medium }]} 
+		                onPress={() => subtractTime(30)}
+		              >
+		                <Text style={styles.addTimeButtonText}>-30s</Text>
+		              </TouchableOpacity>
+		            </View>
+		          )}
         </View>
         
         {/* Period Control - moved to bottom of card */}
@@ -7666,19 +7760,19 @@ export default function RemoteScreen() {
       </LinearGradient>
       </View>
 
-      {/* Match Status Display - Show for Foil/Epee always, hidden for Sabre (shown inline with Fencers instead) */}
-      {selectedWeapon !== 'sabre' && (
-        <View style={styles.matchStatusContainer}>
-          <Text style={styles.matchStatusText}>
-            {isBreakTime ? '🍃 Break Time' : isPlaying ? '🟢 Match in Progress' : timeRemaining === 0 ? '🔴 Match Ended' : timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'}
-          </Text>
-          {isBreakTime && (
-            <Text style={styles.matchStatusSubtext}>
-              Break in progress
-            </Text>
-          )}
-        </View>
-      )}
+		      {/* Match Status Display - Show for Foil/Epee always, hidden for Sabre (shown inline with Fencers instead) */}
+		      {selectedWeapon !== 'sabre' && (
+		        <View style={styles.matchStatusContainer}>
+		          <Text style={styles.matchStatusText}>
+		            {isBreakTime ? '🍃 Break Time' : isPlaying ? '🟢 Match in Progress' : timeRemaining === 0 ? '🔴 Match Ended' : timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'}
+		          </Text>
+		          {isBreakTime && (
+		            <Text style={styles.matchStatusSubtext}>
+		              Break in progress
+		            </Text>
+		          )}
+		        </View>
+		      )}
 
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
@@ -7867,7 +7961,7 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('left'))}
             </Text>
           </TouchableOpacity>
-          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('left').toString().padStart(2, '0')}</Text>
+	          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('left').toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -7880,7 +7974,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={() => decrementScore(getEntityAtPosition('left'))}>
-              <Ionicons name="remove" size={28} color="black" />
+              <Ionicons name="remove" size={34} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -7892,7 +7986,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={() => incrementScore(getEntityAtPosition('left'))}>
-              <Ionicons name="add" size={28} color="black" />
+              <Ionicons name="add" size={34} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -8094,7 +8188,7 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('right'))}
             </Text>
           </TouchableOpacity>
-          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('right').toString().padStart(2, '0')}</Text>
+	          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('right').toString().padStart(2, '0')}</Text>
           
           <View style={styles.scoreControls}>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -8107,7 +8201,7 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={() => decrementScore(getEntityAtPosition('right'))}>
-              <Ionicons name="remove" size={28} color="black" />
+              <Ionicons name="remove" size={34} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -8119,151 +8213,168 @@ export default function RemoteScreen() {
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
             }]} onPress={() => incrementScore(getEntityAtPosition('right'))}>
-              <Ionicons name="add" size={28} color="black" />
+              <Ionicons name="add" size={34} color="black" />
             </TouchableOpacity>
           </View>
         </View>
       </View>
 
-      {/* Bottom Controls */}
-      <View style={[
-        styles.bottomControls,
-        // Only make controls smaller when timer is ready AND cards are present
-        (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-          marginBottom: height * 0.002, // Reduce bottom margin
-          gap: width * 0.03, // Reduce gap between elements
-        } : {}
-      ]}>
-        <View style={[
-          styles.decorativeCards,
-          // Only make cards smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-            gap: width * 0.02, // Reduce gap between cards
-          } : {}
-        ]}>
-          <TouchableOpacity style={[
-            styles.decorativeCard, 
-            styles.cardYellow,
-            // Only make individual cards smaller when timer is ready AND cards are present
-            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-              width: width * 0.07, // Reduce width
-              height: width * 0.10, // Reduce height
-            } : {}
-          ]} onPress={addYellowCardToAlice}>
-            {leftYellowCards.length > 0 && (
-              <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
-                {leftYellowCards.length}
-              </Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={[
-            styles.decorativeCard, 
-            styles.cardRed,
-            // Only make individual cards smaller when timer is ready AND cards are present
-            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-              width: width * 0.07, // Reduce width
-              height: width * 0.10, // Reduce height
-            } : {}
-          ]} onPress={addRedCardToAlice}>
-            {leftRedCards.length > 0 && (
-              <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
-                {leftRedCards[0]}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.assignPriorityButton, 
-            {
-              backgroundColor: (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-                Colors.yellow.accent :
-                hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
-            },
-            // Only make button smaller when timer is ready AND cards are present
-            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-              paddingHorizontal: width * 0.025, // Reduce horizontal padding
-              paddingVertical: height * 0.010, // Reduce vertical padding
-            } : {},
-            // Grey out when match hasn't started
-            !hasMatchStarted && {
-              opacity: 0.6
-            }
-          ]}
-          onPress={
-            hasMatchStarted ? (
-              (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-                () => setShowPriorityPopup(true) :
-                (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
-            ) : undefined
-          }
-          disabled={!hasMatchStarted}
-        >
-          <Text style={styles.assignPriorityIcon}>
-            {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ? '🎲' : '🏥'}
-          </Text>
-          <Text style={styles.assignPriorityText}>
-            {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-              'Assign Priority' :
-              (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')
-            }
-          </Text>
-        </TouchableOpacity>
-        <View style={[
-          styles.decorativeCards,
-          // Only make cards smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-            gap: width * 0.02, // Reduce gap between cards
-          } : {}
-        ]}>
-          <TouchableOpacity style={[
-            styles.decorativeCard, 
-            styles.cardYellow,
-            // Only make individual cards smaller when timer is ready AND cards are present
-            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-              width: width * 0.07, // Reduce width
-              height: width * 0.10, // Reduce height
-            } : {}
-          ]} onPress={addYellowCardToBob}>
-            {rightYellowCards.length > 0 && (
-              <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
-                {rightYellowCards.length}
-              </Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={[
-            styles.decorativeCard, 
-            styles.cardRed,
-            // Only make individual cards smaller when timer is ready AND cards are present
-            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-              width: width * 0.07, // Reduce width
-              height: width * 0.10, // Reduce height
-            } : {}
-          ]} onPress={addRedCardToBob}>
-            {rightRedCards.length > 0 && (
-              <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
-                {rightRedCards[0]}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+		      {/* Bottom Controls + Play Controls */}
+		      <View
+		        style={[
+		          // In timer-ready state, dock the entire bottom area above the tab bar
+		          isNonSabreTimerReady && {
+		            position: 'absolute',
+		            left: 0,
+		            right: 0,
+		            bottom: height * 0.08,
+		            zIndex: 20,
+		          },
+		        ]}
+		      >
+		        {/* Bottom Controls */}
+		        <View style={[
+		          styles.bottomControls,
+		          // Only make controls smaller when timer is ready AND cards are present
+		          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		            marginBottom: height * 0.002, // Reduce bottom margin
+		            gap: width * 0.03, // Reduce gap between elements
+		          } : {}
+		        ]}>
+		          <View style={[
+		            styles.decorativeCards,
+		            // Only make cards smaller when timer is ready AND cards are present
+		            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		              gap: width * 0.02, // Reduce gap between cards
+		            } : {}
+		          ]}>
+		            <TouchableOpacity style={[
+		              styles.decorativeCard, 
+		              styles.cardYellow,
+		              // Only make individual cards smaller when timer is ready AND cards are present
+		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		                width: width * 0.07, // Reduce width
+		                height: width * 0.10, // Reduce height
+		              } : {}
+		            ]} onPress={addYellowCardToAlice}>
+		              {leftYellowCards.length > 0 && (
+		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
+		                  {leftYellowCards.length}
+		                </Text>
+		              )}
+		            </TouchableOpacity>
+		            <TouchableOpacity style={[
+		              styles.decorativeCard, 
+		              styles.cardRed,
+		              // Only make individual cards smaller when timer is ready AND cards are present
+		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		                width: width * 0.07, // Reduce width
+		                height: width * 0.10, // Reduce height
+		              } : {}
+		            ]} onPress={addRedCardToAlice}>
+		              {leftRedCards.length > 0 && (
+		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
+		                  {leftRedCards[0]}
+		                </Text>
+		              )}
+		            </TouchableOpacity>
+		          </View>
+		          <TouchableOpacity
+		            style={[
+		              styles.assignPriorityButton, 
+		              {
+		                backgroundColor: (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+		                  Colors.yellow.accent :
+		                  hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
+		              },
+		              // Only make button smaller when timer is ready AND cards are present
+		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		                paddingHorizontal: width * 0.025, // Reduce horizontal padding
+		                paddingVertical: height * 0.010, // Reduce vertical padding
+		              } : {},
+		              // Grey out when match hasn't started
+		              !hasMatchStarted && {
+		                opacity: 0.6
+		              }
+		            ]}
+		            onPress={
+		              hasMatchStarted ? (
+		                (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+		                  () => setShowPriorityPopup(true) :
+		                  (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
+		              ) : undefined
+		            }
+		            disabled={!hasMatchStarted}
+		          >
+		            <Text style={styles.assignPriorityIcon}>
+		              {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ? '🎲' : '🏥'}
+		            </Text>
+		            <Text style={styles.assignPriorityText}>
+		              {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
+		                'Assign Priority' :
+		                (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')
+		              }
+		            </Text>
+		          </TouchableOpacity>
+		          <View style={[
+		            styles.decorativeCards,
+		            // Only make cards smaller when timer is ready AND cards are present
+		            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		              gap: width * 0.02, // Reduce gap between cards
+		            } : {}
+		          ]}>
+		            <TouchableOpacity style={[
+		              styles.decorativeCard, 
+		              styles.cardYellow,
+		              // Only make individual cards smaller when timer is ready AND cards are present
+		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		                width: width * 0.07, // Reduce width
+		                height: width * 0.10, // Reduce height
+		              } : {}
+		            ]} onPress={addYellowCardToBob}>
+		              {rightYellowCards.length > 0 && (
+		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
+		                  {rightYellowCards.length}
+		                </Text>
+		              )}
+		            </TouchableOpacity>
+		            <TouchableOpacity style={[
+		              styles.decorativeCard, 
+		              styles.cardRed,
+		              // Only make individual cards smaller when timer is ready AND cards are present
+		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		                width: width * 0.07, // Reduce width
+		                height: width * 0.10, // Reduce height
+		              } : {}
+		            ]} onPress={addRedCardToBob}>
+		              {rightRedCards.length > 0 && (
+		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
+		                  {rightRedCards[0]}
+		                </Text>
+		              )}
+		            </TouchableOpacity>
+		          </View>
+		        </View>
 
-              {/* Play, Reset, and Complete Match Controls - REBUILT */}
-              <View style={[
-          {
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-          marginVertical: height * 0.012,
-          marginTop: height * 0.006,
-          paddingHorizontal: width * 0.04,
-            backgroundColor: 'transparent',
-          borderRadius: width * 0.02,
-          gap: height * 0.012, // Reduced gap between elements
-          marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset
-          }
-        ]}>
+		        {/* Play, Reset, and Complete Match Controls - REBUILT */}
+		        <View style={[
+		          {
+		            flexDirection: 'column',
+		            alignItems: 'center',
+		            justifyContent: 'center',
+		            marginVertical: height * 0.012,
+		            marginTop: height * 0.006,
+		            paddingHorizontal: width * 0.04,
+		            backgroundColor: 'transparent',
+		            borderRadius: width * 0.02,
+		            gap: height * 0.012, // Reduced gap between elements
+		            marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
+		          },
+		          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
+		          isNonSabreTimerReady && {
+		            marginBottom: 0,
+		          },
+		        ]}>
         
         {/* Play and Reset Row */}
         <View style={{
@@ -8274,33 +8385,23 @@ export default function RemoteScreen() {
         }}>
           {/* Play Button / Skip Button - Hidden for Sabre */}
           {selectedWeapon !== 'sabre' && (
-          <TouchableOpacity 
-            style={{
-              flex: 1,
-              backgroundColor: '#2A2A2A',
-              paddingVertical: layout.adjustPadding(
-                Platform.OS === 'android' && scores.fencerA === 0 && scores.fencerB === 0 && currentPeriod === 1 && period1Time === 0
-                  ? height * 0.040  // Smaller on Android when timer ready
-                  : height * 0.045,  // Normal size otherwise
-                'bottom'
-              ),
-              paddingHorizontal: width * 0.05,
-              borderRadius: width * 0.02,
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'row',
-              marginRight: width * 0.025,
-              borderWidth: width * 0.005,
-              borderColor: 'white',
-              minHeight: layout.adjustPadding(
-                Platform.OS === 'android' && scores.fencerA === 0 && scores.fencerB === 0 && currentPeriod === 1 && period1Time === 0
-                  ? height * 0.125  // Smaller on Android when timer ready
-                  : height * 0.14,  // Normal size otherwise
-                'bottom'
-              ),
-              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
-            }} 
-            onPress={async () => {
+	          <TouchableOpacity 
+	            style={{
+	              flex: 1,
+	              backgroundColor: '#2A2A2A',
+			              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? height * 0.038 : height * 0.045, 'bottom'),
+	              paddingHorizontal: width * 0.05,
+	              borderRadius: width * 0.02,
+	              alignItems: 'center',
+	              justifyContent: 'center',
+	              flexDirection: 'row',
+	              marginRight: width * 0.025,
+	              borderWidth: width * 0.005,
+	              borderColor: 'white',
+			              minHeight: layout.adjustPadding(isNonSabreTimerReady ? height * 0.12 : height * 0.14, 'bottom'),
+	              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
+	            }} 
+	            onPress={async () => {
               console.log('Play button onPress started - isInjuryTimer:', isInjuryTimer, 'isBreakTime:', isBreakTime, 'timeRemaining:', timeRemaining);
               
               // Skip button during injury time
@@ -8380,9 +8481,10 @@ export default function RemoteScreen() {
           )}
         </View>
 
-      </View>
+	      </View>
+	    </View>
 
-      {/* Edit Time Popup */}
+	      {/* Edit Time Popup */}
       {showEditPopup && (
         <View style={styles.popupOverlay}>
           <KeyboardAvoidingView 

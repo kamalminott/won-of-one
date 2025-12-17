@@ -355,6 +355,31 @@ export default function RootLayout() {
         });
         return true;
       }
+
+      // Handle OAuth callbacks (Google, etc.)
+      // Supabase OAuth redirects with access_token and refresh_token
+      if (hasTokens && !isEmailConfirm && !isRecovery) {
+        console.log('🔐 Handling OAuth callback...');
+        try {
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken!,
+            refresh_token: refreshToken!,
+          });
+          
+          if (sessionError) {
+            console.error('❌ Error setting OAuth session:', sessionError);
+            return false;
+          }
+          
+          console.log('✅ OAuth session set successfully');
+          // Navigation will happen automatically via auth state change listener
+          return true;
+        } catch (error) {
+          console.error('❌ Error handling OAuth callback:', error);
+          return false;
+        }
+      }
+
       return false;
     };
 

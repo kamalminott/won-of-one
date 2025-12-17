@@ -4,6 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session, User } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import * as Linking from 'expo-linking';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { Platform } from 'react-native';
 
 // Define the shape of our authentication context
 interface AuthContextType {
@@ -19,6 +22,8 @@ interface AuthContextType {
   loadProfileImage: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: any }>;
+  signInWithGoogle: () => Promise<{ error: any }>;
+  signInWithApple: () => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   setIsPasswordRecovery: (value: boolean) => void;
 }
@@ -37,6 +42,8 @@ const AuthContext = createContext<AuthContextType>({
   loadProfileImage: async () => {},
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
+  signInWithGoogle: async () => ({ error: null }),
+  signInWithApple: async () => ({ error: null }),
   signOut: async () => {},
   setIsPasswordRecovery: () => {},
 });
@@ -475,6 +482,127 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return { error };
   };
 
+  // Sign in with Google
+  const signInWithGoogle = async () => {
+    try {
+      console.log('🔵 Starting Google sign in...');
+      const redirectUrl = Linking.createURL('/');
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+        },
+      });
+      
+      if (error) {
+        console.error('❌ Google sign in error:', error);
+        return { error };
+      }
+      
+      console.log('✅ Google OAuth initiated, redirecting...');
+      // The OAuth flow will redirect back to the app
+      // The auth state change listener will handle the session
+      return { error: null };
+    } catch (error: any) {
+      console.error('❌ Google sign in exception:', error);
+      return { error };
+    }
+  };
+
+  // Sign in with Apple
+  const signInWithApple = async () => {
+    try {
+      if (Platform.OS !== 'ios') {
+        return { error: { message: 'Apple Sign In is only available on iOS' } };
+      }
+
+      console.log('🍎 Starting Apple sign in...');
+      
+      // Check if Apple Authentication is available
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      if (!isAvailable) {
+        return { error: { message: 'Apple Sign In is not available on this device' } };
+      }
+
+      // Request Apple authentication
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      console.log('✅ Apple credential received:', {
+        user: credential.user,
+        hasEmail: !!credential.email,
+        hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+      });
+
+      // Sign in with Supabase using the Apple credential
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken!,
+      });
+
+      if (error) {
+        console.error('❌ Apple sign in error:', error);
+        return { error };
+      }
+
+      console.log('✅ Apple sign in successful, user ID:', data.user?.id);
+
+      // Create user in app_user table if needed
+      if (data.user && !error) {
+        const existingUser = await userService.getUserById(data.user.id);
+        
+        if (!existingUser) {
+          // Extract name from Apple credential or user metadata
+          const firstName = credential.fullName?.givenName || 
+                           data.user.user_metadata?.full_name?.split(' ')[0] || 
+                           '';
+          const lastName = credential.fullName?.familyName || 
+                          data.user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || 
+                          '';
+          const email = credential.email || data.user.email || '';
+          
+          console.log('🔍 Extracted user info:', { firstName, lastName, email });
+          
+          if (firstName && lastName) {
+            const createdUser = await userService.createUser(data.user.id, email, firstName, lastName);
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created from Apple sign in:', createdUser.name);
+            }
+          } else {
+            // If no name provided, use email prefix as fallback
+            const emailPrefix = email.split('@')[0] || 'User';
+            const createdUser = await userService.createUser(data.user.id, email, emailPrefix, '');
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created with email prefix:', createdUser.name);
+            }
+          }
+        } else {
+          // User exists, sync name from database
+          if (existingUser.name) {
+            await setUserName(existingUser.name);
+            console.log('✅ User name synced from database:', existingUser.name);
+          }
+        }
+      }
+
+      return { error: null };
+    } catch (error: any) {
+      if (error.code === 'ERR_CANCELED') {
+        console.log('⚠️ Apple sign in was canceled by user');
+        return { error: { message: 'Sign in was canceled' } };
+      }
+      console.error('❌ Apple sign in exception:', error);
+      return { error };
+    }
+  };
+
   // Sign out function
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -493,6 +621,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loadProfileImage,
     signIn,
     signUp,
+    signInWithGoogle,
+    signInWithApple,
     signOut,
     setIsPasswordRecovery,
   };

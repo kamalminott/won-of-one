@@ -28,7 +28,7 @@ export default function LoginScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple } = useAuth();
   const hasShownVerification = React.useRef(false);
 
   // Track screen view
@@ -257,11 +257,24 @@ export default function LoginScreen() {
             </View>
             
             <View style={[styles.socialButtons, { gap: width * 0.05 }]}>
-              <TouchableOpacity style={[styles.socialButton, { 
-                width: width * 0.12, 
-                height: width * 0.12, 
-                borderRadius: width * 0.06 
-              }]}>
+              <TouchableOpacity 
+                style={[styles.socialButton, { 
+                  width: width * 0.12, 
+                  height: width * 0.12, 
+                  borderRadius: width * 0.06 
+                }]}
+                onPress={async () => {
+                  analytics.capture('google_signin_attempt');
+                  const { error } = await signInWithGoogle();
+                  if (error) {
+                    analytics.capture('google_signin_failure', { error: error.message });
+                    Alert.alert('Error', error.message || 'Failed to sign in with Google');
+                  } else {
+                    analytics.capture('google_signin_success');
+                    // Navigation will happen automatically via auth state change
+                  }
+                }}
+              >
                 <View style={[styles.googleIcon, { 
                   width: width * 0.045, 
                   height: width * 0.045, 
@@ -271,11 +284,26 @@ export default function LoginScreen() {
                 </View>
               </TouchableOpacity>
               
-              <TouchableOpacity style={[styles.socialButton, { 
-                width: width * 0.12, 
-                height: width * 0.12, 
-                borderRadius: width * 0.06 
-              }]}>
+              <TouchableOpacity 
+                style={[styles.socialButton, { 
+                  width: width * 0.12, 
+                  height: width * 0.12, 
+                  borderRadius: width * 0.06 
+                }]}
+                onPress={async () => {
+                  analytics.capture('apple_signin_attempt');
+                  const { error } = await signInWithApple();
+                  if (error) {
+                    if (error.message !== 'Sign in was canceled') {
+                      analytics.capture('apple_signin_failure', { error: error.message });
+                      Alert.alert('Error', error.message || 'Failed to sign in with Apple');
+                    }
+                  } else {
+                    analytics.capture('apple_signin_success');
+                    router.push('/(tabs)');
+                  }
+                }}
+              >
                 <Ionicons name="logo-apple" size={width * 0.06} color="white" />
               </TouchableOpacity>
             </View>

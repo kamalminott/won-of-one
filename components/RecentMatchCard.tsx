@@ -248,10 +248,10 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       position: 'absolute',
       top: 38, // Position below the pill
       right: 10, // Move slightly to the left
-      backgroundColor: '#FF6B6B',
-      width: 30,
-      height: 30,
-      borderRadius: 15,
+      backgroundColor: '#2A2A2A',
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -297,7 +297,7 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
               onPress={handleDeletePress}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Ionicons name="trash" size={16} color="white" />
+              <Ionicons name="trash-outline" size={22} color="#FF7675" />
             </TouchableOpacity>
           )}
         </View>

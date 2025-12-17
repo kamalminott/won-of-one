@@ -992,35 +992,49 @@ export default function NeutralMatchSummary() {
             headerFencer1Score: number,
             headerFencer2Score: number
           ) => {
-            const userLast = progression.userData[progression.userData.length - 1];
-            const oppLast = progression.opponentData[progression.opponentData.length - 1];
-
-            const userClamped = userLast && userLast.y > headerFencer1Score;
-            const oppClamped = oppLast && oppLast.y > headerFencer2Score;
-
-            if (userClamped) {
-              console.log('📉 [NEUTRAL SUMMARY] Suppressing padded user progression to header total', {
-                from: userLast.y,
-                to: headerFencer1Score,
-                headerFencer1Score
+            const clampSeries = (series: { x: string; y: number }[], cap: number, label: 'user' | 'opponent') => {
+              return series.map(point => {
+                if (point.y > cap) {
+                  console.log('📉 [NEUTRAL SUMMARY] Clamping progression point', {
+                    series: label,
+                    from: point.y,
+                    to: cap,
+                    cap
+                  });
+                }
+                return { ...point, y: Math.min(point.y, cap) };
               });
-              progression.userData = [
-                ...progression.userData.slice(0, -1),
-                { ...userLast, y: headerFencer1Score }
-              ];
-            }
-            if (oppClamped) {
-              console.log('📉 [NEUTRAL SUMMARY] Suppressing padded opponent progression to header total', {
-                from: oppLast.y,
-                to: headerFencer2Score,
-                headerFencer2Score
-              });
-              progression.opponentData = [
-                ...progression.opponentData.slice(0, -1),
-                { ...oppLast, y: headerFencer2Score }
-              ];
-            }
+            };
+
+            progression.userData = clampSeries(progression.userData, headerFencer1Score, 'user');
+            progression.opponentData = clampSeries(progression.opponentData, headerFencer2Score, 'opponent');
             return progression;
+          };
+          
+          const clampTouchesByPeriod = (
+            touches: {
+              period1: { user: number; opponent: number };
+              period2: { user: number; opponent: number };
+              period3: { user: number; opponent: number };
+            },
+            headerFencer1Score: number,
+            headerFencer2Score: number
+          ) => {
+            const clampVal = (val: number, cap: number) => Math.max(0, Math.min(val, cap));
+            return {
+              period1: {
+                user: clampVal(touches.period1.user, headerFencer1Score),
+                opponent: clampVal(touches.period1.opponent, headerFencer2Score),
+              },
+              period2: {
+                user: clampVal(touches.period2.user, headerFencer1Score),
+                opponent: clampVal(touches.period2.opponent, headerFencer2Score),
+              },
+              period3: {
+                user: clampVal(touches.period3.user, headerFencer1Score),
+                opponent: clampVal(touches.period3.opponent, headerFencer2Score),
+              },
+            };
           };
           
           // Online match - fetch from database
@@ -1115,6 +1129,13 @@ export default function NeutralMatchSummary() {
                 }
               });
 
+              // Clamp any runaway per-period touches to the header totals
+              const clampedTouches = clampTouchesByPeriod(
+                touchesByPeriodData,
+                localFinalFencer1Score,
+                localFinalFencer2Score
+              );
+
               // If we detected a negative delta (likely due to side swap), fall back to event-based counting per period
               if (hasNegativeDelta) {
                 try {
@@ -1127,7 +1148,7 @@ export default function NeutralMatchSummary() {
                   
                   if (periodEventsError || !periodEvents) {
                     console.error('❌ Error fetching events for period recalculation:', periodEventsError);
-                    setTouchesByPeriod(touchesByPeriodData);
+                    setTouchesByPeriod(clampedTouches);
                   } else {
                     // Build a map from match_period_id to period_number
                     const periodNumberById: Record<string, number> = {};
@@ -1169,16 +1190,21 @@ export default function NeutralMatchSummary() {
                       }
                     });
 
-                    console.log('📊 Recalculated touches by period from events:', recalculated);
-                    setTouchesByPeriod(recalculated);
+                    const clamped = clampTouchesByPeriod(
+                      recalculated,
+                      localFinalFencer1Score,
+                      localFinalFencer2Score
+                    );
+                    console.log('📊 Recalculated touches by period from events:', clamped);
+                    setTouchesByPeriod(clamped);
                   }
                 } catch (error) {
                   console.error('❌ Error during event-based period recalculation:', error);
-                  setTouchesByPeriod(touchesByPeriodData);
+                  setTouchesByPeriod(clampedTouches);
                 }
               } else {
-                console.log('📊 Using actual period scores from database:', touchesByPeriodData);
-                setTouchesByPeriod(touchesByPeriodData);
+                console.log('📊 Using actual period scores from database (clamped):', clampedTouches);
+                setTouchesByPeriod(clampedTouches);
               }
               // Also fetch score progression data
               if (data && data.fencer_1_name) {

@@ -2,7 +2,8 @@ import { analytics } from '@/lib/analytics';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert, InteractionManager, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddNewMatchButton } from '@/components/AddNewMatchButton';
@@ -19,39 +20,69 @@ import { SimpleGoal, SimpleMatch } from '@/types/database';
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
-  const { user, loading, signOut, userName, profileImage, isPasswordRecovery } = useAuth();
+  const { user, loading, userName, profileImage, isPasswordRecovery } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
   const [goals, setGoals] = useState<SimpleGoal[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [, setIsRefreshing] = useState(false);
   const [winRate, setWinRate] = useState<number>(0);
   const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
-  const [weeklySessions, setWeeklySessions] = useState<{ current: number; total: number; daysRemaining: number }>({ current: 0, total: 5, daysRemaining: 0 });
+  const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
 
-  // Fetch data when user is available
+  const fetchInFlightRef = useRef(false);
+  const lastFetchAtMsRef = useRef(0);
+  const lastHeavyRefreshAtMsRef = useRef(0);
+  const liveDataAppliedRef = useRef(false);
+  const trainingTimeRef = useRef(trainingTime);
+
   useEffect(() => {
-    if (user && !loading) {
-      fetchUserData();
-    } else if (!user && !loading) {
-      // No user logged in, stop data loading
-      setDataLoading(false);
-    }
-  }, [user, loading]);
+    trainingTimeRef.current = trainingTime;
+  }, [trainingTime]);
 
-  // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
-  useFocusEffect(
-    useCallback(() => {
-      if (user && !loading) {
-        fetchUserData();
-      } else if (!user && !loading) {
-        // No user logged in, stop data loading
-        setDataLoading(false);
+  // Hydrate from cache ASAP so the Home screen feels instant
+  useEffect(() => {
+    if (!user || loading) return;
+
+    let cancelled = false;
+    const cacheKey = `home_cache_v2:${user.id}`;
+
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(cacheKey);
+        if (!raw || cancelled) return;
+
+        const cached = JSON.parse(raw) as Partial<{
+          version: number;
+          matches: SimpleMatch[];
+          goals: SimpleGoal[];
+          winRate: number;
+          trainingTime: { value: string; label: string };
+          matchCounts: { totalMatches: number; winMatches: number } | null;
+        }>;
+
+        if (cached.version !== 2) return;
+        if (liveDataAppliedRef.current) return;
+
+        if (Array.isArray(cached.matches)) setMatches(cached.matches);
+        if (Array.isArray(cached.goals)) setGoals(cached.goals);
+        if (typeof cached.winRate === 'number') setWinRate(cached.winRate);
+        if (cached.trainingTime?.value && cached.trainingTime?.label) setTrainingTime(cached.trainingTime);
+        if (cached.matchCounts) setMatchCounts(cached.matchCounts);
+
+        setHasLoadedOnce(true);
+      } catch (error) {
+        console.warn('Failed to hydrate Home cache:', error);
       }
-    }, [user, loading])
-  );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, loading]);
 
   // Redirect to login if no user is logged in (but wait for auth to finish loading)
   useEffect(() => {
@@ -122,7 +153,7 @@ export default function HomeScreen() {
 
   // Auto-open goal modal when returning from completed goal
   useEffect(() => {
-    if (params.autoOpenGoalModal === 'true' && !dataLoading && goalCardRef.current) {
+    if (params.autoOpenGoalModal === 'true' && hasLoadedOnce && goalCardRef.current) {
       // Small delay to ensure UI is ready and data is loaded
       const timer = setTimeout(() => {
         // console.log('🎯 Auto-opening goal modal after celebration');
@@ -131,11 +162,11 @@ export default function HomeScreen() {
       
       return () => clearTimeout(timer);
     }
-  }, [params.autoOpenGoalModal, dataLoading]);
+  }, [params.autoOpenGoalModal, hasLoadedOnce]);
 
   // Show alert when goal fails
   useEffect(() => {
-    if (params.showFailedGoalAlert === 'true' && params.failedGoalTitle && !dataLoading) {
+    if (params.showFailedGoalAlert === 'true' && params.failedGoalTitle && hasLoadedOnce) {
       const timer = setTimeout(() => {
         Alert.alert(
           '💥 Goal Failed',
@@ -172,76 +203,125 @@ export default function HomeScreen() {
       
       return () => clearTimeout(timer);
     }
-  }, [params.showFailedGoalAlert, params.failedGoalTitle, params.failedGoalReason, dataLoading]);
+  }, [params.showFailedGoalAlert, params.failedGoalTitle, params.failedGoalReason, hasLoadedOnce]);
 
-  const fetchUserData = async () => {
-    if (!user) {
-      // console.log('No user found, skipping data fetch');
-      setDataLoading(false);
+  const fetchUserData = useCallback(async () => {
+    if (!user?.id) {
+      setHasLoadedOnce(true);
       return;
     }
-    
-    // console.log('Fetching data for user:', user.id);
-    setDataLoading(true);
+
+    const nowMs = Date.now();
+    if (fetchInFlightRef.current) return;
+    if (nowMs - lastFetchAtMsRef.current < 500) return; // Prevent double-fetch on initial focus
+    lastFetchAtMsRef.current = nowMs;
+    fetchInFlightRef.current = true;
+
+    setIsRefreshing(true);
+
+    const userId = user.id;
+    const userEmail = user.email || '';
+    const cacheKey = `home_cache_v2:${userId}`;
+
     try {
-      // First, ensure user exists in app_user table
-      const existingUser = await userService.getUserById(user.id);
-      if (!existingUser) {
-        // console.log('User not found in app_user table, creating...');
-        await userService.createUser(user.id, user.email || '');
-      }
-      
-      // Clean up any old completed goals that weren't auto-deactivated
-      const deactivatedCount = await goalService.deactivateAllCompletedGoals(user.id);
-      // if (deactivatedCount > 0) {
-      //   console.log(`🧹 Cleaned up ${deactivatedCount} old completed goals`);
-      // }
-      
-      // Deactivate any expired goals (past deadline and not completed)
-      const expiredCount = await goalService.deactivateExpiredGoals(user.id);
-      // if (expiredCount > 0) {
-      //   console.log(`⏰ Auto-deactivated ${expiredCount} expired goal(s)`);
-      // }
-      
-      // Fetch matches, goals, and training time data in parallel
-      // Note: Fetch more matches to support windowed goal calculations
-      const [matchesData, goalsData, trainingTimeData] = await Promise.all([
-        matchService.getRecentMatches(user.id, 1000), // Increased from 5 to support windowed goals
-        goalService.getActiveGoals(user.id),
-        matchService.getAllMatchesForTrainingTime(user.id)
+      // Fetch lightweight stats/goals first (small payload)
+      const [goalsData, counts] = await Promise.all([
+        goalService.getActiveGoals(userId),
+        matchService.getMatchCounts(userId),
       ]);
-      
-      // console.log('Fetched matches:', matchesData);
-      // console.log('Fetched goals:', goalsData);
-      // console.log('Goals count:', goalsData.length);
-      // console.log('Fetched training time data:', trainingTimeData);
-      
-      // Calculate win rate from matches
-      const calculatedWinRate = calculateWinRate(matchesData);
-      // console.log('Calculated win rate:', calculatedWinRate + '%');
-      
-      // Calculate total training time
-      const totalSeconds = trainingTimeData.reduce((sum, match) => sum + (match.bout_length_s || 0), 0);
-      const formattedTrainingTime = formatTrainingTime(totalSeconds);
-      // console.log('Total training time (seconds):', totalSeconds);
-      // console.log('Formatted training time:', formattedTrainingTime);
-      
-      // Calculate weekly sessions
-      const calculatedWeeklySessions = calculateWeeklySessions(matchesData);
-      // console.log('Weekly sessions:', calculatedWeeklySessions);
-      
+
+      const maxMatchWindow = goalsData.reduce((max, goal) => Math.max(max, goal.match_window ?? 0), 0);
+      const matchLimit = Math.min(Math.max(20, maxMatchWindow), 200);
+
+      const matchesData = await matchService.getRecentMatches(userId, matchLimit);
+
+      const calculatedWinRate =
+        counts.totalMatches > 0 ? Math.round((counts.winMatches / counts.totalMatches) * 100) : 0;
+
       setMatches(matchesData);
       setGoals(goalsData);
+      setMatchCounts(counts);
       setWinRate(calculatedWinRate);
-      setTrainingTime(formattedTrainingTime);
-      setWeeklySessions(calculatedWeeklySessions);
+      setHasLoadedOnce(true);
+      liveDataAppliedRef.current = true;
+
+      void AsyncStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          version: 2,
+          matches: matchesData,
+          goals: goalsData,
+          winRate: calculatedWinRate,
+          trainingTime: trainingTimeRef.current,
+          matchCounts: counts,
+        })
+      ).catch(error => console.warn('Failed to persist Home cache:', error));
+
+      // Defer heavy work so the initial render is fast (and don't run it on every focus)
+      const HEAVY_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+      const shouldRunHeavyRefresh = nowMs - lastHeavyRefreshAtMsRef.current > HEAVY_REFRESH_INTERVAL_MS;
+      if (shouldRunHeavyRefresh) {
+        lastHeavyRefreshAtMsRef.current = nowMs;
+
+        InteractionManager.runAfterInteractions(() => {
+          void (async () => {
+          try {
+            // Ensure user exists in app_user table (non-blocking)
+            const existingUser = await userService.getUserById(userId);
+            if (!existingUser) {
+              await userService.createUser(userId, userEmail);
+            }
+          } catch (error) {
+            console.warn('Failed to ensure app_user exists:', error);
+          }
+
+          try {
+            await goalService.deactivateAllCompletedGoals(userId);
+            await goalService.deactivateExpiredGoals(userId);
+          } catch (error) {
+            console.warn('Failed to run goal cleanup:', error);
+          }
+
+          try {
+            const trainingTimeData = await matchService.getAllMatchesForTrainingTime(userId);
+            const totalSeconds = trainingTimeData.reduce((sum, match) => sum + (match.bout_length_s || 0), 0);
+            const formattedTrainingTime = formatTrainingTime(totalSeconds);
+            setTrainingTime(formattedTrainingTime);
+
+            void AsyncStorage.setItem(
+              cacheKey,
+              JSON.stringify({
+                version: 2,
+                matches: matchesData,
+                goals: goalsData,
+                winRate: calculatedWinRate,
+                trainingTime: formattedTrainingTime,
+                matchCounts: counts,
+              })
+            ).catch(error => console.warn('Failed to persist Home cache:', error));
+          } catch (error) {
+            console.warn('Failed to fetch training time:', error);
+          }
+          })();
+        });
+      }
     } catch (error) {
       console.error('Error fetching user data:', error);
       Alert.alert('Error', 'Failed to load data');
     } finally {
-      setDataLoading(false);
+      setIsRefreshing(false);
+      fetchInFlightRef.current = false;
     }
-  };
+  }, [user?.id, user?.email]);
+
+  // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
+  useFocusEffect(
+    useCallback(() => {
+      if (user && !loading) {
+        fetchUserData();
+      }
+    }, [user, loading, fetchUserData])
+  );
 
   const handleSettings = () => {
     router.push('/settings');
@@ -267,48 +347,6 @@ export default function HomeScreen() {
     const timeDiff = goalDeadline.getTime() - today.getTime();
     const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
     return Math.max(0, daysLeft); // Don't show negative days
-  };
-
-  const calculateWinRate = (matches: SimpleMatch[]): number => {
-    if (matches.length === 0) return 0;
-    
-    const wins = matches.filter(match => match.isWin).length;
-    const winPercentage = (wins / matches.length) * 100;
-    return Math.round(winPercentage); // Round to nearest whole number
-  };
-
-  const calculateWeeklySessions = (matches: SimpleMatch[]): { current: number; total: number; daysRemaining: number } => {
-    const now = new Date();
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday = 0
-    startOfWeek.setHours(0, 0, 0, 0);
-    
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    endOfWeek.setHours(23, 59, 59, 999);
-    
-    // Filter matches for current week
-    const weeklyMatches = matches.filter(match => {
-      const matchDate = new Date(match.date);
-      return matchDate >= startOfWeek && matchDate <= endOfWeek;
-    });
-    
-    // Get unique days (sessions) from matches
-    const uniqueDays = new Set(
-      weeklyMatches.map(match => {
-        const matchDate = new Date(match.date);
-        return matchDate.toDateString(); // "Mon Jan 15 2024"
-      })
-    );
-    
-    const current = uniqueDays.size; // Number of unique days with fencing
-    const total = 5; // Target sessions (days) per week
-    const daysRemaining = Math.max(0, 6 - now.getDay()); // Days left in week (Sunday=0, Saturday=6)
-    
-    // console.log('Current day of week:', now.getDay(), 'Days remaining:', daysRemaining);
-    // console.log('Current sessions:', current, 'Target sessions:', total);
-    
-    return { current, total, daysRemaining };
   };
 
   const formatTrainingTime = (totalSeconds: number): { value: string; label: string } => {
@@ -341,15 +379,6 @@ export default function HomeScreen() {
 
   const handleSwipeRight = () => {
     router.push('/match-history');
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      router.push('/login');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to sign out');
-    }
   };
 
   const styles = StyleSheet.create({
@@ -412,20 +441,11 @@ export default function HomeScreen() {
     },
   });
 
-  // Show loading screen while checking authentication or loading data
-  if (loading || dataLoading) {
+  // Show loading screen while checking authentication
+  if (loading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: 'white', fontSize: 18 }}>Loading...</Text>
-        <Text style={{ color: 'white', fontSize: 14, marginTop: 10 }}>
-          Auth Loading: {loading ? 'Yes' : 'No'}
-        </Text>
-        <Text style={{ color: 'white', fontSize: 14 }}>
-          Data Loading: {dataLoading ? 'Yes' : 'No'}
-        </Text>
-        <Text style={{ color: 'white', fontSize: 14 }}>
-          User: {user ? 'Logged In' : 'Not Logged In'}
-        </Text>
       </View>
     );
   }
@@ -481,26 +501,18 @@ export default function HomeScreen() {
                 // Calculate window matches for insights
                 const goal = goals[0];
                 let windowMatches = matches;
-                
-                if (goal.match_window && goal.starting_match_count !== undefined) {
-                  // Get matches since goal was created
-                  const matchesSinceGoalCreation = Math.max(0, matches.length - goal.starting_match_count);
-                  // console.log('🔍 Frontend window calculation:', {
-                  //   totalMatches: matches.length,
-                  //   startingMatchCount: goal.starting_match_count,
-                  //   matchesSinceGoalCreation,
-                  //   matchWindow: goal.match_window
-                  // });
-                  
-                  const matchesSinceGoal = matches.slice(0, matchesSinceGoalCreation);
-                  // Limit to window size
-                  windowMatches = matchesSinceGoal.slice(0, goal.match_window);
-                  
-                  // console.log('🔍 Frontend window matches:', {
-                  //   matchesSinceGoalCount: matchesSinceGoal.length,
-                  //   windowMatchesCount: windowMatches.length,
-                  //   windowMatches: windowMatches.map(m => ({ id: m.id, isWin: m.isWin }))
-                  // });
+
+                let matchesSinceGoalCreation: number | undefined;
+                if (goal.match_window && goal.starting_match_count !== undefined && matchCounts) {
+                  matchesSinceGoalCreation = Math.max(0, matchCounts.totalMatches - goal.starting_match_count);
+                }
+
+                if (goal.match_window) {
+                  const matchesToConsider =
+                    matchesSinceGoalCreation === undefined
+                      ? goal.match_window
+                      : Math.min(goal.match_window, matchesSinceGoalCreation);
+                  windowMatches = matches.slice(0, matchesToConsider);
                 }
                 
                 const windowWins = windowMatches.filter(m => m.isWin).length;
@@ -537,7 +549,7 @@ export default function HomeScreen() {
                     targetValue={goal.targetValue}
                     currentValue={goal.currentValue}
                     matchWindow={goal.match_window}
-                    totalMatches={windowMatches.length}
+                    totalMatches={matchesSinceGoalCreation ?? windowMatches.length}
                     currentRecord={{
                       wins: windowWins,
                       losses: windowLosses
@@ -550,8 +562,8 @@ export default function HomeScreen() {
                     try {
                       // If this is a windowed goal, add starting match count
                       if (goalData.match_window) {
-                        const currentMatches = await matchService.getRecentMatches(user.id, 10000);
-                        goalData.starting_match_count = currentMatches.length;
+                        const { totalMatches } = await matchService.getMatchCounts(user.id);
+                        goalData.starting_match_count = totalMatches;
                         // console.log('Adding starting_match_count:', goalData.starting_match_count);
                       }
                       
@@ -581,8 +593,8 @@ export default function HomeScreen() {
                   try {
                     // If match_window is being added or modified, recalculate starting_match_count
                     if (updates.match_window !== undefined && user) {
-                      const currentMatches = await matchService.getRecentMatches(user.id, 10000);
-                      updates.starting_match_count = currentMatches.length;
+                      const { totalMatches } = await matchService.getMatchCounts(user.id);
+                      updates.starting_match_count = totalMatches;
                       // console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
                     }
                     
@@ -675,8 +687,8 @@ export default function HomeScreen() {
                     try {
                       // If this is a windowed goal, add starting match count
                       if (goalData.match_window) {
-                        const currentMatches = await matchService.getRecentMatches(user.id, 10000);
-                        goalData.starting_match_count = currentMatches.length;
+                        const { totalMatches } = await matchService.getMatchCounts(user.id);
+                        goalData.starting_match_count = totalMatches;
                         // console.log('Adding starting_match_count:', goalData.starting_match_count);
                       }
                       

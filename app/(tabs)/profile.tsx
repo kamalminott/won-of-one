@@ -5,6 +5,7 @@ import { analytics } from '@/lib/analytics';
 import { matchService, userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
@@ -148,6 +149,8 @@ export default function ProfileScreen() {
         }
         if (userData.preferred_weapon) {
           setPreferredWeapon(userData.preferred_weapon);
+          // Cache for offline/default weapon selection across the app
+          await AsyncStorage.setItem('preferred_weapon', userData.preferred_weapon);
         }
       }
     } catch (error) {
@@ -441,6 +444,8 @@ export default function ProfileScreen() {
     if (user?.id) {
       try {
         await userService.updateUser(user.id, { preferred_weapon: value });
+        // Cache for offline/default weapon selection across the app
+        await AsyncStorage.setItem('preferred_weapon', value);
         analytics.profileUpdate({ field: 'preferred_weapon' });
         analytics.identify(user.id, { preferred_weapon: value });
         console.log('✅ Preferred weapon updated:', value);

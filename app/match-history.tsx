@@ -355,7 +355,12 @@ export default function RecentMatchesScreen() {
       textAlign: 'center',
     },
     menuButton: {
-      padding: width * 0.02,
+      width: width * 0.08,
+      height: width * 0.08,
+      borderRadius: width * 0.04,
+      backgroundColor: '#2A2A2A',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     searchContainer: {
       paddingHorizontal: width * 0.04,
@@ -542,9 +547,9 @@ export default function RecentMatchesScreen() {
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Ionicons 
-            name={editMode ? "close" : "ellipsis-vertical"} 
-            size={24} 
-            color={editMode ? Colors.purple.primary : "rgba(255, 255, 255, 0.6)"} 
+            name={editMode ? "close" : "trash-outline"} 
+            size={22} 
+            color={editMode ? Colors.purple.primary : "#FF7675"} 
           />
         </TouchableOpacity>
       </View>
