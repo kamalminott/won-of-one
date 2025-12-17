@@ -2,8 +2,9 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
-import { matchService } from '@/lib/database';
+import { matchService, userService } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -206,6 +207,51 @@ export default function AddMatchScreen() {
     };
     fetchMatchData();
   }, [isEditMode, params.matchId]);
+
+  // Default weapon type to user's preferred weapon when creating a new manual match
+  useEffect(() => {
+    let cancelled = false;
+
+    const normalizePreferredWeapon = (value: string | null | undefined) => {
+      const normalized = (value || '').toLowerCase();
+      if (normalized === 'foil' || normalized === 'epee' || normalized === 'sabre' || normalized === 'saber') {
+        return normalized === 'saber' ? 'sabre' : normalized;
+      }
+      return null;
+    };
+
+    const toDisplayWeapon = (value: 'foil' | 'epee' | 'sabre') => {
+      return value.charAt(0).toUpperCase() + value.slice(1);
+    };
+
+    const loadPreferredWeapon = async () => {
+      if (isEditMode) return;
+      if (!user?.id) return;
+      // Don't override if user already changed the selection away from the default
+      if (weaponType !== 'Foil') return;
+
+      try {
+        const cached = await AsyncStorage.getItem('preferred_weapon');
+        const cachedWeapon = normalizePreferredWeapon(cached);
+        if (!cancelled && cachedWeapon) {
+          setWeaponType(toDisplayWeapon(cachedWeapon));
+        }
+
+        const userData = await userService.getUserById(user.id);
+        const preferredWeapon = normalizePreferredWeapon(userData?.preferred_weapon);
+        if (!cancelled && preferredWeapon) {
+          setWeaponType(toDisplayWeapon(preferredWeapon));
+        }
+      } catch (error) {
+        console.error('Error loading preferred weapon:', error);
+      }
+    };
+
+    loadPreferredWeapon();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, isEditMode, weaponType]);
 
   const formatDate = (date: Date) => {
     const safe = isNaN(date.getTime()) ? new Date() : date;
@@ -457,7 +503,9 @@ export default function AddMatchScreen() {
 
   const openScoreModal = (scoreType: 'your' | 'opponent') => {
     setEditingScore(scoreType);
-    setTempScore(scoreType === 'your' ? yourScore : opponentScore);
+    const currentScore = scoreType === 'your' ? yourScore : opponentScore;
+    // If score is 0, show empty input with placeholder so user can type immediately
+    setTempScore(currentScore === '0' ? '' : currentScore);
     setShowScoreModal(true);
   };
 
@@ -468,10 +516,12 @@ export default function AddMatchScreen() {
   };
 
   const saveScore = () => {
+    const normalized = tempScore.trim();
+    const valueToSave = normalized === '' ? '0' : normalized;
     if (editingScore === 'your') {
-      setYourScore(tempScore);
+      setYourScore(valueToSave);
     } else if (editingScore === 'opponent') {
-      setOpponentScore(tempScore);
+      setOpponentScore(valueToSave);
     }
     closeScoreModal();
   };
@@ -1778,6 +1828,7 @@ export default function AddMatchScreen() {
                   placeholder="0"
                   placeholderTextColor="rgba(255, 255, 255, 0.5)"
                   autoFocus={true}
+                  selectTextOnFocus={true}
                 />
               </View>
             </View>

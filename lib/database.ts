@@ -663,33 +663,45 @@ export const goalService: GoalService = {
 // Match-related functions
 export const matchService = {
   // Get recent matches for a user
-  async getRecentMatches(userId: string, limit: number = 10): Promise<SimpleMatch[]> {
-    console.log('🔍 getRecentMatches called with userId:', userId, 'limit:', limit);
-    
-    // Fetch user's name to identify which fencer is the user (handles swaps correctly)
-    const userProfile = await userService.getUserById(userId);
-    const userDisplayName = userProfile?.name || '';
-    
+  async getRecentMatches(
+    userId: string,
+    limit: number = 10,
+    userDisplayNameOverride?: string
+  ): Promise<SimpleMatch[]> {
+    const debug = __DEV__;
+    if (debug) {
+      console.log('🔍 getRecentMatches', { userId, limit });
+    }
+
     // Helper function to normalize names for comparison
-    const normalizeName = (name?: string | null): string => {
-      if (!name) return '';
-      return name.trim().toLowerCase();
-    };
-    
+    const normalizeName = (name?: string | null): string => (name ?? '').trim().toLowerCase();
+
+    // Fetch user's name to identify which fencer is the user (handles swaps correctly)
+    let userDisplayName = (userDisplayNameOverride ?? '').trim();
+    if (!userDisplayName) {
+      const userProfile = await userService.getUserById(userId);
+      userDisplayName = userProfile?.name || '';
+    }
+
     const normalizedUserName = normalizeName(userDisplayName);
-    
-    console.log('👤 User identification for opponent matching:', {
-      userId,
-      userDisplayName,
-      normalizedUserName
-    });
-    
+
     const { data, error } = await supabase
       .from('match')
-      .select(`
-        *,
+      .select(
+        `
+        match_id,
+        event_date,
+        final_score,
+        touches_against,
+        is_win,
+        match_type,
+        source,
+        notes,
+        fencer_1_name,
+        fencer_2_name,
         match_period(end_time)
-      `)
+      `
+      )
       .eq('user_id', userId)
       .order('event_date', { ascending: false })
       .order('match_id', { ascending: false }) // Secondary sort by match_id for same-day matches
@@ -700,46 +712,41 @@ export const matchService = {
       return [];
     }
 
-    console.log('📊 Raw matches data from database:', data?.length, 'matches found');
-    console.log('📊 Match details:', data?.map(m => ({ 
-      id: m.match_id, 
-      fencer1: m.fencer_1_name,
-      fencer2: m.fencer_2_name,
-      source: m.source, 
-      hasPeriods: m.match_period?.length > 0 
-    })));
+    const formatTimeHHMM = (timestampMs: number): string => {
+      const date = new Date(timestampMs);
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    };
 
-    const matches = data?.map(match => {
+    const matches = data?.map((match: any) => {
       // Get the latest period end time as the match completion time
-      const matchPeriods = match.match_period as any[];
+      const matchPeriods = match.match_period as any[] | undefined;
       let completionTime: string | undefined;
       let completionTimestamp: number | undefined;
       
       if (matchPeriods && matchPeriods.length > 0) {
-        // Find the period with the latest end_time
-        const sortedPeriods = [...matchPeriods].sort((a, b) => {
-          if (!a.end_time) return 1;
-          if (!b.end_time) return -1;
-          return new Date(b.end_time).getTime() - new Date(a.end_time).getTime();
-        });
-        
-        if (sortedPeriods[0]?.end_time) {
-          const endTime = new Date(sortedPeriods[0].end_time);
-          completionTimestamp = endTime.getTime();
-          // Format as HH:MM
-          const hours = endTime.getHours().toString().padStart(2, '0');
-          const minutes = endTime.getMinutes().toString().padStart(2, '0');
-          completionTime = `${hours}:${minutes}`;
+        // Find the latest end_time without sorting to reduce work
+        let latestEndMs: number | undefined;
+        for (const period of matchPeriods) {
+          if (!period?.end_time) continue;
+          const ts = new Date(period.end_time).getTime();
+          if (!Number.isFinite(ts)) continue;
+          if (latestEndMs === undefined || ts > latestEndMs) {
+            latestEndMs = ts;
+          }
+        }
+
+        if (latestEndMs !== undefined) {
+          completionTimestamp = latestEndMs;
+          completionTime = formatTimeHHMM(latestEndMs);
         }
       } else {
         // For manual matches without match_period, use event_date and event_time
         if (match.event_date) {
           const eventDateTime = new Date(match.event_date);
           completionTimestamp = eventDateTime.getTime();
-          // Format as HH:MM
-          const hours = eventDateTime.getHours().toString().padStart(2, '0');
-          const minutes = eventDateTime.getMinutes().toString().padStart(2, '0');
-          completionTime = `${hours}:${minutes}`;
+          completionTime = formatTimeHHMM(eventDateTime.getTime());
         }
       }
       
@@ -775,13 +782,13 @@ export const matchService = {
         // Fallback: if we can't identify the user, use fencer_2 (old behavior)
         // This handles edge cases where user name doesn't match either fencer name
         opponentName = fencer2Name || 'Unknown';
-        console.log('⚠️ Could not identify user in match, using fallback:', {
-          matchId: match.match_id,
-          fencer1Name,
-          fencer2Name,
-          userDisplayName,
-          source: match.source
-        });
+        if (debug) {
+          console.log('⚠️ Could not identify user in match, using fallback', {
+            matchId: match.match_id,
+            userDisplayName,
+            source: match.source,
+          });
+        }
       }
       
       return {
@@ -811,16 +818,39 @@ export const matchService = {
       return b.date.localeCompare(a.date);
     }).map(({ _completionTimestamp, ...match }) => match); // Remove internal field
 
-    console.log('✅ Final processed matches:', sortedMatches.length, 'matches');
-    console.log('✅ Match summary:', sortedMatches.map(m => ({ 
-      id: m.id, 
-      opponent: m.opponentName, 
-      source: m.source, 
-      date: m.date,
-      time: m.time 
-    })));
-
     return sortedMatches;
+  },
+
+  async getMatchCounts(userId: string): Promise<{ totalMatches: number; winMatches: number }> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping match count fetch due to invalid userId', { userId });
+      return { totalMatches: 0, winMatches: 0 };
+    }
+
+    const [{ count: totalMatches, error: totalError }, { count: winMatches, error: winError }] = await Promise.all([
+      supabase
+        .from('match')
+        .select('match_id', { count: 'exact', head: true })
+        .eq('user_id', userId),
+      supabase
+        .from('match')
+        .select('match_id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('is_win', true),
+    ]);
+
+    if (totalError) {
+      console.error('Error fetching match count:', totalError);
+    }
+
+    if (winError) {
+      console.error('Error fetching win match count:', winError);
+    }
+
+    return {
+      totalMatches: totalMatches ?? 0,
+      winMatches: winMatches ?? 0,
+    };
   },
 
   // Get all matches for training time calculation

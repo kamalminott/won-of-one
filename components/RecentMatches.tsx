@@ -9,6 +9,7 @@ interface RecentMatchesProps {
   userName?: string;
   userProfileImage?: string | null;
   hasActiveGoals?: boolean;
+  maxItems?: number;
 }
 
 export const RecentMatches: React.FC<RecentMatchesProps> = ({
@@ -17,15 +18,10 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
   userName,
   userProfileImage,
   hasActiveGoals = true,
+  maxItems = 3,
 }) => {
   // Convert SimpleMatch to CarouselItem format (already ordered by most recent first from database)
-  const carouselItems = matches.map(match => {
-    console.log('🔄 Converting match to carousel item:', { 
-      id: match.id, 
-      source: match.source, 
-      opponentName: match.opponentName,
-      matchType: match.matchType
-    });
+  const carouselItems = matches.slice(0, maxItems).map(match => {
     return {
       id: match.id,
       date: match.date,
@@ -46,6 +42,7 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       userName={userName}
       userProfileImage={userProfileImage}
       hasActiveGoals={hasActiveGoals}
+      maxItems={maxItems}
     />
   );
 };
