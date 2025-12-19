@@ -700,6 +700,30 @@ export default function MatchSummaryScreen() {
     fencer2Score: fencer2ScoreFinal,
   } : null;
 
+  // Clamp score progression to the header totals so penalties/cards don't push the chart past the displayed score
+  useEffect(() => {
+    const clampSeries = (series: { x: string; y: number }[], cap: number) =>
+      series.map(point => (point.y > cap ? { ...point, y: cap } : point));
+
+    const exceedsHeader =
+      scoreProgression.userData.some(p => p.y > userScoreFinal) ||
+      scoreProgression.opponentData.some(p => p.y > opponentScoreFinal);
+
+    if (exceedsHeader) {
+      const clamped = {
+        userData: clampSeries(scoreProgression.userData, userScoreFinal),
+        opponentData: clampSeries(scoreProgression.opponentData, opponentScoreFinal),
+      };
+      setScoreProgression(clamped);
+      console.log('📉 [MATCH SUMMARY] Clamped score progression to header totals', {
+        userScoreFinal,
+        opponentScoreFinal,
+        lastUser: scoreProgression.userData[scoreProgression.userData.length - 1]?.y,
+        lastOpponent: scoreProgression.opponentData[scoreProgression.opponentData.length - 1]?.y,
+      });
+    }
+  }, [scoreProgression, userScoreFinal, opponentScoreFinal]);
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,

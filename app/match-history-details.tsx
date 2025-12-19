@@ -146,14 +146,36 @@ export default function MatchDetailsScreen() {
         return 0;
       };
 
-      // Calculate average time between scoring touches
-      const canComputeIntervals = scoringEvents.length > 1;
+      // Build user identity set for filtering (only show user insights)
+      const userNameCandidates = [
+        userName,
+        isFencer1User ? match?.fencer_1_name : null,
+        isFencer2User ? match?.fencer_2_name : null,
+        'You',
+        'you'
+      ].filter(Boolean).map(normalizeName);
+
+      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
+      const isUserScoringEvent = (event: any) => {
+        const type = (event.event_type || '').toLowerCase();
+        // Double touch gives a point to both fencers; count it for the user if we know which side they're on
+        if (doubleTypes.has(type)) {
+          return isFencer1User || isFencer2User;
+        }
+        const scorerName = normalizeName(event.scoring_user_name);
+        return scorerName ? userNameCandidates.includes(scorerName) : false;
+      };
+
+      const userScoringEvents = scoringEvents.filter(isUserScoringEvent);
+
+      // Calculate average time between scoring touches (user only)
+      const canComputeIntervals = userScoringEvents.length > 1;
       let totalTimeBetweenTouches = 0;
       let touchCount = 0;
 
-      for (let i = 1; i < scoringEvents.length; i++) {
-        const currentSeconds = getSeconds(scoringEvents[i]);
-        const previousSeconds = getSeconds(scoringEvents[i - 1]);
+      for (let i = 1; i < userScoringEvents.length; i++) {
+        const currentSeconds = getSeconds(userScoringEvents[i]);
+        const previousSeconds = getSeconds(userScoringEvents[i - 1]);
         const timeDiff = Math.max(0, currentSeconds - previousSeconds);
         
         totalTimeBetweenTouches += timeDiff;
@@ -166,21 +188,21 @@ export default function MatchDetailsScreen() {
       console.log('🔍 Match Events Debug:', {
         totalEvents: matchEvents.length,
         scoringEvents: scoringEvents.length,
+        userScoringEvents: userScoringEvents.length,
         cancelled: cancelledEventIds.size,
         userName: userName,
         eventScorers: scoringEvents.map(e => e.scoring_user_name),
         uniqueScorers: [...new Set(scoringEvents.map(e => e.scoring_user_name))]
       });
 
-      // Calculate longest scoring drought (longest time between ANY scoring events)
+      // Calculate longest scoring drought (longest time between user scoring events)
       let longestDrought = 0;
-      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
-      const doubleTouchCount = scoringEvents.filter(ev => doubleTypes.has((ev.event_type || '').toLowerCase())).length;
+      const doubleTouchCount = userScoringEvents.filter(ev => doubleTypes.has((ev.event_type || '').toLowerCase())).length;
       
-      if (scoringEvents.length > 1) {
-        for (let i = 1; i < scoringEvents.length; i++) {
-          const currentSeconds = getSeconds(scoringEvents[i]);
-          const previousSeconds = getSeconds(scoringEvents[i - 1]);
+      if (userScoringEvents.length > 1) {
+        for (let i = 1; i < userScoringEvents.length; i++) {
+          const currentSeconds = getSeconds(userScoringEvents[i]);
+          const previousSeconds = getSeconds(userScoringEvents[i - 1]);
           const timeDiff = Math.max(0, currentSeconds - previousSeconds);
           
           if (timeDiff > longestDrought) {
@@ -189,54 +211,24 @@ export default function MatchDetailsScreen() {
         }
       }
 
-      // Calculate touch streaks (consecutive scoring events by user)
+      // Calculate touch streaks: longest run of consecutive user touches (any opponent/double breaks it)
       let currentStreak = 0;
       let maxStreak = 0;
-      let lastScorerWasUser = false;
-
-      // Try different variations of userName matching
-      const userNameVariations = [
-        userName,
-        userName?.toLowerCase(),
-        userName?.toUpperCase(),
-        'You',
-        'you'
-      ].filter(Boolean);
-
-      console.log('🔍 Checking userName variations:', userNameVariations);
-
-      const normalizedUserVariations = userNameVariations.map(variation => normalizeName(variation));
-
       for (const event of scoringEvents) {
         const eventType = (event.event_type || '').toLowerCase();
+        const isUserEvent = isUserScoringEvent(event);
 
-        // In epee, a double touch should break the streak (it doesn't belong to either fencer)
-        if (doubleTypes.has(eventType)) {
+        if (doubleTypes.has(eventType) || !isUserEvent) {
+          // Opponent or double touch breaks streak
           currentStreak = 0;
-          lastScorerWasUser = false;
           continue;
         }
 
-        const scorerName = normalizeName(event.scoring_user_name);
-        const isUserScoring = scorerName
-          ? normalizedUserVariations.some(variation => scorerName === variation)
-          : false;
-        
-        if (isUserScoring) {
-          if (lastScorerWasUser) {
-            currentStreak++;
-          } else {
-            currentStreak = 1;
-          }
-          maxStreak = Math.max(maxStreak, currentStreak);
-          lastScorerWasUser = true;
-        } else {
-          lastScorerWasUser = false;
-          currentStreak = 0;
-        }
+        currentStreak += 1;
+        maxStreak = Math.max(maxStreak, currentStreak);
       }
 
-      console.log('🔍 Calculated insights:', {
+      console.log('🔍 Calculated insights (user only):', {
         avgTime,
         longestDrought: Math.round(longestDrought),
         maxStreak
@@ -289,34 +281,34 @@ export default function MatchDetailsScreen() {
       });
 
       // Align progression with DB totals when they don't match (avoid inflated scores from duplicate/double events)
-      const dbUserScore = match?.final_score ?? 0;
-      const dbOpponentScore = match?.touches_against ?? 0;
+      const dbUserScore = match?.final_score ?? 0; // Stored as user-facing score
+      const dbOpponentScore = match?.touches_against ?? 0; // Stored as opponent score
       const progressionUserTotal = mappedProgression.userData.length > 0 ? mappedProgression.userData[mappedProgression.userData.length - 1].y : 0;
       const progressionOpponentTotal = mappedProgression.opponentData.length > 0 ? mappedProgression.opponentData[mappedProgression.opponentData.length - 1].y : 0;
       const progressionMatchesDb = progressionUserTotal === dbUserScore && progressionOpponentTotal === dbOpponentScore;
 
-      const trimProgression = (data: { x: string; y: number }[], maxY: number) => {
-        const filtered = data.filter(point => point.y <= maxY);
-        if (filtered.length === 0) {
-          return maxY > 0 ? [{ x: '00:00', y: 0 }] : [];
-        }
-        return filtered;
-      };
+      // Use the same rules as match-summary: prefer progression totals when they match, otherwise trust DB
+      const userScoreFinal = progressionMatchesDb && progressionUserTotal > 0 ? progressionUserTotal : dbUserScore;
+      const opponentScoreFinal = progressionMatchesDb && progressionOpponentTotal > 0 ? progressionOpponentTotal : dbOpponentScore;
 
-      const alignedProgression = progressionMatchesDb ? mappedProgression : {
-        userData: trimProgression(mappedProgression.userData, dbUserScore),
-        opponentData: trimProgression(mappedProgression.opponentData, dbOpponentScore),
+      // Clamp (do not trim/remove) progression so cards/duplicates cannot push past the header totals
+      const clampSeries = (series: { x: string; y: number }[], cap: number) =>
+        series.map(point => (point.y > cap ? { ...point, y: cap } : point));
+
+      const alignedProgression = {
+        userData: clampSeries(mappedProgression.userData, userScoreFinal),
+        opponentData: clampSeries(mappedProgression.opponentData, opponentScoreFinal),
       };
 
       if (!progressionMatchesDb) {
-        console.warn('⚠️ [Match History Details] Progression totals differ from DB, aligning to DB scores', {
+        console.warn('⚠️ [Match History Details] Progression totals differ from DB, aligning to header scores', {
           matchId: match.match_id,
           progressionUserTotal,
           progressionOpponentTotal,
-          dbUserScore,
-          dbOpponentScore,
-          userTrimmed: alignedProgression.userData.length,
-          opponentTrimmed: alignedProgression.opponentData.length,
+          userScoreFinal,
+          opponentScoreFinal,
+          userLast: alignedProgression.userData[alignedProgression.userData.length - 1]?.y,
+          opponentLast: alignedProgression.opponentData[alignedProgression.opponentData.length - 1]?.y,
         });
       }
 
@@ -820,10 +812,12 @@ export default function MatchDetailsScreen() {
               <Text style={styles.insightLabel}>Touch Streaks</Text>
               <Text style={styles.insightValue}>{matchInsights.touchStreaks}</Text>
             </View>
-            <View style={[styles.insightRow, styles.insightRowLast]}>
-              <Text style={styles.insightLabel}>Double Touches</Text>
-              <Text style={styles.insightValue}>{matchInsights.doubleTouches}</Text>
-            </View>
+            {weaponType?.toLowerCase() === 'epee' && (
+              <View style={[styles.insightRow, styles.insightRowLast]}>
+                <Text style={styles.insightLabel}>Double Touches</Text>
+                <Text style={styles.insightValue}>{matchInsights.doubleTouches}</Text>
+              </View>
+            )}
           </View>
 
           {/* Match Notes Section */}

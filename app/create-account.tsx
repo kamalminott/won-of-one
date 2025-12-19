@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { signUp, signInWithGoogle, signInWithApple } = useAuth();
+  const { signUp, signUpWithGoogle, signUpWithApple } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -399,7 +399,7 @@ export default function CreateAccountScreen() {
             }]}
             onPress={async () => {
               analytics.capture('google_signup_attempt');
-              const { error } = await signInWithGoogle();
+              const { error } = await signUpWithGoogle();
               if (error) {
                 analytics.capture('google_signup_failure', { error: error.message });
                 Alert.alert('Error', error.message || 'Failed to sign up with Google');
@@ -426,9 +426,9 @@ export default function CreateAccountScreen() {
             }]}
             onPress={async () => {
               analytics.capture('apple_signup_attempt');
-              const { error } = await signInWithApple();
+              const { error } = await signUpWithApple();
               if (error) {
-                if (error.message !== 'Sign in was canceled') {
+                if (error.message !== 'Sign up was canceled') {
                   analytics.capture('apple_signup_failure', { error: error.message });
                   Alert.alert('Error', error.message || 'Failed to sign up with Apple');
                 }

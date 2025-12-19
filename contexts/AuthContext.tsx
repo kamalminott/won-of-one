@@ -24,6 +24,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: any }>;
   signInWithGoogle: () => Promise<{ error: any }>;
   signInWithApple: () => Promise<{ error: any }>;
+  signUpWithGoogle: () => Promise<{ error: any }>;
+  signUpWithApple: () => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   setIsPasswordRecovery: (value: boolean) => void;
 }
@@ -44,6 +46,8 @@ const AuthContext = createContext<AuthContextType>({
   signUp: async () => ({ error: null }),
   signInWithGoogle: async () => ({ error: null }),
   signInWithApple: async () => ({ error: null }),
+  signUpWithGoogle: async () => ({ error: null }),
+  signUpWithApple: async () => ({ error: null }),
   signOut: async () => {},
   setIsPasswordRecovery: () => {},
 });
@@ -321,6 +325,88 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             await subscriptionService.linkUser(session.user.id);
           } catch (error) {
             console.error('❌ Error linking RevenueCat user:', error);
+          }
+
+          // Create user in app_user table if needed (for OAuth sign-ups)
+          // Only create on SIGNED_IN event (not on TOKEN_REFRESHED or other events)
+          if (event === 'SIGNED_IN') {
+            // Check if this is an OAuth provider (Google, Apple, etc.)
+            const isOAuthProvider = session.user.app_metadata?.provider && 
+                                    session.user.app_metadata.provider !== 'email';
+            
+            if (isOAuthProvider) {
+              try {
+                const existingUser = await userService.getUserById(session.user.id);
+                
+                if (!existingUser) {
+                  console.log('🔍 New OAuth user detected, creating user in database...');
+                  const email = session.user.email || '';
+                  
+                  // Try to extract name from user metadata (Google provides full_name, Apple provides givenName/familyName)
+                  const fullName = session.user.user_metadata?.full_name || 
+                                 session.user.user_metadata?.name ||
+                                 session.user.user_metadata?.display_name ||
+                                 '';
+                  
+                  let firstName = '';
+                  let lastName = '';
+                  
+                  if (fullName) {
+                    const nameParts = fullName.trim().split(' ');
+                    firstName = nameParts[0] || '';
+                    lastName = nameParts.slice(1).join(' ') || '';
+                  }
+                  
+                  // If we have both first and last name, create user
+                  if (firstName && lastName) {
+                    const createdUser = await userService.createUser(
+                      session.user.id, 
+                      email, 
+                      firstName, 
+                      lastName
+                    );
+                    if (createdUser?.name) {
+                      await setUserName(createdUser.name);
+                      console.log('✅ New OAuth user created in database:', createdUser.name);
+                    }
+                  } else if (email) {
+                    // Fallback: use email prefix as name
+                    const emailPrefix = email.split('@')[0] || 'User';
+                    const createdUser = await userService.createUser(
+                      session.user.id, 
+                      email, 
+                      emailPrefix, 
+                      ''
+                    );
+                    if (createdUser?.name) {
+                      await setUserName(createdUser.name);
+                      console.log('✅ New OAuth user created with email prefix:', createdUser.name);
+                    }
+                  } else {
+                    console.warn('⚠️ OAuth user has no email or name, cannot create user record');
+                  }
+                } else {
+                  // User exists, sync name from database
+                  if (existingUser.name) {
+                    await setUserName(existingUser.name);
+                    console.log('✅ OAuth user name synced from database:', existingUser.name);
+                  }
+                }
+              } catch (error) {
+                console.error('❌ Error creating OAuth user in database:', error);
+                // Don't block the sign-in process if user creation fails
+              }
+            }
+          } else if (session.user.id) {
+            // For existing users on other events (like TOKEN_REFRESHED), just sync name
+            try {
+              const existingUser = await userService.getUserById(session.user.id);
+              if (existingUser?.name) {
+                await setUserName(existingUser.name);
+              }
+            } catch (error) {
+              // Silent fail for name sync on non-sign-in events
+            }
           }
         } else {
           // Log out RevenueCat when user logs out
@@ -603,6 +689,127 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Sign up with Google
+  const signUpWithGoogle = async () => {
+    try {
+      console.log('🔵 Starting Google sign up...');
+      const redirectUrl = Linking.createURL('/');
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+        },
+      });
+      
+      if (error) {
+        console.error('❌ Google sign up error:', error);
+        return { error };
+      }
+      
+      console.log('✅ Google OAuth initiated for sign up, redirecting...');
+      // The OAuth flow will redirect back to the app
+      // The auth state change listener will handle the session and user creation
+      return { error: null };
+    } catch (error: any) {
+      console.error('❌ Google sign up exception:', error);
+      return { error };
+    }
+  };
+
+  // Sign up with Apple
+  const signUpWithApple = async () => {
+    try {
+      if (Platform.OS !== 'ios') {
+        return { error: { message: 'Apple Sign In is only available on iOS' } };
+      }
+
+      console.log('🍎 Starting Apple sign up...');
+      
+      // Check if Apple Authentication is available
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      if (!isAvailable) {
+        return { error: { message: 'Apple Sign In is not available on this device' } };
+      }
+
+      // Request Apple authentication
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      console.log('✅ Apple credential received for sign up:', {
+        user: credential.user,
+        hasEmail: !!credential.email,
+        hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+      });
+
+      // Sign in with Supabase using the Apple credential
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken!,
+      });
+
+      if (error) {
+        console.error('❌ Apple sign up error:', error);
+        return { error };
+      }
+
+      console.log('✅ Apple sign up successful, user ID:', data.user?.id);
+
+      // Create user in app_user table if needed
+      if (data.user && !error) {
+        const existingUser = await userService.getUserById(data.user.id);
+        
+        if (!existingUser) {
+          // Extract name from Apple credential or user metadata
+          const firstName = credential.fullName?.givenName || 
+                           data.user.user_metadata?.full_name?.split(' ')[0] || 
+                           '';
+          const lastName = credential.fullName?.familyName || 
+                          data.user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || 
+                          '';
+          const email = credential.email || data.user.email || '';
+          
+          console.log('🔍 Extracted user info for sign up:', { firstName, lastName, email });
+          
+          if (firstName && lastName) {
+            const createdUser = await userService.createUser(data.user.id, email, firstName, lastName);
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created from Apple sign up:', createdUser.name);
+            }
+          } else {
+            // If no name provided, use email prefix as fallback
+            const emailPrefix = email.split('@')[0] || 'User';
+            const createdUser = await userService.createUser(data.user.id, email, emailPrefix, '');
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created with email prefix from Apple sign up:', createdUser.name);
+            }
+          }
+        } else {
+          // User exists, sync name from database
+          if (existingUser.name) {
+            await setUserName(existingUser.name);
+            console.log('✅ User name synced from database:', existingUser.name);
+          }
+        }
+      }
+
+      return { error: null };
+    } catch (error: any) {
+      if (error.code === 'ERR_CANCELED') {
+        console.log('⚠️ Apple sign up was canceled by user');
+        return { error: { message: 'Sign up was canceled' } };
+      }
+      console.error('❌ Apple sign up exception:', error);
+      return { error };
+    }
+  };
+
   // Sign out function
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -623,6 +830,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signUp,
     signInWithGoogle,
     signInWithApple,
+    signUpWithGoogle,
+    signUpWithApple,
     signOut,
     setIsPasswordRecovery,
   };

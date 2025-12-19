@@ -1630,7 +1630,7 @@ export default function RemoteScreen() {
       // Always queue to offline cache with correct IDs
       await offlineRemoteService.recordEvent({
         remote_id: remoteSession.remote_id,
-        event_type: "touch",
+        event_type: enrichedEvent.event_type || "touch",
         scoring_user_name: enrichedEvent.scoring_user_name,
         match_time_elapsed: enrichedEvent.match_time_elapsed,
         metadata: {
@@ -1680,7 +1680,7 @@ export default function RemoteScreen() {
     scoringEntity?: 'fencerA' | 'fencerB', 
     newScore?: number,
     sessionOverride?: any,
-    eventType: 'touch' | 'double' = 'touch'
+    eventType: 'touch' | 'double' | 'card' = 'touch'
   ) => {
     // Early return if reset is in progress
     if (isResetting) {
@@ -1887,12 +1887,15 @@ export default function RemoteScreen() {
     console.log(`🎯 SCORING DEBUG: scoringEntity="${scoringEntity}", newScore=${newScore}, fencerAScore=${currentFencerAScore}, fencerBScore=${currentFencerBScore}`);
 
     // Build a canonical event payload we can queue or send immediately
+    // Cards should never be stored as touches; force event type to "card" when a card is given
+    const finalEventType = cardGiven ? 'card' : eventType;
+
     const baseEvent = {
       match_id: effectivePeriod?.match_id || null,
       match_period_id: effectivePeriod?.match_period_id || null,
       fencing_remote_id: activeSession.remote_id,
       event_time: now.toISOString(),
-      event_type: eventType,
+      event_type: finalEventType,
       scoring_user_id: scorer === 'user' ? user?.id : null,
       scoring_user_name: scoringUserName,
       fencer_1_name: fencer1Name,
@@ -1924,7 +1927,7 @@ export default function RemoteScreen() {
     // Use offline service to record event (works online and offline)
     await offlineRemoteService.recordEvent({
       remote_id: activeSession.remote_id,
-      event_type: eventType,
+      event_type: finalEventType,
       scoring_user_name: scoringUserName,
       match_time_elapsed: matchTimeElapsed,
       metadata: {
@@ -2474,10 +2477,15 @@ export default function RemoteScreen() {
       setMatchId(period.match_id || null);
     }
 
-    // If in priority round, the priority score popup already handled completion
+    // If in priority round, allow manual completion by ending priority mode and finishing with latest scores
     if (isPriorityRound) {
-      console.log('⚠️ completeMatch called during priority round - this should not happen');
-      console.log('Priority completion should be handled by the priority score popup');
+      console.log('⚠️ completeMatch called during priority round - finishing with current scores');
+      setIsPriorityRound(false);
+      setHasShownPriorityScorePopup(true);
+      setPriorityRoundPeriod(null);
+      setIsAssigningPriority(false);
+      const latestScores = scoresRef.current;
+      await proceedWithMatchCompletion(latestScores.fencerA, latestScores.fencerB);
       return;
     }
 
@@ -3180,6 +3188,11 @@ export default function RemoteScreen() {
   const currentPeriodRef = useRef<number>(1); // Ref to track current period value
   const isPlayingRef = useRef<boolean>(false); // Ref to track playing state for timer callback
 
+  // Keep period ref in sync with state so timer callbacks always see the latest period
+  useEffect(() => {
+    currentPeriodRef.current = currentPeriod;
+  }, [currentPeriod]);
+
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState<string>('');
 
@@ -3275,56 +3288,49 @@ export default function RemoteScreen() {
       return;
     }
 
-    // Don't run during swaps - prevents overwriting names mid-swap
-    if (isSwappingRef.current) return;
-    
-    const isAnonymousParams = params?.isAnonymous === 'true' && !!params.fencer1Name && !!params.fencer2Name;
-    const isKeepToggleOffFlow = params?.keepToggleOff === 'true';
-    
-    if (showUserProfile && userDisplayName) {
-      // User toggle is ON - set user's name and preserve opponent's name
-      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
-      
-      setFencerNames(prev => {
-        // Only reset opponent name if it's still the default placeholder
-        const shouldResetOpponent = prev[opponentEntity] === 'Tap to add name';
-        
-        return {
-          ...prev,
-          [userEntity]: userDisplayName,
-          // Keep opponent's existing name unless it's still the placeholder
-          ...(shouldResetOpponent ? { [opponentEntity]: 'Tap to add name' } : {})
-        };
-      });
-    } else if (!showUserProfile) {
-      // Toggle is OFF
-      // For keep-toggle-off flows, do not overwrite user edits after initial apply
-      if (isKeepToggleOffFlow) {
-        return;
-      }
+	    // Don't run during swaps - prevents overwriting names mid-swap
+	    if (isSwappingRef.current) return;
+	    
+	    const isAnonymousParams = params?.isAnonymous === 'true' && !!params.fencer1Name && !!params.fencer2Name;
+	    const isKeepToggleOffFlow = params?.keepToggleOff === 'true';
+	    
+	    if (showUserProfile && userDisplayName) {
+	      // User toggle is ON - set user's name and preserve opponent's name
+	      setFencerNames(prev =>
+	        userEntity === 'fencerA'
+	          ? { ...prev, fencerA: userDisplayName }
+	          : { ...prev, fencerB: userDisplayName }
+	      );
+	    } else if (!showUserProfile) {
+	      // Toggle is OFF
+	      // For keep-toggle-off flows, do not overwrite user edits after initial apply
+	      if (isKeepToggleOffFlow) {
+	        return;
+	      }
 
-      if (isAnonymousParams && anonBaselineNamesRef.current) {
-        // Restore baseline anonymous names (keeps params values instead of user name)
-        setFencerNames(prev => {
-          const next = {
-            ...prev,
-            fencerA: anonBaselineNamesRef.current!.fencerA,
-            fencerB: anonBaselineNamesRef.current!.fencerB,
-          };
-          if (next.fencerA === prev.fencerA && next.fencerB === prev.fencerB) {
-            return prev;
-          }
-          return next;
-        });
-      } else {
-        // Reset the user entity's name to placeholder for normal flow
-        setFencerNames(prev => ({
-          ...prev,
-          [userEntity]: 'Tap to add name'
-        }));
-      }
-    }
-  }, [showUserProfile, userDisplayName, userEntity, params?.isAnonymous, params?.fencer1Name, params?.fencer2Name, params?.keepToggleOff]);
+	      if (isAnonymousParams && anonBaselineNamesRef.current) {
+	        // Restore baseline anonymous names (keeps params values instead of user name)
+	        setFencerNames(prev => {
+	          const next = {
+	            ...prev,
+	            fencerA: anonBaselineNamesRef.current!.fencerA,
+	            fencerB: anonBaselineNamesRef.current!.fencerB,
+	          };
+	          if (next.fencerA === prev.fencerA && next.fencerB === prev.fencerB) {
+	            return prev;
+	          }
+	          return next;
+	        });
+	      } else {
+	        // Reset the user entity's name to placeholder for normal flow
+	        setFencerNames(prev =>
+	          userEntity === 'fencerA'
+	            ? { ...prev, fencerA: 'Tap to add name' }
+	            : { ...prev, fencerB: 'Tap to add name' }
+	        );
+	      }
+	    }
+	  }, [showUserProfile, userDisplayName, userEntity, params?.isAnonymous, params?.fencer1Name, params?.fencer2Name, params?.keepToggleOff]);
 
   // Validate that fencer names are filled before starting a match
   const validateFencerNames = useCallback((): { isValid: boolean; message?: string } => {
@@ -4616,23 +4622,26 @@ export default function RemoteScreen() {
         console.error('❌ Error clearing offline caches during reset:', cacheErr);
       }
 
-      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
-      if (keepOpponentName && showUserProfile && userDisplayName) {
-        // Preserve opponent name tied to the non-user entity, regardless of card position
-        setFencerNames({
-          [userEntity]: userDisplayName,
-          [opponentEntity]: fencerNames[opponentEntity] || 'Tap to add name'
-        });
-      } else if (showUserProfile && userDisplayName) {
-        // Reset opponent to placeholder; keep user on their entity (position-agnostic)
-        setFencerNames({
-          [userEntity]: userDisplayName,
-          [opponentEntity]: 'Tap to add name'
-        });
-      } else {
-        setFencerNames({ 
-          fencerA: 'Tap to add name', 
-          fencerB: 'Tap to add name' 
+	      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
+	      if (keepOpponentName && showUserProfile && userDisplayName) {
+	        // Preserve opponent name tied to the non-user entity, regardless of card position
+	        const preservedOpponentName = fencerNames[opponentEntity] || 'Tap to add name';
+	        setFencerNames(
+	          userEntity === 'fencerA'
+	            ? { fencerA: userDisplayName, fencerB: preservedOpponentName }
+	            : { fencerA: preservedOpponentName, fencerB: userDisplayName }
+	        );
+	      } else if (showUserProfile && userDisplayName) {
+	        // Reset opponent to placeholder; keep user on their entity (position-agnostic)
+	        setFencerNames(
+	          userEntity === 'fencerA'
+	            ? { fencerA: userDisplayName, fencerB: 'Tap to add name' }
+	            : { fencerA: 'Tap to add name', fencerB: userDisplayName }
+	        );
+	      } else {
+	        setFencerNames({ 
+	          fencerA: 'Tap to add name', 
+	          fencerB: 'Tap to add name' 
         });
       }
       
@@ -4800,29 +4809,27 @@ export default function RemoteScreen() {
       const leftEntity = getEntityAtPosition('left');
       const rightEntity = getEntityAtPosition('right');
 
-      // Preserve user's name when toggle is on, based on current card position
-      if (showUserProfile) {
-        const userPosition = toggleCardPosition;
-        const opponentPosition = userPosition === 'left' ? 'right' : 'left';
-        const userEntity = userPosition === 'left' ? leftEntity : rightEntity;
-        const opponentEntity = opponentPosition === 'left' ? leftEntity : rightEntity;
-        const opponentName = opponentPosition === 'left' ? trimmedLeft : trimmedRight;
+	      // Preserve user's name when toggle is on, based on current card position
+	      if (showUserProfile) {
+	        const userPosition = toggleCardPosition;
+	        const opponentPosition = userPosition === 'left' ? 'right' : 'left';
+	        const userEntityForEdit = userPosition === 'left' ? leftEntity : rightEntity;
+	        const opponentName = opponentPosition === 'left' ? trimmedLeft : trimmedRight;
 
-        setFencerNames(prev => ({
-          ...prev,
-          [userEntity]: userDisplayName, // Keep user's name on their current card
-          [opponentEntity]: opponentName // Update the visible opponent card
-        }));
-      } else {
-        const newNames = {
-          ...fencerNames,
-          [leftEntity]: trimmedLeft,
-          [rightEntity]: trimmedRight
-        };
-        console.log('💾 [saveFencerName] Setting fencer names state:', newNames, {
-          currentState: fencerNames,
-          keepToggleOff: params.keepToggleOff
-        });
+	        setFencerNames(prev =>
+	          userEntityForEdit === 'fencerA'
+	            ? { ...prev, fencerA: userDisplayName, fencerB: opponentName }
+	            : { ...prev, fencerA: opponentName, fencerB: userDisplayName }
+	        );
+	      } else {
+	        const newNames =
+	          leftEntity === 'fencerA'
+	            ? { fencerA: trimmedLeft, fencerB: trimmedRight }
+	            : { fencerA: trimmedRight, fencerB: trimmedLeft };
+	        console.log('💾 [saveFencerName] Setting fencer names state:', newNames, {
+	          currentState: fencerNames,
+	          keepToggleOff: params.keepToggleOff
+	        });
         
         // Lock keep-toggle-off flows BEFORE state update to prevent overwrites
         if (params.keepToggleOff === 'true') {
@@ -4906,6 +4913,11 @@ export default function RemoteScreen() {
       return;
     }
 
+    // Pause immediately (match should stop the moment a double is recorded)
+    if (isPlaying) {
+      pauseTimer();
+    }
+
     // Ensure remote session exists
     const session = await ensureRemoteSession();
     if (!session) {
@@ -4958,11 +4970,6 @@ export default function RemoteScreen() {
       fencer_a_score: newFencerAScore,
       fencer_b_score: newFencerBScore
     });
-
-    // Pause timer if it's currently running
-    if (isPlaying) {
-      pauseTimer();
-    }
 
     console.log('⚔️ Double hit recorded - both fencers scored');
   }, [isResetting, isCompletingMatch, scores, createMatchEvent, ensureRemoteSession, remoteSession, isPlaying, pauseTimer, isEntityUser, getEntityAtPosition]);
@@ -5028,12 +5035,13 @@ export default function RemoteScreen() {
         
         // Get the current period value to avoid stale closure
         const currentPeriodValue = currentPeriodRef.current;
+        const currentScores = scoresRef.current;
         
         // CHECK FOR PRIORITY ROUND TIMER EXPIRY
         if (isPriorityRound) {
           // Priority timer expired
-          const currentFencerAScore = scores.fencerA;
-          const currentFencerBScore = scores.fencerB;
+          const currentFencerAScore = currentScores.fencerA;
+          const currentFencerBScore = currentScores.fencerB;
           if (currentFencerAScore === currentFencerBScore) {
             // Still tied - priority fencer wins
             const winnerName = priorityFencer === 'fencerA' 
@@ -5131,7 +5139,6 @@ export default function RemoteScreen() {
         }
         
         // Check if scores are tied for any period (use ref to get current value)
-        const currentScores = scoresRef.current;
         const isTied = currentScores.fencerA === currentScores.fencerB;
         
         // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
@@ -5141,7 +5148,7 @@ export default function RemoteScreen() {
             // Scores are tied - show 3-button popup with priority option
             Alert.alert(
               'Match Time Complete!',
-              `Period ${currentPeriodValue} ended in a tie (${scores.fencerA}-${scores.fencerB}). Would you like to assign priority?`,
+              `Period ${currentPeriodValue} ended in a tie (${currentScores.fencerA}-${currentScores.fencerB}). Would you like to assign priority?`,
               [
                 { 
                   text: 'Assign Priority', 
@@ -5212,7 +5219,7 @@ export default function RemoteScreen() {
                   onPress: async () => {
                     setTimeRemaining(0);
                     // Complete the match without priority
-                    await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                    await proceedWithMatchCompletion(currentScores.fencerA, currentScores.fencerB);
                   }
                 }
               ]
@@ -5225,7 +5232,7 @@ export default function RemoteScreen() {
                 onPress: async () => {
                   setTimeRemaining(0);
                   // Complete the match properly - pass current scores
-                  await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                  await proceedWithMatchCompletion(currentScores.fencerA, currentScores.fencerB);
                 }
               }
             ]);
@@ -5267,12 +5274,13 @@ export default function RemoteScreen() {
           
           // Get the current period value to avoid stale closure
           const currentPeriodValue = currentPeriodRef.current;
+          const currentScores = scoresRef.current;
           
           // CHECK FOR PRIORITY ROUND TIMER EXPIRY
           if (isPriorityRound) {
             // Priority timer expired
-            const currentFencerAScore = scores.fencerA;
-            const currentFencerBScore = scores.fencerB;
+            const currentFencerAScore = currentScores.fencerA;
+            const currentFencerBScore = currentScores.fencerB;
             if (currentFencerAScore === currentFencerBScore) {
               // Still tied - priority fencer wins
               const winnerName = priorityFencer === 'fencerA' 
@@ -5371,7 +5379,6 @@ export default function RemoteScreen() {
           }
           
           // Check if scores are tied for any period (use ref to get current value)
-          const currentScores = scoresRef.current;
           const isTied = currentScores.fencerA === currentScores.fencerB;
           
           // SIMPLE PERIOD LOGIC - Period 1 and 2 show break popup, Period 3 shows completion
@@ -5472,7 +5479,7 @@ export default function RemoteScreen() {
                     onPress: async () => {
                       setTimeRemaining(0);
                       // Complete the match without priority
-                      await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                      await proceedWithMatchCompletion(currentScores.fencerA, currentScores.fencerB);
                     }
                   }
                 ]
@@ -5485,7 +5492,7 @@ export default function RemoteScreen() {
                   onPress: async () => {
                     setTimeRemaining(0);
                     // Complete the match properly - pass current scores
-                    await proceedWithMatchCompletion(scores.fencerA, scores.fencerB);
+                    await proceedWithMatchCompletion(currentScores.fencerA, currentScores.fencerB);
                   }
                 }
               ]);
@@ -7500,7 +7507,7 @@ export default function RemoteScreen() {
               <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
           )}
-          {hasMatchStarted && !isInjuryTimer && (
+          {scores.fencerA + scores.fencerB > 0 && !isInjuryTimer && (
             <TouchableOpacity 
               style={styles.completeMatchCircle} 
               onPress={completeMatch}
@@ -8235,28 +8242,26 @@ export default function RemoteScreen() {
 		        {/* Bottom Controls */}
 		        <View style={[
 		          styles.bottomControls,
-		          // Only make controls smaller when timer is ready AND cards are present
-		          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		            marginBottom: height * 0.002, // Reduce bottom margin
-		            gap: width * 0.03, // Reduce gap between elements
+		          // Foil/Epee: compact + higher when timer-ready so play button has room
+		          isNonSabreTimerReady ? {
+		            marginBottom: height * 0.018, // Push this row up (creates more space below for Play)
+		            gap: width * 0.03, // Slightly tighter
 		          } : {}
 		        ]}>
 		          <View style={[
 		            styles.decorativeCards,
-		            // Only make cards smaller when timer is ready AND cards are present
-		            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		            isNonSabreTimerReady ? {
 		              gap: width * 0.02, // Reduce gap between cards
 		            } : {}
 		          ]}>
 		            <TouchableOpacity style={[
-		              styles.decorativeCard, 
-		              styles.cardYellow,
-		              // Only make individual cards smaller when timer is ready AND cards are present
-		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		                width: width * 0.07, // Reduce width
-		                height: width * 0.10, // Reduce height
-		              } : {}
-		            ]} onPress={addYellowCardToAlice}>
+			              styles.decorativeCard, 
+			              styles.cardYellow,
+			              isNonSabreTimerReady ? {
+			                width: width * 0.080, // Slightly smaller
+			                height: width * 0.12, // Slightly smaller
+			              } : {}
+			            ]} onPress={addYellowCardToAlice}>
 		              {leftYellowCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
 		                  {leftYellowCards.length}
@@ -8264,14 +8269,13 @@ export default function RemoteScreen() {
 		              )}
 		            </TouchableOpacity>
 		            <TouchableOpacity style={[
-		              styles.decorativeCard, 
-		              styles.cardRed,
-		              // Only make individual cards smaller when timer is ready AND cards are present
-		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		                width: width * 0.07, // Reduce width
-		                height: width * 0.10, // Reduce height
-		              } : {}
-		            ]} onPress={addRedCardToAlice}>
+			              styles.decorativeCard, 
+			              styles.cardRed,
+			              isNonSabreTimerReady ? {
+			                width: width * 0.080, // Slightly smaller
+			                height: width * 0.12, // Slightly smaller
+			              } : {}
+			            ]} onPress={addRedCardToAlice}>
 		              {leftRedCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
 		                  {leftRedCards[0]}
@@ -8287,10 +8291,10 @@ export default function RemoteScreen() {
 		                  Colors.yellow.accent :
 		                  hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
 		              },
-		              // Only make button smaller when timer is ready AND cards are present
-		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		                paddingHorizontal: width * 0.025, // Reduce horizontal padding
-		                paddingVertical: height * 0.010, // Reduce vertical padding
+		              // Slightly smaller in timer-ready state to free space
+		              isNonSabreTimerReady ? {
+		                paddingHorizontal: width * 0.024,
+		                paddingVertical: height * 0.012,
 		              } : {},
 		              // Grey out when match hasn't started
 		              !hasMatchStarted && {
@@ -8318,20 +8322,18 @@ export default function RemoteScreen() {
 		          </TouchableOpacity>
 		          <View style={[
 		            styles.decorativeCards,
-		            // Only make cards smaller when timer is ready AND cards are present
-		            (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
+		            isNonSabreTimerReady ? {
 		              gap: width * 0.02, // Reduce gap between cards
 		            } : {}
 		          ]}>
 		            <TouchableOpacity style={[
-		              styles.decorativeCard, 
-		              styles.cardYellow,
-		              // Only make individual cards smaller when timer is ready AND cards are present
-		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		                width: width * 0.07, // Reduce width
-		                height: width * 0.10, // Reduce height
-		              } : {}
-		            ]} onPress={addYellowCardToBob}>
+			              styles.decorativeCard, 
+			              styles.cardYellow,
+			              isNonSabreTimerReady ? {
+			                width: width * 0.080, // Slightly smaller
+			                height: width * 0.12, // Slightly smaller
+			              } : {}
+			            ]} onPress={addYellowCardToBob}>
 		              {rightYellowCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
 		                  {rightYellowCards.length}
@@ -8339,14 +8341,13 @@ export default function RemoteScreen() {
 		              )}
 		            </TouchableOpacity>
 		            <TouchableOpacity style={[
-		              styles.decorativeCard, 
-		              styles.cardRed,
-		              // Only make individual cards smaller when timer is ready AND cards are present
-		              (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-		                width: width * 0.07, // Reduce width
-		                height: width * 0.10, // Reduce height
-		              } : {}
-		            ]} onPress={addRedCardToBob}>
+			              styles.decorativeCard, 
+			              styles.cardRed,
+			              isNonSabreTimerReady ? {
+			                width: width * 0.080, // Slightly smaller
+			                height: width * 0.12, // Slightly smaller
+			              } : {}
+			            ]} onPress={addRedCardToBob}>
 		              {rightRedCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
 		                  {rightRedCards[0]}
@@ -8358,23 +8359,26 @@ export default function RemoteScreen() {
 
 		        {/* Play, Reset, and Complete Match Controls - REBUILT */}
 		        <View style={[
-		          {
-		            flexDirection: 'column',
-		            alignItems: 'center',
-		            justifyContent: 'center',
-		            marginVertical: height * 0.012,
-		            marginTop: height * 0.006,
-		            paddingHorizontal: width * 0.04,
-		            backgroundColor: 'transparent',
+			          {
+			            flexDirection: 'column',
+			            alignItems: 'center',
+			            justifyContent: 'center',
+			            width: '100%',
+			            marginVertical: height * 0.012,
+			            marginTop: height * 0.006,
+			            paddingHorizontal: width * 0.04,
+			            backgroundColor: 'transparent',
 		            borderRadius: width * 0.02,
 		            gap: height * 0.012, // Reduced gap between elements
 		            marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
-		          },
-		          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
-		          isNonSabreTimerReady && {
-		            marginBottom: 0,
-		          },
-		        ]}>
+			          },
+			          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
+			          isNonSabreTimerReady && {
+			            marginBottom: 0,
+			            // Bring play controls closer to the cards/injury row without moving the row itself
+			            transform: [{ translateY: -height * 0.01 }],
+			          },
+			        ]}>
         
         {/* Play and Reset Row */}
         <View style={{
@@ -8385,22 +8389,23 @@ export default function RemoteScreen() {
         }}>
           {/* Play Button / Skip Button - Hidden for Sabre */}
           {selectedWeapon !== 'sabre' && (
-	          <TouchableOpacity 
-	            style={{
-	              flex: 1,
-	              backgroundColor: '#2A2A2A',
-			              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? height * 0.038 : height * 0.045, 'bottom'),
-	              paddingHorizontal: width * 0.05,
-	              borderRadius: width * 0.02,
-	              alignItems: 'center',
-	              justifyContent: 'center',
-	              flexDirection: 'row',
-	              marginRight: width * 0.025,
-	              borderWidth: width * 0.005,
-	              borderColor: 'white',
-			              minHeight: layout.adjustPadding(isNonSabreTimerReady ? height * 0.12 : height * 0.14, 'bottom'),
-	              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
-	            }} 
+		          <TouchableOpacity 
+		            style={{
+		              flex: 1,
+		              ...(hasMatchStarted ? { flex: 1.25 } : {}),
+		              backgroundColor: '#2A2A2A',
+		              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? height * 0.038 : height * 0.045, 'bottom'),
+		              paddingHorizontal: width * 0.05,
+		              borderRadius: width * 0.02,
+		              alignItems: 'center',
+		              justifyContent: 'center',
+		              flexDirection: 'row',
+		              marginRight: hasMatchStarted ? width * 0.01 : width * 0.025,
+		              borderWidth: width * 0.005,
+		              borderColor: 'white',
+		              minHeight: layout.adjustPadding(isNonSabreTimerReady ? height * 0.12 : height * 0.14, 'bottom'),
+		              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
+		            }} 
 	            onPress={async () => {
               console.log('Play button onPress started - isInjuryTimer:', isInjuryTimer, 'isBreakTime:', isBreakTime, 'timeRemaining:', timeRemaining);
               
@@ -8455,16 +8460,16 @@ export default function RemoteScreen() {
           </TouchableOpacity>
           )}
           
-          {/* Reset Button - Hidden for Sabre */}
-          {selectedWeapon !== 'sabre' && (
-            <TouchableOpacity 
-              style={{
-                width: width * 0.15,
-                backgroundColor: '#FB5D5C',
-                paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
-                borderRadius: width * 0.05,
-                alignItems: 'center',
-                justifyContent: 'center',
+	          {/* Reset Button - Hidden for Sabre */}
+	          {selectedWeapon !== 'sabre' && (
+		            <TouchableOpacity 
+		              style={{
+		                width: hasMatchStarted ? width * 0.11 : width * 0.15,
+		                backgroundColor: '#FB5D5C',
+		                paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
+		                borderRadius: width * 0.05,
+		                alignItems: 'center',
+		                justifyContent: 'center',
                 borderWidth: width * 0.005,
                 borderColor: 'transparent',
                 minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
