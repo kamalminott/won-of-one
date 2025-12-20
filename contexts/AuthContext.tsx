@@ -97,6 +97,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
+      const metadata = user.user_metadata || {};
+      const metadataName =
+        metadata.full_name ||
+        metadata.name ||
+        metadata.display_name ||
+        [metadata.given_name, metadata.family_name]
+          .filter(Boolean)
+          .join(' ');
+      if (metadataName) {
+        console.log('✅ Loaded name from auth metadata:', metadataName);
+        setUserNameState(metadataName);
+        await AsyncStorage.setItem('user_name', metadataName);
+        return;
+      }
+
       // Fallback to AsyncStorage
       const savedName = await AsyncStorage.getItem('user_name');
       if (savedName) {
@@ -111,7 +126,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('⚠️ Using email prefix as name:', emailPrefix);
         setUserNameState(emailPrefix);
       } else {
-        setUserNameState('Guest User');
+        setUserNameState('User');
       }
     } catch (error) {
       console.error('Error loading user name:', error);
@@ -123,10 +138,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         } else if (user?.email) {
           setUserNameState(user.email.split('@')[0]);
         } else {
-          setUserNameState('Guest User');
+          setUserNameState('User');
         }
       } catch (e) {
-        setUserNameState(user?.email?.split('@')[0] || 'Guest User');
+        setUserNameState(user?.email?.split('@')[0] || 'User');
       }
     }
   };
@@ -450,25 +465,38 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!existingUser) {
         console.log('⚠️ User not found in app_user table');
         // Try to get display_name from auth metadata as fallback
-        const displayName = data.user.user_metadata?.display_name;
-        if (displayName) {
-          // Try to split display_name into first and last name
-          const nameParts = displayName.trim().split(' ');
-          const first = nameParts[0] || '';
-          const last = nameParts.slice(1).join(' ') || '';
-          
-          if (first && last) {
-            console.log('✅ Using display_name from auth metadata:', { first, last });
-            const createdUser = await userService.createUser(data.user.id, email, first, last);
-            if (createdUser?.name) {
-              await setUserName(createdUser.name);
-              console.log('✅ New user created from auth metadata and synced to AsyncStorage:', createdUser.name);
-            }
-          } else {
-            console.warn('⚠️ display_name in auth metadata is not in "FirstName LastName" format, cannot create user');
-          }
+        const metadata = data.user.user_metadata || {};
+        const metadataName =
+          metadata.display_name ||
+          metadata.full_name ||
+          metadata.name ||
+          [metadata.given_name, metadata.family_name]
+            .filter(Boolean)
+            .join(' ');
+        let first = '';
+        let last = '';
+
+        if (metadataName) {
+          const nameParts = metadataName.trim().split(' ').filter(Boolean);
+          first = nameParts[0] || '';
+          last = nameParts.slice(1).join(' ') || '';
+        }
+
+        if (!first && email) {
+          first = email.split('@')[0] || 'User';
+        }
+
+        if (!first) {
+          first = 'User';
+        }
+
+        console.log('✅ Creating user from fallback data:', { first, last });
+        const createdUser = await userService.createUser(data.user.id, email, first, last);
+        if (createdUser?.name) {
+          await setUserName(createdUser.name);
+          console.log('✅ New user created from fallback and synced to AsyncStorage:', createdUser.name);
         } else {
-          console.warn('⚠️ No display_name in auth metadata, user should sign up properly');
+          console.warn('⚠️ User created without a name');
         }
       } else {
         // User exists, sync name from database to AsyncStorage
