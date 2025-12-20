@@ -4475,7 +4475,6 @@ export default function RemoteScreen() {
         event_time: now.toISOString(),
         event_type: 'reset',
         scoring_user_id: null,
-        scoring_user_name: null,
         fencer_1_name: fencer1Name,
         fencer_2_name: fencer2Name,
         reset_segment: nextSegment,
