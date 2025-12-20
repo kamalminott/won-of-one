@@ -63,6 +63,19 @@ export default function MatchDetailsScreen() {
     if (!name) return '';
     return name.trim().toLowerCase();
   };
+
+  const getResetSegmentValue = (value?: number | null) => {
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+
+  const filterEventsByLatestResetSegment = (events: any[]) => {
+    if (!events || events.length === 0) return [];
+    const latestSegment = events.reduce(
+      (max, ev) => Math.max(max, getResetSegmentValue(ev.reset_segment)),
+      0
+    );
+    return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+  };
   
   // Get first name from full name
   const getFirstName = (name: string | null | undefined): string => {
@@ -91,7 +104,8 @@ export default function MatchDetailsScreen() {
         return;
       }
 
-      if (!matchEvents || matchEvents.length === 0) {
+      const filteredEvents = filterEventsByLatestResetSegment(matchEvents || []);
+      if (!filteredEvents || filteredEvents.length === 0) {
         console.log('No match events found for insights calculation');
         setMatchInsights(EMPTY_MATCH_INSIGHTS);
         return;
@@ -99,14 +113,14 @@ export default function MatchDetailsScreen() {
 
       // Build cancelled set and filter to scoring events only, excluding cancelled
       const cancelledEventIds = new Set<string>();
-      for (const event of matchEvents) {
+      for (const event of filteredEvents) {
         if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
           cancelledEventIds.add(event.cancelled_event_id);
         }
       }
 
       const scoringTypes = new Set(['touch', 'double', 'double_touch', 'double_hit']);
-      const scoringEvents = matchEvents
+      const scoringEvents = filteredEvents
         .filter(ev => {
           const type = (ev.event_type || '').toLowerCase();
           if (type === 'cancel') return false;
@@ -186,7 +200,7 @@ export default function MatchDetailsScreen() {
 
       // Debug: Log all events to see what we're working with
       console.log('🔍 Match Events Debug:', {
-        totalEvents: matchEvents.length,
+        totalEvents: filteredEvents.length,
         scoringEvents: scoringEvents.length,
         userScoringEvents: userScoringEvents.length,
         cancelled: cancelledEventIds.size,

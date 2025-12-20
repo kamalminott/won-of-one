@@ -1195,6 +1195,7 @@ export default function RemoteScreen() {
         matchStartTime: matchStartTime?.toISOString(),
         lastEventTime: lastEventTime?.toISOString(),
         totalPausedTime,
+        resetSegment,
         savedAt: new Date().toISOString()
       };
       
@@ -1422,6 +1423,13 @@ export default function RemoteScreen() {
       if (matchState.totalPausedTime) {
         setTotalPausedTime(matchState.totalPausedTime);
       }
+      if (typeof matchState.resetSegment === 'number') {
+        resetSegmentRef.current = matchState.resetSegment;
+        setResetSegment(matchState.resetSegment);
+      } else {
+        resetSegmentRef.current = 0;
+        setResetSegment(0);
+      }
 
       console.log('✅ Match state restored successfully');
     } catch (error) {
@@ -1451,6 +1459,8 @@ export default function RemoteScreen() {
     // Reset all UI state to initial values
     setCurrentPeriod(1);
     setScores({ fencerA: 0, fencerB: 0 });
+    resetSegmentRef.current = 0;
+    setResetSegment(0);
     setIsPlaying(false);
     setIsCompletingMatch(false);
     isActivelyUsingAppRef.current = false; // Reset active usage flag
@@ -1571,6 +1581,8 @@ export default function RemoteScreen() {
   
   // Event tracking state
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
+  const [resetSegment, setResetSegment] = useState(0);
+  const resetSegmentRef = useRef(0);
   // Track most recent scoring event IDs for each fencer (for cancellation tracking)
   const [recentScoringEventIds, setRecentScoringEventIds] = useState<{
     fencerA: string | null;
@@ -1583,6 +1595,9 @@ export default function RemoteScreen() {
   const [matchStartTime, setMatchStartTime] = useState<Date | null>(null);
   const [totalPausedTime, setTotalPausedTime] = useState<number>(0); // in milliseconds
   const [pauseStartTime, setPauseStartTime] = useState<Date | null>(null);
+  useEffect(() => {
+    resetSegmentRef.current = resetSegment;
+  }, [resetSegment]);
   
   // We'll use null for opponent scoring and store opponent name in meta field
 
@@ -1628,27 +1643,37 @@ export default function RemoteScreen() {
       };
 
       // Always queue to offline cache with correct IDs
-      await offlineRemoteService.recordEvent({
-        remote_id: remoteSession.remote_id,
-        event_type: enrichedEvent.event_type || "touch",
-        scoring_user_name: enrichedEvent.scoring_user_name,
-        match_time_elapsed: enrichedEvent.match_time_elapsed,
-        metadata: {
-          match_id: enrichedEvent.match_id,
-          match_period_id: enrichedEvent.match_period_id,
-          scoring_user_id: enrichedEvent.scoring_user_id,
-          fencer_1_name: enrichedEvent.fencer_1_name,
-          fencer_2_name: enrichedEvent.fencer_2_name,
-          card_given: enrichedEvent.card_given,
-          score_diff: enrichedEvent.score_diff,
-          seconds_since_last_event: enrichedEvent.seconds_since_last_event,
-        }
-      });
+      let queuedEventId: string | null = null;
+      try {
+        queuedEventId = await offlineRemoteService.recordEvent({
+          remote_id: remoteSession.remote_id,
+          event_type: enrichedEvent.event_type || "touch",
+          scoring_user_name: enrichedEvent.scoring_user_name,
+          match_time_elapsed: enrichedEvent.match_time_elapsed,
+          event_time: enrichedEvent.event_time,
+          metadata: {
+            match_id: enrichedEvent.match_id,
+            match_period_id: enrichedEvent.match_period_id,
+            scoring_user_id: enrichedEvent.scoring_user_id,
+            fencer_1_name: enrichedEvent.fencer_1_name,
+            fencer_2_name: enrichedEvent.fencer_2_name,
+            card_given: enrichedEvent.card_given,
+            reset_segment: enrichedEvent.reset_segment,
+            score_diff: enrichedEvent.score_diff,
+            seconds_since_last_event: enrichedEvent.seconds_since_last_event,
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error queueing replayed touch:', error);
+      }
 
       // If online and not an offline session, also insert immediately
       if (isOnline && !item.isOfflineSession) {
         try {
-          await matchEventService.createMatchEvent(enrichedEvent);
+          const createdEvent = await matchEventService.createMatchEvent(enrichedEvent);
+          if (createdEvent && queuedEventId) {
+            await offlineCache.removePendingRemoteEvent(queuedEventId);
+          }
         } catch (err: any) {
           const isForeignKeyError = err?.code === '23503' || 
                                     err?.message?.includes('foreign key constraint') ||
@@ -1903,6 +1928,7 @@ export default function RemoteScreen() {
       card_given: cardGiven || null,
       score_diff: scoreDiff,
       seconds_since_last_event: secondsSinceLastEvent,
+      reset_segment: resetSegmentRef.current,
       match_time_elapsed: matchTimeElapsed
     };
 
@@ -1925,22 +1951,29 @@ export default function RemoteScreen() {
     }
 
     // Use offline service to record event (works online and offline)
-    await offlineRemoteService.recordEvent({
-      remote_id: activeSession.remote_id,
-      event_type: finalEventType,
-      scoring_user_name: scoringUserName,
-      match_time_elapsed: matchTimeElapsed,
-      metadata: {
-        match_id: baseEvent.match_id,
-        match_period_id: baseEvent.match_period_id,
-        scoring_user_id: baseEvent.scoring_user_id,
-        fencer_1_name: baseEvent.fencer_1_name,
-        fencer_2_name: baseEvent.fencer_2_name,
-        card_given: baseEvent.card_given,
-        score_diff: baseEvent.score_diff,
-        seconds_since_last_event: baseEvent.seconds_since_last_event,
-      }
-    });
+    let queuedEventId: string | null = null;
+    try {
+      queuedEventId = await offlineRemoteService.recordEvent({
+        remote_id: activeSession.remote_id,
+        event_type: finalEventType,
+        scoring_user_name: scoringUserName,
+        match_time_elapsed: matchTimeElapsed,
+        event_time: baseEvent.event_time,
+        metadata: {
+          match_id: baseEvent.match_id,
+          match_period_id: baseEvent.match_period_id,
+          scoring_user_id: baseEvent.scoring_user_id,
+          fencer_1_name: baseEvent.fencer_1_name,
+          fencer_2_name: baseEvent.fencer_2_name,
+          card_given: baseEvent.card_given,
+          reset_segment: baseEvent.reset_segment,
+          score_diff: baseEvent.score_diff,
+          seconds_since_last_event: baseEvent.seconds_since_last_event,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error queueing match event:', error);
+    }
     
     // Also try to create via matchEventService if online and match exists (for immediate sync)
     if (isOnline && !isOfflineSession && effectivePeriod?.match_id) {
@@ -1968,6 +2001,9 @@ export default function RemoteScreen() {
           if (!createdEvent) {
             console.log('⚠️ Match event creation deferred (FK or missing match), will sync from queue');
             return;
+          }
+          if (queuedEventId) {
+            await offlineCache.removePendingRemoteEvent(queuedEventId);
           }
           
           console.log('✅ Event created immediately (online, with match_id)');
@@ -2270,6 +2306,7 @@ export default function RemoteScreen() {
         scoring_user_name: winnerName,
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
+        reset_segment: resetSegmentRef.current,
       };
 
       // Only include fencing_remote_id if remote session exists and is verified
@@ -2335,6 +2372,7 @@ export default function RemoteScreen() {
         event_time: new Date().toISOString(),
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
+        reset_segment: resetSegmentRef.current,
       };
 
       // Only include fencing_remote_id if remote session exists and is verified
@@ -2414,6 +2452,7 @@ export default function RemoteScreen() {
         scoring_user_name: winnerName,
         fencer_1_name: fencerNames.fencerA,
         fencer_2_name: fencerNames.fencerB,
+        reset_segment: resetSegmentRef.current,
       };
 
       // Only include fencing_remote_id if remote session exists and is verified
@@ -4034,12 +4073,14 @@ export default function RemoteScreen() {
     const isOfflineSession = remoteSession.remote_id.startsWith('offline_');
 
     // Record cancellation event via offline service (works online and offline)
+    let queuedEventId: string | null = null;
     try {
-      await offlineRemoteService.recordEvent({
+      queuedEventId = await offlineRemoteService.recordEvent({
         remote_id: remoteSession.remote_id,
         event_type: "cancel",
         scoring_user_name: scoringUserName,
         match_time_elapsed: matchTimeElapsed,
+        event_time: now.toISOString(),
         metadata: {
           match_id: currentMatchPeriod.match_id,
           match_period_id: currentMatchPeriod.match_period_id || null,
@@ -4047,6 +4088,7 @@ export default function RemoteScreen() {
           fencer_1_name: fencer1Name,
           fencer_2_name: fencer2Name,
           cancelled_event_id: cancelledEventId,
+          reset_segment: resetSegmentRef.current,
         }
       });
     } catch (error) {
@@ -4084,6 +4126,7 @@ export default function RemoteScreen() {
             fencer_1_name: fencer1Name,
             fencer_2_name: fencer2Name,
             cancelled_event_id: cancelledEventId,
+            reset_segment: resetSegmentRef.current,
             match_time_elapsed: matchTimeElapsed
           };
           const createdEvent = await matchEventService.createMatchEvent(eventData);
@@ -4091,6 +4134,9 @@ export default function RemoteScreen() {
           if (!createdEvent) {
             console.log('⚠️ Cancellation event creation failed (match may have been deleted), event already queued for sync');
             return; // Event is already queued via offlineRemoteService.recordEvent above
+          }
+          if (queuedEventId) {
+            await offlineCache.removePendingRemoteEvent(queuedEventId);
           }
           
           console.log('✅ Cancellation event created:', cancelledEventId);
@@ -4396,6 +4442,97 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [selectedWeapon]);
 
+  const markResetSegment = useCallback(
+    async (reason: 'period' | 'time') => {
+      const nextSegment = resetSegmentRef.current + 1;
+      resetSegmentRef.current = nextSegment;
+      setResetSegment(nextSegment);
+      pendingTouchQueueRef.current = [];
+      setRecentScoringEventIds({ fencerA: null, fencerB: null });
+
+      const activeSession = remoteSession;
+      const effectivePeriod = currentMatchPeriod || currentMatchPeriodRef.current;
+      if (!activeSession || !effectivePeriod?.match_id) {
+        console.log('⏭️ Reset segment updated locally (no remote session yet)', {
+          reason,
+          reset_segment: nextSegment,
+        });
+        return;
+      }
+
+      const now = new Date();
+      const leftEntity = getEntityAtPosition('left');
+      const rightEntity = getEntityAtPosition('right');
+      const leftIsUser = showUserProfile && isEntityUser(leftEntity);
+      const rightIsUser = showUserProfile && isEntityUser(rightEntity);
+      const fencer1Name = leftIsUser ? userDisplayName : getNameByEntity(leftEntity);
+      const fencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
+
+      const baseEvent = {
+        match_id: effectivePeriod.match_id,
+        match_period_id: effectivePeriod.match_period_id || null,
+        fencing_remote_id: activeSession.remote_id,
+        event_time: now.toISOString(),
+        event_type: 'reset',
+        scoring_user_id: null,
+        scoring_user_name: null,
+        fencer_1_name: fencer1Name,
+        fencer_2_name: fencer2Name,
+        reset_segment: nextSegment,
+        match_time_elapsed: 0,
+      };
+
+      let queuedEventId: string | null = null;
+      try {
+        queuedEventId = await offlineRemoteService.recordEvent({
+          remote_id: activeSession.remote_id,
+          event_type: 'reset',
+          event_time: baseEvent.event_time,
+          match_time_elapsed: baseEvent.match_time_elapsed,
+          metadata: {
+            match_id: baseEvent.match_id,
+            match_period_id: baseEvent.match_period_id,
+            fencer_1_name: baseEvent.fencer_1_name,
+            fencer_2_name: baseEvent.fencer_2_name,
+            reset_segment: baseEvent.reset_segment,
+          },
+        });
+      } catch (error) {
+        console.error('❌ Error queueing reset marker event:', error);
+      }
+
+      const isOnline = await networkService.isOnline();
+      const isOfflineSession = activeSession.remote_id.startsWith('offline_');
+      if (isOnline && !isOfflineSession) {
+        try {
+          const { data: matchCheck, error: matchError } = await supabase
+            .from('match')
+            .select('match_id')
+            .eq('match_id', effectivePeriod.match_id)
+            .single();
+
+          const { data: remoteCheck, error: remoteError } = await supabase
+            .from('fencing_remote')
+            .select('remote_id')
+            .eq('remote_id', activeSession.remote_id)
+            .single();
+
+          if (!matchError && matchCheck && !remoteError && remoteCheck) {
+            const createdEvent = await matchEventService.createMatchEvent(baseEvent);
+            if (createdEvent && queuedEventId) {
+              await offlineCache.removePendingRemoteEvent(queuedEventId);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error creating reset marker event immediately:', error);
+        }
+      }
+
+      console.log('🧭 Reset segment marked', { reason, reset_segment: nextSegment });
+    },
+    [currentMatchPeriod, getEntityAtPosition, getNameByEntity, isEntityUser, remoteSession, showUserProfile, userDisplayName]
+  );
+
   const resetPeriod = useCallback(() => {
     // Stop any running timers for a clean restart
     if (timerRef.current) {
@@ -4424,9 +4561,15 @@ export default function RemoteScreen() {
     setPeriod2Time(0);
     setPeriod3Time(0);
     setTimeRemaining(matchTime); // Reset timer to configured match length
-    setIsManualReset(true); // Prevent auto-sync from assuming an in-progress match
+    setMatchStartTime(null);
+    setTotalPausedTime(0);
+    setPauseStartTime(null);
+    setLastEventTime(null);
+    sabreElapsedRef.current = 0;
+    setIsManualReset(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [breakTimerRef, injuryTimerRef, matchTime]);
+    markResetSegment('period');
+  }, [breakTimerRef, injuryTimerRef, matchTime, markResetSegment]);
 
   const resetTime = useCallback(() => {
     // Stop timer if running
@@ -4441,16 +4584,12 @@ export default function RemoteScreen() {
     setIsPlaying(false);
     setHasMatchStarted(false); // Reset match started state
     // Reset only the timer, keep current period
-    setMatchTime(180); // 3 minutes in seconds
-    setTimeRemaining(180); // Same as matchTime = no paused state
+    setTimeRemaining(matchTime); // Same as matchTime = no paused state
     setPriorityLightPosition(null); // Reset priority light
     setPriorityFencer(null); // Reset priority fencer
     setShowPriorityPopup(false); // Reset priority popup
     setIsPriorityRound(false); // Reset priority round
     setHasShownPriorityScorePopup(false); // Reset priority score popup flag
-    
-    // Reset the card state structure
-    setCards({ fencerA: { yellow: 0, red: 0 }, fencerB: { yellow: 0, red: 0 } });
     
     // Reset injury timer state
     setIsInjuryTimer(false);
@@ -4464,9 +4603,15 @@ export default function RemoteScreen() {
     setShowScoreWarning(false); // Reset warning popup
     setPendingScoreAction(null); // Reset pending action
     setPreviousMatchState(null); // Reset previous match state
+    setMatchStartTime(null);
+    setTotalPausedTime(0);
+    setPauseStartTime(null);
+    setLastEventTime(null);
+    sabreElapsedRef.current = 0;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsManualReset(true); // Set flag to prevent auto-sync
-  }, [breakTimerRef]);
+    setIsManualReset(false);
+    markResetSegment('time');
+  }, [breakTimerRef, matchTime, markResetSegment]);
 
   // Helper function to perform the actual reset
   const performResetAll = useCallback(async (keepOpponentName: boolean = false) => {
@@ -4595,6 +4740,12 @@ export default function RemoteScreen() {
       setShowScoreWarning(false);
       setHasNavigatedAway(false);
       setLastEventTime(null);
+      setMatchStartTime(null);
+      setTotalPausedTime(0);
+      setPauseStartTime(null);
+      pendingTouchQueueRef.current = [];
+      resetSegmentRef.current = 0;
+      setResetSegment(0);
       sabreElapsedRef.current = 0;
       setPendingScoreAction(null);
       setPreviousMatchState(null);

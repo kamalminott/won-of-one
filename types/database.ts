@@ -134,8 +134,10 @@ export interface MatchEvent {
   scoring_user_id?: string | null;
   scoring_user_name?: string; // Name of who scored
   card_given?: string | null;
+  points_awarded?: number | null; // Points awarded for card events (red = 1, yellow = 0)
   score_diff?: number | null; // Score difference at time of event (null if no user)
   seconds_since_last_event?: number; // Time since previous event
+  reset_segment?: number | null; // Segment counter to ignore events before last reset
   fencer_1_name?: string; // User's name
   fencer_2_name?: string; // Opponent's name
   cancelled_event_id?: string | null; // Reference to the event that was cancelled (for cancellation events)

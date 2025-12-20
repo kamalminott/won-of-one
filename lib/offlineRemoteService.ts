@@ -206,15 +206,17 @@ export const offlineRemoteService = {
     event_type: string;
     scoring_user_name?: string;
     match_time_elapsed?: number;
+    event_time?: string;
     metadata?: any;
-  }): Promise<void> {
+  }): Promise<string> {
     const isOnline = await networkService.isOnline();
+    const eventTime = eventData.event_time || new Date().toISOString();
 
     // Always save to pending queue (even if online, for reliability)
-    await offlineCache.addPendingRemoteEvent({
+    const queuedEventId = await offlineCache.addPendingRemoteEvent({
       remote_id: eventData.remote_id,
       event_type: eventData.event_type,
-      event_time: new Date().toISOString(),
+      event_time: eventTime,
       scoring_user_name: eventData.scoring_user_name,
       match_time_elapsed: eventData.match_time_elapsed,
       metadata: eventData.metadata,
@@ -231,6 +233,8 @@ export const offlineRemoteService = {
         console.log('⚠️ Immediate sync failed, will retry later');
       }
     }
+
+    return queuedEventId;
   },
 
   /**
@@ -443,6 +447,9 @@ export const offlineRemoteService = {
 
         for (const event of events) {
           const matchId = event.metadata?.match_id;
+          const resetSegment = typeof event.metadata?.reset_segment === 'number'
+            ? event.metadata.reset_segment
+            : 0;
 
           // Ensure match exists before attempting insert; if not, retry later
           if (matchId) {
@@ -484,15 +491,18 @@ export const offlineRemoteService = {
             });
             // #endregion
             
-            // Use limit(2) to detect multiple matches instead of maybeSingle()
-            const { data: existingEvents, error: checkError } = await supabase
+            // Use limit to detect multiple matches instead of maybeSingle()
+            let duplicateQuery = supabase
               .from('match_event')
               .select('match_event_id, event_time, timestamp')
               .eq('match_id', matchId)
               .eq('match_time_elapsed', event.match_time_elapsed)
               .eq('scoring_user_name', event.scoring_user_name)
               .eq('event_type', event.event_type)
-              .limit(2);
+              .eq('reset_segment', resetSegment)
+              .limit(5);
+
+            const { data: existingEvents, error: checkError } = await duplicateQuery;
             
             // #region agent log
             console.log('[DEBUG] Duplicate check query result:', {
@@ -513,52 +523,37 @@ export const offlineRemoteService = {
               // keep event; retry later
               continue;
             } else if (existingEvents && existingEvents.length > 0) {
-              // Handle multiple matches - check if any match by event_time
-              const existingEvent = existingEvents[0];
-              
-              // #region agent log
-              console.log('[DEBUG] Multiple matches detected:', {
-                matchesCount: existingEvents.length,
-                firstMatch: existingEvent,
-                allMatches: existingEvents
-              });
-              // #endregion
-              
-              // If multiple matches found, check if any match by event_time
-              let matchingEvent = null;
+              const parseTimeMs = (value?: string | null) => {
+                if (!value) return null;
+                const ms = Date.parse(value);
+                return Number.isFinite(ms) ? ms : null;
+              };
+
               const incomingEventTime = event.event_time || null;
-              
-              if (incomingEventTime) {
-                // Try to find exact match by event_time
-                matchingEvent = existingEvents.find(e => e.event_time === incomingEventTime);
-              }
-              
-              // If no exact match by event_time, use first match
-              if (!matchingEvent) {
-                matchingEvent = existingEvent;
-              }
-              
-              // Only treat as duplicate if event_time matches to the second as well
-              const existingEventTime = (matchingEvent as any)?.event_time;
-              const sameEventTime = existingEventTime && incomingEventTime
-                ? existingEventTime === incomingEventTime
-                : false;
-              
+              const incomingEventTimeMs = parseTimeMs(incomingEventTime);
+
+              const matchesExistingTime = incomingEventTimeMs !== null
+                ? existingEvents.some(existing => {
+                    const existingTimeMs = parseTimeMs((existing as any)?.event_time)
+                      ?? parseTimeMs((existing as any)?.timestamp);
+                    return existingTimeMs !== null && existingTimeMs === incomingEventTimeMs;
+                  })
+                : existingEvents.some(existing => (existing as any)?.event_time === incomingEventTime);
+
               // #region agent log
               console.log('[DEBUG] Duplicate check comparison:', {
-                sameEventTime,
-                existingEventTime,
+                matchesExistingTime,
                 incomingEventTime,
+                incomingEventTimeMs,
                 matchesCount: existingEvents.length
               });
               // #endregion
 
-              if (!sameEventTime) {
+              if (!matchesExistingTime) {
                 console.log(`ℹ️ Same elapsed/scorer found but different event_time, allowing insert`, {
                   matchId,
                   match_time_elapsed: event.match_time_elapsed,
                   scorer: event.scoring_user_name,
-                  existingEventTime,
                   incomingEventTime,
                 });
               } else {
@@ -581,6 +576,7 @@ export const offlineRemoteService = {
               .eq('event_type', event.event_type)
               .eq('scoring_user_name', event.scoring_user_name)
               .eq('event_time', compositeTimeKey)
+              .eq('reset_segment', resetSegment)
               .maybeSingle();
 
             if (compositeError) {
@@ -632,6 +628,8 @@ export const offlineRemoteService = {
               fencer_1_name: event.metadata?.fencer_1_name || null,
               fencer_2_name: event.metadata?.fencer_2_name || null,
               card_given: event.metadata?.card_given || null,
+              cancelled_event_id: event.metadata?.cancelled_event_id || null,
+              reset_segment: resetSegment,
               score_diff: event.metadata?.score_diff || null,
               seconds_since_last_event: event.metadata?.seconds_since_last_event || null,
             });

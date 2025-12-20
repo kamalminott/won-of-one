@@ -110,7 +110,7 @@ export const offlineCache = {
   /**
    * Add pending event to queue for later sync
    */
-  addPendingRemoteEvent: async (event: PendingEvent): Promise<void> => {
+  addPendingRemoteEvent: async (event: PendingEvent): Promise<string> => {
     try {
       const existing = await offlineCache.getPendingRemoteEvents();
       const eventWithId: PendingEvent = {
@@ -124,6 +124,7 @@ export const offlineCache = {
         JSON.stringify(updated)
       );
       console.log('✅ Event queued for sync:', event.event_type);
+      return eventWithId.id || '';
     } catch (error) {
       console.error('❌ Failed to queue event:', error);
       throw error;
@@ -155,6 +156,26 @@ export const offlineCache = {
       console.log('✅ Pending events cleared');
     } catch (error) {
       console.error('❌ Failed to clear pending events:', error);
+    }
+  },
+
+  /**
+   * Remove a single pending event from queue (after successful immediate sync)
+   */
+  removePendingRemoteEvent: async (eventId: string): Promise<void> => {
+    try {
+      const existing = await offlineCache.getPendingRemoteEvents();
+      const remaining = existing.filter(event => event.id !== eventId);
+      if (remaining.length === existing.length) {
+        return;
+      }
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.PENDING_EVENTS,
+        JSON.stringify(remaining)
+      );
+      console.log('✅ Pending event removed:', eventId);
+    } catch (error) {
+      console.error('❌ Failed to remove pending event:', error);
     }
   },
 

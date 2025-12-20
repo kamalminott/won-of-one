@@ -29,6 +29,7 @@ export default function MatchSummaryScreen() {
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }>({ userData: [], opponentData: [] });
+  const [userCardCounts, setUserCardCounts] = useState<{ yellow: number; red: number }>({ yellow: 0, red: 0 });
   const [touchesByPeriod, setTouchesByPeriod] = useState<{
     period1: { user: number; opponent: number };
     period2: { user: number; opponent: number };
@@ -130,6 +131,17 @@ export default function MatchSummaryScreen() {
           };
           
           setMatch(matchFromParams);
+
+          const leftCards = JSON.parse(params.aliceCards as string || '{"yellow":0,"red":0}');
+          const rightCards = JSON.parse(params.bobCards as string || '{"yellow":0,"red":0}');
+          const normalizedUser = normalizeName(userName);
+          const isFencer1User = normalizedUser && normalizeName(matchFromParams.fencer_1_name) === normalizedUser;
+          const isFencer2User = normalizedUser && normalizeName(matchFromParams.fencer_2_name) === normalizedUser;
+          const userCards = isFencer1User ? leftCards : isFencer2User ? rightCards : leftCards;
+          setUserCardCounts({
+            yellow: userCards.yellow || 0,
+            red: userCards.red || 0,
+          });
           
           // Set touches by period from params
           if (params.scoreByPeriod) {
@@ -190,6 +202,9 @@ export default function MatchSummaryScreen() {
               : isFencer2User 
               ? (matchData.fencer_2_name || 'You')
               : (matchData.fencer_1_name || 'You'); // Fallback to fencer_1 if no user match
+
+            const userCards = await fetchUserCardCounts(params.matchId as string);
+            setUserCardCounts(userCards);
             
             const calculatedBestRun = await matchService.calculateBestRun(
               params.matchId as string, 
@@ -606,6 +621,108 @@ export default function MatchSummaryScreen() {
     return value.trim().toLowerCase();
   };
 
+  const getResetSegmentValue = (value?: number | null) => {
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+
+  const filterByLatestResetSegment = (events: any[]) => {
+    if (!events || events.length === 0) return [];
+    const latestSegment = events.reduce(
+      (max, ev) => Math.max(max, getResetSegmentValue(ev.reset_segment)),
+      0
+    );
+    return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+  };
+
+  const buildUserCardCounts = (events: any[]) => {
+    const normalizedUser = normalizeName(userName);
+    const cancelledEventIds = new Set<string>();
+    const seen = new Set<string>();
+    let yellow = 0;
+    let red = 0;
+
+    const applyYellow = () => {
+      if (red === 0) {
+        if (yellow === 0) {
+          yellow = 1;
+        } else {
+          yellow = 0;
+          red += 1;
+        }
+      } else {
+        yellow = 0;
+        red += 1;
+      }
+    };
+
+    for (const event of events) {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel' && event.cancelled_event_id) {
+        cancelledEventIds.add(event.cancelled_event_id);
+      }
+    }
+
+    for (const event of events) {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel') {
+        continue;
+      }
+      if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+        continue;
+      }
+      if (!event.card_given) {
+        continue;
+      }
+
+      const isUserEvent = (user?.id && event.scoring_user_id === user.id)
+        || (normalizedUser && normalizeName(event.scoring_user_name) === normalizedUser);
+      if (!isUserEvent) {
+        continue;
+      }
+
+      const timeKey = event.event_time || event.timestamp || '';
+      const compositeKey = `${event.scoring_user_id || event.scoring_user_name || 'unknown'}|${event.card_given}|${timeKey}|${event.match_time_elapsed ?? 'noElapsed'}`;
+      if (seen.has(compositeKey)) {
+        continue;
+      }
+      seen.add(compositeKey);
+
+      if (event.card_given === 'yellow') {
+        applyYellow();
+      } else if (event.card_given === 'red') {
+        red += 1;
+      }
+    }
+
+    return { yellow, red };
+  };
+
+  const fetchUserCardCounts = async (matchId: string) => {
+    if (!matchId) {
+      return { yellow: 0, red: 0 };
+    }
+
+    try {
+      const { data: events, error } = await supabase
+        .from('match_event')
+        .select('match_event_id, event_type, card_given, scoring_user_id, scoring_user_name, event_time, timestamp, match_time_elapsed, cancelled_event_id, reset_segment')
+        .eq('match_id', matchId)
+        .order('event_time', { ascending: true })
+        .order('timestamp', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching match events for user card counts:', error);
+        return { yellow: 0, red: 0 };
+      }
+
+      const filteredEvents = filterByLatestResetSegment(events || []);
+      return buildUserCardCounts(filteredEvents);
+    } catch (error) {
+      console.error('Error calculating user card counts:', error);
+      return { yellow: 0, red: 0 };
+    }
+  };
+
   // Parse "MM:SS" or "(M:SS)" into total seconds
   const parseTimeLabelToSeconds = (label?: string | null) => {
     if (!label) return 0;
@@ -943,8 +1060,8 @@ export default function MatchSummaryScreen() {
             userScore={userScoreFinal}
             opponentScore={opponentScoreFinal}
             bestRun={bestRun}
-            yellowCards={match?.yellow_cards || 0}
-            redCards={match?.red_cards || 0}
+            yellowCards={userCardCounts.yellow}
+            redCards={userCardCounts.red}
             highestMomentum={highestMomentum}
             doubleTouchCount={doubleTouchCount}
             matchDurationSeconds={Math.max(match?.bout_length_s || 0, getProgressionDurationSeconds())}

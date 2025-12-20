@@ -105,6 +105,19 @@ const normalizeEventsForProgression = <T extends { match_time_elapsed?: number |
   });
 };
 
+const getResetSegmentValue = (value?: number | null) => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+};
+
+const filterEventsByLatestResetSegment = <T extends { reset_segment?: number | null }>(events: T[]): T[] => {
+  if (!events || events.length === 0) return [];
+  const latestSegment = events.reduce(
+    (max, ev) => Math.max(max, getResetSegmentValue(ev.reset_segment)),
+    0
+  );
+  return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+};
+
 // User-related helpers
 export const userService = {
   async getUserById(userId: string): Promise<AppUser | null> {
@@ -1195,6 +1208,12 @@ $$;
         return 0;
       }
 
+      matchEvents = filterEventsByLatestResetSegment(matchEvents);
+      if (matchEvents.length === 0) {
+        console.log('No match events found for latest reset segment');
+        return 0;
+      }
+
       // 2. Get all match periods for context
       const { data: matchPeriods, error: periodsError } = await supabase
         .from('match_period')
@@ -1234,7 +1253,23 @@ $$;
 
       console.log('📊 Processing', matchEvents.length, 'match events for best run calculation');
 
+      // Track cancelled events so they don't affect runs
+      const cancelledEventIds = new Set<string>();
       for (const event of matchEvents) {
+        if (event.event_type === 'cancel' && event.cancelled_event_id) {
+          cancelledEventIds.add(event.cancelled_event_id);
+        }
+      }
+
+      for (const event of matchEvents) {
+        // Skip cancellation events and events that were cancelled
+        if (event.event_type === 'cancel') {
+          continue;
+        }
+        if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) {
+          continue;
+        }
+
         // Check if we're in a new period (for logging purposes only)
         const eventPeriod = getPeriodForEvent(event);
         if (eventPeriod !== currentPeriod) {
@@ -1244,7 +1279,18 @@ $$;
 
         // In epee, a double hit should break the streak for both fencers
         const eventType = (event.event_type || '').toLowerCase();
+        const pointsAwarded = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : (event.card_given === 'red' ? 1 : 0);
         const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+        const isSingleTouch = eventType === 'touch';
+        const isCardPoint = eventType === 'card' && pointsAwarded > 0;
+
+        // Ignore non-scoring events (including yellow cards)
+        if (!isSingleTouch && !isDoubleTouch && !isCardPoint) {
+          continue;
+        }
+
         if ((isEpee || !weaponType) && isDoubleTouch) {
           if (currentRun > 0) {
             runDetails.push(`Run of ${currentRun} ended by double touch in period ${eventPeriod}`);
@@ -1253,7 +1299,22 @@ $$;
           continue;
         }
 
-        if (event.scoring_user_name === userName) {
+        if (isCardPoint) {
+          if (!event.scoring_user_name) {
+            continue;
+          }
+          const awardedToUser = event.scoring_user_name !== userName;
+          if (awardedToUser) {
+            currentRun += pointsAwarded;
+            bestRun = Math.max(bestRun, currentRun);
+            runDetails.push(`Point ${currentRun} in period ${eventPeriod} at ${event.timestamp}`);
+          } else {
+            if (currentRun > 0) {
+              runDetails.push(`Run of ${currentRun} ended by opponent card in period ${eventPeriod}`);
+            }
+            currentRun = 0;
+          }
+        } else if (event.scoring_user_name === userName) {
           currentRun++;
           bestRun = Math.max(bestRun, currentRun);
           runDetails.push(`Touch ${currentRun} in period ${eventPeriod} at ${event.timestamp}`);
@@ -1281,7 +1342,7 @@ $$;
     try {
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, event_type, cancelled_event_id, match_time_elapsed, event_time, timestamp')
+        .select('match_event_id, event_type, cancelled_event_id, match_time_elapsed, event_time, timestamp, reset_segment')
         .eq('match_id', matchId)
         .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
@@ -1296,9 +1357,15 @@ $$;
         return 0;
       }
 
+      const matchEvents = filterEventsByLatestResetSegment(matchEventsRaw);
+      if (matchEvents.length === 0) {
+        console.log('No match events found for latest reset segment (double touches)');
+        return 0;
+      }
+
       // Track cancelled events so we don't count them
       const cancelledEventIds = new Set<string>();
-      for (const event of matchEventsRaw) {
+      for (const event of matchEvents) {
         if (event.event_type === 'cancel' && event.cancelled_event_id) {
           cancelledEventIds.add(event.cancelled_event_id);
         }
@@ -1308,7 +1375,7 @@ $$;
       const seenKeys = new Set<string>();
       let doubleTouchCount = 0;
 
-      for (const event of matchEventsRaw) {
+      for (const event of matchEvents) {
         // Skip the cancel events themselves
         if ((event.event_type || '').toLowerCase() === 'cancel') {
           continue;
@@ -1353,7 +1420,7 @@ $$;
       // DEBUG: First check if ANY events exist for this match (without null filter)
       const { data: allEvents, error: allEventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId);
       
       console.log('🔍 DEBUG - All events for match:', {
@@ -1377,7 +1444,7 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId)
         .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
@@ -1393,7 +1460,12 @@ $$;
       }
 
       // Fill in missing match_time_elapsed values so the chart can render (common in sabre/legacy matches)
-      const matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      let matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      matchEvents = filterEventsByLatestResetSegment(matchEvents);
+      if (matchEvents.length === 0) {
+        console.log('No match events found for latest reset segment (score progression)');
+        return { userData: [], opponentData: [] };
+      }
       const missingElapsedCount = matchEventsRaw.filter(ev => ev.match_time_elapsed === null || ev.match_time_elapsed === undefined).length;
       if (missingElapsedCount > 0) {
         console.log('⏱️ Filled missing match_time_elapsed values for score progression:', {
@@ -1511,10 +1583,16 @@ $$;
       let lastSeconds = 0;
 
       for (const event of orderedEvents) {
-        // Only count scoring touches; ignore cards/other events
-        const isDoubleTouch = event.event_type === 'double' || event.event_type === 'double_touch' || event.event_type === 'double_hit';
-        const isSingleTouch = event.event_type === 'touch';
-        if (!isSingleTouch && !isDoubleTouch) {
+        const eventType = (event.event_type || '').toLowerCase();
+        const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+        const isSingleTouch = eventType === 'touch';
+        const pointsAwarded = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : (event.card_given === 'red' ? 1 : 0);
+        const isCardPoint = eventType === 'card' && pointsAwarded > 0;
+
+        // Only count scoring events (touch/double or red-card points)
+        if (!isSingleTouch && !isDoubleTouch && !isCardPoint) {
           continue;
         }
 
@@ -1589,14 +1667,23 @@ $$;
           }
         }
 
-        if (isUserScored) {
+        if (isDoubleTouch) {
           userScore++;
-          const dataPoint = { x: timeString, y: userScore };
-          userData.push(dataPoint);
-        } else {
           opponentScore++;
-          const dataPoint = { x: timeString, y: opponentScore };
-          opponentData.push(dataPoint);
+          userData.push({ x: timeString, y: userScore });
+          opponentData.push({ x: timeString, y: opponentScore });
+          continue;
+        }
+
+        const awardedToUser = isCardPoint ? !isUserScored : isUserScored;
+        const awardedPoints = isCardPoint ? pointsAwarded : 1;
+
+        if (awardedToUser) {
+          userScore += awardedPoints;
+          userData.push({ x: timeString, y: userScore });
+        } else {
+          opponentScore += awardedPoints;
+          opponentData.push({ x: timeString, y: opponentScore });
         }
       }
       
@@ -1739,7 +1826,7 @@ $$;
       // First try to get events by match_id
       const { data: eventsByMatchId, error: matchIdError } = await supabase
         .from('match_event')
-        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id')
+        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId)
         .order('timestamp', { ascending: true });
       
@@ -1754,7 +1841,7 @@ $$;
           console.log('Trying to find events by fencing_remote_id for touches by period:', remoteId);
           const { data: eventsByRemoteId, error: remoteIdError } = await supabase
             .from('match_event')
-            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id')
+            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id, points_awarded, card_given, reset_segment')
             .eq('fencing_remote_id', remoteId)
             .order('timestamp', { ascending: true });
           
@@ -1776,6 +1863,16 @@ $$;
         };
       }
 
+      matchEvents = filterEventsByLatestResetSegment(matchEvents);
+      if (matchEvents.length === 0) {
+        console.log('No match events found for latest reset segment (touches by period)');
+        return {
+          period1: { user: 0, opponent: 0 },
+          period2: { user: 0, opponent: 0 },
+          period3: { user: 0, opponent: 0 }
+        };
+      }
+
       // 2. Build a Set of cancelled event IDs from cancellation events
       const cancelledEventIds = new Set<string>();
       for (const event of matchEvents) {
@@ -1786,6 +1883,24 @@ $$;
       }
 
       console.log('📊 Total events for touches by period:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
+
+      const getScoringMeta = (event: any) => {
+        const eventType = (event.event_type || '').toLowerCase();
+        const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+        const isSingleTouch = eventType === 'touch';
+        const pointsAwarded = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : (event.card_given === 'red' ? 1 : 0);
+        const isCardPoint = eventType === 'card' && pointsAwarded > 0;
+        if (!isSingleTouch && !isDoubleTouch && !isCardPoint) {
+          return null;
+        }
+        return {
+          isDoubleTouch,
+          isCardPoint,
+          points: isCardPoint ? pointsAwarded : 1,
+        };
+      };
 
       // 3. Get final match scores to ensure accuracy
       let authoritativeUserScore = finalUserScore;
@@ -1833,13 +1948,32 @@ $$;
             console.log('🚫 Skipping cancelled event for touches by period:', event.match_event_id);
             continue;
           }
+          const scoring = getScoringMeta(event);
+          if (!scoring) {
+            continue;
+          }
 
-          if (event.scoring_user_name === userName) {
-            userTouches++;
-            console.log(`📊 User touch counted in period 1, total: ${userTouches}`);
-          } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
-            opponentTouches++;
-            console.log(`📊 Opponent touch counted in period 1, total: ${opponentTouches}`);
+          if (scoring.isDoubleTouch) {
+            userTouches += 1;
+            opponentTouches += 1;
+            console.log(`📊 Double touch counted in period 1, totals: ${userTouches}-${opponentTouches}`);
+            continue;
+          }
+
+          if (!event.scoring_user_name) {
+            continue;
+          }
+
+          const awardedToUser = scoring.isCardPoint
+            ? event.scoring_user_name !== userName
+            : event.scoring_user_name === userName;
+
+          if (awardedToUser) {
+            userTouches += scoring.points;
+            console.log(`📊 User point counted in period 1, total: ${userTouches}`);
+          } else {
+            opponentTouches += scoring.points;
+            console.log(`📊 Opponent point counted in period 1, total: ${opponentTouches}`);
           }
         }
         
@@ -1960,18 +2094,42 @@ $$;
         }
 
         // Count the touch (cancelled events already filtered out above)
-        if (event.scoring_user_name === userName) {
-          totalUserTouches++;
-          if (eventPeriod === 1) touchesByPeriod.period1.user++;
-          else if (eventPeriod === 2) touchesByPeriod.period2.user++;
-          else if (eventPeriod === 3) touchesByPeriod.period3.user++;
-          console.log(`📊 User touch counted in period ${eventPeriod}, total: ${totalUserTouches}`);
-        } else if (event.scoring_user_name && event.scoring_user_name !== userName) {
-          totalOpponentTouches++;
-          if (eventPeriod === 1) touchesByPeriod.period1.opponent++;
-          else if (eventPeriod === 2) touchesByPeriod.period2.opponent++;
-          else if (eventPeriod === 3) touchesByPeriod.period3.opponent++;
-          console.log(`📊 Opponent touch counted in period ${eventPeriod}, total: ${totalOpponentTouches}`);
+        const scoring = getScoringMeta(event);
+        if (!scoring) {
+          continue;
+        }
+
+        const target = eventPeriod === 1
+          ? touchesByPeriod.period1
+          : eventPeriod === 2
+          ? touchesByPeriod.period2
+          : touchesByPeriod.period3;
+
+        if (scoring.isDoubleTouch) {
+          totalUserTouches += 1;
+          totalOpponentTouches += 1;
+          target.user += 1;
+          target.opponent += 1;
+          console.log(`📊 Double touch counted in period ${eventPeriod}, totals: ${totalUserTouches}-${totalOpponentTouches}`);
+          continue;
+        }
+
+        if (!event.scoring_user_name) {
+          continue;
+        }
+
+        const awardedToUser = scoring.isCardPoint
+          ? event.scoring_user_name !== userName
+          : event.scoring_user_name === userName;
+
+        if (awardedToUser) {
+          totalUserTouches += scoring.points;
+          target.user += scoring.points;
+          console.log(`📊 User point counted in period ${eventPeriod}, total: ${totalUserTouches}`);
+        } else {
+          totalOpponentTouches += scoring.points;
+          target.opponent += scoring.points;
+          console.log(`📊 Opponent point counted in period ${eventPeriod}, total: ${totalOpponentTouches}`);
         }
       }
 
@@ -2229,7 +2387,7 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time')
+        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId)
         .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
@@ -2245,7 +2403,12 @@ $$;
       }
 
       // Normalize missing elapsed values so the chart doesn't render blank when times weren't stored
-      const matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      let matchEvents = normalizeEventsForProgression(matchEventsRaw);
+      matchEvents = filterEventsByLatestResetSegment(matchEvents);
+      if (matchEvents.length === 0) {
+        console.log('No match events found for latest reset segment (anonymous progression)');
+        return { fencer1Data: [], fencer2Data: [] };
+      }
       const missingElapsedCount = matchEventsRaw.filter(ev => ev.match_time_elapsed === null || ev.match_time_elapsed === undefined).length;
       if (missingElapsedCount > 0) {
         console.log('⏱️ Filled missing match_time_elapsed values for anonymous score progression:', {
@@ -2365,10 +2528,16 @@ $$;
       let lastSeconds = 0;
 
       for (const event of orderedEvents) {
-        // Only count scoring touches; ignore cards/other events (include epee double hits)
-        const isDoubleTouch = event.event_type === 'double' || event.event_type === 'double_touch' || event.event_type === 'double_hit';
-        const isSingleTouch = event.event_type === 'touch';
-        if (!isSingleTouch && !isDoubleTouch) {
+        const eventType = (event.event_type || '').toLowerCase();
+        const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+        const isSingleTouch = eventType === 'touch';
+        const pointsAwarded = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : (event.card_given === 'red' ? 1 : 0);
+        const isCardPoint = eventType === 'card' && pointsAwarded > 0;
+
+        // Only count scoring events (touch/double or red-card points)
+        if (!isSingleTouch && !isDoubleTouch && !isCardPoint) {
           continue;
         }
 
@@ -2431,17 +2600,19 @@ $$;
           fencer2Data.push({ x: timeString, y: fencer2Score });
           console.log(`📈 ✅ Double touch counted: fencer1=${fencer1Score}, fencer2=${fencer2Score} at ${timeString}`);
         } else {
-          const isFencer1Scored = resolveScorerIsFencer1();
-          if (isFencer1Scored) {
-            fencer1Score++;
+          const scorerIsFencer1 = resolveScorerIsFencer1();
+          const awardedToFencer1 = isCardPoint ? !scorerIsFencer1 : scorerIsFencer1;
+          const awardedPoints = isCardPoint ? pointsAwarded : 1;
+          if (awardedToFencer1) {
+            fencer1Score += awardedPoints;
             const dataPoint = { x: timeString, y: fencer1Score };
             fencer1Data.push(dataPoint);
-            console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) touch counted: ${fencer1Score} at ${timeString}`);
+            console.log(`📈 ✅ Fencer 1 (${matchData.fencer_1_name}) point counted: ${fencer1Score} at ${timeString}`);
           } else {
-            fencer2Score++;
+            fencer2Score += awardedPoints;
             const dataPoint = { x: timeString, y: fencer2Score };
             fencer2Data.push(dataPoint);
-            console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) touch counted: ${fencer2Score} at ${timeString}`);
+            console.log(`📈 ✅ Fencer 2 (${matchData.fencer_2_name}) point counted: ${fencer2Score} at ${timeString}`);
           }
         }
       }

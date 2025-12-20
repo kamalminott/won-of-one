@@ -1062,6 +1062,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       width: width * 0.8,
       padding: width * 0.04,
       alignItems: 'center',
+      overflow: 'visible',
     },
     modalHeader: {
       flexDirection: 'row',
@@ -1082,6 +1083,8 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
     goalForm: {
       width: '100%',
       marginBottom: height * 0.02,
+      position: 'relative',
+      zIndex: 2,
     },
     formField: {
       marginBottom: height * 0.015,
@@ -1213,6 +1216,8 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       justifyContent: 'space-around',
       width: '100%',
       marginTop: height * 0.02,
+      position: 'relative',
+      zIndex: 1,
     },
     cancelButton: {
       flex: 1,
@@ -1417,7 +1422,12 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
                   ]}
                   onPress={() => {
                     if (!isUpdatingGoal) {
-                      setShowGoalTypeDropdown(!showGoalTypeDropdown);
+                      const nextOpen = !showGoalTypeDropdown;
+                      setShowGoalTypeDropdown(nextOpen);
+                      if (nextOpen) {
+                        setShowTimeframeDropdown(false);
+                        setShowTimeframeNumberDropdown(false);
+                      }
                     }
                   }}
                   activeOpacity={isUpdatingGoal ? 1 : 0.7}
@@ -1510,7 +1520,14 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
                   <View style={styles.timeframeContainer}>
                     <TouchableOpacity 
                       style={styles.timeframeNumberContainer}
-                      onPress={() => setShowTimeframeNumberDropdown(!showTimeframeNumberDropdown)}
+                      onPress={() => {
+                        const nextOpen = !showTimeframeNumberDropdown;
+                        setShowTimeframeNumberDropdown(nextOpen);
+                        if (nextOpen) {
+                          setShowTimeframeDropdown(false);
+                          setShowGoalTypeDropdown(false);
+                        }
+                      }}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.dropdownText}>{timeframeNumber}</Text>
@@ -1523,7 +1540,14 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
                     
                     <TouchableOpacity 
                       style={styles.timeframeTypeContainer}
-                      onPress={() => setShowTimeframeDropdown(!showTimeframeDropdown)}
+                      onPress={() => {
+                        const nextOpen = !showTimeframeDropdown;
+                        setShowTimeframeDropdown(nextOpen);
+                        if (nextOpen) {
+                          setShowTimeframeNumberDropdown(false);
+                          setShowGoalTypeDropdown(false);
+                        }
+                      }}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.dropdownText}>{timeframe}</Text>

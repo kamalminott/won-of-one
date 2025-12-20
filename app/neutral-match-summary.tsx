@@ -58,6 +58,19 @@ export default function NeutralMatchSummary() {
   }>({ fencer1: 0, fencer2: 0 });
   const [showNewMatchModal, setShowNewMatchModal] = useState(false);
 
+  const getResetSegmentValue = (value?: number | null) => {
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+
+  const filterEventsByLatestResetSegment = (events: any[]) => {
+    if (!events || events.length === 0) return [];
+    const latestSegment = events.reduce(
+      (max, ev) => Math.max(max, getResetSegmentValue(ev.reset_segment)),
+      0
+    );
+    return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+  };
+
   // Extract match data from params
   // Note: params use alice/bob naming from remote page, but we rename to fencer1/fencer2 internally
   const {
@@ -96,7 +109,7 @@ export default function NeutralMatchSummary() {
 
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -105,13 +118,14 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0 };
       }
 
-      if (!matchEvents || matchEvents.length === 0) {
+      const filteredEvents = filterEventsByLatestResetSegment(matchEvents || []);
+      if (filteredEvents.length === 0) {
         return { fencer1: 0, fencer2: 0 };
       }
 
       // Build cancelled event IDs set
       const cancelledEventIds = new Set<string>();
-      for (const event of matchEvents) {
+      for (const event of filteredEvents) {
         if (event.event_type === 'cancel' && event.cancelled_event_id) {
           cancelledEventIds.add(event.cancelled_event_id);
         }
@@ -123,7 +137,7 @@ export default function NeutralMatchSummary() {
       let fencer2LongestRun = 0;
 
       // Process events chronologically to find consecutive scoring streaks
-      for (const event of matchEvents) {
+      for (const event of filteredEvents) {
         // Skip cancelled events
         if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
           continue;
@@ -196,7 +210,7 @@ export default function NeutralMatchSummary() {
       console.log('📊 Calculated longest runs:', {
         fencer1: fencer1LongestRun,
         fencer2: fencer2LongestRun,
-        totalEvents: matchEvents.length,
+        totalEvents: filteredEvents.length,
         isEpee,
         weaponType
       });
@@ -232,7 +246,7 @@ export default function NeutralMatchSummary() {
 
       const { data: matchEvents, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -241,13 +255,14 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0 };
       }
 
-      if (!matchEvents || matchEvents.length < 2) {
+      const filteredEvents = filterEventsByLatestResetSegment(matchEvents || []);
+      if (filteredEvents.length < 2) {
         return { fencer1: 0, fencer2: 0 };
       }
 
       // Build cancelled event IDs set
       const cancelledEventIds = new Set<string>();
-      for (const event of matchEvents) {
+      for (const event of filteredEvents) {
         if (event.event_type === 'cancel' && event.cancelled_event_id) {
           cancelledEventIds.add(event.cancelled_event_id);
         }
@@ -261,7 +276,7 @@ export default function NeutralMatchSummary() {
       let lastFencer2ScoredAgainst: number | null = null;
 
       // Process events chronologically
-      for (const event of matchEvents) {
+      for (const event of filteredEvents) {
         // Skip cancelled events
         if (event.event_type === 'cancel' || (event.cancelled_event_id && cancelledEventIds.has(event.cancelled_event_id))) {
           continue;
@@ -486,7 +501,7 @@ export default function NeutralMatchSummary() {
       // For sabre, order by timestamp (not match_time_elapsed which is NULL)
       const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
         .eq('match_id', matchId)
         .order('timestamp', { ascending: true });
 
@@ -495,7 +510,7 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
-      const matchEvents = matchEventsRaw || [];
+      const matchEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
       console.log('🔍 SCORE-BASED LEADING DEBUG - Match events found:', matchEvents?.length || 0);
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -624,7 +639,7 @@ export default function NeutralMatchSummary() {
       
       const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
         .eq('match_id', matchId)
         .order('match_time_elapsed', { ascending: true });
 
@@ -633,7 +648,8 @@ export default function NeutralMatchSummary() {
         return { fencer1: 0, fencer2: 0, tied: 100 };
       }
 
-      const matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
+      const filteredEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
+      const matchEvents = normalizeEventsForTiming(filteredEvents, []);
       console.log('🔍 TIME LEADING DEBUG - Match events found:', matchEvents?.length || 0);
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -820,7 +836,7 @@ export default function NeutralMatchSummary() {
       // For sabre, order by timestamp; for foil/epee, order by match_time_elapsed
       const { data: matchEventsRaw, error } = await supabase
         .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id')
+        .select('scoring_user_name, match_time_elapsed, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
         .eq('match_id', matchId)
         .order(isSabre ? 'timestamp' : 'match_time_elapsed', { ascending: true });
 
@@ -829,18 +845,19 @@ export default function NeutralMatchSummary() {
         return 0;
       }
 
+      const filteredEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
       // For sabre, sort by timestamp directly; for foil/epee, use normalizeEventsForTiming
       let matchEvents;
       if (isSabre) {
         // For sabre, sort by timestamp (match_time_elapsed is NULL)
-        matchEvents = (matchEventsRaw || []).sort((a, b) => {
+        matchEvents = filteredEvents.sort((a, b) => {
           const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
           const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
           return aTime - bTime;
         });
       } else {
         // For foil/epee, use normalizeEventsForTiming
-        matchEvents = normalizeEventsForTiming(matchEventsRaw || [], []);
+        matchEvents = normalizeEventsForTiming(filteredEvents, []);
       }
 
       if (!matchEvents || matchEvents.length === 0) {
@@ -1140,16 +1157,17 @@ export default function NeutralMatchSummary() {
               if (hasNegativeDelta) {
                 try {
                   console.warn('⚠️ Negative period deltas detected, recalculating touches by period from events');
-                  const { data: periodEvents, error: periodEventsError } = await supabase
-                    .from('match_event')
-                    .select('match_event_id, match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name')
-                    .eq('match_id', matchId as string)
-                    .order('timestamp', { ascending: true });
+                    const { data: periodEvents, error: periodEventsError } = await supabase
+                      .from('match_event')
+                      .select('match_event_id, match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, points_awarded, card_given, reset_segment')
+                      .eq('match_id', matchId as string)
+                      .order('timestamp', { ascending: true });
                   
                   if (periodEventsError || !periodEvents) {
                     console.error('❌ Error fetching events for period recalculation:', periodEventsError);
                     setTouchesByPeriod(clampedTouches);
                   } else {
+                    const filteredPeriodEvents = filterEventsByLatestResetSegment(periodEvents);
                     // Build a map from match_period_id to period_number
                     const periodNumberById: Record<string, number> = {};
                     sortedPeriods.forEach(p => {
@@ -1165,28 +1183,57 @@ export default function NeutralMatchSummary() {
                     };
 
                     const cancelledIds = new Set<string>();
-                    periodEvents.forEach(ev => {
+                    filteredPeriodEvents.forEach(ev => {
                       if (ev.event_type === 'cancel' && ev.cancelled_event_id) {
                         cancelledIds.add(ev.cancelled_event_id);
                       }
                     });
 
-                    periodEvents.forEach(ev => {
+                    filteredPeriodEvents.forEach(ev => {
                       if (ev.event_type === 'cancel') return;
                       if (ev.match_event_id && cancelledIds.has(ev.match_event_id)) return;
 
+                      const eventType = (ev.event_type || '').toLowerCase();
+                      const isDoubleTouch = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+                      const isSingleTouch = eventType === 'touch';
+                      const pointsAwarded = typeof ev.points_awarded === 'number'
+                        ? ev.points_awarded
+                        : (ev.card_given === 'red' ? 1 : 0);
+                      const isCardPoint = eventType === 'card' && pointsAwarded > 0;
+
+                      if (!isSingleTouch && !isDoubleTouch && !isCardPoint) {
+                        return;
+                      }
+
                       const periodNum = ev.match_period_id ? periodNumberById[ev.match_period_id] || 1 : 1;
-                      const isFencer1 = ev.scoring_user_name === ev.fencer_1_name;
                       
                       const target =
                         periodNum === 1 ? recalculated.period1 :
                         periodNum === 2 ? recalculated.period2 :
                         recalculated.period3;
 
-                      if (isFencer1) {
+                      if (isDoubleTouch) {
                         target.user += 1;
-                      } else {
                         target.opponent += 1;
+                        return;
+                      }
+
+                      if (!ev.scoring_user_name) {
+                        return;
+                      }
+
+                      const scorerIsFencer1 = ev.scoring_user_name === ev.fencer_1_name;
+                      if (!scorerIsFencer1 && ev.scoring_user_name !== ev.fencer_2_name) {
+                        return;
+                      }
+
+                      const awardedToFencer1 = isCardPoint ? !scorerIsFencer1 : scorerIsFencer1;
+                      const awardedPoints = isCardPoint ? pointsAwarded : 1;
+
+                      if (awardedToFencer1) {
+                        target.user += awardedPoints;
+                      } else {
+                        target.opponent += awardedPoints;
                       }
                     });
 
