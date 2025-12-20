@@ -304,7 +304,15 @@ export default function HomeScreen() {
             // Ensure user exists in app_user table (non-blocking)
             const existingUser = await userService.getUserById(userId);
             if (!existingUser) {
-              await userService.createUser(userId, userEmail);
+              const provider = user?.app_metadata?.provider;
+              const isAppleProvider = provider === 'apple';
+              await userService.createUser(
+                userId,
+                userEmail,
+                undefined,
+                undefined,
+                isAppleProvider ? { fallbackEmailForName: null } : undefined
+              );
             }
           } catch (error) {
             console.warn('Failed to ensure app_user exists:', error);

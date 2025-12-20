@@ -167,8 +167,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       const metadataName = getMetadataName(user);
+      const provider = user?.app_metadata?.provider;
+      const isAppleProvider = provider === 'apple';
       const emailPrefix = user?.email ? user.email.split('@')[0] : '';
-      const fallbackName = metadataName || emailPrefix;
+      const fallbackName = metadataName || (!isAppleProvider ? emailPrefix : '');
 
       if (dbUser && !dbUser.name && fallbackName) {
         try {
@@ -221,8 +223,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Final fallback to email prefix
-      if (user?.email) {
+      if (!isAppleProvider && user?.email) {
         console.log('⚠️ Using email prefix as name:', emailPrefix);
         setUserNameState(emailPrefix);
       } else {
@@ -237,13 +238,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           (await AsyncStorage.getItem('user_name'));
         if (savedName && savedName !== 'Guest User') {
           setUserNameState(savedName);
-        } else if (user?.email) {
+        } else if (user?.email && user?.app_metadata?.provider !== 'apple') {
           setUserNameState(user.email.split('@')[0]);
         } else {
           setUserNameState('User');
         }
       } catch (e) {
-        setUserNameState(user?.email?.split('@')[0] || 'User');
+        if (user?.app_metadata?.provider === 'apple') {
+          setUserNameState('User');
+        } else {
+          setUserNameState(user?.email?.split('@')[0] || 'User');
+        }
       }
     }
   };
@@ -449,8 +454,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // Only create on SIGNED_IN event (not on TOKEN_REFRESHED or other events)
           if (event === 'SIGNED_IN') {
             // Check if this is an OAuth provider (Google, Apple, etc.)
-            const isOAuthProvider = session.user.app_metadata?.provider && 
-                                    session.user.app_metadata.provider !== 'email';
+            const provider = session.user.app_metadata?.provider;
+            const isOAuthProvider = provider && provider !== 'email';
+            const isAppleProvider = provider === 'apple';
             
             if (isOAuthProvider) {
               try {
@@ -478,28 +484,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                   // If we have both first and last name, create user
                   if (firstName && lastName) {
                     const createdUser = await userService.createUser(
-                      session.user.id, 
-                      email, 
-                      firstName, 
+                      session.user.id,
+                      email,
+                      firstName,
                       lastName
                     );
                     if (createdUser?.name) {
                       await setUserName(createdUser.name);
                       console.log('✅ New OAuth user created in database:', createdUser.name);
                     }
-                  } else if (email) {
-                    // Fallback: use email prefix as name
+                  } else if (email && !isAppleProvider) {
+                    // Fallback: use email prefix as name (non-Apple providers only)
                     const emailPrefix = email.split('@')[0] || 'User';
                     const createdUser = await userService.createUser(
-                      session.user.id, 
-                      email, 
-                      emailPrefix, 
+                      session.user.id,
+                      email,
+                      emailPrefix,
                       ''
                     );
                     if (createdUser?.name) {
                       await setUserName(createdUser.name);
                       console.log('✅ New OAuth user created with email prefix:', createdUser.name);
                     }
+                  } else if (isAppleProvider) {
+                    const createdUser = await userService.createUser(
+                      session.user.id,
+                      email,
+                      undefined,
+                      undefined,
+                      { fallbackEmailForName: null }
+                    );
+                    if (createdUser?.name) {
+                      await setUserName(createdUser.name);
+                    }
+                    console.log('✅ New Apple OAuth user created without name');
                   } else {
                     console.warn('⚠️ OAuth user has no email or name, cannot create user record');
                   }
@@ -795,13 +813,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               console.log('✅ New user created from Apple sign in:', createdUser.name);
             }
           } else {
-            // If no name provided, use email prefix as fallback
-            const emailPrefix = email.split('@')[0] || 'User';
-            const createdUser = await userService.createUser(data.user.id, email, emailPrefix, '');
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              undefined,
+              undefined,
+              { fallbackEmailForName: null }
+            );
             if (createdUser?.name) {
               await setUserName(createdUser.name);
-              console.log('✅ New user created with email prefix:', createdUser.name);
             }
+            console.log('✅ New Apple user created without name');
           }
         } else {
           // User exists, sync name from database
@@ -919,13 +941,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               console.log('✅ New user created from Apple sign up:', createdUser.name);
             }
           } else {
-            // If no name provided, use email prefix as fallback
-            const emailPrefix = email.split('@')[0] || 'User';
-            const createdUser = await userService.createUser(data.user.id, email, emailPrefix, '');
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              undefined,
+              undefined,
+              { fallbackEmailForName: null }
+            );
             if (createdUser?.name) {
               await setUserName(createdUser.name);
-              console.log('✅ New user created with email prefix from Apple sign up:', createdUser.name);
             }
+            console.log('✅ New Apple user created without name (sign up)');
           }
         } else {
           // User exists, sync name from database

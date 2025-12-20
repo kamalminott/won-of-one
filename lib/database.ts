@@ -119,6 +119,10 @@ const filterEventsByLatestResetSegment = <T extends { reset_segment?: number | n
 };
 
 // User-related helpers
+type CreateUserOptions = {
+  fallbackEmailForName?: string | null;
+};
+
 export const userService = {
   async getUserById(userId: string): Promise<AppUser | null> {
     try {
@@ -142,14 +146,25 @@ export const userService = {
     }
   },
 
-  async createUser(userId: string, email?: string | null, firstName?: string, lastName?: string): Promise<AppUser | null> {
-    const name = formatFullName(firstName, lastName, email);
+  async createUser(
+    userId: string,
+    email?: string | null,
+    firstName?: string,
+    lastName?: string,
+    options?: CreateUserOptions
+  ): Promise<AppUser | null> {
+    const hasFallbackOverride = options && Object.prototype.hasOwnProperty.call(options, 'fallbackEmailForName');
+    const fallbackEmailForName = hasFallbackOverride ? options?.fallbackEmailForName : email;
+    const name = formatFullName(firstName, lastName, fallbackEmailForName);
 
     const insertData: Partial<AppUser> & { user_id: string } = {
       user_id: userId,
       email: email || undefined,
-      name,
     };
+
+    if (name) {
+      insertData.name = name;
+    }
 
     try {
       const { data, error } = await supabase
