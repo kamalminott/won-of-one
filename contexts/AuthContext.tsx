@@ -79,6 +79,70 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userName, setUserNameState] = useState<string>('');
   const [profileImage, setProfileImageState] = useState<string | null>(null);
 
+  const userNameStorageKey = (userId?: string | null) => {
+    return userId ? `user_name:${userId}` : 'user_name';
+  };
+
+  const getMetadataName = (authUser?: User | null) => {
+    if (!authUser) return '';
+    const metadata = authUser.user_metadata || {};
+    return (
+      metadata.full_name ||
+      metadata.name ||
+      metadata.display_name ||
+      [metadata.given_name, metadata.family_name].filter(Boolean).join(' ')
+    );
+  };
+
+  const updateAppleMetadata = async (
+    credential: AppleAuthentication.AppleAuthenticationCredential,
+    authUser?: User | null
+  ) => {
+    if (!authUser) return;
+
+    const fullName = credential.fullName;
+    if (!fullName) return;
+
+    const givenName = fullName.givenName?.trim() || '';
+    const familyName = fullName.familyName?.trim() || '';
+    const fullNameValue = [givenName, familyName].filter(Boolean).join(' ').trim();
+
+    if (!givenName && !familyName && !fullNameValue) return;
+
+    const metadata = authUser.user_metadata || {};
+    const updateData: Record<string, string> = {};
+
+    if (givenName && !metadata.given_name) {
+      updateData.given_name = givenName;
+    }
+    if (familyName && !metadata.family_name) {
+      updateData.family_name = familyName;
+    }
+    if (fullNameValue) {
+      if (!metadata.full_name) {
+        updateData.full_name = fullNameValue;
+      }
+      if (!metadata.display_name) {
+        updateData.display_name = fullNameValue;
+      }
+      if (!metadata.name) {
+        updateData.name = fullNameValue;
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) return;
+
+    const { error } = await supabase.auth.updateUser({ data: updateData });
+    if (error) {
+      console.warn('⚠️ Failed to update Apple auth metadata:', error);
+      return;
+    }
+
+    console.log('✅ Apple auth metadata stored:', updateData);
+  };
+
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   // Load user name from database first, then AsyncStorage, then fallback
   const loadUserName = async () => {
     try {
@@ -87,34 +151,71 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // First, try to load from database
-      const dbUser = await userService.getUserById(user.id);
+      // First, try to load from database (retry briefly to allow profile creation to finish)
+      let dbUser = await userService.getUserById(user.id);
+      if (!dbUser) {
+        await wait(300);
+        dbUser = await userService.getUserById(user.id);
+      }
       if (dbUser?.name) {
         console.log('✅ Loaded name from database:', dbUser.name);
         setUserNameState(dbUser.name);
         // Also save to AsyncStorage for offline access
+        await AsyncStorage.setItem(userNameStorageKey(user.id), dbUser.name);
         await AsyncStorage.setItem('user_name', dbUser.name);
         return;
       }
 
-      const metadata = user.user_metadata || {};
-      const metadataName =
-        metadata.full_name ||
-        metadata.name ||
-        metadata.display_name ||
-        [metadata.given_name, metadata.family_name]
-          .filter(Boolean)
-          .join(' ');
+      const metadataName = getMetadataName(user);
+      const emailPrefix = user?.email ? user.email.split('@')[0] : '';
+      const fallbackName = metadataName || emailPrefix;
+
+      if (dbUser && !dbUser.name && fallbackName) {
+        try {
+          const updatedUser = await userService.updateUser(user.id, { name: fallbackName });
+          if (updatedUser?.name) {
+            console.log('✅ Backfilled missing name in database:', updatedUser.name);
+            setUserNameState(updatedUser.name);
+            await AsyncStorage.setItem(userNameStorageKey(user.id), updatedUser.name);
+            await AsyncStorage.setItem('user_name', updatedUser.name);
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to backfill missing name:', error);
+        }
+      }
+
+      if (!dbUser && fallbackName) {
+        try {
+          const nameParts = fallbackName.trim().split(' ').filter(Boolean);
+          const first = nameParts[0] || fallbackName;
+          const last = nameParts.slice(1).join(' ');
+          const createdUser = await userService.createUser(user.id, user.email, first, last);
+          if (createdUser?.name) {
+            console.log('✅ Created missing user profile:', createdUser.name);
+            setUserNameState(createdUser.name);
+            await AsyncStorage.setItem(userNameStorageKey(user.id), createdUser.name);
+            await AsyncStorage.setItem('user_name', createdUser.name);
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to create missing user profile:', error);
+        }
+      }
+
       if (metadataName) {
         console.log('✅ Loaded name from auth metadata:', metadataName);
         setUserNameState(metadataName);
+        await AsyncStorage.setItem(userNameStorageKey(user.id), metadataName);
         await AsyncStorage.setItem('user_name', metadataName);
         return;
       }
 
       // Fallback to AsyncStorage
-      const savedName = await AsyncStorage.getItem('user_name');
-      if (savedName) {
+      const savedName =
+        (await AsyncStorage.getItem(userNameStorageKey(user.id))) ||
+        (await AsyncStorage.getItem('user_name'));
+      if (savedName && savedName !== 'Guest User') {
         console.log('✅ Loaded name from AsyncStorage:', savedName);
         setUserNameState(savedName);
         return;
@@ -122,7 +223,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Final fallback to email prefix
       if (user?.email) {
-        const emailPrefix = user.email.split('@')[0];
         console.log('⚠️ Using email prefix as name:', emailPrefix);
         setUserNameState(emailPrefix);
       } else {
@@ -132,8 +232,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.error('Error loading user name:', error);
       // Fallback to AsyncStorage or email prefix
       try {
-        const savedName = await AsyncStorage.getItem('user_name');
-        if (savedName) {
+        const savedName =
+          (await AsyncStorage.getItem(userNameStorageKey(user?.id))) ||
+          (await AsyncStorage.getItem('user_name'));
+        if (savedName && savedName !== 'Guest User') {
           setUserNameState(savedName);
         } else if (user?.email) {
           setUserNameState(user.email.split('@')[0]);
@@ -150,6 +252,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const setUserName = async (name: string) => {
     try {
       setUserNameState(name);
+      await AsyncStorage.setItem(userNameStorageKey(user?.id), name);
       await AsyncStorage.setItem('user_name', name);
       console.log('✅ User name saved to AsyncStorage');
     } catch (error) {
@@ -665,6 +768,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Apple sign in successful, user ID:', data.user?.id);
+      if (data.user) {
+        await updateAppleMetadata(credential, data.user);
+      }
 
       // Create user in app_user table if needed
       if (data.user && !error) {
@@ -786,6 +892,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Apple sign up successful, user ID:', data.user?.id);
+      if (data.user) {
+        await updateAppleMetadata(credential, data.user);
+      }
 
       // Create user in app_user table if needed
       if (data.user && !error) {

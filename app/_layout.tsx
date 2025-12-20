@@ -356,6 +356,24 @@ export default function RootLayout() {
         return true;
       }
 
+      // Handle OAuth callbacks for PKCE flow (code exchange)
+      if (code && !isEmailConfirm && !isRecovery) {
+        console.log('🔐 Handling OAuth PKCE callback...');
+        try {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            console.error('❌ Error exchanging OAuth code for session:', exchangeError);
+            return false;
+          }
+
+          console.log('✅ OAuth session established via code exchange');
+          return true;
+        } catch (error) {
+          console.error('❌ Error handling OAuth PKCE callback:', error);
+          return false;
+        }
+      }
+
       // Handle OAuth callbacks (Google, etc.)
       // Supabase OAuth redirects with access_token and refresh_token
       if (hasTokens && !isEmailConfirm && !isRecovery) {

@@ -12,6 +12,7 @@ import { ProgressCard } from '@/components/ProgressCard';
 import { RecentMatches } from '@/components/RecentMatches';
 import { SummaryCard } from '@/components/SummaryCard';
 import { UserHeader } from '@/components/UserHeader';
+import { CompleteProfilePrompt } from '@/components/CompleteProfilePrompt';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
@@ -32,12 +33,14 @@ export default function HomeScreen() {
   const [winRate, setWinRate] = useState<number>(0);
   const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
+  const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
 
   const fetchInFlightRef = useRef(false);
   const lastFetchAtMsRef = useRef(0);
   const lastHeavyRefreshAtMsRef = useRef(0);
   const liveDataAppliedRef = useRef(false);
   const trainingTimeRef = useRef(trainingTime);
+  const profilePromptShownRef = useRef(false);
 
   useEffect(() => {
     trainingTimeRef.current = trainingTime;
@@ -104,6 +107,38 @@ export default function HomeScreen() {
       router.replace('/reset-password');
     }
   }, [isPasswordRecovery]);
+
+  useEffect(() => {
+    profilePromptShownRef.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || loading || isPasswordRecovery) return;
+    if (profilePromptShownRef.current) return;
+
+    let cancelled = false;
+
+    const checkProfileName = async () => {
+      try {
+        const existingUser = await userService.getUserById(user.id);
+        if (cancelled) return;
+        const name = existingUser?.name?.trim() || '';
+        if (!name) {
+          setShowCompleteProfilePrompt(true);
+        }
+      } catch (error) {
+        console.warn('Failed to check profile name:', error);
+      } finally {
+        profilePromptShownRef.current = true;
+      }
+    };
+
+    checkProfileName();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, loading, isPasswordRecovery]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed
@@ -734,6 +769,11 @@ export default function HomeScreen() {
           </View>
         </SafeAreaView>
       </View>
+      <CompleteProfilePrompt
+        visible={showCompleteProfilePrompt}
+        onDismiss={() => setShowCompleteProfilePrompt(false)}
+        onCompleted={() => setShowCompleteProfilePrompt(false)}
+      />
     </>
   );
 }
