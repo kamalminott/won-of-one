@@ -195,9 +195,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       const metadataName = getMetadataName(user);
       const provider = user?.app_metadata?.provider;
-      const isAppleProvider = provider === 'apple';
+      const allowEmailFallback = provider === 'email' || !provider;
       const emailPrefix = user?.email ? user.email.split('@')[0] : '';
-      const fallbackName = metadataName || (!isAppleProvider ? emailPrefix : '');
+      const fallbackName = metadataName || (allowEmailFallback ? emailPrefix : '');
 
       if (dbUser && !dbUser.name && fallbackName) {
         try {
@@ -250,7 +250,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      if (!isAppleProvider && user?.email) {
+      if (allowEmailFallback && user?.email) {
         console.log('⚠️ Using email prefix as name:', emailPrefix);
         setUserNameState(emailPrefix);
       } else {
@@ -265,13 +265,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           (await AsyncStorage.getItem('user_name'));
         if (savedName && savedName !== 'Guest User') {
           setUserNameState(savedName);
-        } else if (user?.email && user?.app_metadata?.provider !== 'apple') {
+        } else if (user?.email && (user?.app_metadata?.provider === 'email' || !user?.app_metadata?.provider)) {
           setUserNameState(user.email.split('@')[0]);
         } else {
           setUserNameState('User');
         }
       } catch (e) {
-        if (user?.app_metadata?.provider === 'apple') {
+        if (user?.app_metadata?.provider && user?.app_metadata?.provider !== 'email') {
           setUserNameState('User');
         } else {
           setUserNameState(user?.email?.split('@')[0] || 'User');
@@ -484,6 +484,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             const provider = session.user.app_metadata?.provider;
             const isOAuthProvider = provider && provider !== 'email';
             const isAppleProvider = provider === 'apple';
+            const isGoogleProvider = provider === 'google';
             
             if (isOAuthProvider) {
               try {
@@ -520,7 +521,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                       await setUserName(createdUser.name);
                       console.log('✅ New OAuth user created in database:', createdUser.name);
                     }
-                  } else if (email && !isAppleProvider) {
+                  } else if (email && !isAppleProvider && !isGoogleProvider) {
                     // Fallback: use email prefix as name (non-Apple providers only)
                     const emailPrefix = email.split('@')[0] || 'User';
                     const createdUser = await userService.createUser(
@@ -533,7 +534,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                       await setUserName(createdUser.name);
                       console.log('✅ New OAuth user created with email prefix:', createdUser.name);
                     }
-                  } else if (isAppleProvider) {
+                  } else if (isAppleProvider || isGoogleProvider) {
                     const createdUser = await userService.createUser(
                       session.user.id,
                       email,

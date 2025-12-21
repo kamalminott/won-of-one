@@ -306,12 +306,13 @@ export default function HomeScreen() {
             if (!existingUser) {
               const provider = user?.app_metadata?.provider;
               const isAppleProvider = provider === 'apple';
+              const isGoogleProvider = provider === 'google';
               await userService.createUser(
                 userId,
                 userEmail,
                 undefined,
                 undefined,
-                isAppleProvider ? { fallbackEmailForName: null } : undefined
+                isAppleProvider || isGoogleProvider ? { fallbackEmailForName: null } : undefined
               );
             }
           } catch (error) {

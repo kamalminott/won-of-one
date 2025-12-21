@@ -249,6 +249,7 @@ export default function RootLayout() {
       const refreshToken = qp.refresh_token as string | undefined;
       const type = qp.type as string | undefined;
       const code = qp.code as string | undefined;
+      const state = qp.state as string | undefined;
       const token = qp.token as string | undefined;
       const path = parsed.path || '';
 
@@ -256,12 +257,32 @@ export default function RootLayout() {
       const isRecovery = type === 'recovery' || isResetPath;
       const hasTokens = accessToken && refreshToken;
       const hasCode = !!code;
+      const hasOAuthState = !!state;
       const hasToken = !!token;
       const isEmailConfirm =
         type === 'signup' ||
         type === 'email_confirm' ||
         type === 'invite' ||
         (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
+      const shouldHandleOAuthCode = hasCode && hasOAuthState && !isRecovery;
+
+      // Handle OAuth callbacks for PKCE flow (code exchange)
+      if (shouldHandleOAuthCode && code) {
+        console.log('🔐 Handling OAuth PKCE callback...');
+        try {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            console.error('❌ Error exchanging OAuth code for session:', exchangeError);
+            return false;
+          }
+
+          console.log('✅ OAuth session established via code exchange');
+          return true;
+        } catch (error) {
+          console.error('❌ Error handling OAuth PKCE callback:', error);
+          return false;
+        }
+      }
 
       // Handle email confirmation: verify email and then redirect to login (never log in)
       if (isEmailConfirm) {
@@ -354,24 +375,6 @@ export default function RootLayout() {
           },
         });
         return true;
-      }
-
-      // Handle OAuth callbacks for PKCE flow (code exchange)
-      if (code && !isEmailConfirm && !isRecovery) {
-        console.log('🔐 Handling OAuth PKCE callback...');
-        try {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) {
-            console.error('❌ Error exchanging OAuth code for session:', exchangeError);
-            return false;
-          }
-
-          console.log('✅ OAuth session established via code exchange');
-          return true;
-        } catch (error) {
-          console.error('❌ Error handling OAuth PKCE callback:', error);
-          return false;
-        }
       }
 
       // Handle OAuth callbacks (Google, etc.)
