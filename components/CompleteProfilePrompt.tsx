@@ -33,6 +33,23 @@ const capitalizeName = (value: string) => {
     .join(' ');
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   visible,
   onDismiss,
@@ -55,6 +72,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   }, [visible, userName]);
 
   const handleSave = async () => {
+    if (isSaving) return;
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
 
@@ -76,18 +94,32 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     const fullName = [formattedFirst, formattedLast].filter(Boolean).join(' ').trim();
 
     try {
-      const existingUser = await userService.getUserById(user.id);
+      const existingUser = await withTimeout(
+        userService.getUserById(user.id),
+        10000,
+        'Loading profile'
+      );
       let updatedUser = null;
 
       if (existingUser) {
-        updatedUser = await userService.updateUser(user.id, { name: fullName });
+        updatedUser = await withTimeout(
+          userService.updateUser(user.id, { name: fullName }),
+          10000,
+          'Saving profile'
+        );
       } else {
-        updatedUser = await userService.createUser(user.id, user.email, formattedFirst, formattedLast);
+        updatedUser = await withTimeout(
+          userService.createUser(user.id, user.email, formattedFirst, formattedLast),
+          10000,
+          'Creating profile'
+        );
       }
 
-      if (updatedUser?.name) {
-        await setUserName(updatedUser.name);
+      if (!updatedUser?.name) {
+        throw new Error('Profile save failed');
       }
+
+      await setUserName(updatedUser.name);
 
       const metadata: Record<string, string> = {
         display_name: fullName,
@@ -103,16 +135,22 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
         metadata.family_name = formattedLast;
       }
 
-      const { error } = await supabase.auth.updateUser({ data: metadata });
-      if (error) {
-        console.warn('⚠️ Failed to update auth display name:', error);
-      }
-
       if (onCompleted) {
         onCompleted();
       } else {
         onDismiss();
       }
+
+      void supabase.auth
+        .updateUser({ data: metadata })
+        .then(({ error }) => {
+          if (error) {
+            console.warn('⚠️ Failed to update auth display name:', error);
+          }
+        })
+        .catch(error => {
+          console.warn('⚠️ Failed to update auth display name:', error);
+        });
     } catch (error) {
       console.error('Error updating profile name:', error);
       setErrorMessage('Unable to save your name. Please try again.');
