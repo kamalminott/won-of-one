@@ -143,6 +143,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+  const startOAuthFlow = async (provider: 'google') => {
+    const redirectUrl = Linking.createURL('/');
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: redirectUrl,
+        skipBrowserRedirect: true,
+      },
+    });
+
+    if (error) {
+      return { error };
+    }
+
+    if (!data?.url) {
+      return { error: { message: 'No OAuth URL returned' } };
+    }
+
+    const canOpen = await Linking.canOpenURL(data.url);
+    if (!canOpen) {
+      return { error: { message: 'Unable to open browser for sign in' } };
+    }
+
+    await Linking.openURL(data.url);
+    return { error: null };
+  };
+
   // Load user name from database first, then AsyncStorage, then fallback
   const loadUserName = async () => {
     try {
@@ -721,20 +748,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const signInWithGoogle = async () => {
     try {
       console.log('🔵 Starting Google sign in...');
-      const redirectUrl = Linking.createURL('/');
-      
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-        },
-      });
-      
+      const { error } = await startOAuthFlow('google');
+
       if (error) {
         console.error('❌ Google sign in error:', error);
         return { error };
       }
-      
+
       console.log('✅ Google OAuth initiated, redirecting...');
       // The OAuth flow will redirect back to the app
       // The auth state change listener will handle the session
@@ -849,20 +869,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const signUpWithGoogle = async () => {
     try {
       console.log('🔵 Starting Google sign up...');
-      const redirectUrl = Linking.createURL('/');
-      
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-        },
-      });
-      
+      const { error } = await startOAuthFlow('google');
+
       if (error) {
         console.error('❌ Google sign up error:', error);
         return { error };
       }
-      
+
       console.log('✅ Google OAuth initiated for sign up, redirecting...');
       // The OAuth flow will redirect back to the app
       // The auth state change listener will handle the session and user creation
