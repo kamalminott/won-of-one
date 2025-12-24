@@ -217,9 +217,11 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     },
     modalButtonContainer: {
       marginTop: 8,
+      alignItems: 'stretch',
     },
     modalButton: {
       flex: 1,
+      minHeight: 48,
       paddingVertical: 16,
       borderRadius: 8,
       alignItems: 'center',
@@ -231,8 +233,11 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     },
     modalButtonSaveText: {
       fontSize: 16,
-      color: 'white',
+      color: '#FFFFFF',
       fontWeight: '600',
+      textAlign: 'center',
+      width: '100%',
+      includeFontPadding: false,
     },
     errorText: {
       color: '#FF6B6B',
