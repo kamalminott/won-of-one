@@ -20,6 +20,7 @@ import { goalService, matchService, userService } from '@/lib/database';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
+const PROFILE_NAME_SETTLE_DELAY_MS = 800;
 
 const isPlaceholderName = (name: string, email?: string | null) => {
   const normalized = name.trim().toLowerCase();
@@ -28,6 +29,17 @@ const isPlaceholderName = (name: string, email?: string | null) => {
   const emailPrefix = email?.split('@')[0]?.trim().toLowerCase();
   if (emailPrefix && normalized === emailPrefix) return true;
   return false;
+};
+
+const getAuthMetadataName = (authUser?: { user_metadata?: Record<string, any> } | null) => {
+  if (!authUser?.user_metadata) return '';
+  const metadata = authUser.user_metadata;
+  return (
+    metadata.full_name ||
+    metadata.name ||
+    metadata.display_name ||
+    [metadata.given_name, metadata.family_name].filter(Boolean).join(' ')
+  );
 };
 
 export default function HomeScreen() {
@@ -150,36 +162,66 @@ export default function HomeScreen() {
     if (profilePromptShownRef.current) return;
 
     let cancelled = false;
+    profilePromptShownRef.current = true;
 
-    const checkProfileName = async () => {
-      try {
+    const resolveProfileName = async () => {
+      const fetchNameState = async () => {
         const existingUser = await userService.getUserById(user.id);
-        if (cancelled) return;
-        const name = existingUser?.name?.trim() || '';
-        const isMissingName = isPlaceholderName(name, user.email);
-        if (isMissingName) {
-          setShowCompleteProfilePrompt(true);
-          setProfileNameStatus('missing');
-        } else {
-          setProfileNameStatus('present');
+        const dbName = existingUser?.name?.trim() || '';
+        const metadataName = getAuthMetadataName(user)?.trim() || '';
+        return { existingUser, dbName, metadataName };
+      };
+
+      const decideStatus = async () => {
+        try {
+          const { existingUser, dbName, metadataName } = await fetchNameState();
+          if (cancelled) return null;
+
+          const effectiveName = dbName || metadataName;
+          const isMissingName = isPlaceholderName(effectiveName, user.email);
+
+          if (!dbName && metadataName && !isMissingName) {
+            void userService
+              .updateUser(user.id, { name: metadataName })
+              .catch(error => console.warn('Failed to backfill profile name:', error));
+          }
+
+          return { isMissingName };
+        } catch (error) {
+          console.warn('Failed to check profile name:', error);
+          return { isMissingName: true };
         }
-      } catch (error) {
-        console.warn('Failed to check profile name:', error);
-        if (!cancelled) {
-          setShowCompleteProfilePrompt(true);
-          setProfileNameStatus('missing');
-        }
-      } finally {
-        profilePromptShownRef.current = true;
+      };
+
+      let status = await decideStatus();
+      if (!status || cancelled) return;
+
+      if (!status.isMissingName) {
+        setProfileNameStatus('present');
+        return;
       }
+
+      await new Promise(resolve => setTimeout(resolve, PROFILE_NAME_SETTLE_DELAY_MS));
+      if (cancelled) return;
+
+      status = await decideStatus();
+      if (!status || cancelled) return;
+
+      if (!status.isMissingName) {
+        setProfileNameStatus('present');
+        return;
+      }
+
+      setShowCompleteProfilePrompt(true);
+      setProfileNameStatus('missing');
     };
 
-    checkProfileName();
+    void resolveProfileName();
 
     return () => {
       cancelled = true;
     };
-  }, [user?.id, loading, isPasswordRecovery]);
+  }, [user?.id, user?.email, loading, isPasswordRecovery]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed
@@ -346,14 +388,16 @@ export default function HomeScreen() {
             const existingUser = await userService.getUserById(userId);
             if (!existingUser) {
               const provider = user?.app_metadata?.provider;
-              const isAppleProvider = provider === 'apple';
-              const isGoogleProvider = provider === 'google';
+              const providers = Array.isArray(user?.app_metadata?.providers)
+                ? user?.app_metadata?.providers
+                : [];
+              const isEmailProvider = provider === 'email' || providers.includes('email');
               await userService.createUser(
                 userId,
                 userEmail,
                 undefined,
                 undefined,
-                isAppleProvider || isGoogleProvider ? { fallbackEmailForName: null } : undefined
+                isEmailProvider ? undefined : { fallbackEmailForName: null }
               );
             }
           } catch (error) {
