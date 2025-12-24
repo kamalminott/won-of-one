@@ -47,6 +47,18 @@ export default function HomeScreen() {
   const liveDataAppliedRef = useRef(false);
   const trainingTimeRef = useRef(trainingTime);
   const profilePromptShownRef = useRef(false);
+  const shouldShowCompleteProfilePrompt = showCompleteProfilePrompt || profileNameStatus === 'missing';
+  const handleProfilePromptCompleted = useCallback(() => {
+    setShowCompleteProfilePrompt(false);
+    setProfileNameStatus('present');
+  }, []);
+
+  const handleProfilePromptDismiss = useCallback(() => {
+    if (profileNameStatus === 'missing') {
+      return;
+    }
+    setShowCompleteProfilePrompt(false);
+  }, [profileNameStatus]);
 
   useEffect(() => {
     trainingTimeRef.current = trainingTime;
@@ -506,9 +518,9 @@ export default function HomeScreen() {
       <>
         <HomeSkeleton />
         <CompleteProfilePrompt
-          visible={showCompleteProfilePrompt}
-          onDismiss={() => setShowCompleteProfilePrompt(false)}
-          onCompleted={() => setShowCompleteProfilePrompt(false)}
+          visible={shouldShowCompleteProfilePrompt}
+          onDismiss={handleProfilePromptDismiss}
+          onCompleted={handleProfilePromptCompleted}
         />
       </>
     );
@@ -523,9 +535,9 @@ export default function HomeScreen() {
       <>
         <HomeSkeleton />
         <CompleteProfilePrompt
-          visible={showCompleteProfilePrompt}
-          onDismiss={() => setShowCompleteProfilePrompt(false)}
-          onCompleted={() => setShowCompleteProfilePrompt(false)}
+          visible={shouldShowCompleteProfilePrompt}
+          onDismiss={handleProfilePromptDismiss}
+          onCompleted={handleProfilePromptCompleted}
         />
       </>
     );
@@ -812,9 +824,9 @@ export default function HomeScreen() {
         </SafeAreaView>
       </View>
       <CompleteProfilePrompt
-        visible={showCompleteProfilePrompt}
-        onDismiss={() => setShowCompleteProfilePrompt(false)}
-        onCompleted={() => setShowCompleteProfilePrompt(false)}
+        visible={shouldShowCompleteProfilePrompt}
+        onDismiss={handleProfilePromptDismiss}
+        onCompleted={handleProfilePromptCompleted}
       />
     </>
   );

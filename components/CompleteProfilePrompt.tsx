@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface CompleteProfilePromptProps {
   visible: boolean;
@@ -56,6 +57,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   onCompleted,
 }) => {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { user, userName, setUserName } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -165,6 +167,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       backgroundColor: 'rgba(0, 0, 0, 0.7)',
       justifyContent: 'center',
       alignItems: 'center',
+      paddingTop: Math.max(16, insets.top),
+      paddingBottom: Math.max(16, insets.bottom),
     },
     modalContainer: {
       backgroundColor: '#2A2A2A',
