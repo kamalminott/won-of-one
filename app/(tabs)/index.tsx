@@ -19,6 +19,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
+const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
+
+const isPlaceholderName = (name: string, email?: string | null) => {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return true;
+  if (FALLBACK_NAME_VALUES.has(normalized)) return true;
+  const emailPrefix = email?.split('@')[0]?.trim().toLowerCase();
+  if (emailPrefix && normalized === emailPrefix) return true;
+  return false;
+};
+
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
@@ -26,7 +37,9 @@ export default function HomeScreen() {
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   const trimmedUserName = userName.trim();
-  const isUserNameReady = trimmedUserName.length > 0 && trimmedUserName !== 'User' && trimmedUserName !== 'Guest User';
+  const normalizedUserName = trimmedUserName.toLowerCase();
+  const isUserNameReady =
+    trimmedUserName.length > 0 && !FALLBACK_NAME_VALUES.has(normalizedUserName);
   const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
   const shouldHoldForProfileCheck = !!user && !loading && profileNameStatus === 'unknown';
   const shouldHoldForUserName = !!user && !loading && profileNameStatus === 'present' && !isUserNameReady;
@@ -143,7 +156,8 @@ export default function HomeScreen() {
         const existingUser = await userService.getUserById(user.id);
         if (cancelled) return;
         const name = existingUser?.name?.trim() || '';
-        if (!name) {
+        const isMissingName = isPlaceholderName(name, user.email);
+        if (isMissingName) {
           setShowCompleteProfilePrompt(true);
           setProfileNameStatus('missing');
         } else {

@@ -195,7 +195,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       const metadataName = getMetadataName(user);
       const provider = user?.app_metadata?.provider;
-      const allowEmailFallback = provider === 'email' || !provider;
+      const providers = Array.isArray(user?.app_metadata?.providers)
+        ? user?.app_metadata?.providers
+        : [];
+      const allowEmailFallback = provider === 'email' || providers.includes('email');
       const emailPrefix = user?.email ? user.email.split('@')[0] : '';
       const fallbackName = metadataName || (allowEmailFallback ? emailPrefix : '');
 
