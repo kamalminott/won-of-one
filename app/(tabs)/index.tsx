@@ -27,7 +27,9 @@ export default function HomeScreen() {
   const goalCardRef = useRef<GoalCardRef>(null);
   const trimmedUserName = userName.trim();
   const isUserNameReady = trimmedUserName.length > 0 && trimmedUserName !== 'User' && trimmedUserName !== 'Guest User';
-  const shouldHoldForUserName = !!user && !loading && !isUserNameReady;
+  const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
+  const shouldHoldForProfileCheck = !!user && !loading && profileNameStatus === 'unknown';
+  const shouldHoldForUserName = !!user && !loading && profileNameStatus === 'present' && !isUserNameReady;
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
@@ -114,6 +116,8 @@ export default function HomeScreen() {
 
   useEffect(() => {
     profilePromptShownRef.current = false;
+    setProfileNameStatus('unknown');
+    setShowCompleteProfilePrompt(false);
   }, [user?.id]);
 
   useEffect(() => {
@@ -129,9 +133,16 @@ export default function HomeScreen() {
         const name = existingUser?.name?.trim() || '';
         if (!name) {
           setShowCompleteProfilePrompt(true);
+          setProfileNameStatus('missing');
+        } else {
+          setProfileNameStatus('present');
         }
       } catch (error) {
         console.warn('Failed to check profile name:', error);
+        if (!cancelled) {
+          setShowCompleteProfilePrompt(true);
+          setProfileNameStatus('missing');
+        }
       } finally {
         profilePromptShownRef.current = true;
       }
@@ -490,7 +501,7 @@ export default function HomeScreen() {
   });
 
   // Show loading screen while checking authentication
-  if (loading || shouldHoldForUserName) {
+  if (loading || shouldHoldForProfileCheck || shouldHoldForUserName) {
     return (
       <>
         <HomeSkeleton />
