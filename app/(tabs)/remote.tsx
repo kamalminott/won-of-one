@@ -265,6 +265,18 @@ export default function RemoteScreen() {
     setShowUserProfile(false);
   }, [hasMatchStarted, fencerNames, params?.keepToggleOff]);
 
+  const clearIncomingMatchParams = useCallback(() => {
+    router.setParams({
+      resetAll: undefined,
+      resetNames: undefined,
+      changeOneFencer: undefined,
+      keepToggleOff: undefined,
+      isAnonymous: undefined,
+      fencer1Name: undefined,
+      fencer2Name: undefined,
+    });
+  }, [router]);
+
   // Clear anonymous init guard whenever screen loses focus so new visits can re-init
   useFocusEffect(
     useCallback(() => {
@@ -272,6 +284,9 @@ export default function RemoteScreen() {
       appliedAnonThisFocusRef.current = false;
       userHasToggledProfileRef.current = false;
       anonBaselineNamesRef.current = null;
+      keepToggleOffLockedRef.current = false;
+      keepToggleOffLockedNamesRef.current = null;
+      pendingFencerNamesRef.current = null;
       resetAllFromParamsHandledRef.current = false;
       changeOneFencerAppliedRef.current = false;
       return () => {
@@ -279,6 +294,9 @@ export default function RemoteScreen() {
         appliedAnonThisFocusRef.current = false;
         userHasToggledProfileRef.current = false;
         anonBaselineNamesRef.current = null;
+        keepToggleOffLockedRef.current = false;
+        keepToggleOffLockedNamesRef.current = null;
+        pendingFencerNamesRef.current = null;
         resetAllFromParamsHandledRef.current = false;
         changeOneFencerAppliedRef.current = false;
       };
@@ -336,6 +354,13 @@ export default function RemoteScreen() {
     if (!needsReset || resetAllFromParamsHandledRef.current) return;
 
     resetAllFromParamsHandledRef.current = true;
+    keepToggleOffLockedRef.current = false;
+    keepToggleOffLockedNamesRef.current = null;
+    restoringLockedNamesRef.current = false;
+    pendingFencerNamesRef.current = null;
+    anonBaselineNamesRef.current = null;
+    appliedAnonThisFocusRef.current = false;
+    initializedAnonNamesRef.current = null;
     userHasToggledProfileRef.current = false; // allow toggle to be set by params
 
     const applyParamsAfterReset = () => {
@@ -351,7 +376,6 @@ export default function RemoteScreen() {
       initializedAnonNamesRef.current = `${fencerAName}||${fencerBName}`;
       anonBaselineNamesRef.current = { fencerA: fencerAName, fencerB: fencerBName };
       appliedAnonThisFocusRef.current = true;
-      keepToggleOffLockedRef.current = true;
       return;
     }
 
@@ -413,12 +437,16 @@ export default function RemoteScreen() {
         console.error('Error running resetAllWithPersistence from params:', error);
       } finally {
         applyParamsAfterReset();
+        clearIncomingMatchParams();
       }
     })();
-  }, [params.resetAll, params.isAnonymous, params.fencer1Name, params.fencer2Name, params.resetNames, params.changeOneFencer, autoToggleOff]);
+  }, [params.resetAll, params.isAnonymous, params.fencer1Name, params.fencer2Name, params.resetNames, params.changeOneFencer, autoToggleOff, clearIncomingMatchParams]);
 
   // Check for fencer names from params (e.g., when coming from neutral match summary)
   useEffect(() => {
+    if (params.resetAll === 'true') {
+      return;
+    }
     // Handle reset names request (e.g., "Different Fencers" from neutral match summary)
     // If this is an anonymous match that's already been applied, don't force toggle/name changes here
     if (
@@ -572,6 +600,9 @@ export default function RemoteScreen() {
   // Set fencer names and toggle state synchronously for anonymous matches (before paint)
   // This ensures both are set before the first render, eliminating race conditions
   useLayoutEffect(() => {
+    if (params.resetAll === 'true') {
+      return;
+    }
     // Reset guard when coming from a reset flow
       if (params.resetNames === 'true' && !keepToggleOffLockedRef.current) {
       initializedAnonNamesRef.current = null;
@@ -624,6 +655,9 @@ export default function RemoteScreen() {
 
   // Backup: ensure anonymous params are applied if names are still placeholders/mismatched
   useEffect(() => {
+    if (params.resetAll === 'true') {
+      return;
+    }
     const hasAnonParams = params.isAnonymous === 'true' && !!params.fencer1Name && !!params.fencer2Name;
     // Only run this backup during initial anonymous apply for this focus
     if (!hasAnonParams || appliedAnonThisFocusRef.current || keepToggleOffLockedRef.current) return;
@@ -902,127 +936,129 @@ export default function RemoteScreen() {
     useCallback(() => {
       resumePromptShownRef.current = false; // reset for this focus
 
-      // Check for reset names request first (e.g., "Different Fencers" from neutral match summary)
-      if (params.resetNames === 'true' && params.keepToggleOff === 'true') {
-        // If user has already edited names, skip param-driven overwrites
-        if (keepToggleOffLockedRef.current) {
-          return;
-        }
-        
-        // Clear any pending names first
-        pendingFencerNamesRef.current = null;
-        
-        // Handle "Change One Fencer" option
-        // Only apply once - if already applied, skip (allows user to edit names freely)
-        if (params.changeOneFencer === 'true' && !changeOneFencerAppliedRef.current) {
-          if (params.fencer1Name) {
-            // Keep first fencer, reset second
-            if (!showUserProfile) {
-              setTimeout(() => {
-                // Check lock again inside setTimeout - user may have edited in the meantime
-                if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
-                  console.log('⏭️ [useFocusEffect] Skipping fencer1 update - user has edited or already applied');
-                  return;
-                }
-                setFencerNames({
-                  fencerA: params.fencer1Name as string,
-                  fencerB: 'Tap to add name',
-                });
-                changeOneFencerAppliedRef.current = true; // Mark as applied
-              }, 50);
-            } else {
-              autoToggleOff('changeOne resetNames focus');
-              setTimeout(() => {
-                // Check lock again inside setTimeout - user may have edited in the meantime
-                if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
-                  console.log('⏭️ [useFocusEffect] Skipping fencer1 update (toggle on) - user has edited or already applied');
-                  return;
-                }
-                setFencerNames({
-                  fencerA: params.fencer1Name as string,
-                  fencerB: 'Tap to add name',
-                });
-                changeOneFencerAppliedRef.current = true; // Mark as applied
-              }, 100);
+      if (params.resetAll !== 'true') {
+        // Check for reset names request first (e.g., "Different Fencers" from neutral match summary)
+        if (params.resetNames === 'true' && params.keepToggleOff === 'true') {
+          // If user has already edited names, skip param-driven overwrites
+          if (keepToggleOffLockedRef.current) {
+            return;
+          }
+          
+          // Clear any pending names first
+          pendingFencerNamesRef.current = null;
+          
+          // Handle "Change One Fencer" option
+          // Only apply once - if already applied, skip (allows user to edit names freely)
+          if (params.changeOneFencer === 'true' && !changeOneFencerAppliedRef.current) {
+            if (params.fencer1Name) {
+              // Keep first fencer, reset second
+              if (!showUserProfile) {
+                setTimeout(() => {
+                  // Check lock again inside setTimeout - user may have edited in the meantime
+                  if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
+                    console.log('⏭️ [useFocusEffect] Skipping fencer1 update - user has edited or already applied');
+                    return;
+                  }
+                  setFencerNames({
+                    fencerA: params.fencer1Name as string,
+                    fencerB: 'Tap to add name',
+                  });
+                  changeOneFencerAppliedRef.current = true; // Mark as applied
+                }, 50);
+              } else {
+                autoToggleOff('changeOne resetNames focus');
+                setTimeout(() => {
+                  // Check lock again inside setTimeout - user may have edited in the meantime
+                  if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
+                    console.log('⏭️ [useFocusEffect] Skipping fencer1 update (toggle on) - user has edited or already applied');
+                    return;
+                  }
+                  setFencerNames({
+                    fencerA: params.fencer1Name as string,
+                    fencerB: 'Tap to add name',
+                  });
+                  changeOneFencerAppliedRef.current = true; // Mark as applied
+                }, 100);
+              }
+            } else if (params.fencer2Name) {
+              // Keep second fencer, reset first
+              if (!showUserProfile) {
+                setTimeout(() => {
+                  // Check lock again inside setTimeout - user may have edited in the meantime
+                  if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
+                    console.log('⏭️ [useFocusEffect] Skipping fencer2 update - user has edited or already applied');
+                    return;
+                  }
+                  setFencerNames({
+                    fencerA: 'Tap to add name',
+                    fencerB: params.fencer2Name as string,
+                  });
+                  changeOneFencerAppliedRef.current = true; // Mark as applied
+                }, 50);
+              } else {
+                autoToggleOff('changeOne resetNames focus');
+                setTimeout(() => {
+                  // Check lock again inside setTimeout - user may have edited in the meantime
+                  if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
+                    console.log('⏭️ [useFocusEffect] Skipping fencer2 update (toggle on) - user has edited or already applied');
+                    return;
+                  }
+                  setFencerNames({
+                    fencerA: 'Tap to add name',
+                    fencerB: params.fencer2Name as string,
+                  });
+                  changeOneFencerAppliedRef.current = true; // Mark as applied
+                }, 100);
+              }
             }
-          } else if (params.fencer2Name) {
-            // Keep second fencer, reset first
+          }
+          // Handle "Change Both Fencers" option
+          else {
+            // console.log('🔄 [useFocusEffect] Resetting both fencer names while keeping toggle off');
+            // If toggle is already off, keep it off and reset names
             if (!showUserProfile) {
+              // Use setTimeout to ensure this runs after any other effects
               setTimeout(() => {
-                // Check lock again inside setTimeout - user may have edited in the meantime
-                if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
-                  console.log('⏭️ [useFocusEffect] Skipping fencer2 update - user has edited or already applied');
-                  return;
-                }
+                // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name"');
                 setFencerNames({
                   fencerA: 'Tap to add name',
-                  fencerB: params.fencer2Name as string,
+                  fencerB: 'Tap to add name',
                 });
-                changeOneFencerAppliedRef.current = true; // Mark as applied
+                // console.log('✅ [useFocusEffect setTimeout] Both names reset, toggle remains off');
               }, 50);
             } else {
-              autoToggleOff('changeOne resetNames focus');
+              // If toggle is on, turn it off first, then reset names
+              autoToggleOff('changeBoth resetNames focus');
               setTimeout(() => {
-                // Check lock again inside setTimeout - user may have edited in the meantime
-                if (keepToggleOffLockedRef.current || changeOneFencerAppliedRef.current) {
-                  console.log('⏭️ [useFocusEffect] Skipping fencer2 update (toggle on) - user has edited or already applied');
-                  return;
-                }
+                // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
                 setFencerNames({
                   fencerA: 'Tap to add name',
-                  fencerB: params.fencer2Name as string,
+                  fencerB: 'Tap to add name',
                 });
-                changeOneFencerAppliedRef.current = true; // Mark as applied
+                // console.log('✅ [useFocusEffect setTimeout] Toggle turned off and both names reset');
               }, 100);
             }
           }
         }
-        // Handle "Change Both Fencers" option
-        else {
-          // console.log('🔄 [useFocusEffect] Resetting both fencer names while keeping toggle off');
-          // If toggle is already off, keep it off and reset names
-          if (!showUserProfile) {
-            // Use setTimeout to ensure this runs after any other effects
-            setTimeout(() => {
-              // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name"');
-              setFencerNames({
-                fencerA: 'Tap to add name',
-                fencerB: 'Tap to add name',
-              });
-              // console.log('✅ [useFocusEffect setTimeout] Both names reset, toggle remains off');
-            }, 50);
+        // Check for fencer names from params (e.g., when coming from neutral match summary)
+        // This takes precedence over persisted state
+        else if (params.fencer1Name && params.fencer2Name) {
+          // If this is an anonymous match (from neutral match summary), let useLayoutEffect handle it
+          // to avoid conflicts and ensure synchronous setup before paint
+          if (params.isAnonymous === 'true') {
+            // Don't set names here - useLayoutEffect will handle it synchronously
+            // Just ensure toggle is off (useLayoutEffect will also do this, but this is a backup)
+            if (showUserProfile) {
+              autoToggleOff('anon params focus');
+            }
           } else {
-            // If toggle is on, turn it off first, then reset names
-            autoToggleOff('changeBoth resetNames focus');
-            setTimeout(() => {
-              // console.log('🔄 [useFocusEffect setTimeout] Setting both names to "Tap to add name" after toggle off');
-              setFencerNames({
-                fencerA: 'Tap to add name',
-                fencerB: 'Tap to add name',
-              });
-              // console.log('✅ [useFocusEffect setTimeout] Toggle turned off and both names reset');
-            }, 100);
+            // Not anonymous, just set names normally
+            console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
+            setFencerNames({
+              fencerA: params.fencer1Name as string,
+              fencerB: params.fencer2Name as string,
+            });
           }
-        }
-      }
-      // Check for fencer names from params (e.g., when coming from neutral match summary)
-      // This takes precedence over persisted state
-      else if (params.fencer1Name && params.fencer2Name) {
-        // If this is an anonymous match (from neutral match summary), let useLayoutEffect handle it
-        // to avoid conflicts and ensure synchronous setup before paint
-        if (params.isAnonymous === 'true') {
-          // Don't set names here - useLayoutEffect will handle it synchronously
-          // Just ensure toggle is off (useLayoutEffect will also do this, but this is a backup)
-          if (showUserProfile) {
-            autoToggleOff('anon params focus');
-          }
-        } else {
-          // Not anonymous, just set names normally
-          console.log('📝 Setting fencer names from params on focus:', params.fencer1Name, params.fencer2Name);
-          setFencerNames({
-            fencerA: params.fencer1Name as string,
-            fencerB: params.fencer2Name as string,
-          });
         }
       }
 
@@ -1923,6 +1959,7 @@ export default function RemoteScreen() {
       event_type: finalEventType,
       scoring_user_id: scorer === 'user' ? user?.id : null,
       scoring_user_name: scoringUserName,
+      scoring_entity: scoringEntity || null,
       fencer_1_name: fencer1Name,
       fencer_2_name: fencer2Name,
       card_given: cardGiven || null,
@@ -1963,6 +2000,7 @@ export default function RemoteScreen() {
           match_id: baseEvent.match_id,
           match_period_id: baseEvent.match_period_id,
           scoring_user_id: baseEvent.scoring_user_id,
+          scoring_entity: baseEvent.scoring_entity,
           fencer_1_name: baseEvent.fencer_1_name,
           fencer_2_name: baseEvent.fencer_2_name,
           card_given: baseEvent.card_given,
@@ -2832,6 +2870,8 @@ export default function RemoteScreen() {
         score_by_period: finalScoreByPeriod,
         fencer_1_name: currentFencer1Name, // Update to reflect current positions (after any swaps)
         fencer_2_name: currentFencer2Name, // Update to reflect current positions (after any swaps)
+        fencer_1_entity: leftEntity, // Stable entity for fencer_1 at completion
+        fencer_2_entity: rightEntity, // Stable entity for fencer_2 at completion
         final_period: selectedWeapon === 'sabre' ? finalPeriodNumber : undefined, // Set final_period for sabre
       });
 
@@ -3323,6 +3363,9 @@ export default function RemoteScreen() {
   // Initialize fencer names based on user profile toggle
   useEffect(() => {
     // For keep-toggle-off flows, never auto-adjust names based on toggle once locked
+    if (keepToggleOffLockedRef.current) {
+      return;
+    }
     if (params?.keepToggleOff === 'true') {
       return;
     }
@@ -3330,7 +3373,7 @@ export default function RemoteScreen() {
 	    // Don't run during swaps - prevents overwriting names mid-swap
 	    if (isSwappingRef.current) return;
 	    
-	    const isAnonymousParams = params?.isAnonymous === 'true' && !!params.fencer1Name && !!params.fencer2Name;
+	    const hasAnonBaseline = !!anonBaselineNamesRef.current;
 	    const isKeepToggleOffFlow = params?.keepToggleOff === 'true';
 	    
 	    if (showUserProfile && userDisplayName) {
@@ -3347,7 +3390,7 @@ export default function RemoteScreen() {
 	        return;
 	      }
 
-	      if (isAnonymousParams && anonBaselineNamesRef.current) {
+	      if (hasAnonBaseline && anonBaselineNamesRef.current) {
 	        // Restore baseline anonymous names (keeps params values instead of user name)
 	        setFencerNames(prev => {
 	          const next = {
@@ -7188,7 +7231,7 @@ export default function RemoteScreen() {
     }
     
     // Create match event for the yellow card
-    await createMatchEvent('user', 'yellow');
+    await createMatchEvent('user', 'yellow', entity);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -7244,7 +7287,7 @@ export default function RemoteScreen() {
     }
     
     // Create match event for the yellow card
-    await createMatchEvent('opponent', 'yellow');
+    await createMatchEvent('opponent', 'yellow', entity);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -7308,7 +7351,7 @@ export default function RemoteScreen() {
               }));
               console.log('🔴 Red card issued → Opponent gets +1 point');
               // Create match event for the red card
-              await createMatchEvent('user', 'red');
+              await createMatchEvent('user', 'red', entity);
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -7359,7 +7402,7 @@ export default function RemoteScreen() {
       }));
       console.log('🔴 Red card issued → Opponent gets +1 point');
       // Create match event for the red card
-      await createMatchEvent('user', 'red');
+      await createMatchEvent('user', 'red', entity);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -7423,7 +7466,7 @@ export default function RemoteScreen() {
               }));
               console.log('🔴 Red card issued → Opponent gets +1 point');
               // Create match event for the red card
-              await createMatchEvent('opponent', 'red');
+              await createMatchEvent('opponent', 'red', entity);
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
           },
@@ -7474,7 +7517,7 @@ export default function RemoteScreen() {
       }));
       console.log('🔴 Red card issued → Opponent gets +1 point');
       // Create match event for the red card
-      await createMatchEvent('opponent', 'red');
+      await createMatchEvent('opponent', 'red', entity);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };

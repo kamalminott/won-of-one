@@ -17,6 +17,8 @@ export interface Match {
   fencer_2_id?: string;
   fencer_1_name?: string;
   fencer_2_name?: string;
+  fencer_1_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_1 at completion
+  fencer_2_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_2 at completion
   opponent_id?: string;
   result?: string;
   score_diff?: number | null;
@@ -133,6 +135,7 @@ export interface MatchEvent {
   event_type?: string;
   scoring_user_id?: string | null;
   scoring_user_name?: string; // Name of who scored
+  scoring_entity?: string | null; // Stable scoring entity (fencerA/fencerB)
   card_given?: string | null;
   points_awarded?: number | null; // Points awarded for card events (red = 1, yellow = 0)
   score_diff?: number | null; // Score difference at time of event (null if no user)

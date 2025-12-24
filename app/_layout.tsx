@@ -257,14 +257,15 @@ export default function RootLayout() {
       const isRecovery = type === 'recovery' || isResetPath;
       const hasTokens = accessToken && refreshToken;
       const hasCode = !!code;
-      const hasOAuthState = !!state;
       const hasToken = !!token;
       const isEmailConfirm =
-        type === 'signup' ||
-        type === 'email_confirm' ||
-        type === 'invite' ||
-        (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'));
-      const shouldHandleOAuthCode = hasCode && hasOAuthState && !isRecovery;
+        !hasCode && (
+          type === 'signup' ||
+          type === 'email_confirm' ||
+          type === 'invite' ||
+          (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'))
+        );
+      const shouldHandleOAuthCode = hasCode && !isRecovery;
 
       // Handle OAuth callbacks for PKCE flow (code exchange)
       if (shouldHandleOAuthCode && code) {

@@ -212,8 +212,6 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       borderColor: '#464646',
     },
     modalButtonContainer: {
-      flexDirection: 'row',
-      gap: 12,
       marginTop: 8,
     },
     modalButton: {
@@ -223,17 +221,9 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
     },
-    modalButtonCancel: {
-      backgroundColor: '#393939',
-    },
     modalButtonSave: {
       backgroundColor: '#6C5CE7',
       opacity: isSaving ? 0.7 : 1,
-    },
-    modalButtonCancelText: {
-      fontSize: 16,
-      color: '#9D9D9D',
-      fontWeight: '600',
     },
     modalButtonSaveText: {
       fontSize: 16,
@@ -253,7 +243,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onDismiss}
+      onRequestClose={() => {}}
     >
       <View style={styles.modalOverlay}>
         <KeyboardAvoidingView
@@ -299,13 +289,6 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
               </View>
 
               <View style={styles.modalButtonContainer}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalButtonCancel]}
-                  onPress={onDismiss}
-                  disabled={isSaving}
-                >
-                  <Text style={styles.modalButtonCancelText}>Later</Text>
-                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.modalButtonSave]}
                   onPress={handleSave}

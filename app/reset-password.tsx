@@ -38,6 +38,21 @@ export default function ResetPasswordScreen() {
   const [isSessionSet, setIsSessionSet] = useState(false);
   const processedTokenRef = useRef<string | null>(null);
 
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       analytics.screen('ResetPassword');
@@ -91,17 +106,25 @@ export default function ResetPasswordScreen() {
       try {
         if (hasTokenPair) {
           console.log('🔑 Setting session from password reset link (access/refresh)...');
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken as string,
-            refresh_token: refreshToken as string,
-          });
+          const { error } = await withTimeout(
+            supabase.auth.setSession({
+              access_token: accessToken as string,
+              refresh_token: refreshToken as string,
+            }),
+            10000,
+            'Setting recovery session'
+          );
 
           if (error) {
             throw error;
           }
         } else if (hasCode) {
           console.log('🔑 Exchanging PKCE code for session (password recovery)...');
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code as string);
+          const { data, error } = await withTimeout(
+            supabase.auth.exchangeCodeForSession(code as string),
+            10000,
+            'Exchanging recovery code'
+          );
           if (error) {
             throw error;
           }
@@ -201,7 +224,11 @@ export default function ResetPasswordScreen() {
 
     // Check if session is set
     if (!isSessionSet) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'Loading session'
+      );
       if (!session) {
         setErrorMessage('Session expired. Please request a new password reset link.');
         return;
@@ -212,9 +239,13 @@ export default function ResetPasswordScreen() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: password.trim(),
-      });
+      const { error } = await withTimeout(
+        supabase.auth.updateUser({
+          password: password.trim(),
+        }),
+        10000,
+        'Updating password'
+      );
 
       if (error) {
         console.error('❌ Error updating password:', error);

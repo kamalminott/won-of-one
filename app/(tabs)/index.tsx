@@ -13,6 +13,7 @@ import { RecentMatches } from '@/components/RecentMatches';
 import { SummaryCard } from '@/components/SummaryCard';
 import { UserHeader } from '@/components/UserHeader';
 import { CompleteProfilePrompt } from '@/components/CompleteProfilePrompt';
+import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
@@ -24,6 +25,9 @@ export default function HomeScreen() {
   const { user, loading, userName, profileImage, isPasswordRecovery } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
+  const trimmedUserName = userName.trim();
+  const isUserNameReady = trimmedUserName.length > 0 && trimmedUserName !== 'User' && trimmedUserName !== 'Guest User';
+  const shouldHoldForUserName = !!user && !loading && !isUserNameReady;
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
@@ -486,16 +490,34 @@ export default function HomeScreen() {
   });
 
   // Show loading screen while checking authentication
-  if (loading) {
+  if (loading || shouldHoldForUserName) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: 'white', fontSize: 18 }}>Loading...</Text>
-      </View>
+      <>
+        <HomeSkeleton />
+        <CompleteProfilePrompt
+          visible={showCompleteProfilePrompt}
+          onDismiss={() => setShowCompleteProfilePrompt(false)}
+          onCompleted={() => setShowCompleteProfilePrompt(false)}
+        />
+      </>
     );
   }
 
   if (!user) {
     return null;
+  }
+
+  if (!hasLoadedOnce) {
+    return (
+      <>
+        <HomeSkeleton />
+        <CompleteProfilePrompt
+          visible={showCompleteProfilePrompt}
+          onDismiss={() => setShowCompleteProfilePrompt(false)}
+          onCompleted={() => setShowCompleteProfilePrompt(false)}
+        />
+      </>
+    );
   }
 
   return (

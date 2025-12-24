@@ -1823,7 +1823,7 @@ export default function NeutralMatchSummary() {
             style={styles.backToHomeButton}
             onPress={() => router.push('/(tabs)')}
           >
-            <Ionicons name="home-outline" size={24} color="white" />
+            <Ionicons name="home-outline" size={24} color="#EF4444" />
             <Text style={styles.backToHomeButtonText}>Back to Home</Text>
           </TouchableOpacity>
         </View>

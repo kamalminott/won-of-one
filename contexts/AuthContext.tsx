@@ -174,7 +174,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loadUserName = async () => {
     try {
       if (!user?.id) {
-        setUserNameState('Guest User');
+        setUserNameState('');
         return;
       }
 
@@ -593,7 +593,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       loadUserName();
       loadProfileImage();
     } else {
-      setUserNameState('Guest User');
+      setUserNameState('');
       setProfileImageState(null);
     }
   }, [user]);
@@ -700,10 +700,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('🔍 Calculated display name:', fullName);
     
     // Sign up with user_metadata to set display_name in Supabase Auth
+    const emailRedirectTo = Linking.createURL('/login', {
+      queryParams: { verification: 'success' },
+    });
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo,
         data: {
           display_name: fullName,
         },

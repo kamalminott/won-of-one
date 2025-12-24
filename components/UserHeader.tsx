@@ -94,6 +94,11 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
     },
   });
 
+  const trimmedName = userName.trim();
+  const firstName = trimmedName ? trimmedName.split(' ')[0] : '';
+  const greeting = firstName ? `Hi, ${firstName}` : 'Hi';
+  const avatarInitial = trimmedName ? trimmedName.charAt(0) : '';
+
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.userInfo} onPress={handleProfilePress} activeOpacity={0.7}>
@@ -109,11 +114,11 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
               resizeMode="cover"
             />
           ) : (
-            <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
+            <Text style={styles.avatarText}>{avatarInitial}</Text>
           )}
         </View>
         <View style={styles.textContainer}>
-          <Text style={styles.greeting}>Hi, {userName.split(' ')[0]}</Text>
+          <Text style={styles.greeting}>{greeting}</Text>
           <Text style={styles.subtitle}>Your Daily Fitness Goals</Text>
         </View>
       </TouchableOpacity>

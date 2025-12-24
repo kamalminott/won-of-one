@@ -25,7 +25,9 @@ BEGIN
         score_spp = COALESCE((updates->>'score_spp')::integer, score_spp),
         score_by_period = COALESCE((updates->'score_by_period')::jsonb, score_by_period),
         fencer_1_name = COALESCE((updates->>'fencer_1_name')::text, fencer_1_name),
-        fencer_2_name = COALESCE((updates->>'fencer_2_name')::text, fencer_2_name)
+        fencer_2_name = COALESCE((updates->>'fencer_2_name')::text, fencer_2_name),
+        fencer_1_entity = COALESCE((updates->>'fencer_1_entity')::text, fencer_1_entity),
+        fencer_2_entity = COALESCE((updates->>'fencer_2_entity')::text, fencer_2_entity)
     WHERE match_id = match_id_param::uuid
     RETURNING * INTO result_record;
     
@@ -38,4 +40,3 @@ GRANT EXECUTE ON FUNCTION update_anonymous_match(text, jsonb) TO authenticated;
 
 -- Optional: Grant to anon role if you want unauthenticated users to update matches
 -- GRANT EXECUTE ON FUNCTION update_anonymous_match(text, jsonb) TO anon;
-

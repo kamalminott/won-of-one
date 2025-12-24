@@ -625,6 +625,7 @@ export const offlineRemoteService = {
               match_time_elapsed: event.match_time_elapsed,
               match_period_id: validatedMatchPeriodId || undefined,
               scoring_user_id: event.metadata?.scoring_user_id || null,
+              scoring_entity: event.metadata?.scoring_entity || null,
               fencer_1_name: event.metadata?.fencer_1_name || null,
               fencer_2_name: event.metadata?.fencer_2_name || null,
               card_given: event.metadata?.card_given || null,

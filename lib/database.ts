@@ -1459,7 +1459,7 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
+        .select('match_event_id, scoring_user_name, scoring_entity, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId)
         .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
@@ -1504,7 +1504,7 @@ $$;
       // 3. Get match data to determine user vs opponent AND final scores for validation
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name, final_score, touches_against')
+        .select('fencer_1_name, fencer_2_name, fencer_1_entity, fencer_2_entity, final_score, touches_against')
         .eq('match_id', matchId)
         .single();
 
@@ -2179,6 +2179,8 @@ $$;
     match_type?: string;
     fencer_1_name?: string; // Update fencer names to reflect current positions (after swaps)
     fencer_2_name?: string; // Update fencer names to reflect current positions (after swaps)
+    fencer_1_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_1
+    fencer_2_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_2
     event_date?: string; // ISO string for event date/time
     weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
   }): Promise<Match | null> {
@@ -2252,7 +2254,9 @@ BEGIN
         score_spp = COALESCE((updates->>'score_spp')::integer, score_spp),
         score_by_period = COALESCE((updates->'score_by_period')::jsonb, score_by_period),
         fencer_1_name = COALESCE((updates->>'fencer_1_name')::text, fencer_1_name),
-        fencer_2_name = COALESCE((updates->>'fencer_2_name')::text, fencer_2_name)
+        fencer_2_name = COALESCE((updates->>'fencer_2_name')::text, fencer_2_name),
+        fencer_1_entity = COALESCE((updates->>'fencer_1_entity')::text, fencer_1_entity),
+        fencer_2_entity = COALESCE((updates->>'fencer_2_entity')::text, fencer_2_entity)
     WHERE match_id = match_id_param::uuid
     RETURNING * INTO result_record;
     
@@ -2457,6 +2461,7 @@ $$;
       }
 
       console.log('📈 ANONYMOUS - Fencer names:', matchData.fencer_1_name, 'vs', matchData.fencer_2_name);
+      console.log('📈 ANONYMOUS - Fencer entities:', matchData.fencer_1_entity, 'vs', matchData.fencer_2_entity);
       console.log('📈 ANONYMOUS - Match events found:', matchEvents.length);
 
       // 4. Deduplicate events
@@ -2580,6 +2585,14 @@ $$;
         // We need to map the event's fencer to the final match fencer based on entity identity
         
         const resolveScorerIsFencer1 = () => {
+          if (event.scoring_entity && matchData.fencer_1_entity && matchData.fencer_2_entity) {
+            if (event.scoring_entity === matchData.fencer_1_entity) {
+              return true;
+            }
+            if (event.scoring_entity === matchData.fencer_2_entity) {
+              return false;
+            }
+          }
           let isFencer1Scored = false;
           if (event.fencer_1_name && event.fencer_2_name) {
             if (event.scoring_user_name === event.fencer_1_name) {
@@ -3223,21 +3236,44 @@ export const weeklyTargetService = {
     targetSessions: number
   ): Promise<WeeklyTarget | null> {
     try {
-      const { data, error } = await supabase
+      const weekStart = weekStartDate.toISOString().split('T')[0];
+      const weekEnd = weekEndDate.toISOString().split('T')[0];
+
+      const { data: existing, error: existingError } = await supabase
         .from('weekly_target')
-        .upsert({
-          user_id: userId,
-          activity_type: activityType,
-          week_start_date: weekStartDate.toISOString().split('T')[0],
-          week_end_date: weekEndDate.toISOString().split('T')[0],
-          target_sessions: targetSessions,
-          status: 'active', // Set as active target
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id,activity_type,week_start_date'
-        })
-        .select()
-        .single();
+        .select('target_id')
+        .eq('user_id', userId)
+        .eq('activity_type', activityType)
+        .eq('week_start_date', weekStart)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (existingError) {
+        console.error('Error checking existing weekly target:', existingError);
+      }
+
+      const payload = {
+        user_id: userId,
+        activity_type: activityType,
+        week_start_date: weekStart,
+        week_end_date: weekEnd,
+        target_sessions: targetSessions,
+        updated_at: new Date().toISOString()
+      };
+
+      const existingTarget = existing?.[0];
+      const { data, error } = existingTarget?.target_id
+        ? await supabase
+            .from('weekly_target')
+            .update(payload)
+            .eq('target_id', existingTarget.target_id)
+            .select()
+            .single()
+        : await supabase
+            .from('weekly_target')
+            .insert(payload)
+            .select()
+            .single();
 
       if (error) {
         console.error('Error setting weekly target:', error);
@@ -3266,22 +3302,23 @@ export const weeklyTargetService = {
         .eq('user_id', userId)
         .eq('activity_type', activityType)
         .eq('week_start_date', dateString)
-        .eq('status', 'active') // Only get active targets
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1);
       
       console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          console.log('🔍 No active target found for this week');
-          return null; // No rows found
-        }
         console.error('Error getting weekly target:', error);
         return null;
       }
 
-      console.log('🔍 Found active target:', data);
-      return data;
+      const target = data?.[0] || null;
+      if (!target) {
+        console.log('🔍 No target found for this week');
+      } else {
+        console.log('🔍 Found target:', target);
+      }
+      return target;
     } catch (error) {
       console.error('Error in getWeeklyTarget:', error);
       return null;
@@ -3395,7 +3432,6 @@ export const weeklyTargetService = {
         .select('*')
         .eq('user_id', userId)
         .eq('activity_type', activityType)
-        .eq('status', 'active') // Only get active targets
         .order('week_start_date', { ascending: true });
 
       if (error) {
