@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { signUp, signUpWithGoogle, signUpWithApple } = useAuth();
+  const { signUp, signUpWithGoogle, signUpWithApple, user, loading: authLoading, isPasswordRecovery } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -63,6 +63,13 @@ export default function CreateAccountScreen() {
       }
     };
   }, [hasStartedForm, loading, firstName, lastName, email, password]);
+
+  useEffect(() => {
+    if (authLoading || isPasswordRecovery) return;
+    if (user) {
+      router.replace('/(tabs)');
+    }
+  }, [user, authLoading, isPasswordRecovery]);
 
   const handleSignIn = () => {
     router.push('/login');

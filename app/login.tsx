@@ -28,7 +28,7 @@ export default function LoginScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { signIn, signInWithGoogle, signInWithApple } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple, user, loading: authLoading, isPasswordRecovery } = useAuth();
   const hasShownVerification = React.useRef(false);
 
   // Track screen view
@@ -62,6 +62,13 @@ export default function LoginScreen() {
       router.setParams({ verification: undefined, error: undefined });
     }
   }, [params.verification, params.error]);
+
+  useEffect(() => {
+    if (authLoading || isPasswordRecovery) return;
+    if (user) {
+      router.replace('/(tabs)');
+    }
+  }, [user, authLoading, isPasswordRecovery]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
