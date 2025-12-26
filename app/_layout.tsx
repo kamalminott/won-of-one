@@ -267,24 +267,6 @@ export default function RootLayout() {
         );
       const shouldHandleOAuthCode = hasCode && !isRecovery;
 
-      // Handle OAuth callbacks for PKCE flow (code exchange)
-      if (shouldHandleOAuthCode && code) {
-        console.log('🔐 Handling OAuth PKCE callback...');
-        try {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) {
-            console.error('❌ Error exchanging OAuth code for session:', exchangeError);
-            return false;
-          }
-
-          console.log('✅ OAuth session established via code exchange');
-          return true;
-        } catch (error) {
-          console.error('❌ Error handling OAuth PKCE callback:', error);
-          return false;
-        }
-      }
-
       // Handle email confirmation: verify email and then redirect to login (never log in)
       if (isEmailConfirm) {
         try {
@@ -378,28 +360,10 @@ export default function RootLayout() {
         return true;
       }
 
-      // Handle OAuth callbacks (Google, etc.)
-      // Supabase OAuth redirects with access_token and refresh_token
-      if (hasTokens && !isEmailConfirm && !isRecovery) {
-        console.log('🔐 Handling OAuth callback...');
-        try {
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken!,
-            refresh_token: refreshToken!,
-          });
-          
-          if (sessionError) {
-            console.error('❌ Error setting OAuth session:', sessionError);
-            return false;
-          }
-          
-          console.log('✅ OAuth session set successfully');
-          // Navigation will happen automatically via auth state change listener
-          return true;
-        } catch (error) {
-          console.error('❌ Error handling OAuth callback:', error);
-          return false;
-        }
+      // OAuth callbacks are handled inside the auth flow (AuthSession).
+      // Avoid exchanging here to prevent flow-state races.
+      if ((shouldHandleOAuthCode || hasTokens) && !isEmailConfirm && !isRecovery) {
+        return true;
       }
 
       return false;

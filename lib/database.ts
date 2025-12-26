@@ -174,6 +174,18 @@ export const userService = {
         .single();
 
       if (error) {
+        if (error.code === '23505') {
+          console.warn('User already exists, returning existing record:', { userId });
+          const existing = await userService.getUserById(userId);
+          if (existing) {
+            if (!existing.name && name) {
+              const updated = await userService.updateUser(userId, { name });
+              return updated ?? existing;
+            }
+            return existing;
+          }
+          return null;
+        }
         console.error('Error creating user:', error);
         return null;
       }

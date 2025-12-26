@@ -2,8 +2,8 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "3.0.0",
-    "runtimeVersion": "3.0.0",
+    "version": "3.1.1",
+    "runtimeVersion": "3.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
@@ -51,7 +51,8 @@
         }
       ],
       "expo-font",
-      "expo-localization"
+      "expo-localization",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

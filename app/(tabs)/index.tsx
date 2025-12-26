@@ -49,9 +49,12 @@ export default function HomeScreen() {
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   const trimmedUserName = userName.trim();
-  const normalizedUserName = trimmedUserName.toLowerCase();
+  const authMetadataName = getAuthMetadataName(user)?.trim() || '';
+  const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
+  const effectiveUserName = trimmedUserName || (metadataNameReady ? authMetadataName : '');
+  const normalizedUserName = effectiveUserName.toLowerCase();
   const isUserNameReady =
-    trimmedUserName.length > 0 && !FALLBACK_NAME_VALUES.has(normalizedUserName);
+    effectiveUserName.length > 0 && !isPlaceholderName(effectiveUserName, user?.email);
   const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
   const shouldHoldForProfileCheck = !!user && !loading && profileNameStatus === 'unknown';
   const shouldHoldForUserName = !!user && !loading && profileNameStatus === 'present' && !isUserNameReady;
@@ -174,20 +177,13 @@ export default function HomeScreen() {
 
       const decideStatus = async () => {
         try {
-          const { existingUser, dbName, metadataName } = await fetchNameState();
-          if (cancelled) return null;
+        const { existingUser, dbName } = await fetchNameState();
+        if (cancelled) return null;
 
-          const effectiveName = dbName || metadataName;
-          const isMissingName = isPlaceholderName(effectiveName, user.email);
+        const isMissingName = isPlaceholderName(dbName, user.email);
 
-          if (!dbName && metadataName && !isMissingName) {
-            void userService
-              .updateUser(user.id, { name: metadataName })
-              .catch(error => console.warn('Failed to backfill profile name:', error));
-          }
-
-          return { isMissingName };
-        } catch (error) {
+        return { isMissingName };
+      } catch (error) {
           console.warn('Failed to check profile name:', error);
           return { isMissingName: true };
         }
@@ -437,6 +433,7 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('Error fetching user data:', error);
       Alert.alert('Error', 'Failed to load data');
+      setHasLoadedOnce(true);
     } finally {
       setIsRefreshing(false);
       fetchInFlightRef.current = false;
@@ -609,7 +606,7 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
           <View style={styles.stickyHeader}>
             <UserHeader
-              userName={userName}
+              userName={effectiveUserName}
               streak={7}
               avatarUrl={profileImage || undefined}
               onSettingsPress={handleSettings}
@@ -873,7 +870,7 @@ export default function HomeScreen() {
                 matches={matches}
                 onViewAll={handleViewAllMatches}
                 onSwipeRight={handleSwipeRight}
-                userName={userName}
+                userName={effectiveUserName}
                 userProfileImage={profileImage}
                 hasActiveGoals={goals.length > 0}
               />

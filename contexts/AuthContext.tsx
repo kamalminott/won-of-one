@@ -6,7 +6,11 @@ import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as Linking from 'expo-linking';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+
+WebBrowser.maybeCompleteAuthSession();
 
 // Define the shape of our authentication context
 interface AuthContextType {
@@ -78,9 +82,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
   const [userName, setUserNameState] = useState<string>('');
   const [profileImage, setProfileImageState] = useState<string | null>(null);
+  const oauthInFlightRef = useRef(false);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
+  };
+
+  const getSupabaseStorageKey = () => {
+    const authAny = supabase?.auth as any;
+    const storageKey = authAny?.storageKey || (supabase as any)?.storageKey;
+    return storageKey || 'sb-dxgvjghcpnseglukvqao-auth-token';
+  };
+
+  const getOAuthCodeVerifierKey = () => `${getSupabaseStorageKey()}-code-verifier`;
+
+  const logOAuthCodeVerifier = async (label: string) => {
+    try {
+      const key = getOAuthCodeVerifierKey();
+      const stored = await AsyncStorage.getItem(key);
+      if (stored) {
+        console.log(`🔐 [OAUTH] ${label} code-verifier present (len ${stored.length})`);
+      } else {
+        console.log(`🔐 [OAUTH] ${label} code-verifier missing`, { key });
+      }
+    } catch (error) {
+      console.warn(`⚠️ [OAUTH] ${label} code-verifier check failed`, error);
+    }
   };
 
   const getMetadataName = (authUser?: User | null) => {
@@ -144,30 +171,107 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const startOAuthFlow = async (provider: 'google') => {
-    const redirectUrl = Linking.createURL('/');
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: redirectUrl,
-        skipBrowserRedirect: true,
-      },
+    if (oauthInFlightRef.current) {
+      return { error: { message: 'OAuth already in progress' } };
+    }
+
+    oauthInFlightRef.current = true;
+
+    const redirectUrl = AuthSession.makeRedirectUri({
+      scheme: 'wonofone',
+      path: 'auth',
     });
 
-    if (error) {
-      return { error };
-    }
+    try {
+      await logOAuthCodeVerifier('before signInWithOAuth');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+        },
+      });
 
-    if (!data?.url) {
-      return { error: { message: 'No OAuth URL returned' } };
-    }
+      if (error) {
+        return { error };
+      }
 
-    const canOpen = await Linking.canOpenURL(data.url);
-    if (!canOpen) {
-      return { error: { message: 'Unable to open browser for sign in' } };
-    }
+      if (!data?.url) {
+        return { error: { message: 'No OAuth URL returned' } };
+      }
 
-    await Linking.openURL(data.url);
-    return { error: null };
+      try {
+        const authUrl = new URL(data.url);
+        const redirectTo = authUrl.searchParams.get('redirect_to');
+        const challengeMethod = authUrl.searchParams.get('code_challenge_method');
+        console.log('🔐 [OAUTH] auth URL ready', {
+          redirectTo,
+          challengeMethod,
+          host: authUrl.host,
+        });
+      } catch (parseError) {
+        console.warn('⚠️ [OAUTH] Failed to parse auth URL', parseError);
+      }
+
+      await logOAuthCodeVerifier('after signInWithOAuth');
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+
+      if (result.type !== 'success' || !result.url) {
+        return { error: { message: 'OAuth flow was cancelled' } };
+      }
+
+      try {
+        const resultUrl = new URL(result.url);
+        if (resultUrl.searchParams.has('code')) {
+          resultUrl.searchParams.set('code', 'REDACTED');
+        }
+        if (resultUrl.searchParams.has('state')) {
+          resultUrl.searchParams.set('state', 'REDACTED');
+        }
+        console.log('🔐 [OAUTH] result URL', resultUrl.toString());
+      } catch (parseError) {
+        console.warn('⚠️ [OAUTH] Failed to parse result URL', parseError);
+      }
+
+      const [baseUrl, fragment] = result.url.split('#');
+      const parsedUrl = fragment
+        ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${fragment}`
+        : baseUrl;
+      const parsed = Linking.parse(parsedUrl);
+      const params = parsed.queryParams ?? {};
+      const rawCode = params.code as string | undefined;
+      const code = rawCode ? rawCode.replace(/[#?]+$/, '') : undefined;
+      const authError = params.error as string | undefined;
+      const state = params.state as string | undefined;
+
+      if (code) {
+        console.log('🔐 [OAUTH] code received', {
+          length: code.length,
+          prefix: code.slice(0, 8),
+          suffix: code.slice(-3),
+          hasState: !!state,
+          paramKeys: Object.keys(params),
+        });
+      }
+
+      if (authError) {
+        return { error: { message: params.error_description || authError } };
+      }
+
+      if (!code) {
+        return { error: { message: 'No OAuth code returned' } };
+      }
+
+      await logOAuthCodeVerifier('before exchangeCodeForSession');
+      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+      if (exchangeError) {
+        return { error: exchangeError };
+      }
+
+      return { error: null };
+    } finally {
+      oauthInFlightRef.current = false;
+    }
   };
 
   // Load user name from database first, then AsyncStorage, then fallback
@@ -335,7 +439,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       try {
         // Check AsyncStorage directly for debugging
         try {
-          const storedSession = await AsyncStorage.getItem('sb-dxgvjghcpnseglukvqao-auth-token');
+          const storedSession = await AsyncStorage.getItem(getSupabaseStorageKey());
           if (storedSession) {
             console.log('✅ [AUTH] AsyncStorage session found:', storedSession.substring(0, 50) + '...');
           } else {
