@@ -221,7 +221,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       borderColor: '#464646',
     },
     modalButtonContainer: {
-      marginTop: 8,
+      marginTop: 16,
+      paddingBottom: 4,
       alignItems: 'stretch',
     },
     modalButton: {
