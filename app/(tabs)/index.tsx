@@ -21,6 +21,9 @@ import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
+const PROFILE_CHECK_TIMEOUT_MS = 5000;
+const USER_NAME_WAIT_TIMEOUT_MS = 3000;
+const HOME_LOAD_TIMEOUT_MS = 12000;
 
 const isPlaceholderName = (name: string, email?: string | null) => {
   const normalized = name.trim().toLowerCase();
@@ -56,8 +59,14 @@ export default function HomeScreen() {
   const isUserNameReady =
     effectiveUserName.length > 0 && !isPlaceholderName(effectiveUserName, user?.email);
   const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
+  const [userNameWaitTimedOut, setUserNameWaitTimedOut] = useState(false);
   const shouldHoldForProfileCheck = !!user && !loading && profileNameStatus === 'unknown';
-  const shouldHoldForUserName = !!user && !loading && profileNameStatus === 'present' && !isUserNameReady;
+  const shouldHoldForUserName =
+    !!user &&
+    !loading &&
+    profileNameStatus === 'present' &&
+    !isUserNameReady &&
+    !userNameWaitTimedOut;
   
   // State for real data
   const [matches, setMatches] = useState<SimpleMatch[]>([]);
@@ -74,6 +83,7 @@ export default function HomeScreen() {
   const lastHeavyRefreshAtMsRef = useRef(0);
   const liveDataAppliedRef = useRef(false);
   const trainingTimeRef = useRef(trainingTime);
+  const userNameRef = useRef(userName);
   const profilePromptShownRef = useRef(false);
   const shouldShowCompleteProfilePrompt = showCompleteProfilePrompt || profileNameStatus === 'missing';
   const handleProfilePromptCompleted = useCallback(() => {
@@ -91,6 +101,10 @@ export default function HomeScreen() {
   useEffect(() => {
     trainingTimeRef.current = trainingTime;
   }, [trainingTime]);
+
+  useEffect(() => {
+    userNameRef.current = userName;
+  }, [userName]);
 
   // Hydrate from cache ASAP so the Home screen feels instant
   useEffect(() => {
@@ -158,7 +172,45 @@ export default function HomeScreen() {
     profilePromptShownRef.current = false;
     setProfileNameStatus('unknown');
     setShowCompleteProfilePrompt(false);
+    setUserNameWaitTimedOut(false);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || loading || isPasswordRecovery || profileNameStatus !== 'unknown') {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      console.warn('Profile name check timed out. Allowing access and showing prompt.');
+      setProfileNameStatus('missing');
+      setShowCompleteProfilePrompt(true);
+    }, PROFILE_CHECK_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [user?.id, loading, isPasswordRecovery, profileNameStatus]);
+
+  useEffect(() => {
+    if (!user || loading || profileNameStatus !== 'present') {
+      if (userNameWaitTimedOut) {
+        setUserNameWaitTimedOut(false);
+      }
+      return;
+    }
+
+    if (isUserNameReady) {
+      if (userNameWaitTimedOut) {
+        setUserNameWaitTimedOut(false);
+      }
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      console.warn('User name not ready in time. Continuing with fallback.');
+      setUserNameWaitTimedOut(true);
+    }, USER_NAME_WAIT_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [user?.id, loading, profileNameStatus, isUserNameReady, userNameWaitTimedOut]);
 
   useEffect(() => {
     if (!user || loading || isPasswordRecovery) return;
@@ -172,15 +224,17 @@ export default function HomeScreen() {
         const existingUser = await userService.getUserById(user.id);
         const dbName = existingUser?.name?.trim() || '';
         const metadataName = getAuthMetadataName(user)?.trim() || '';
-        return { existingUser, dbName, metadataName };
+        const localName = (userNameRef.current || '').trim();
+        const candidateName = dbName || localName || metadataName;
+        return { existingUser, dbName, metadataName, localName, candidateName };
       };
 
       const decideStatus = async () => {
         try {
-        const { existingUser, dbName } = await fetchNameState();
+        const { existingUser, dbName, candidateName } = await fetchNameState();
         if (cancelled) return null;
 
-        const isMissingName = isPlaceholderName(dbName, user.email);
+        const isMissingName = isPlaceholderName(candidateName, user.email);
 
         return { isMissingName };
       } catch (error) {
@@ -194,6 +248,7 @@ export default function HomeScreen() {
 
       if (!status.isMissingName) {
         setProfileNameStatus('present');
+        setShowCompleteProfilePrompt(false);
         return;
       }
 
@@ -205,6 +260,7 @@ export default function HomeScreen() {
 
       if (!status.isMissingName) {
         setProfileNameStatus('present');
+        setShowCompleteProfilePrompt(false);
         return;
       }
 
@@ -218,6 +274,24 @@ export default function HomeScreen() {
       cancelled = true;
     };
   }, [user?.id, user?.email, loading, isPasswordRecovery]);
+
+  useEffect(() => {
+    if (!user || loading) return;
+    if (!hasLoadedOnce) {
+      fetchUserData();
+    }
+  }, [user?.id, loading, hasLoadedOnce, fetchUserData]);
+
+  useEffect(() => {
+    if (!user || loading || hasLoadedOnce) return;
+
+    const timeoutId = setTimeout(() => {
+      console.warn('Home data load timed out. Showing cached or empty state.');
+      setHasLoadedOnce(true);
+    }, HOME_LOAD_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [user?.id, loading, hasLoadedOnce]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed

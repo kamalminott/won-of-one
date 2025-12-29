@@ -23,7 +23,7 @@ try {
   console.log('📦 RevenueCat native module not available (dev mode)');
 }
 
-// RevenueCat API Key (test key for development)
+// RevenueCat API Key (test key for development; allow in dev builds only)
 const REVENUECAT_API_KEY = Platform.select({
   ios: 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU', // iOS API key
   android: 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU', // Android API key (can be different)
@@ -64,14 +64,28 @@ export const subscriptionService = {
     }
 
     try {
-      // Skip initialization if using a test key (RevenueCat SDK will crash the app with test keys in production builds)
-      if (!REVENUECAT_API_KEY || REVENUECAT_API_KEY.startsWith('test_')) {
+      // Skip test keys in production builds (RevenueCat can crash in release with test keys)
+      const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+      const isTestKey = !!REVENUECAT_API_KEY && REVENUECAT_API_KEY.startsWith('test_');
+
+      if (!REVENUECAT_API_KEY) {
+        console.warn('⚠️ RevenueCat API key missing - skipping initialization');
+        isInitialized = true;
+        isActuallyConfigured = false;
+        return;
+      }
+
+      if (isTestKey && !isDev) {
         console.warn('⚠️ RevenueCat test API key detected - skipping initialization to prevent app crash');
         console.warn('⚠️ Configure a production API key in RevenueCat dashboard to enable subscriptions');
         // Mark as initialized to prevent retry loops, but don't actually configure
         isInitialized = true;
         isActuallyConfigured = false;
         return;
+      }
+
+      if (isTestKey && isDev) {
+        console.warn('⚠️ RevenueCat test API key detected - allowed in dev build');
       }
 
       if (!Purchases) {
@@ -393,4 +407,3 @@ export const subscriptionService = {
     }
   },
 };
-

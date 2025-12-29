@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { PurchasesOffering, PurchasesPackage } from '@/lib/subscriptionService';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors } from '@/constants/Colors';
+import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
 
 export default function PaywallScreen() {
   const { width, height } = useWindowDimensions();
@@ -30,11 +31,48 @@ export default function PaywallScreen() {
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<PurchasesPackage | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const [presentError, setPresentError] = useState<string | null>(null);
+  const [paywallResult, setPaywallResult] = useState<PAYWALL_RESULT | null>(null);
+  const hasPresentedRef = useRef(false);
+  const useRevenueCatPaywall = true;
 
   useEffect(() => {
     analytics.screen('Paywall');
-    loadOfferings();
+    if (useRevenueCatPaywall) {
+      void openRevenueCatPaywall();
+    } else {
+      loadOfferings();
+    }
   }, []);
+
+  const openRevenueCatPaywall = async (force = false) => {
+    if (presenting) return;
+    if (hasPresentedRef.current && !force) return;
+
+    hasPresentedRef.current = true;
+    setPresentError(null);
+    setPaywallResult(null);
+    setPresenting(true);
+
+    try {
+      const result = await RevenueCatUI.presentPaywall({ displayCloseButton: true });
+      setPaywallResult(result);
+
+      if (result === PAYWALL_RESULT.PURCHASED || result === PAYWALL_RESULT.RESTORED) {
+        handleClose();
+      } else if (result === PAYWALL_RESULT.NOT_PRESENTED) {
+        setPresentError('Paywall not presented. Check that your offering is set as current.');
+      } else if (result === PAYWALL_RESULT.ERROR) {
+        setPresentError('Paywall failed to load. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Error presenting paywall:', error);
+      setPresentError(error?.message || 'Failed to open paywall.');
+    } finally {
+      setPresenting(false);
+    }
+  };
 
   const loadOfferings = async () => {
     try {
@@ -125,6 +163,57 @@ export default function PaywallScreen() {
     'Match History',
     'Offline Sync',
   ];
+
+  if (useRevenueCatPaywall) {
+    const statusMessage = presentError
+      ? presentError
+      : paywallResult
+        ? 'Paywall closed.'
+        : 'Tap below to open the paywall.';
+
+    return (
+      <>
+        <ExpoStatusBar style="light" />
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <View style={styles.paywallStatusContainer}>
+            {presenting ? (
+              <>
+                <ActivityIndicator size="large" color={Colors.purple.primary} />
+                <Text style={styles.loadingText}>Opening paywall...</Text>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.title, { fontSize: width * 0.08 }]}>Paywall</Text>
+                <Text style={[styles.paywallStatusMessage, { fontSize: width * 0.04 }]}>
+                  {statusMessage}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => openRevenueCatPaywall(true)}
+                  style={[styles.subscribeButton, { width: width * 0.9 }]}
+                >
+                  <LinearGradient
+                    colors={Colors.gradientButton.colors}
+                    start={Colors.gradientButton.start}
+                    end={Colors.gradientButton.end}
+                    style={styles.subscribeButtonGradient}
+                  >
+                    <Text style={[styles.subscribeButtonText, { fontSize: width * 0.045 }]}>
+                      Open Paywall
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity onPress={handleClose} style={styles.restoreButton}>
+              <Text style={[styles.restoreText, styles.closePaywallText, { fontSize: width * 0.035 }]}>
+                Close Paywall
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </>
+    );
+  }
 
   if (loading) {
     return (
@@ -264,6 +353,13 @@ export default function PaywallScreen() {
           >
             <Text style={[styles.restoreText, { fontSize: width * 0.035 }]}>
               Restore Purchases
+            </Text>
+          </TouchableOpacity>
+
+          {/* Close Paywall */}
+          <TouchableOpacity onPress={handleClose} style={styles.restoreButton}>
+            <Text style={[styles.restoreText, styles.closePaywallText, { fontSize: width * 0.035 }]}>
+              Close Paywall
             </Text>
           </TouchableOpacity>
 
@@ -446,6 +542,9 @@ const styles = StyleSheet.create({
     color: Colors.purple.primary,
     fontWeight: '500',
   },
+  closePaywallText: {
+    color: '#9D9D9D',
+  },
   termsText: {
     color: '#9D9D9D',
     textAlign: 'center',
@@ -456,5 +555,16 @@ const styles = StyleSheet.create({
     marginTop: '4%',
     fontSize: 16,
   },
+  paywallStatusContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: '8%',
+  },
+  paywallStatusMessage: {
+    color: '#9D9D9D',
+    textAlign: 'center',
+    marginTop: '4%',
+    marginBottom: '6%',
+  },
 });
-

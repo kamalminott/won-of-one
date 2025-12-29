@@ -223,6 +223,11 @@ export default function SettingsScreen() {
     router.push('/(tabs)/profile');
   };
 
+  const handleOpenPaywall = () => {
+    analytics.capture('paywall_opened_from_settings');
+    router.push('/paywall');
+  };
+
   const handleLogOut = async () => {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
@@ -536,6 +541,18 @@ export default function SettingsScreen() {
               <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Subscription Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Subscription</Text>
+          <TouchableOpacity style={[styles.card, styles.profileCard]} onPress={handleOpenPaywall}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="lock-closed" size={width * 0.06} color="#FFFFFF" />
+            </View>
+            <Text style={styles.optionText}>Open Paywall</Text>
+            <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
+          </TouchableOpacity>
         </View>
 
         {/* Authentication & Account Section */}

@@ -118,6 +118,23 @@ const filterEventsByLatestResetSegment = <T extends { reset_segment?: number | n
   return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 // User-related helpers
 type CreateUserOptions = {
   fallbackEmailForName?: string | null;
@@ -719,8 +736,18 @@ export const matchService = {
     // Fetch user's name to identify which fencer is the user (handles swaps correctly)
     let userDisplayName = (userDisplayNameOverride ?? '').trim();
     if (!userDisplayName) {
-      const userProfile = await userService.getUserById(userId);
-      userDisplayName = userProfile?.name || '';
+      try {
+        const userProfile = await withTimeout(
+          userService.getUserById(userId),
+          4000,
+          'User profile lookup'
+        );
+        userDisplayName = userProfile?.name || '';
+      } catch (error) {
+        if (debug) {
+          console.warn('User profile lookup timed out or failed:', error);
+        }
+      }
     }
 
     const normalizedUserName = normalizeName(userDisplayName);
