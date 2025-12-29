@@ -85,8 +85,10 @@ export default function HomeScreen() {
   const trainingTimeRef = useRef(trainingTime);
   const userNameRef = useRef(userName);
   const profilePromptShownRef = useRef(false);
+  const profilePromptSuppressedRef = useRef(false);
   const shouldShowCompleteProfilePrompt = showCompleteProfilePrompt || profileNameStatus === 'missing';
   const handleProfilePromptCompleted = useCallback(() => {
+    profilePromptSuppressedRef.current = true;
     setShowCompleteProfilePrompt(false);
     setProfileNameStatus('present');
   }, []);
@@ -170,6 +172,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     profilePromptShownRef.current = false;
+    profilePromptSuppressedRef.current = false;
     setProfileNameStatus('unknown');
     setShowCompleteProfilePrompt(false);
     setUserNameWaitTimedOut(false);
@@ -177,6 +180,9 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!user || loading || isPasswordRecovery || profileNameStatus !== 'unknown') {
+      return;
+    }
+    if (profilePromptSuppressedRef.current) {
       return;
     }
 
@@ -215,6 +221,7 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!user || loading || isPasswordRecovery) return;
     if (profilePromptShownRef.current) return;
+    if (profilePromptSuppressedRef.current) return;
 
     let cancelled = false;
     profilePromptShownRef.current = true;
@@ -261,6 +268,10 @@ export default function HomeScreen() {
       if (!status.isMissingName) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
+        return;
+      }
+
+      if (profilePromptSuppressedRef.current) {
         return;
       }
 

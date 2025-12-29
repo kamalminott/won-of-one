@@ -63,6 +63,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   const [lastName, setLastName] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const hasOptimisticCloseRef = React.useRef(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -71,6 +72,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     setFirstName(parts[0] || '');
     setLastName(parts.slice(1).join(' ') || '');
     setErrorMessage('');
+    setIsSaving(false);
+    hasOptimisticCloseRef.current = false;
   }, [visible, userName]);
 
   const handleSave = async () => {
@@ -96,6 +99,16 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     const fullName = [formattedFirst, formattedLast].filter(Boolean).join(' ').trim();
 
     try {
+      if (!hasOptimisticCloseRef.current) {
+        hasOptimisticCloseRef.current = true;
+        void setUserName(fullName);
+        if (onCompleted) {
+          onCompleted();
+        } else {
+          onDismiss();
+        }
+      }
+
       const existingUser = await withTimeout(
         userService.getUserById(user.id),
         10000,
@@ -121,8 +134,6 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
         throw new Error('Profile save failed');
       }
 
-      await setUserName(updatedUser.name);
-
       const metadata: Record<string, string> = {
         display_name: fullName,
         full_name: fullName,
@@ -135,12 +146,6 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
 
       if (formattedLast) {
         metadata.family_name = formattedLast;
-      }
-
-      if (onCompleted) {
-        onCompleted();
-      } else {
-        onDismiss();
       }
 
       void supabase.auth
