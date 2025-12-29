@@ -64,6 +64,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const hasOptimisticCloseRef = React.useRef(false);
+  const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0;
 
   useEffect(() => {
     if (!visible) return;
@@ -81,8 +82,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
 
-    if (!trimmedFirst) {
-      setErrorMessage('Please enter at least a first name.');
+    if (!trimmedFirst || !trimmedLast) {
+      setErrorMessage('Please enter your first and last name.');
       return;
     }
 
@@ -235,7 +236,11 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     },
     modalButtonSave: {
       backgroundColor: '#6C5CE7',
-      opacity: isSaving ? 0.7 : 1,
+      opacity: isSaving || !canSubmit ? 0.7 : 1,
+    },
+    requiredIndicator: {
+      color: '#FF6B6B',
+      fontWeight: '700',
     },
     modalButtonSaveText: {
       fontSize: 16,
@@ -279,7 +284,9 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
               {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>First Name</Text>
+                <Text style={styles.nameInputLabel}>
+                  First Name<Text style={styles.requiredIndicator}> *</Text>
+                </Text>
                 <TextInput
                   style={styles.nameInput}
                   value={firstName}
@@ -292,7 +299,9 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
               </View>
 
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>Last Name</Text>
+                <Text style={styles.nameInputLabel}>
+                  Last Name<Text style={styles.requiredIndicator}> *</Text>
+                </Text>
                 <TextInput
                   style={styles.nameInput}
                   value={lastName}
@@ -307,7 +316,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
                 <TouchableOpacity
                   style={[styles.modalButton, styles.modalButtonSave]}
                   onPress={handleSave}
-                  disabled={isSaving}
+                  disabled={isSaving || !canSubmit}
                 >
                   <Text style={styles.modalButtonSaveText}>
                     {isSaving ? 'Saving...' : 'Save'}
