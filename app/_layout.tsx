@@ -361,8 +361,25 @@ export default function RootLayout() {
       }
 
       // OAuth callbacks are handled inside the auth flow (AuthSession).
-      // Avoid exchanging here to prevent flow-state races.
-      if ((shouldHandleOAuthCode || hasTokens) && !isEmailConfirm && !isRecovery) {
+      // Fallback on cold starts (Android can restart during OAuth) by exchanging the code here.
+      if (shouldHandleOAuthCode && !isEmailConfirm && !isRecovery) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session && code) {
+            const { error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+              console.warn('⚠️ OAuth code exchange fallback failed:', error);
+            } else {
+              console.log('✅ OAuth code exchanged via fallback handler');
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ OAuth fallback exchange failed:', error);
+        }
+        return true;
+      }
+
+      if (hasTokens && !isEmailConfirm && !isRecovery) {
         return true;
       }
 
