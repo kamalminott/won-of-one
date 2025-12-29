@@ -263,9 +263,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       await logOAuthCodeVerifier('before exchangeCodeForSession');
-      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+      const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
       if (exchangeError) {
         return { error: exchangeError };
+      }
+
+      if (exchangeData?.session) {
+        setSession(exchangeData.session);
+        setUser(exchangeData.session.user ?? null);
+        setLoading(false);
       }
 
       return { error: null };
@@ -431,6 +437,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
+    const AUTH_BOOT_TIMEOUT_MS = 8000;
+    let bootTimedOut = false;
+    const bootTimeoutId = setTimeout(() => {
+      if (bootTimedOut) return;
+      bootTimedOut = true;
+      console.warn('⚠️ [AUTH] Initial session check timed out; continuing without session');
+      setLoading(false);
+    }, AUTH_BOOT_TIMEOUT_MS);
+
+    const markBootComplete = () => {
+      if (bootTimedOut) return;
+      bootTimedOut = true;
+      clearTimeout(bootTimeoutId);
+      setLoading(false);
+    };
+
     // Get initial session with enhanced error handling
     const getInitialSession = async () => {
       console.log('🔍 [AUTH] Checking for existing session on app start...');
@@ -459,7 +481,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // If session retrieval fails, clear any stale data
           setSession(null);
           setUser(null);
-          setLoading(false);
+          markBootComplete();
           return;
         }
         
@@ -467,7 +489,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.log('⚠️ [AUTH] No session found - user needs to login');
           setSession(null);
           setUser(null);
-          setLoading(false);
+          markBootComplete();
           return;
         }
         
@@ -499,12 +521,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         setSession(session);
         setUser(session?.user ?? null);
-        setLoading(false);
+        markBootComplete();
       } catch (error) {
         console.error('❌ [AUTH] Unexpected error getting session:', error);
         setSession(null);
         setUser(null);
-        setLoading(false);
+        markBootComplete();
       }
     };
 
@@ -520,7 +542,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setIsPasswordRecovery(true);
           setSession(session);
           setUser(null);
-          setLoading(false);
+          markBootComplete();
           try {
             router.replace('/reset-password');
           } catch (error) {
@@ -554,7 +576,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (event === 'SIGNED_OUT') {
           setSession(null);
           setUser(null);
-          setLoading(false);
+          markBootComplete();
           setIsPasswordRecovery(false);
           
           try {
@@ -569,7 +591,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // During recovery, keep the user null so the app never treats this as a full login
         setSession(session);
         setUser(isPasswordRecoveryRef.current ? null : session?.user ?? null);
-        setLoading(false);
+        markBootComplete();
 
         if (isPasswordRecoveryRef.current) {
           return;
@@ -691,7 +713,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(bootTimeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Load user name and profile image when user changes
