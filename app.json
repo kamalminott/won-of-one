@@ -2,8 +2,8 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "3.1.1",
-    "runtimeVersion": "3.1.1",
+    "version": "3.2.1",
+    "runtimeVersion": "3.2.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.kamalminott.wonofone",
-      "versionCode": 311,
+      "versionCode": 321,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

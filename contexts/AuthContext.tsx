@@ -288,6 +288,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
+      const cachedName =
+        (await AsyncStorage.getItem(userNameStorageKey(user.id))) ||
+        (await AsyncStorage.getItem('user_name'));
+      const hasCachedName = !!cachedName && cachedName !== 'Guest User';
+      if (hasCachedName) {
+        setUserNameState(cachedName);
+      }
+
       // First, try to load from database (retry briefly to allow profile creation to finish)
       let dbUser = await userService.getUserById(user.id);
       if (!dbUser) {
@@ -353,13 +361,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Fallback to AsyncStorage
-      const savedName =
-        (await AsyncStorage.getItem(userNameStorageKey(user.id))) ||
-        (await AsyncStorage.getItem('user_name'));
-      if (savedName && savedName !== 'Guest User') {
-        console.log('✅ Loaded name from AsyncStorage:', savedName);
-        setUserNameState(savedName);
+      if (hasCachedName) {
         return;
       }
 
@@ -371,6 +373,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     } catch (error) {
       console.error('Error loading user name:', error);
+      const cachedName =
+        (await AsyncStorage.getItem(userNameStorageKey(user?.id))) ||
+        (await AsyncStorage.getItem('user_name'));
+      const hasCachedName = !!cachedName && cachedName !== 'Guest User';
+      if (hasCachedName) {
+        setUserNameState(cachedName);
+        return;
+      }
       // Fallback to AsyncStorage or email prefix
       try {
         const savedName =

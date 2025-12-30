@@ -163,6 +163,37 @@ export const userService = {
     }
   },
 
+  async ensureUserById(userId: string, email?: string | null): Promise<AppUser | null> {
+    const existing = await userService.getUserById(userId);
+    if (existing) {
+      return existing;
+    }
+
+    let resolvedEmail = email ?? null;
+    if (!resolvedEmail) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        resolvedEmail = data?.user?.email ?? null;
+      } catch (error) {
+        console.warn('⚠️ Unable to resolve user email for profile creation:', error);
+      }
+    }
+
+    const created = await userService.createUser(
+      userId,
+      resolvedEmail,
+      undefined,
+      undefined,
+      { fallbackEmailForName: null }
+    );
+
+    if (!created) {
+      console.warn('⚠️ Failed to ensure app_user record exists', { userId });
+    }
+
+    return created;
+  },
+
   async createUser(
     userId: string,
     email?: string | null,
@@ -1056,6 +1087,9 @@ export const matchService = {
 
   // Create a new match from fencing remote data
   async createMatchFromRemote(remoteData: FencingRemote, userId: string | null): Promise<Match | null> {
+    if (userId) {
+      await userService.ensureUserById(userId);
+    }
     const matchData = {
       user_id: userId, // Can be null if user toggle is off
       fencer_1_name: remoteData.fencer_1_name,
@@ -2740,6 +2774,10 @@ $$;
 export const fencingRemoteService = {
   // Create a new fencing remote session
   async createRemoteSession(remoteData: Partial<FencingRemote>): Promise<FencingRemote | null> {
+    if (remoteData.referee_id) {
+      await userService.ensureUserById(remoteData.referee_id);
+    }
+
     const { data, error } = await supabase
       .from('fencing_remote')
       .insert(remoteData)
@@ -3275,6 +3313,7 @@ export const weeklyTargetService = {
     targetSessions: number
   ): Promise<WeeklyTarget | null> {
     try {
+      await userService.ensureUserById(userId);
       const weekStart = weekStartDate.toISOString().split('T')[0];
       const weekEnd = weekEndDate.toISOString().split('T')[0];
 
@@ -3315,6 +3354,30 @@ export const weeklyTargetService = {
             .single();
 
       if (error) {
+        if ((error as any)?.code === '23503') {
+          console.warn('⚠️ Weekly target insert failed due to missing user record; retrying once');
+          await userService.ensureUserById(userId);
+          const retry = existingTarget?.target_id
+            ? await supabase
+                .from('weekly_target')
+                .update(payload)
+                .eq('target_id', existingTarget.target_id)
+                .select()
+                .single()
+            : await supabase
+                .from('weekly_target')
+                .insert(payload)
+                .select()
+                .single();
+
+          if (retry.error) {
+            console.error('Error setting weekly target after retry:', retry.error);
+            return null;
+          }
+
+          return retry.data;
+        }
+
         console.error('Error setting weekly target:', error);
         return null;
       }
@@ -3576,6 +3639,7 @@ export const weeklySessionLogService = {
     notes?: string
   ): Promise<WeeklySessionLog | null> {
     try {
+      await userService.ensureUserById(userId);
       const { data, error } = await supabase
         .from('weekly_session_log')
         .insert({
@@ -3591,6 +3655,31 @@ export const weeklySessionLogService = {
         .single();
 
       if (error) {
+        if ((error as any)?.code === '23503') {
+          console.warn('⚠️ Weekly session insert failed due to missing user record; retrying once');
+          await userService.ensureUserById(userId);
+          const retry = await supabase
+            .from('weekly_session_log')
+            .insert({
+              user_id: userId,
+              activity_type: activityType,
+              session_date: sessionDate 
+                ? sessionDate.toISOString().split('T')[0] 
+                : new Date().toISOString().split('T')[0],
+              duration_minutes: durationMinutes,
+              notes: notes
+            })
+            .select()
+            .single();
+
+          if (retry.error) {
+            console.error('Error logging session after retry:', retry.error);
+            return null;
+          }
+
+          return retry.data;
+        }
+
         console.error('Error logging session:', error);
         return null;
       }

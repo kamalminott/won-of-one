@@ -1,6 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
   Keyboard,
@@ -23,6 +24,7 @@ interface CompleteProfilePromptProps {
 }
 
 const FALLBACK_NAMES = new Set(['', 'User', 'Guest User']);
+const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
 
 const capitalizeName = (value: string) => {
   return value
@@ -65,6 +67,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const hasOptimisticCloseRef = React.useRef(false);
   const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0;
+  const keyboardVerticalOffset = Platform.OS === 'ios' ? Math.max(16, insets.top) : 0;
 
   useEffect(() => {
     if (!visible) return;
@@ -103,6 +106,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       if (!hasOptimisticCloseRef.current) {
         hasOptimisticCloseRef.current = true;
         void setUserName(fullName);
+        void AsyncStorage.setItem(profileCompletedStorageKey(user.id), 'true');
         if (onCompleted) {
           onCompleted();
         } else {
@@ -181,6 +185,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       borderRadius: 16,
       width: width * 0.9,
       padding: 20,
+      maxHeight: '85%',
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.3,
@@ -267,7 +272,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     >
       <View style={styles.modalOverlay}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
+          keyboardVerticalOffset={keyboardVerticalOffset}
           style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}
         >
           <TouchableOpacity

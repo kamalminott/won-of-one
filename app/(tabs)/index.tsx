@@ -45,6 +45,8 @@ const getAuthMetadataName = (authUser?: { user_metadata?: Record<string, any> } 
   );
 };
 
+const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
+
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
@@ -177,6 +179,40 @@ export default function HomeScreen() {
     setShowCompleteProfilePrompt(false);
     setUserNameWaitTimedOut(false);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || loading || isPasswordRecovery) return;
+
+    let cancelled = false;
+    const key = profileCompletedStorageKey(user.id);
+
+    AsyncStorage.getItem(key)
+      .then(flag => {
+        if (cancelled) return;
+        if (flag === 'true') {
+          profilePromptSuppressedRef.current = true;
+          setProfileNameStatus('present');
+          setShowCompleteProfilePrompt(false);
+        }
+      })
+      .catch(error => {
+        console.warn('Failed to load profile completion flag:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, loading, isPasswordRecovery]);
+
+  useEffect(() => {
+    if (!user || loading || isPasswordRecovery) return;
+    if (!isUserNameReady) return;
+    if (profileNameStatus === 'present') return;
+
+    profilePromptSuppressedRef.current = true;
+    setProfileNameStatus('present');
+    setShowCompleteProfilePrompt(false);
+  }, [user?.id, loading, isPasswordRecovery, isUserNameReady, profileNameStatus]);
 
   useEffect(() => {
     if (!user || loading || isPasswordRecovery || profileNameStatus !== 'unknown') {
