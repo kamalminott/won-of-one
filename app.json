@@ -27,6 +27,7 @@
     },
     "android": {
       "package": "com.kamalminott.wonofone",
+      "versionCode": 311,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
