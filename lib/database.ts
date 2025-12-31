@@ -4,6 +4,7 @@ import {
     MatchApproval, MatchEvent,
     SimpleGoal, SimpleMatch
 } from '@/types/database';
+import type { PostgrestSingleResponse } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 // Re-export supabase for use in other services
@@ -118,7 +119,7 @@ const filterEventsByLatestResetSegment = <T extends { reset_segment?: number | n
   return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
 };
 
-const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -127,7 +128,7 @@ const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): 
   });
 
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    return await Promise.race([Promise.resolve(promise), timeoutPromise]);
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
@@ -217,30 +218,18 @@ export const userService = {
     try {
       const { data, error } = await supabase
         .from('app_user')
-        .insert(insertData)
+        .upsert(insertData, { onConflict: 'user_id' })
         .select()
         .single();
 
       if (error) {
-        if (error.code === '23505') {
-          console.warn('User already exists, returning existing record:', { userId });
-          const existing = await userService.getUserById(userId);
-          if (existing) {
-            if (!existing.name && name) {
-              const updated = await userService.updateUser(userId, { name });
-              return updated ?? existing;
-            }
-            return existing;
-          }
-          return null;
-        }
-        console.error('Error creating user:', error);
+        console.error('Error upserting user:', error);
         return null;
       }
 
       return data as AppUser;
     } catch (err) {
-      console.error('Unexpected error creating user:', err);
+      console.error('Unexpected error upserting user:', err);
       return null;
     }
   },
@@ -1062,7 +1051,7 @@ export const matchService = {
 
     let data, error;
     try {
-      const result = await withTimeout(
+      const result = await withTimeout<PostgrestSingleResponse<Match>>(
         supabase
           .from('match')
           .insert(insertData)
@@ -2490,7 +2479,7 @@ $$;
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
       const { data: matchEventsRaw, error: eventsError } = await supabase
         .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
+        .select('match_event_id, scoring_user_name, scoring_entity, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
         .eq('match_id', matchId)
         .order('event_time', { ascending: true })
         .order('timestamp', { ascending: true });
@@ -2535,7 +2524,7 @@ $$;
       // 3. Get match data to get fencer names and final scores
       const { data: matchData, error: matchError } = await supabase
         .from('match')
-        .select('fencer_1_name, fencer_2_name, final_score, touches_against')
+        .select('fencer_1_name, fencer_2_name, fencer_1_entity, fencer_2_entity, final_score, touches_against')
         .eq('match_id', matchId)
         .single();
 
