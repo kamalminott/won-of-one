@@ -465,6 +465,8 @@ export default function AddMatchScreen() {
       // Check for network-related errors
       const isNetworkError = 
         error?.message?.includes('Network request failed') ||
+        error?.message?.includes('timed out') ||
+        error?.message?.includes('timeout') ||
         error?.message?.includes('network') ||
         error?.code === 'NETWORK_ERROR' ||
         error?.name === 'NetworkError';

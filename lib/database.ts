@@ -147,7 +147,7 @@ export const userService = {
         .from('app_user')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         if (error.code !== 'PGRST116') {
@@ -986,6 +986,12 @@ export const matchService = {
       console.error('❌ Error: userId is required');
       return null;
     }
+
+    try {
+      await userService.ensureUserById(userId);
+    } catch (error) {
+      console.warn('⚠️ Unable to ensure app_user record before match insert:', error);
+    }
     
     if (!opponentName || opponentName.trim() === '') {
       console.error('❌ Error: opponentName is required and cannot be empty');
@@ -1056,17 +1062,22 @@ export const matchService = {
 
     let data, error;
     try {
-      const result = await supabase
-        .from('match')
-        .insert(insertData)
-        .select()
-        .single();
+      const result = await withTimeout(
+        supabase
+          .from('match')
+          .insert(insertData)
+          .select()
+          .single(),
+        12000,
+        'Manual match insert'
+      );
       data = result.data;
       error = result.error;
-    } catch (networkError: any) {
-      // Catch network-level errors (not Supabase errors)
-      console.error('❌ Network error creating manual match:', networkError);
-      throw new Error('Network request failed');
+    } catch (requestError: any) {
+      console.error('❌ Request error creating manual match:', requestError);
+      throw requestError?.message?.includes('timed out')
+        ? requestError
+        : new Error('Network request failed');
     }
 
     if (error) {
