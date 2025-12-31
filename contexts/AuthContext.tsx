@@ -83,6 +83,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userName, setUserNameState] = useState<string>('');
   const [profileImage, setProfileImageState] = useState<string | null>(null);
   const oauthInFlightRef = useRef(false);
+  const sessionPersistInFlightRef = useRef(false);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
@@ -193,6 +194,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.warn(`⚠️ [AUTH] ${label} session persist exception`, error);
       return session;
     }
+  };
+
+  const hydrateAuthSession = async (label: string) => {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+      }
+      if (data.session) {
+        setSession(data.session);
+        setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
+        return data.session;
+      }
+
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.error) {
+        console.warn(`⚠️ [AUTH] ${label} refreshSession error`, refreshed.error);
+        return null;
+      }
+
+      if (refreshed.data.session) {
+        setSession(refreshed.data.session);
+        setUser(isPasswordRecoveryRef.current ? null : refreshed.data.session.user ?? null);
+        return refreshed.data.session;
+      }
+    } catch (error) {
+      console.warn(`⚠️ [AUTH] ${label} hydration exception`, error);
+    }
+    return null;
   };
 
   const startOAuthFlow = async (provider: 'google') => {
@@ -629,6 +659,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(isPasswordRecoveryRef.current ? null : session?.user ?? null);
         markBootComplete();
 
+        if (
+          !isPasswordRecoveryRef.current &&
+          session &&
+          (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+          !sessionPersistInFlightRef.current
+        ) {
+          sessionPersistInFlightRef.current = true;
+          try {
+            const persistedSession = await persistAuthSession(
+              session,
+              `auth_state_${event.toLowerCase()}`
+            );
+            setSession(persistedSession);
+            setUser(isPasswordRecoveryRef.current ? null : persistedSession.user ?? null);
+          } finally {
+            sessionPersistInFlightRef.current = false;
+          }
+        }
+
         if (isPasswordRecoveryRef.current) {
           return;
         }
@@ -765,6 +814,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setProfileImageState(null);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id || session?.access_token || isPasswordRecoveryRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const attemptHydration = async () => {
+      const hydrated = await hydrateAuthSession('post_sign_in');
+      if (!hydrated && !cancelled) {
+        console.warn('⚠️ [AUTH] Session still missing after hydration attempt');
+      }
+    };
+
+    attemptHydration();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, session?.access_token]);
 
   // Sign in function
   const signIn = async (email: string, password: string) => {

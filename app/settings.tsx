@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { accountService } from '@/lib/database';
 import { analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
+import type { Session } from '@supabase/supabase-js';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -22,7 +23,7 @@ try {
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user, signOut } = useAuth();
+  const { user, signOut, session } = useAuth();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<{
     updateId: string | null;
@@ -68,11 +69,18 @@ export default function SettingsScreen() {
   );
 
   // Load token information
-  const loadTokenInfo = async () => {
+  const loadTokenInfo = async (sessionOverride?: Session | null) => {
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      let activeSession = sessionOverride ?? null;
+      if (!activeSession) {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error loading token info:', error);
+        }
+        activeSession = session;
+      }
       
-      if (error || !session) {
+      if (!activeSession) {
         setTokenInfo({
           hasAccessToken: false,
           hasRefreshToken: false,
@@ -84,15 +92,15 @@ export default function SettingsScreen() {
         return;
       }
 
-      const expiresAt = session.expires_at ? new Date(session.expires_at * 1000) : null;
+      const expiresAt = activeSession.expires_at ? new Date(activeSession.expires_at * 1000) : null;
       const now = new Date();
       const minutesUntilExpiry = expiresAt 
         ? Math.floor((expiresAt.getTime() - now.getTime()) / 1000 / 60)
         : null;
 
       setTokenInfo({
-        hasAccessToken: !!session.access_token,
-        hasRefreshToken: !!session.refresh_token,
+        hasAccessToken: !!activeSession.access_token,
+        hasRefreshToken: !!activeSession.refresh_token,
         accessTokenExpiresAt: expiresAt ? expiresAt.toISOString() : null,
         minutesUntilExpiry,
         willAutoRefresh: minutesUntilExpiry !== null && minutesUntilExpiry < 60,
@@ -102,6 +110,12 @@ export default function SettingsScreen() {
       console.error('Error loading token info:', error);
     }
   };
+
+  useEffect(() => {
+    if (session) {
+      loadTokenInfo(session);
+    }
+  }, [session?.access_token, session?.refresh_token]);
 
   // Listen for token refresh events
   useEffect(() => {
