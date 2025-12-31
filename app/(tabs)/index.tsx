@@ -62,10 +62,10 @@ export default function HomeScreen() {
     effectiveUserName.length > 0 && !isPlaceholderName(effectiveUserName, user?.email);
   const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
   const [userNameWaitTimedOut, setUserNameWaitTimedOut] = useState(false);
-  const shouldHoldForProfileCheck = !!user && !loading && profileNameStatus === 'unknown';
+  const shouldHoldForProfileCheck = !!user && authReady && profileNameStatus === 'unknown';
   const shouldHoldForUserName =
     !!user &&
-    !loading &&
+    authReady &&
     profileNameStatus === 'present' &&
     !isUserNameReady &&
     !userNameWaitTimedOut;
@@ -181,7 +181,7 @@ export default function HomeScreen() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (!user?.id || loading || isPasswordRecovery) return;
+    if (!user?.id || !authReady || isPasswordRecovery) return;
 
     let cancelled = false;
     const key = profileCompletedStorageKey(user.id);
@@ -202,20 +202,20 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, loading, isPasswordRecovery]);
+  }, [user?.id, authReady, isPasswordRecovery]);
 
   useEffect(() => {
-    if (!user || loading || isPasswordRecovery) return;
+    if (!user || !authReady || isPasswordRecovery) return;
     if (!isUserNameReady) return;
     if (profileNameStatus === 'present') return;
 
     profilePromptSuppressedRef.current = true;
     setProfileNameStatus('present');
     setShowCompleteProfilePrompt(false);
-  }, [user?.id, loading, isPasswordRecovery, isUserNameReady, profileNameStatus]);
+  }, [user?.id, authReady, isPasswordRecovery, isUserNameReady, profileNameStatus]);
 
   useEffect(() => {
-    if (!user || loading || isPasswordRecovery || profileNameStatus !== 'unknown') {
+    if (!user || !authReady || isPasswordRecovery || profileNameStatus !== 'unknown') {
       return;
     }
     if (profilePromptSuppressedRef.current) {
@@ -229,10 +229,10 @@ export default function HomeScreen() {
     }, PROFILE_CHECK_TIMEOUT_MS);
 
     return () => clearTimeout(timeoutId);
-  }, [user?.id, loading, isPasswordRecovery, profileNameStatus]);
+  }, [user?.id, authReady, isPasswordRecovery, profileNameStatus]);
 
   useEffect(() => {
-    if (!user || loading || profileNameStatus !== 'present') {
+    if (!user || !authReady || profileNameStatus !== 'present') {
       if (userNameWaitTimedOut) {
         setUserNameWaitTimedOut(false);
       }
@@ -252,10 +252,10 @@ export default function HomeScreen() {
     }, USER_NAME_WAIT_TIMEOUT_MS);
 
     return () => clearTimeout(timeoutId);
-  }, [user?.id, loading, profileNameStatus, isUserNameReady, userNameWaitTimedOut]);
+  }, [user?.id, authReady, profileNameStatus, isUserNameReady, userNameWaitTimedOut]);
 
   useEffect(() => {
-    if (!user || loading || isPasswordRecovery) return;
+    if (!user || !authReady || isPasswordRecovery) return;
     if (profilePromptShownRef.current) return;
     if (profilePromptSuppressedRef.current) return;
 
@@ -264,10 +264,20 @@ export default function HomeScreen() {
 
     const resolveProfileName = async () => {
       const fetchNameState = async () => {
-        const existingUser = await userService.getUserById(user.id);
-        const dbName = existingUser?.name?.trim() || '';
         const metadataName = getAuthMetadataName(user)?.trim() || '';
         const localName = (userNameRef.current || '').trim();
+        const localCandidate = localName || metadataName;
+        if (localCandidate && !isPlaceholderName(localCandidate, user.email)) {
+          return {
+            existingUser: null,
+            dbName: '',
+            metadataName,
+            localName,
+            candidateName: localCandidate,
+          };
+        }
+        const existingUser = await userService.getUserById(user.id);
+        const dbName = existingUser?.name?.trim() || '';
         const candidateName = dbName || localName || metadataName;
         return { existingUser, dbName, metadataName, localName, candidateName };
       };
@@ -320,7 +330,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email, loading, isPasswordRecovery]);
+  }, [user?.id, user?.email, authReady, isPasswordRecovery]);
 
   useEffect(() => {
     if (!user || loading) return;
