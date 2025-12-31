@@ -17,7 +17,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   onDataUpdate,
 }) => {
   const { width, height } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   
   // State for current week progress
   const [current, setCurrent] = useState(0);
@@ -44,6 +44,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   // Counter state for animated text
   const [counterText, setCounterText] = useState('1');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSavingTarget, setIsSavingTarget] = useState(false);
   const [lastWeekChecked, setLastWeekChecked] = useState<string>('');
   const [showCelebration, setShowCelebration] = useState(false);
   const [previousProgress, setPreviousProgress] = useState(0);
@@ -412,31 +413,44 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
 
   // Handle save target
   const handleSaveTarget = async () => {
-    if (!user?.id) {
-      console.error('❌ No user ID available');
-      return;
-    }
-    
-    // Validation
-    if (sessionCount < 1) {
-      console.error('❌ Session count must be at least 1');
-      return;
-    }
-    
-    if (sessionCount > 20) {
-      console.error('❌ Session count cannot exceed 20');
-      return;
-    }
-    
-    if (!selectedActivity || selectedActivity.trim() === '') {
-      console.error('❌ Activity type is required');
-      return;
-    }
-    
-    const selectedWeekData = weekOptions[selectedWeek];
-    
-    // Check if a target already exists for this specific week and activity type
+    if (isSavingTarget) return;
+    setIsSavingTarget(true);
+
     try {
+      if (!user?.id) {
+        console.error('❌ No user ID available');
+        Alert.alert('Not signed in', 'Please sign in and try again.');
+        return;
+      }
+
+      if (!session?.access_token) {
+        console.warn('⚠️ Session not ready when saving target');
+        Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
+        return;
+      }
+      
+      // Validation
+      if (sessionCount < 1) {
+        console.error('❌ Session count must be at least 1');
+        Alert.alert('Invalid target', 'Session count must be at least 1.');
+        return;
+      }
+      
+      if (sessionCount > 20) {
+        console.error('❌ Session count cannot exceed 20');
+        Alert.alert('Invalid target', 'Session count cannot exceed 20.');
+        return;
+      }
+      
+      if (!selectedActivity || selectedActivity.trim() === '') {
+        console.error('❌ Activity type is required');
+        Alert.alert('Missing activity', 'Please choose an activity type.');
+        return;
+      }
+      
+      const selectedWeekData = weekOptions[selectedWeek];
+      
+      // Check if a target already exists for this specific week and activity type
       console.log('🔍 Checking for existing target:', {
         userId: user.id,
         activity: selectedActivity,
@@ -467,20 +481,14 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       } else {
         console.log('✅ No existing target found for this week, proceeding with save');
       }
-    } catch (error) {
-      console.error('❌ Error checking for existing targets:', error);
-      // Continue with saving if we can't check (better to allow than block)
-    }
-    
-    console.log('💾 Saving target:', {
-      userId: user.id,
-      activity: selectedActivity,
-      weekStart: selectedWeekData.startDate,
-      weekEnd: selectedWeekData.endDate,
-      targetSessions: sessionCount
-    });
-    
-    try {
+      console.log('💾 Saving target:', {
+        userId: user.id,
+        activity: selectedActivity,
+        weekStart: selectedWeekData.startDate,
+        weekEnd: selectedWeekData.endDate,
+        targetSessions: sessionCount
+      });
+      
       const result = await weeklyTargetService.setWeeklyTarget(
         user.id,
         selectedActivity,
@@ -509,33 +517,52 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         onDataUpdate?.();
       } else {
         console.error('❌ Failed to save target - no result returned');
-        // You could add a toast or alert here
+        Alert.alert('Save failed', 'We could not save your target. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error saving target:', error);
-      // You could add a toast or alert here
+      Alert.alert('Save failed', 'We could not save your target. Please try again.');
+    } finally {
+      setIsSavingTarget(false);
     }
   };
 
   // Handle clear target
   const handleClearTarget = async () => {
-    if (!user?.id) return;
+    if (isSavingTarget) return;
+    setIsSavingTarget(true);
+
+    try {
+      if (!user?.id) {
+        Alert.alert('Not signed in', 'Please sign in and try again.');
+        return;
+      }
+
+      if (!session?.access_token) {
+        Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
+        return;
+      }
     
-    const selectedWeekData = weekOptions[selectedWeek];
-    // Set target to 0 (or you could delete it)
-    const result = await weeklyTargetService.setWeeklyTarget(
-      user.id,
-      selectedActivity,
-      selectedWeekData.startDate,
-      selectedWeekData.endDate,
-      0
-    );
-    
-    if (result) {
-      await fetchProgress();
-      setModalSaved(true);
-      closeModalWithTracking(true, 0); // Clearing target
-      onDataUpdate?.();
+      const selectedWeekData = weekOptions[selectedWeek];
+      // Set target to 0 (or you could delete it)
+      const result = await weeklyTargetService.setWeeklyTarget(
+        user.id,
+        selectedActivity,
+        selectedWeekData.startDate,
+        selectedWeekData.endDate,
+        0
+      );
+      
+      if (result) {
+        await fetchProgress();
+        setModalSaved(true);
+        closeModalWithTracking(true, 0); // Clearing target
+        onDataUpdate?.();
+      } else {
+        Alert.alert('Save failed', 'We could not clear your target. Please try again.');
+      }
+    } finally {
+      setIsSavingTarget(false);
     }
   };
 
@@ -2036,15 +2063,19 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
 
             {/* Action Buttons */}
             <TouchableOpacity 
-              style={styles.saveButton}
+              style={[styles.saveButton, isSavingTarget && { opacity: 0.6 }]}
               onPress={handleSaveTarget}
+              disabled={isSavingTarget}
             >
-              <Text style={styles.saveButtonText}>Save Target</Text>
+              <Text style={styles.saveButtonText}>
+                {isSavingTarget ? 'Saving...' : 'Save Target'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
-              style={styles.clearButton}
+              style={[styles.clearButton, isSavingTarget && { opacity: 0.6 }]}
               onPress={handleClearTarget}
+              disabled={isSavingTarget}
             >
               <Text style={styles.clearButtonText}>Clear Target</Text>
             </TouchableOpacity>
@@ -2179,10 +2210,13 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
 
             {/* Action Buttons */}
             <TouchableOpacity 
-              style={styles.saveButton}
+              style={[styles.saveButton, isSavingTarget && { opacity: 0.6 }]}
               onPress={handleSaveTarget}
+              disabled={isSavingTarget}
             >
-              <Text style={styles.saveButtonText}>Save Changes</Text>
+              <Text style={styles.saveButtonText}>
+                {isSavingTarget ? 'Saving...' : 'Save Changes'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity 

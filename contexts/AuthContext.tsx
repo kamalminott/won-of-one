@@ -170,6 +170,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+  const persistAuthSession = async (session: Session, label: string) => {
+    if (!session?.access_token || !session?.refresh_token) {
+      console.warn(`⚠️ [AUTH] ${label} session missing tokens`, {
+        hasAccessToken: !!session?.access_token,
+        hasRefreshToken: !!session?.refresh_token,
+      });
+      return session;
+    }
+
+    try {
+      const { data, error } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+      if (error) {
+        console.warn(`⚠️ [AUTH] ${label} failed to persist session`, error);
+        return session;
+      }
+      return data.session ?? session;
+    } catch (error) {
+      console.warn(`⚠️ [AUTH] ${label} session persist exception`, error);
+      return session;
+    }
+  };
+
   const startOAuthFlow = async (provider: 'google') => {
     if (oauthInFlightRef.current) {
       return { error: { message: 'OAuth already in progress' } };
@@ -269,8 +294,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       if (exchangeData?.session) {
-        setSession(exchangeData.session);
-        setUser(exchangeData.session.user ?? null);
+        const persistedSession = await persistAuthSession(exchangeData.session, 'oauth');
+        setSession(persistedSession);
+        setUser(persistedSession.user ?? null);
         setLoading(false);
       }
 
@@ -954,6 +980,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Apple sign in successful, user ID:', data.user?.id);
+      if (data.session) {
+        const persistedSession = await persistAuthSession(data.session, 'apple');
+        setSession(persistedSession);
+        setUser(persistedSession.user ?? null);
+      }
       if (data.user) {
         await updateAppleMetadata(credential, data.user);
       }
@@ -1075,6 +1106,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Apple sign up successful, user ID:', data.user?.id);
+      if (data.session) {
+        const persistedSession = await persistAuthSession(data.session, 'apple_sign_up');
+        setSession(persistedSession);
+        setUser(persistedSession.user ?? null);
+      }
       if (data.user) {
         await updateAppleMetadata(credential, data.user);
       }

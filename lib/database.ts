@@ -4,7 +4,7 @@ import {
     MatchApproval, MatchEvent,
     SimpleGoal, SimpleMatch
 } from '@/types/database';
-import type { PostgrestSingleResponse } from '@supabase/supabase-js';
+import type { PostgrestSingleResponse, Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 // Re-export supabase for use in other services
@@ -134,6 +134,31 @@ const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number, label: strin
       clearTimeout(timeoutId);
     }
   }
+};
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const ensureAuthSession = async (label: string): Promise<Session | null> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+    }
+    if (data.session?.access_token) {
+      return data.session;
+    }
+    if (attempt < 2) {
+      await delay(250);
+    }
+  }
+
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error) {
+    console.warn(`⚠️ [AUTH] ${label} refreshSession error`, error);
+    return null;
+  }
+
+  return data.session ?? null;
 };
 
 // User-related helpers
@@ -973,6 +998,12 @@ export const matchService = {
     // Validate required fields
     if (!userId) {
       console.error('❌ Error: userId is required');
+      return null;
+    }
+
+    const authSession = await ensureAuthSession('createManualMatch');
+    if (!authSession?.access_token) {
+      console.warn('⚠️ createManualMatch blocked - auth session not ready', { userId });
       return null;
     }
 
@@ -3313,6 +3344,11 @@ export const weeklyTargetService = {
     targetSessions: number
   ): Promise<WeeklyTarget | null> {
     try {
+      const authSession = await ensureAuthSession('setWeeklyTarget');
+      if (!authSession?.access_token) {
+        console.warn('⚠️ setWeeklyTarget blocked - auth session not ready', { userId });
+        return null;
+      }
       await userService.ensureUserById(userId);
       const weekStart = weekStartDate.toISOString().split('T')[0];
       const weekEnd = weekEndDate.toISOString().split('T')[0];
@@ -3639,6 +3675,11 @@ export const weeklySessionLogService = {
     notes?: string
   ): Promise<WeeklySessionLog | null> {
     try {
+      const authSession = await ensureAuthSession('logSession');
+      if (!authSession?.access_token) {
+        console.warn('⚠️ logSession blocked - auth session not ready', { userId });
+        return null;
+      }
       await userService.ensureUserById(userId);
       const { data, error } = await supabase
         .from('weekly_session_log')
