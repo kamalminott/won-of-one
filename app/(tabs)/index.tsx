@@ -215,23 +215,6 @@ export default function HomeScreen() {
   }, [user?.id, authReady, isPasswordRecovery, isUserNameReady, profileNameStatus]);
 
   useEffect(() => {
-    if (!user || !authReady || isPasswordRecovery || profileNameStatus !== 'unknown') {
-      return;
-    }
-    if (profilePromptSuppressedRef.current) {
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      console.warn('Profile name check timed out. Allowing access and showing prompt.');
-      setProfileNameStatus('missing');
-      setShowCompleteProfilePrompt(true);
-    }, PROFILE_CHECK_TIMEOUT_MS);
-
-    return () => clearTimeout(timeoutId);
-  }, [user?.id, authReady, isPasswordRecovery, profileNameStatus]);
-
-  useEffect(() => {
     if (!user || !authReady || profileNameStatus !== 'present') {
       if (userNameWaitTimedOut) {
         setUserNameWaitTimedOut(false);
@@ -263,43 +246,17 @@ export default function HomeScreen() {
     profilePromptShownRef.current = true;
 
     const resolveProfileName = async () => {
-      const fetchNameState = async () => {
+      const getLocalCandidate = () => {
         const metadataName = getAuthMetadataName(user)?.trim() || '';
         const localName = (userNameRef.current || '').trim();
-        const localCandidate = localName || metadataName;
-        if (localCandidate && !isPlaceholderName(localCandidate, user.email)) {
-          return {
-            existingUser: null,
-            dbName: '',
-            metadataName,
-            localName,
-            candidateName: localCandidate,
-          };
-        }
-        const existingUser = await userService.getUserById(user.id);
-        const dbName = existingUser?.name?.trim() || '';
-        const candidateName = dbName || localName || metadataName;
-        return { existingUser, dbName, metadataName, localName, candidateName };
+        return { metadataName, localName, candidate: localName || metadataName };
       };
 
-      const decideStatus = async () => {
-        try {
-        const { existingUser, dbName, candidateName } = await fetchNameState();
-        if (cancelled) return null;
+      const isCandidateValid = (candidate: string) =>
+        !!candidate && !isPlaceholderName(candidate, user.email);
 
-        const isMissingName = isPlaceholderName(candidateName, user.email);
-
-        return { isMissingName };
-      } catch (error) {
-          console.warn('Failed to check profile name:', error);
-          return { isMissingName: true };
-        }
-      };
-
-      let status = await decideStatus();
-      if (!status || cancelled) return;
-
-      if (!status.isMissingName) {
+      let { candidate } = getLocalCandidate();
+      if (isCandidateValid(candidate)) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
         return;
@@ -308,10 +265,33 @@ export default function HomeScreen() {
       await new Promise(resolve => setTimeout(resolve, PROFILE_NAME_SETTLE_DELAY_MS));
       if (cancelled) return;
 
-      status = await decideStatus();
-      if (!status || cancelled) return;
+      ({ candidate } = getLocalCandidate());
+      if (isCandidateValid(candidate)) {
+        setProfileNameStatus('present');
+        setShowCompleteProfilePrompt(false);
+        return;
+      }
 
-      if (!status.isMissingName) {
+      let dbName = '';
+      try {
+        const dbLookup = userService.getUserById(user.id).then(existingUser =>
+          existingUser?.name?.trim() || ''
+        );
+        const timeout = new Promise<null>(resolve =>
+          setTimeout(() => resolve(null), PROFILE_CHECK_TIMEOUT_MS)
+        );
+        const result = await Promise.race([dbLookup, timeout]);
+        if (result === null) {
+          analytics.capture('profile_name_check_timeout', { user_id: user.id });
+        } else {
+          dbName = result;
+        }
+      } catch (error) {
+        console.warn('Failed to check profile name:', error);
+      }
+
+      const finalCandidate = dbName || candidate;
+      if (isCandidateValid(finalCandidate)) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
         return;
