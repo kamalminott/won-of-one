@@ -111,6 +111,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const buildAuthTelemetry = (session?: Session | null) => ({
+    has_session: !!session,
+    has_access_token: !!session?.access_token,
+    access_token_len: session?.access_token?.length ?? 0,
+    has_refresh_token: !!session?.refresh_token,
+    refresh_token_len: session?.refresh_token?.length ?? 0,
+    expires_at: session?.expires_at ?? null,
+    provider: session?.user?.app_metadata?.provider ?? null,
+    user_id_present: !!session?.user?.id,
+  });
+
+  const logAuthHydrationStep = async (
+    step: string,
+    session?: Session | null,
+    extra: Record<string, any> = {}
+  ) => {
+    try {
+      const { analytics } = await import('@/lib/analytics');
+      analytics.capture('auth_hydration_step', {
+        step,
+        ...buildAuthTelemetry(session),
+        ...extra,
+      });
+    } catch (error) {
+      console.warn(`⚠️ [AUTH] hydration log failed: ${step}`, error);
+    }
+  };
+
   const getMetadataName = (authUser?: User | null) => {
     if (!authUser) return '';
     const metadata = authUser.user_metadata || {};
@@ -177,6 +205,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         hasAccessToken: !!session?.access_token,
         hasRefreshToken: !!session?.refresh_token,
       });
+      await logAuthHydrationStep('persist_skipped_missing_tokens', session, { label });
       return session;
     }
 
@@ -187,11 +216,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       if (error) {
         console.warn(`⚠️ [AUTH] ${label} failed to persist session`, error);
+        await logAuthHydrationStep('persist_error', session, {
+          label,
+          error: error.message || 'unknown_error',
+        });
         return session;
       }
+      await logAuthHydrationStep('persist_success', data.session ?? session, { label });
       return data.session ?? session;
     } catch (error) {
       console.warn(`⚠️ [AUTH] ${label} session persist exception`, error);
+      await logAuthHydrationStep('persist_exception', session, { label });
       return session;
     }
   };
@@ -201,27 +236,75 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const { data, error } = await supabase.auth.getSession();
       if (error) {
         console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+        await logAuthHydrationStep('hydrate_get_session_error', null, {
+          label,
+          error: error.message || 'unknown_error',
+        });
       }
       if (data.session) {
         setSession(data.session);
         setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
+        await logAuthHydrationStep('hydrate_get_session_found', data.session, { label });
         return data.session;
       }
 
       const refreshed = await supabase.auth.refreshSession();
       if (refreshed.error) {
         console.warn(`⚠️ [AUTH] ${label} refreshSession error`, refreshed.error);
+        await logAuthHydrationStep('hydrate_refresh_error', null, {
+          label,
+          error: refreshed.error.message || 'unknown_error',
+        });
         return null;
       }
 
       if (refreshed.data.session) {
         setSession(refreshed.data.session);
         setUser(isPasswordRecoveryRef.current ? null : refreshed.data.session.user ?? null);
+        await logAuthHydrationStep('hydrate_refresh_found', refreshed.data.session, { label });
         return refreshed.data.session;
       }
     } catch (error) {
       console.warn(`⚠️ [AUTH] ${label} hydration exception`, error);
+      await logAuthHydrationStep('hydrate_exception', null, { label });
     }
+    return null;
+  };
+
+  const syncSessionFromSupabase = async (label: string) => {
+    await logAuthHydrationStep('sync_start', null, { label });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+          await logAuthHydrationStep('sync_get_session_error', null, {
+            label,
+            attempt,
+            error: error.message || 'unknown_error',
+          });
+        }
+        if (data.session?.access_token) {
+          setSession(data.session);
+          setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
+          await logAuthHydrationStep('sync_success', data.session, { label, attempt });
+          return data.session;
+        }
+      } catch (error) {
+        console.warn(`⚠️ [AUTH] ${label} getSession exception`, error);
+        await logAuthHydrationStep('sync_get_session_exception', null, {
+          label,
+          attempt,
+        });
+      }
+
+      if (attempt < 2) {
+        await wait(250);
+      }
+    }
+
+    console.warn(`⚠️ [AUTH] ${label} unable to sync session tokens`);
+    await logAuthHydrationStep('sync_failed', null, { label });
     return null;
   };
 
@@ -231,6 +314,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     oauthInFlightRef.current = true;
+    await logAuthHydrationStep('oauth_start', null, { provider });
 
     const redirectUrl = AuthSession.makeRedirectUri({
       scheme: 'wonofone',
@@ -248,10 +332,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
 
       if (error) {
+        await logAuthHydrationStep('oauth_url_error', null, {
+          provider,
+          error: error.message || 'unknown_error',
+        });
         return { error };
       }
 
       if (!data?.url) {
+        await logAuthHydrationStep('oauth_url_missing', null, { provider });
         return { error: { message: 'No OAuth URL returned' } };
       }
 
@@ -272,6 +361,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
 
       if (result.type !== 'success' || !result.url) {
+        await logAuthHydrationStep('oauth_cancelled', null, { provider, result_type: result.type });
         return { error: { message: 'OAuth flow was cancelled' } };
       }
 
@@ -310,23 +400,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       if (authError) {
+        await logAuthHydrationStep('oauth_error', null, { provider, error: authError });
         return { error: { message: params.error_description || authError } };
       }
 
       if (!code) {
+        await logAuthHydrationStep('oauth_code_missing', null, { provider });
         return { error: { message: 'No OAuth code returned' } };
       }
+
+      await logAuthHydrationStep('oauth_code_received', null, {
+        provider,
+        code_length: code.length,
+        has_state: !!state,
+      });
 
       await logOAuthCodeVerifier('before exchangeCodeForSession');
       const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
       if (exchangeError) {
+        await logAuthHydrationStep('oauth_exchange_error', null, {
+          provider,
+          error: exchangeError.message || 'unknown_error',
+        });
         return { error: exchangeError };
       }
 
       if (exchangeData?.session) {
+        await logAuthHydrationStep('oauth_exchange_success', exchangeData.session, { provider });
         const persistedSession = await persistAuthSession(exchangeData.session, 'oauth');
         setSession(persistedSession);
         setUser(persistedSession.user ?? null);
+        await syncSessionFromSupabase('oauth_post_exchange');
         setLoading(false);
       }
 
@@ -530,11 +634,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           const storedSession = await AsyncStorage.getItem(getSupabaseStorageKey());
           if (storedSession) {
             console.log('✅ [AUTH] AsyncStorage session found:', storedSession.substring(0, 50) + '...');
+            await logAuthHydrationStep('boot_storage_checked', null, {
+              storage_has_session: true,
+              storage_len: storedSession.length,
+            });
           } else {
             console.log('⚠️ [AUTH] AsyncStorage session NOT found - user will need to login');
+            await logAuthHydrationStep('boot_storage_checked', null, {
+              storage_has_session: false,
+              storage_len: 0,
+            });
           }
         } catch (error) {
           console.log('❌ [AUTH] AsyncStorage error:', error);
+          await logAuthHydrationStep('boot_storage_error', null, { error: (error as any)?.message || 'unknown_error' });
         }
         
         // Get session from Supabase (this will auto-refresh if needed)
@@ -544,6 +657,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (error) {
           console.error('❌ [AUTH] Error getting session from Supabase:', error);
           console.error('❌ [AUTH] Error details:', JSON.stringify(error, null, 2));
+          await logAuthHydrationStep('boot_get_session_error', null, {
+            error: error.message || 'unknown_error',
+          });
           // If session retrieval fails, clear any stale data
           setSession(null);
           setUser(null);
@@ -553,6 +669,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (!session) {
           console.log('⚠️ [AUTH] No session found - user needs to login');
+          await logAuthHydrationStep('boot_no_session');
           setSession(null);
           setUser(null);
           markBootComplete();
@@ -565,6 +682,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'N/A',
           refreshToken: session?.refresh_token ? 'Present' : 'Missing'
         });
+        await logAuthHydrationStep('boot_session_found', session);
         
         // Check if session is expired
         if (session && session.expires_at) {
@@ -602,6 +720,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth state change:', event, session?.user?.id || 'no user');
+        await logAuthHydrationStep('auth_state_change', session, { event });
         
         if (event === 'PASSWORD_RECOVERY') {
           console.log('🔐 Password recovery event detected - limiting access until reset completes');
@@ -1016,6 +1135,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('🍎 Starting Apple sign in...');
+      await logAuthHydrationStep('apple_sign_in_start', null, { provider: 'apple' });
       
       // Check if Apple Authentication is available
       const isAvailable = await AppleAuthentication.isAvailableAsync();
@@ -1036,6 +1156,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         hasEmail: !!credential.email,
         hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
       });
+      await logAuthHydrationStep('apple_credential_received', null, {
+        provider: 'apple',
+        has_email: !!credential.email,
+        has_full_name: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+      });
 
       // Sign in with Supabase using the Apple credential
       const { data, error } = await supabase.auth.signInWithIdToken({
@@ -1045,14 +1170,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (error) {
         console.error('❌ Apple sign in error:', error);
+        await logAuthHydrationStep('apple_sign_in_error', null, {
+          provider: 'apple',
+          error: error.message || 'unknown_error',
+        });
         return { error };
       }
 
       console.log('✅ Apple sign in successful, user ID:', data.user?.id);
       if (data.session) {
+        await logAuthHydrationStep('apple_session_received', data.session, { provider: 'apple' });
         const persistedSession = await persistAuthSession(data.session, 'apple');
         setSession(persistedSession);
         setUser(persistedSession.user ?? null);
+        await syncSessionFromSupabase('apple_post_sign_in');
       }
       if (data.user) {
         await updateAppleMetadata(credential, data.user);
@@ -1142,6 +1273,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('🍎 Starting Apple sign up...');
+      await logAuthHydrationStep('apple_sign_up_start', null, { provider: 'apple' });
       
       // Check if Apple Authentication is available
       const isAvailable = await AppleAuthentication.isAvailableAsync();
@@ -1162,6 +1294,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         hasEmail: !!credential.email,
         hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
       });
+      await logAuthHydrationStep('apple_sign_up_credential_received', null, {
+        provider: 'apple',
+        has_email: !!credential.email,
+        has_full_name: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+      });
 
       // Sign in with Supabase using the Apple credential
       const { data, error } = await supabase.auth.signInWithIdToken({
@@ -1171,14 +1308,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (error) {
         console.error('❌ Apple sign up error:', error);
+        await logAuthHydrationStep('apple_sign_up_error', null, {
+          provider: 'apple',
+          error: error.message || 'unknown_error',
+        });
         return { error };
       }
 
       console.log('✅ Apple sign up successful, user ID:', data.user?.id);
       if (data.session) {
+        await logAuthHydrationStep('apple_sign_up_session_received', data.session, { provider: 'apple' });
         const persistedSession = await persistAuthSession(data.session, 'apple_sign_up');
         setSession(persistedSession);
         setUser(persistedSession.user ?? null);
+        await syncSessionFromSupabase('apple_post_sign_up');
       }
       if (data.user) {
         await updateAppleMetadata(credential, data.user);

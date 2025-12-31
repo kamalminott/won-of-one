@@ -140,25 +140,46 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ensureAuthSession = async (label: string): Promise<Session | null> => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { data, error } = await supabase.auth.getSession();
-    if (error) {
-      console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.auth.getSession(),
+        4000,
+        `auth.getSession:${label}`
+      );
+      if (error) {
+        console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+      }
+      if (data.session?.access_token) {
+        return data.session;
+      }
+      if (!data.session?.refresh_token) {
+        console.warn(`⚠️ [AUTH] ${label} session missing refresh token`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ [AUTH] ${label} getSession timeout`, error);
     }
-    if (data.session?.access_token) {
-      return data.session;
-    }
+
     if (attempt < 2) {
       await delay(250);
     }
   }
 
-  const { data, error } = await supabase.auth.refreshSession();
-  if (error) {
-    console.warn(`⚠️ [AUTH] ${label} refreshSession error`, error);
+  try {
+    const { data, error } = await withTimeout(
+      supabase.auth.refreshSession(),
+      8000,
+      `auth.refreshSession:${label}`
+    );
+    if (error) {
+      console.warn(`⚠️ [AUTH] ${label} refreshSession error`, error);
+      return null;
+    }
+
+    return data.session ?? null;
+  } catch (error) {
+    console.warn(`⚠️ [AUTH] ${label} refreshSession timeout`, error);
     return null;
   }
-
-  return data.session ?? null;
 };
 
 // User-related helpers
@@ -3353,14 +3374,27 @@ export const weeklyTargetService = {
       const weekStart = weekStartDate.toISOString().split('T')[0];
       const weekEnd = weekEndDate.toISOString().split('T')[0];
 
-      const { data: existing, error: existingError } = await supabase
-        .from('weekly_target')
-        .select('target_id')
-        .eq('user_id', userId)
-        .eq('activity_type', activityType)
-        .eq('week_start_date', weekStart)
-        .order('updated_at', { ascending: false })
-        .limit(1);
+      let existing: { target_id: string }[] | null = null;
+      let existingError: any = null;
+      try {
+        const existingResult = await withTimeout<PostgrestSingleResponse<{ target_id: string }[]>>(
+          supabase
+            .from('weekly_target')
+            .select('target_id')
+            .eq('user_id', userId)
+            .eq('activity_type', activityType)
+            .eq('week_start_date', weekStart)
+            .order('updated_at', { ascending: false })
+            .limit(1),
+          8000,
+          'Weekly target lookup'
+        );
+        existing = existingResult.data;
+        existingError = existingResult.error;
+      } catch (requestError) {
+        console.error('Error checking existing weekly target (request):', requestError);
+        return null;
+      }
 
       if (existingError) {
         console.error('Error checking existing weekly target:', existingError);
@@ -3376,35 +3410,66 @@ export const weeklyTargetService = {
       };
 
       const existingTarget = existing?.[0];
-      const { data, error } = existingTarget?.target_id
-        ? await supabase
-            .from('weekly_target')
-            .update(payload)
-            .eq('target_id', existingTarget.target_id)
-            .select()
-            .single()
-        : await supabase
-            .from('weekly_target')
-            .insert(payload)
-            .select()
-            .single();
+      let data: WeeklyTarget | null = null;
+      let error: any = null;
+      try {
+        const result = existingTarget?.target_id
+          ? await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
+              supabase
+                .from('weekly_target')
+                .update(payload)
+                .eq('target_id', existingTarget.target_id)
+                .select()
+                .single(),
+              8000,
+              'Weekly target update'
+            )
+          : await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
+              supabase
+                .from('weekly_target')
+                .insert(payload)
+                .select()
+                .single(),
+              8000,
+              'Weekly target insert'
+            );
+        data = result.data;
+        error = result.error;
+      } catch (requestError) {
+        console.error('Error setting weekly target (request):', requestError);
+        return null;
+      }
 
       if (error) {
         if ((error as any)?.code === '23503') {
           console.warn('⚠️ Weekly target insert failed due to missing user record; retrying once');
           await userService.ensureUserById(userId);
-          const retry = existingTarget?.target_id
-            ? await supabase
-                .from('weekly_target')
-                .update(payload)
-                .eq('target_id', existingTarget.target_id)
-                .select()
-                .single()
-            : await supabase
-                .from('weekly_target')
-                .insert(payload)
-                .select()
-                .single();
+          let retry: PostgrestSingleResponse<WeeklyTarget>;
+          try {
+            retry = existingTarget?.target_id
+              ? await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
+                  supabase
+                    .from('weekly_target')
+                    .update(payload)
+                    .eq('target_id', existingTarget.target_id)
+                    .select()
+                    .single(),
+                  8000,
+                  'Weekly target retry update'
+                )
+              : await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
+                  supabase
+                    .from('weekly_target')
+                    .insert(payload)
+                    .select()
+                    .single(),
+                  8000,
+                  'Weekly target retry insert'
+                );
+          } catch (requestError) {
+            console.error('Error setting weekly target after retry (request):', requestError);
+            return null;
+          }
 
           if (retry.error) {
             console.error('Error setting weekly target after retry:', retry.error);
@@ -3432,16 +3497,34 @@ export const weeklyTargetService = {
     weekStartDate: Date
   ): Promise<WeeklyTarget | null> {
     try {
+      const authSession = await ensureAuthSession('getWeeklyTarget');
+      if (!authSession?.access_token) {
+        console.warn('⚠️ getWeeklyTarget blocked - auth session not ready', { userId });
+        return null;
+      }
       const dateString = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getDate()).padStart(2, '0')}`;
       
-      const { data, error } = await supabase
-        .from('weekly_target')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('activity_type', activityType)
-        .eq('week_start_date', dateString)
-        .order('updated_at', { ascending: false })
-        .limit(1);
+      let data: WeeklyTarget[] | null = null;
+      let error: any = null;
+      try {
+        const result = await withTimeout<PostgrestSingleResponse<WeeklyTarget[]>>(
+          supabase
+            .from('weekly_target')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('activity_type', activityType)
+            .eq('week_start_date', dateString)
+            .order('updated_at', { ascending: false })
+            .limit(1),
+          8000,
+          'Weekly target fetch'
+        );
+        data = result.data;
+        error = result.error;
+      } catch (requestError) {
+        console.error('Error getting weekly target (request):', requestError);
+        return null;
+      }
       
       console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
 
@@ -4144,26 +4227,8 @@ export const accountService = {
           console.error('❌ Error deleting match events:', eventsError);
           // Continue - some events might not have match_id
         }
-
-        // Also delete events by user_id (for events that might not have match_id yet)
-        const { error: eventsByUserIdError } = await supabase
-          .from('match_event')
-          .delete()
-          .eq('user_id', userId);
-        
-        if (eventsByUserIdError) {
-          console.error('❌ Error deleting match events by user_id:', eventsByUserIdError);
-        }
       } else {
-        // Delete events by user_id if no matches found
-        const { error: eventsByUserIdError } = await supabase
-          .from('match_event')
-          .delete()
-          .eq('user_id', userId);
-        
-        if (eventsByUserIdError) {
-          console.error('❌ Error deleting match events by user_id:', eventsByUserIdError);
-        }
+        // No matches found for user; nothing to delete in match_event
       }
 
       // 2. Delete match periods (by match_id)

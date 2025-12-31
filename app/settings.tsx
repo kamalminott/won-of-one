@@ -306,6 +306,9 @@ export default function SettingsScreen() {
                 return;
               }
 
+              // Sign out the user
+              await signOut();
+
               // Clear AsyncStorage
               try {
                 await AsyncStorage.clear();
@@ -314,9 +317,6 @@ export default function SettingsScreen() {
                 console.error('❌ Error clearing AsyncStorage:', storageError);
                 // Continue even if AsyncStorage clear fails
               }
-
-              // Sign out the user
-              await signOut();
 
               // Show success message and navigate to login
               Alert.alert(
