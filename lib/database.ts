@@ -6,6 +6,7 @@ import {
 } from '@/types/database';
 import type { PostgrestSingleResponse, Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { getCachedAuthSession, getLastAuthEvent } from './authSessionCache';
 
 // Re-export supabase for use in other services
 export { supabase };
@@ -139,11 +140,13 @@ const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number, label: strin
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const AUTH_SESSION_CACHE_MS = 2000;
+const AUTH_SESSION_TIMEOUT_COOLDOWN_MS = 15000;
 let authSessionCache: { session: Session | null; timestamp: number } = {
   session: null,
   timestamp: 0,
 };
 let authSessionInFlight: Promise<Session | null> | null = null;
+let authSessionTimeoutUntil = 0;
 
 const setAuthSessionCache = (session: Session | null) => {
   authSessionCache = { session, timestamp: Date.now() };
@@ -151,6 +154,20 @@ const setAuthSessionCache = (session: Session | null) => {
 
 const ensureAuthSession = async (label: string): Promise<Session | null> => {
   const now = Date.now();
+  const cachedSession = getCachedAuthSession();
+  if (cachedSession?.access_token) {
+    setAuthSessionCache(cachedSession);
+    return cachedSession;
+  }
+
+  if (getLastAuthEvent() === 'SIGNED_OUT') {
+    return null;
+  }
+
+  if (authSessionTimeoutUntil > now) {
+    return null;
+  }
+
   if (authSessionCache.session && now - authSessionCache.timestamp < AUTH_SESSION_CACHE_MS) {
     return authSessionCache.session;
   }
@@ -160,7 +177,7 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
   }
 
   authSessionInFlight = (async () => {
-    let sawRefreshToken = false;
+    let sawRefreshToken = !!cachedSession?.refresh_token;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const { data, error } = await withTimeout(
@@ -183,6 +200,7 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
         }
       } catch (error) {
         console.warn(`⚠️ [AUTH] ${label} getSession timeout`, error);
+        authSessionTimeoutUntil = Date.now() + AUTH_SESSION_TIMEOUT_COOLDOWN_MS;
       }
 
       if (attempt < 2) {
@@ -210,6 +228,7 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
       return data.session ?? null;
     } catch (error) {
       console.warn(`⚠️ [AUTH] ${label} refreshSession timeout`, error);
+      authSessionTimeoutUntil = Date.now() + AUTH_SESSION_TIMEOUT_COOLDOWN_MS;
       return null;
     }
   })();

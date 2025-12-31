@@ -1,10 +1,14 @@
 import { Colors } from '@/constants/Colors';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export const HomeSkeleton: React.FC = () => {
+type HomeSkeletonProps = {
+  message?: string;
+};
+
+export const HomeSkeleton: React.FC<HomeSkeletonProps> = ({ message }) => {
   const { width, height } = useWindowDimensions();
   const pulse = useRef(new Animated.Value(0.4)).current;
 
@@ -136,6 +140,30 @@ export const HomeSkeleton: React.FC = () => {
       height: height * 0.16,
       borderRadius: width * 0.05,
     },
+    overlay: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: '8%',
+    },
+    overlayPill: {
+      backgroundColor: 'rgba(33, 33, 33, 0.9)',
+      borderRadius: 999,
+      paddingHorizontal: width * 0.06,
+      paddingVertical: height * 0.008,
+      borderWidth: 1,
+      borderColor: '#3A3A3A',
+    },
+    overlayText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
   });
 
   return (
@@ -178,6 +206,13 @@ export const HomeSkeleton: React.FC = () => {
             <Animated.View style={[styles.block, styles.recentCard, animatedStyle]} />
           </View>
         </SafeAreaView>
+        {message ? (
+          <View style={styles.overlay}>
+            <View style={styles.overlayPill}>
+              <Text style={styles.overlayText}>{message}</Text>
+            </View>
+          </View>
+        ) : null}
       </View>
     </>
   );

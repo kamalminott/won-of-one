@@ -9,6 +9,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+import { setCachedAuthSession } from '@/lib/authSessionCache';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -17,6 +18,7 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  authReady: boolean;
   isPasswordRecovery: boolean;
   userName: string;
   setUserName: (name: string) => Promise<void>;
@@ -39,6 +41,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   loading: true,
+  authReady: false,
   isPasswordRecovery: false,
   userName: '',
   setUserName: async () => {},
@@ -74,6 +77,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const authReady = !loading && (!user || !!session?.access_token);
   const [isPasswordRecovery, setIsPasswordRecoveryState] = useState(false);
   const isPasswordRecoveryRef = useRef(false);
   const setIsPasswordRecovery = (value: boolean) => {
@@ -245,6 +249,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (data.session) {
         setSession(data.session);
         setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
+        setCachedAuthSession(data.session, 'HYDRATE');
         await logAuthHydrationStep('hydrate_get_session_found', data.session, { label });
         return data.session;
       }
@@ -295,6 +300,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (refreshed.data.session) {
         setSession(refreshed.data.session);
         setUser(isPasswordRecoveryRef.current ? null : refreshed.data.session.user ?? null);
+        setCachedAuthSession(refreshed.data.session, 'HYDRATE');
         await logAuthHydrationStep('hydrate_refresh_found', refreshed.data.session, { label });
         return refreshed.data.session;
       }
@@ -321,6 +327,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (data.session?.access_token) {
           setSession(data.session);
           setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
+          setCachedAuthSession(data.session, 'SYNC');
           await logAuthHydrationStep('sync_success', data.session, { label, attempt });
           return data.session;
         }
@@ -697,6 +704,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // If session retrieval fails, clear any stale data
           setSession(null);
           setUser(null);
+          setCachedAuthSession(null, 'BOOT_ERROR');
           markBootComplete();
           return;
         }
@@ -706,6 +714,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           await logAuthHydrationStep('boot_no_session');
           setSession(null);
           setUser(null);
+          setCachedAuthSession(null, 'BOOT_NO_SESSION');
           markBootComplete();
           return;
         }
@@ -739,6 +748,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         setSession(session);
         setUser(session?.user ?? null);
+        setCachedAuthSession(session, 'BOOTSTRAP');
         markBootComplete();
       } catch (error) {
         console.error('❌ [AUTH] Unexpected error getting session:', error);
@@ -755,6 +765,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       async (event, session) => {
         console.log('🔄 Auth state change:', event, session?.user?.id || 'no user');
         lastAuthEventRef.current = event;
+        setCachedAuthSession(session ?? null, event);
         await logAuthHydrationStep('auth_state_change', session, { event });
         
         if (event === 'PASSWORD_RECOVERY') {
@@ -796,6 +807,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (event === 'SIGNED_OUT') {
           setSession(null);
           setUser(null);
+          setCachedAuthSession(null, event);
           markBootComplete();
           setIsPasswordRecovery(false);
           
@@ -811,6 +823,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // During recovery, keep the user null so the app never treats this as a full login
         setSession(session);
         setUser(isPasswordRecoveryRef.current ? null : session?.user ?? null);
+        setCachedAuthSession(session ?? null, event);
         markBootComplete();
 
         if (
@@ -827,6 +840,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             );
             setSession(persistedSession);
             setUser(isPasswordRecoveryRef.current ? null : persistedSession.user ?? null);
+            setCachedAuthSession(persistedSession, event);
           } finally {
             sessionPersistInFlightRef.current = false;
           }
@@ -1222,6 +1236,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const persistedSession = await persistAuthSession(data.session, 'apple');
         setSession(persistedSession);
         setUser(persistedSession.user ?? null);
+        setCachedAuthSession(persistedSession, 'SIGNED_IN');
         await syncSessionFromSupabase('apple_post_sign_in');
       }
       if (data.user) {
@@ -1360,6 +1375,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const persistedSession = await persistAuthSession(data.session, 'apple_sign_up');
         setSession(persistedSession);
         setUser(persistedSession.user ?? null);
+        setCachedAuthSession(persistedSession, 'SIGNED_IN');
         await syncSessionFromSupabase('apple_post_sign_up');
       }
       if (data.user) {
@@ -1430,6 +1446,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     session,
     loading,
+    authReady,
     isPasswordRecovery,
     userName,
     setUserName,

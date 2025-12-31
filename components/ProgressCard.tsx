@@ -175,6 +175,11 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   // Fetch current week progress
   const fetchProgress = async () => {
     if (!user?.id) return;
+    if (!session?.access_token) {
+      console.warn('⚠️ Progress fetch skipped - session not ready');
+      setIsLoading(false);
+      return;
+    }
     
     setIsLoading(true);
     console.log('📊 Fetching progress for:', { userId: user.id, activity: selectedActivity });
@@ -288,11 +293,15 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   useEffect(() => {
     checkWeekBoundary();
     fetchProgress();
-  }, [user?.id, selectedActivity]);
+  }, [user?.id, selectedActivity, session?.access_token]);
 
   // Handle manual session increment (+1 button)
   const handleIncrementSession = async () => {
     if (!user?.id || isProcessing) return;
+    if (!session?.access_token) {
+      Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
+      return;
+    }
     
     // Validation
     if (!selectedActivity || selectedActivity.trim() === '') {
