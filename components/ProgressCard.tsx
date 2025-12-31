@@ -17,7 +17,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   onDataUpdate,
 }) => {
   const { width, height } = useWindowDimensions();
-  const { user, session } = useAuth();
+  const { user, session, authReady } = useAuth();
   
   // State for current week progress
   const [current, setCurrent] = useState(0);
@@ -175,7 +175,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   // Fetch current week progress
   const fetchProgress = async () => {
     if (!user?.id) return;
-    if (!session?.access_token) {
+    if (!authReady || !session?.access_token) {
       console.warn('⚠️ Progress fetch skipped - session not ready');
       setIsLoading(false);
       return;
@@ -293,12 +293,12 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   useEffect(() => {
     checkWeekBoundary();
     fetchProgress();
-  }, [user?.id, selectedActivity, session?.access_token]);
+  }, [user?.id, selectedActivity, session?.access_token, authReady]);
 
   // Handle manual session increment (+1 button)
   const handleIncrementSession = async () => {
     if (!user?.id || isProcessing) return;
-    if (!session?.access_token) {
+    if (!authReady || !session?.access_token) {
       Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
       return;
     }
@@ -432,7 +432,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         return;
       }
 
-      if (!session?.access_token) {
+      if (!authReady || !session?.access_token) {
         console.warn('⚠️ Session not ready when saving target');
         Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
         return;
@@ -547,7 +547,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         return;
       }
 
-      if (!session?.access_token) {
+      if (!authReady || !session?.access_token) {
         Alert.alert('Finishing sign-in', 'Your session is still loading. Please wait a moment and try again.');
         return;
       }
