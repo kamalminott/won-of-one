@@ -22,6 +22,7 @@ if (Platform.OS === 'ios' || Platform.OS === 'android') {
 // Create Supabase client with conditional storage
 // Enhanced configuration for secure token management
 const supabaseConfig: any = {
+  global: {},
   auth: {
     autoRefreshToken: true,        // Automatically refresh expired access tokens
     persistSession: true,          // Save session to AsyncStorage for persistence
@@ -31,6 +32,36 @@ const supabaseConfig: any = {
     flowType: 'pkce',              // Use PKCE flow for better security (recommended)
   },
 };
+
+const DEFAULT_FETCH_TIMEOUT_MS = Number(
+  process.env.EXPO_PUBLIC_SUPABASE_FETCH_TIMEOUT_MS || 15000
+);
+
+const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
+  if (!Number.isFinite(DEFAULT_FETCH_TIMEOUT_MS) || DEFAULT_FETCH_TIMEOUT_MS <= 0) {
+    return fetch(input, init);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT_MS);
+
+  const incomingSignal = init.signal;
+  if (incomingSignal) {
+    if (incomingSignal.aborted) {
+      controller.abort();
+    } else {
+      incomingSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+supabaseConfig.global.fetch = fetchWithTimeout;
 
 // Only use AsyncStorage on native platforms
 if (AsyncStorage && (Platform.OS === 'ios' || Platform.OS === 'android')) {

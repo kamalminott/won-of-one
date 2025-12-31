@@ -138,47 +138,77 @@ const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number, label: strin
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const ensureAuthSession = async (label: string): Promise<Session | null> => {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const { data, error } = await withTimeout(
-        supabase.auth.getSession(),
-        4000,
-        `auth.getSession:${label}`
-      );
-      if (error) {
-        console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
-      }
-      if (data.session?.access_token) {
-        return data.session;
-      }
-      if (!data.session?.refresh_token) {
-        console.warn(`⚠️ [AUTH] ${label} session missing refresh token`);
-      }
-    } catch (error) {
-      console.warn(`⚠️ [AUTH] ${label} getSession timeout`, error);
-    }
+const AUTH_SESSION_CACHE_MS = 2000;
+let authSessionCache: { session: Session | null; timestamp: number } = {
+  session: null,
+  timestamp: 0,
+};
+let authSessionInFlight: Promise<Session | null> | null = null;
 
-    if (attempt < 2) {
-      await delay(250);
-    }
+const setAuthSessionCache = (session: Session | null) => {
+  authSessionCache = { session, timestamp: Date.now() };
+};
+
+const ensureAuthSession = async (label: string): Promise<Session | null> => {
+  const now = Date.now();
+  if (authSessionCache.session && now - authSessionCache.timestamp < AUTH_SESSION_CACHE_MS) {
+    return authSessionCache.session;
   }
 
-  try {
-    const { data, error } = await withTimeout(
-      supabase.auth.refreshSession(),
-      8000,
-      `auth.refreshSession:${label}`
-    );
-    if (error) {
-      console.warn(`⚠️ [AUTH] ${label} refreshSession error`, error);
-      return null;
+  if (authSessionInFlight) {
+    return authSessionInFlight;
+  }
+
+  authSessionInFlight = (async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const { data, error } = await withTimeout(
+          supabase.auth.getSession(),
+          4000,
+          `auth.getSession:${label}`
+        );
+        if (error) {
+          console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+        }
+        if (data.session?.access_token) {
+          setAuthSessionCache(data.session);
+          return data.session;
+        }
+        if (!data.session?.refresh_token) {
+          console.warn(`⚠️ [AUTH] ${label} session missing refresh token`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ [AUTH] ${label} getSession timeout`, error);
+      }
+
+      if (attempt < 2) {
+        await delay(250);
+      }
     }
 
-    return data.session ?? null;
-  } catch (error) {
-    console.warn(`⚠️ [AUTH] ${label} refreshSession timeout`, error);
-    return null;
+    try {
+      const { data, error } = await withTimeout(
+        supabase.auth.refreshSession(),
+        8000,
+        `auth.refreshSession:${label}`
+      );
+      if (error) {
+        console.warn(`⚠️ [AUTH] ${label} refreshSession error`, error);
+        return null;
+      }
+
+      setAuthSessionCache(data.session ?? null);
+      return data.session ?? null;
+    } catch (error) {
+      console.warn(`⚠️ [AUTH] ${label} refreshSession timeout`, error);
+      return null;
+    }
+  })();
+
+  try {
+    return await authSessionInFlight;
+  } finally {
+    authSessionInFlight = null;
   }
 };
 
