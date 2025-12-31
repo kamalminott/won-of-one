@@ -84,6 +84,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profileImage, setProfileImageState] = useState<string | null>(null);
   const oauthInFlightRef = useRef(false);
   const sessionPersistInFlightRef = useRef(false);
+  const lastAuthEventRef = useRef<string | null>(null);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
@@ -246,6 +247,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(isPasswordRecoveryRef.current ? null : data.session.user ?? null);
         await logAuthHydrationStep('hydrate_get_session_found', data.session, { label });
         return data.session;
+      }
+
+      let storedSessionRaw: string | null = null;
+      try {
+        storedSessionRaw = await AsyncStorage.getItem(getSupabaseStorageKey());
+      } catch (storageError) {
+        console.warn(`⚠️ [AUTH] ${label} storage read error`, storageError);
+        await logAuthHydrationStep('hydrate_storage_error', null, {
+          label,
+          error: (storageError as any)?.message || 'unknown_error',
+        });
+      }
+
+      if (!storedSessionRaw) {
+        await logAuthHydrationStep('hydrate_refresh_skipped_no_storage', null, { label });
+        return null;
+      }
+
+      let storedRefreshToken: string | null = null;
+      try {
+        const parsed = JSON.parse(storedSessionRaw);
+        storedRefreshToken = parsed?.refresh_token ?? null;
+      } catch (parseError) {
+        console.warn(`⚠️ [AUTH] ${label} storage parse error`, parseError);
+        await logAuthHydrationStep('hydrate_storage_parse_error', null, {
+          label,
+          error: (parseError as any)?.message || 'unknown_error',
+        });
+      }
+
+      if (!storedRefreshToken) {
+        await logAuthHydrationStep('hydrate_refresh_skipped_no_refresh', null, { label });
+        return null;
       }
 
       const refreshed = await supabase.auth.refreshSession();
@@ -720,6 +754,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth state change:', event, session?.user?.id || 'no user');
+        lastAuthEventRef.current = event;
         await logAuthHydrationStep('auth_state_change', session, { event });
         
         if (event === 'PASSWORD_RECOVERY') {
@@ -936,6 +971,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     if (!user?.id || session?.access_token || isPasswordRecoveryRef.current) {
+      return;
+    }
+
+    if (lastAuthEventRef.current === 'SIGNED_OUT') {
       return;
     }
 

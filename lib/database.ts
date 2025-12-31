@@ -160,6 +160,7 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
   }
 
   authSessionInFlight = (async () => {
+    let sawRefreshToken = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const { data, error } = await withTimeout(
@@ -169,6 +170,9 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
         );
         if (error) {
           console.warn(`⚠️ [AUTH] ${label} getSession error`, error);
+        }
+        if (data.session?.refresh_token) {
+          sawRefreshToken = true;
         }
         if (data.session?.access_token) {
           setAuthSessionCache(data.session);
@@ -184,6 +188,11 @@ const ensureAuthSession = async (label: string): Promise<Session | null> => {
       if (attempt < 2) {
         await delay(250);
       }
+    }
+
+    if (!sawRefreshToken) {
+      console.warn(`⚠️ [AUTH] ${label} refreshSession skipped - no refresh token`);
+      return null;
     }
 
     try {
