@@ -1,14 +1,16 @@
 import { Colors } from '@/constants/Colors';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type HomeSkeletonProps = {
   message?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
 };
 
-export const HomeSkeleton: React.FC<HomeSkeletonProps> = ({ message }) => {
+export const HomeSkeleton: React.FC<HomeSkeletonProps> = ({ message, onRetry, retryLabel }) => {
   const { width, height } = useWindowDimensions();
   const pulse = useRef(new Animated.Value(0.4)).current;
 
@@ -157,10 +159,24 @@ export const HomeSkeleton: React.FC<HomeSkeletonProps> = ({ message }) => {
       paddingVertical: height * 0.008,
       borderWidth: 1,
       borderColor: '#3A3A3A',
+      alignItems: 'center',
     },
     overlayText: {
       color: '#FFFFFF',
       fontSize: width * 0.035,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    retryButton: {
+      marginTop: height * 0.008,
+      paddingHorizontal: width * 0.06,
+      paddingVertical: height * 0.008,
+      borderRadius: 999,
+      backgroundColor: '#4A3B72',
+    },
+    retryText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.033,
       fontWeight: '600',
       textAlign: 'center',
     },
@@ -210,6 +226,15 @@ export const HomeSkeleton: React.FC<HomeSkeletonProps> = ({ message }) => {
           <View style={styles.overlay}>
             <View style={styles.overlayPill}>
               <Text style={styles.overlayText}>{message}</Text>
+              {onRetry ? (
+                <TouchableOpacity
+                  onPress={onRetry}
+                  accessibilityRole="button"
+                  style={styles.retryButton}
+                >
+                  <Text style={styles.retryText}>{retryLabel || 'Retry'}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         ) : null}

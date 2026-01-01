@@ -88,7 +88,16 @@ const profileCompletedStorageKey = (userId: string) => `profile_completed:${user
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
-  const { user, session, loading, userName, profileImage, isPasswordRecovery, authReady } = useAuth();
+  const {
+    user,
+    session,
+    loading,
+    userName,
+    profileImage,
+    isPasswordRecovery,
+    authReady,
+    retryAuthHydration,
+  } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   const trimmedUserName = userName.trim();
@@ -738,11 +747,16 @@ export default function HomeScreen() {
   });
 
   // Show loading screen while checking authentication
-  const authHoldMessage = !authReady && user ? 'Finishing sign-in...' : undefined;
+  const shouldShowAuthRetry = !authReady && !!user;
+  const authHoldMessage = shouldShowAuthRetry ? 'Session still loading' : undefined;
   if (loading || !authReady || shouldHoldForProfileCheck || shouldHoldForUserName) {
     return (
       <>
-        <HomeSkeleton message={authHoldMessage} />
+        <HomeSkeleton
+          message={authHoldMessage}
+          onRetry={shouldShowAuthRetry ? retryAuthHydration : undefined}
+          retryLabel="Retry"
+        />
         <CompleteProfilePrompt
           visible={shouldShowCompleteProfilePrompt}
           onDismiss={handleProfilePromptDismiss}

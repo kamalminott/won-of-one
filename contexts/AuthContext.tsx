@@ -33,6 +33,7 @@ interface AuthContextType {
   signUpWithGoogle: () => Promise<{ error: any }>;
   signUpWithApple: () => Promise<{ error: any }>;
   signOut: () => Promise<void>;
+  retryAuthHydration: () => Promise<void>;
   setIsPasswordRecovery: (value: boolean) => void;
 }
 
@@ -56,6 +57,7 @@ const AuthContext = createContext<AuthContextType>({
   signUpWithGoogle: async () => ({ error: null }),
   signUpWithApple: async () => ({ error: null }),
   signOut: async () => {},
+  retryAuthHydration: async () => {},
   setIsPasswordRecovery: () => {},
 });
 
@@ -89,6 +91,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const oauthInFlightRef = useRef(false);
   const sessionPersistInFlightRef = useRef(false);
   const lastAuthEventRef = useRef<string | null>(null);
+  const manualRetryInFlightRef = useRef(false);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
@@ -347,6 +350,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.warn(`⚠️ [AUTH] ${label} unable to sync session tokens`);
     await logAuthHydrationStep('sync_failed', null, { label });
     return null;
+  };
+
+  const retryAuthHydration = async () => {
+    if (manualRetryInFlightRef.current) {
+      return;
+    }
+
+    manualRetryInFlightRef.current = true;
+    try {
+      await logAuthHydrationStep('manual_retry_start', session ?? null);
+      const hydrated = await hydrateAuthSession('manual_retry');
+      if (!hydrated) {
+        await syncSessionFromSupabase('manual_retry');
+      }
+    } finally {
+      manualRetryInFlightRef.current = false;
+    }
   };
 
   const startOAuthFlow = async (provider: 'google') => {
@@ -1516,6 +1536,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signUpWithGoogle,
     signUpWithApple,
     signOut,
+    retryAuthHydration,
     setIsPasswordRecovery,
   };
 

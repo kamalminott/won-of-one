@@ -3641,14 +3641,27 @@ export const weeklyTargetService = {
   },
 
   // Delete a weekly target
-  async deleteWeeklyTarget(targetId: string): Promise<boolean> {
+  async deleteWeeklyTarget(
+    targetId: string,
+    accessToken?: string | null
+  ): Promise<boolean> {
     try {
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ deleteWeeklyTarget blocked - auth session not ready', { targetId });
+        return false;
+      }
+
       // First, get the target details to create history record
-      const { data: target, error: fetchError } = await supabase
-        .from('weekly_target')
-        .select('*')
-        .eq('target_id', targetId)
-        .single();
+      const { data: target, error: fetchError } = await postgrestSelectOne<WeeklyTarget>(
+        'weekly_target',
+        {
+          select: '*',
+          target_id: `eq.${targetId}`,
+          limit: 1,
+        },
+        { accessToken: token }
+      );
 
       if (fetchError || !target) {
         console.error('Error fetching target for deletion:', fetchError);
@@ -3656,29 +3669,44 @@ export const weeklyTargetService = {
       }
 
       // Get completed sessions count
-      const { data: sessions } = await supabase
-        .from('weekly_session_log')
-        .select('session_id')
-        .eq('user_id', target.user_id)
-        .eq('activity_type', target.activity_type)
-        .gte('session_date', target.week_start_date)
-        .lte('session_date', target.week_end_date);
+      const { data: sessions, error: sessionsError } = await postgrestSelect<WeeklySessionLog>(
+        'weekly_session_log',
+        {
+          select: 'session_id',
+          user_id: `eq.${target.user_id}`,
+          activity_type: `eq.${target.activity_type}`,
+          session_date: [
+            `gte.${target.week_start_date}`,
+            `lte.${target.week_end_date}`,
+          ],
+        },
+        { accessToken: token }
+      );
+
+      if (sessionsError) {
+        console.error('Error fetching session logs for deletion:', sessionsError);
+      }
 
       const completedSessions = sessions?.length || 0;
       const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
 
       // Check if there are any history records that reference this target
-      const { data: existingHistory } = await supabase
-        .from('weekly_completion_history')
-        .select('id')
-        .eq('original_target_id', targetId);
+      const { data: existingHistory } = await postgrestSelect<{ id: string }>(
+        'weekly_completion_history',
+        {
+          select: 'id',
+          original_target_id: `eq.${targetId}`,
+        },
+        { accessToken: token }
+      );
 
       // Only delete history records if they exist
       if (existingHistory && existingHistory.length > 0) {
-        const { error: deleteHistoryError } = await supabase
-          .from('weekly_completion_history')
-          .delete()
-          .eq('original_target_id', targetId);
+        const { error: deleteHistoryError } = await postgrestDelete(
+          'weekly_completion_history',
+          { original_target_id: `eq.${targetId}` },
+          { accessToken: token }
+        );
 
         if (deleteHistoryError) {
           console.error('Error deleting existing history records:', deleteHistoryError);
@@ -3690,9 +3718,9 @@ export const weeklyTargetService = {
       }
 
       // Create history record for deleted target
-      const { error: historyError } = await supabase
-        .from('weekly_completion_history')
-        .insert({
+      const { error: historyError } = await postgrestInsert(
+        'weekly_completion_history',
+        {
           user_id: target.user_id,
           activity_type: target.activity_type,
           week_start_date: target.week_start_date,
@@ -3701,8 +3729,11 @@ export const weeklyTargetService = {
           completed_sessions: completedSessions,
           completion_rate: completionRate,
           status: 'abandoned', // Mark as abandoned since user manually deleted
-          completion_date: new Date().toISOString()
-        });
+          completion_date: new Date().toISOString(),
+        },
+        undefined,
+        { accessToken: token, preferReturn: false }
+      );
 
       if (historyError) {
         console.error('Error creating deletion history:', historyError);
@@ -3712,19 +3743,29 @@ export const weeklyTargetService = {
       // Clear session logs for the deleted target
       if (sessions && sessions.length > 0) {
         console.log('🗑️ Clearing', sessions.length, 'session logs for deleted target');
-        for (const session of sessions) {
-          await supabase
-            .from('weekly_session_log')
-            .delete()
-            .eq('session_id', session.session_id);
+        const { error: deleteSessionsError } = await postgrestDelete(
+          'weekly_session_log',
+          {
+            user_id: `eq.${target.user_id}`,
+            activity_type: `eq.${target.activity_type}`,
+            session_date: [
+              `gte.${target.week_start_date}`,
+              `lte.${target.week_end_date}`,
+            ],
+          },
+          { accessToken: token }
+        );
+        if (deleteSessionsError) {
+          console.error('Error deleting weekly session logs:', deleteSessionsError);
         }
       }
 
       // Now delete the target
-      const { error } = await supabase
-        .from('weekly_target')
-        .delete()
-        .eq('target_id', targetId);
+      const { error } = await postgrestDelete(
+        'weekly_target',
+        { target_id: `eq.${targetId}` },
+        { accessToken: token }
+      );
 
       if (error) {
         console.error('Error deleting weekly target:', error);
@@ -3776,14 +3817,27 @@ export const weeklyTargetService = {
   },
 
   // Mark a target as complete and create history record
-  async markTargetComplete(targetId: string): Promise<boolean> {
+  async markTargetComplete(
+    targetId: string,
+    accessToken?: string | null
+  ): Promise<boolean> {
     try {
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ markTargetComplete blocked - auth session not ready', { targetId });
+        return false;
+      }
+
       // First, get the target details
-      const { data: target, error: fetchError } = await supabase
-        .from('weekly_target')
-        .select('*')
-        .eq('target_id', targetId)
-        .single();
+      const { data: target, error: fetchError } = await postgrestSelectOne<WeeklyTarget>(
+        'weekly_target',
+        {
+          select: '*',
+          target_id: `eq.${targetId}`,
+          limit: 1,
+        },
+        { accessToken: token }
+      );
 
       if (fetchError || !target) {
         console.error('Error fetching target for completion:', fetchError);
@@ -3791,13 +3845,23 @@ export const weeklyTargetService = {
       }
 
       // Get completed sessions count before clearing them
-      const { data: sessions } = await supabase
-        .from('weekly_session_log')
-        .select('session_id')
-        .eq('user_id', target.user_id)
-        .eq('activity_type', target.activity_type)
-        .gte('session_date', target.week_start_date)
-        .lte('session_date', target.week_end_date);
+      const { data: sessions, error: sessionsError } = await postgrestSelect<WeeklySessionLog>(
+        'weekly_session_log',
+        {
+          select: 'session_id',
+          user_id: `eq.${target.user_id}`,
+          activity_type: `eq.${target.activity_type}`,
+          session_date: [
+            `gte.${target.week_start_date}`,
+            `lte.${target.week_end_date}`,
+          ],
+        },
+        { accessToken: token }
+      );
+
+      if (sessionsError) {
+        console.error('Error fetching session logs for completion:', sessionsError);
+      }
 
       const completedSessions = sessions?.length || 0;
       const completionRate = target.target_sessions > 0 ? (completedSessions / target.target_sessions) * 100 : 0;
@@ -3805,19 +3869,29 @@ export const weeklyTargetService = {
       // Clear the session logs for the completed target
       if (sessions && sessions.length > 0) {
         console.log('🗑️ Clearing', sessions.length, 'session logs for completed target');
-        for (const session of sessions) {
-          await supabase
-            .from('weekly_session_log')
-            .delete()
-            .eq('session_id', session.session_id);
+        const { error: deleteSessionsError } = await postgrestDelete(
+          'weekly_session_log',
+          {
+            user_id: `eq.${target.user_id}`,
+            activity_type: `eq.${target.activity_type}`,
+            session_date: [
+              `gte.${target.week_start_date}`,
+              `lte.${target.week_end_date}`,
+            ],
+          },
+          { accessToken: token }
+        );
+        if (deleteSessionsError) {
+          console.error('Error deleting weekly session logs:', deleteSessionsError);
+        } else {
+          console.log('✅ Session logs cleared for completed target');
         }
-        console.log('✅ Session logs cleared for completed target');
       }
 
       // Create history record (without foreign key reference)
-      const { error: historyError } = await supabase
-        .from('weekly_completion_history')
-        .insert({
+      const { error: historyError } = await postgrestInsert(
+        'weekly_completion_history',
+        {
           user_id: target.user_id,
           activity_type: target.activity_type,
           week_start_date: target.week_start_date,
@@ -3826,8 +3900,11 @@ export const weeklyTargetService = {
           completed_sessions: completedSessions,
           completion_rate: completionRate,
           status: 'completed',
-          completion_date: new Date().toISOString()
-        });
+          completion_date: new Date().toISOString(),
+        },
+        undefined,
+        { accessToken: token, preferReturn: false }
+      );
 
       if (historyError) {
         console.error('Error creating completion history:', historyError);
@@ -3835,10 +3912,11 @@ export const weeklyTargetService = {
       }
 
       // Delete the target completely after creating history record
-      const { error: deleteError } = await supabase
-        .from('weekly_target')
-        .delete()
-        .eq('target_id', targetId);
+      const { error: deleteError } = await postgrestDelete(
+        'weekly_target',
+        { target_id: `eq.${targetId}` },
+        { accessToken: token }
+      );
 
       if (deleteError) {
         console.error('Error deleting completed target:', deleteError);

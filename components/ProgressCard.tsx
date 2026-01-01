@@ -356,7 +356,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             );
             
             if (currentTarget && currentTarget.target_id) {
-              await weeklyTargetService.markTargetComplete(currentTarget.target_id);
+              await weeklyTargetService.markTargetComplete(
+                currentTarget.target_id,
+                accessToken
+              );
               console.log('🎉 Target marked as complete!');
               
               // Show completion modal after a short delay
@@ -725,7 +728,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       if (targetToDelete && targetToDelete.target_id) {
         console.log('🎯 Found target to delete:', targetToDelete);
         // Delete the target from database
-        const deleted = await weeklyTargetService.deleteWeeklyTarget(targetToDelete.target_id);
+        const deleted = await weeklyTargetService.deleteWeeklyTarget(
+          targetToDelete.target_id,
+          accessToken
+        );
         
         if (deleted) {
           console.log('✅ Target deleted successfully');
@@ -904,7 +910,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           
           if (currentTarget && currentTarget.target_id) {
             // Mark the old target as complete and create history record
-            await weeklyTargetService.markTargetComplete(currentTarget.target_id);
+            await weeklyTargetService.markTargetComplete(
+              currentTarget.target_id,
+              accessToken
+            );
             console.log('✅ Old target archived with completion history');
           }
         } catch (error) {
