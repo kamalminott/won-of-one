@@ -424,6 +424,7 @@ export default function AddMatchScreen() {
           }),
           notes: notes.trim() || undefined,
           weaponType: weaponType,
+          accessToken,
         });
       }
 

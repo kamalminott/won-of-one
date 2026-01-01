@@ -4,7 +4,7 @@ import {
     MatchApproval, MatchEvent,
     SimpleGoal, SimpleMatch
 } from '@/types/database';
-import type { PostgrestSingleResponse, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { getCachedAuthSession, getLastAuthEvent } from './authSessionCache';
 import {
@@ -1280,6 +1280,7 @@ export const matchService = {
     time: string;
     notes?: string;
     weaponType?: string;
+    accessToken?: string | null;
   }): Promise<Match | null> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
     
@@ -1289,14 +1290,14 @@ export const matchService = {
       return null;
     }
 
-    const authSession = await ensureAuthSession('createManualMatch');
-    if (!authSession?.access_token) {
+    const token = resolveAccessToken(matchData.accessToken);
+    if (!token) {
       console.warn('⚠️ createManualMatch blocked - auth session not ready', { userId });
       return null;
     }
 
     try {
-      await userService.ensureUserById(userId);
+      await userService.ensureUserById(userId, undefined, token);
     } catch (error) {
       console.warn('⚠️ Unable to ensure app_user record before match insert:', error);
     }
@@ -1368,40 +1369,55 @@ export const matchService = {
 
     console.log('🔄 Creating manual match with data:', insertData);
 
-    let data, error;
+    let result;
     try {
-      const result = await withTimeout<PostgrestSingleResponse<Match>>(
-        supabase
-          .from('match')
-          .insert(insertData)
-          .select()
-          .single(),
-        12000,
-        'Manual match insert'
+      result = await postgrestInsert<Match>(
+        'match',
+        insertData,
+        { select: '*' },
+        { accessToken: token }
       );
-      data = result.data;
-      error = result.error;
     } catch (requestError: any) {
       console.error('❌ Request error creating manual match:', requestError);
-      throw requestError?.message?.includes('timed out')
-        ? requestError
-        : new Error('Network request failed');
-    }
-
-    if (error) {
-      console.error('❌ Error creating manual match:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-        insertData: JSON.stringify(insertData, null, 2)
-      });
       return null;
     }
 
-    console.log('✅ Manual match created successfully:', data);
-    return data;
+    if (result.error) {
+      if (result.error.code === '23503') {
+        console.warn('⚠️ Manual match insert failed due to missing user record; retrying once');
+        await userService.ensureUserById(userId, undefined, token);
+        try {
+          result = await postgrestInsert<Match>(
+            'match',
+            insertData,
+            { select: '*' },
+            { accessToken: token }
+          );
+        } catch (requestError: any) {
+          console.error('❌ Request error creating manual match after retry:', requestError);
+          return null;
+        }
+
+        if (result.error) {
+          console.error('❌ Error creating manual match after retry:', result.error);
+          return null;
+        }
+      } else {
+        console.error('❌ Error creating manual match:', result.error);
+        console.error('❌ Error details:', {
+          message: result.error.message,
+          details: result.error.details,
+          hint: result.error.hint,
+          code: result.error.code,
+          insertData: JSON.stringify(insertData, null, 2),
+        });
+        return null;
+      }
+    }
+
+    const row = Array.isArray(result.data) ? result.data[0] ?? null : null;
+    console.log('✅ Manual match created successfully:', row);
+    return row;
   },
 
   // Create a new match from fencing remote data
