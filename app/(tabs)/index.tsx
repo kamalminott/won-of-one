@@ -130,6 +130,7 @@ export default function HomeScreen() {
   const fetchInFlightRef = useRef(false);
   const lastFetchAtMsRef = useRef(0);
   const lastHeavyRefreshAtMsRef = useRef(0);
+  const goalsRefreshInFlightRef = useRef(false);
   const liveDataAppliedRef = useRef(false);
   const trainingTimeRef = useRef(trainingTime);
   const userNameRef = useRef(userName);
@@ -619,6 +620,128 @@ export default function HomeScreen() {
     }
   }, [user?.id, user?.email, session?.access_token, authReady]);
 
+  const upsertGoal = useCallback((goal: SimpleGoal) => {
+    setGoals(prev => {
+      const index = prev.findIndex(item => item.id === goal.id);
+      if (index === -1) {
+        return [goal, ...prev];
+      }
+      const next = [...prev];
+      next[index] = { ...prev[index], ...goal };
+      return next;
+    });
+  }, []);
+
+  const removeGoal = useCallback((goalId: string) => {
+    setGoals(prev => prev.filter(goal => goal.id !== goalId));
+  }, []);
+
+  const refreshGoalsOnly = useCallback(async () => {
+    if (!user?.id || !authReady) return;
+    if (goalsRefreshInFlightRef.current) return;
+    goalsRefreshInFlightRef.current = true;
+    try {
+      const refreshedGoals = await goalService.getActiveGoals(user.id, session?.access_token);
+      if (refreshedGoals) {
+        setGoals(refreshedGoals);
+      }
+    } catch (error) {
+      console.warn('Failed to refresh goals:', error);
+    } finally {
+      goalsRefreshInFlightRef.current = false;
+    }
+  }, [authReady, session?.access_token, user?.id]);
+
+  const handleGoalSaved = async (goalData: any) => {
+    if (!user) return;
+    try {
+      if (goalData.match_window) {
+        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id)).totalMatches;
+        goalData.starting_match_count = totalMatches;
+      }
+
+      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
+      if (newGoal) {
+        analytics.goalSaved({
+          goal_type: goalData.category || 'unknown',
+          target: goalData.target_value,
+        });
+        upsertGoal(newGoal);
+        Alert.alert('Success', 'Goal created successfully!');
+        void refreshGoalsOnly();
+      } else {
+        Alert.alert('Error', 'Failed to create goal');
+      }
+    } catch (error) {
+      console.error('Error saving goal:', error);
+      Alert.alert('Error', 'Failed to create goal');
+    }
+  };
+
+  const handleGoalUpdated = async (goalId: string, updates: Partial<Goal>) => {
+    try {
+      if (updates.match_window !== undefined && user) {
+        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id)).totalMatches;
+        updates.starting_match_count = totalMatches;
+      }
+
+      const updatedGoal = await goalService.updateGoal(goalId, updates, session?.access_token);
+      if (updatedGoal && user) {
+        const goal = goals.find(g => g.id === goalId);
+        analytics.goalSaved({
+          goal_type: goal?.title || 'unknown',
+          target: updates.target_value,
+        });
+
+        const needsRecalculation =
+          updates.target_value !== undefined ||
+          updates.match_window !== undefined ||
+          updates.deadline !== undefined;
+
+        if (needsRecalculation) {
+          const recalculated = await goalService.recalculateGoalProgress(
+            goalId,
+            user.id,
+            session?.access_token
+          );
+          if (recalculated) {
+            upsertGoal(recalculated);
+          }
+        } else {
+          upsertGoal(updatedGoal);
+        }
+
+        Alert.alert('Success', 'Goal updated successfully!');
+        void refreshGoalsOnly();
+      } else {
+        Alert.alert('Error', 'Failed to update goal');
+      }
+    } catch (error) {
+      console.error('❌ Exception during update:', error);
+      Alert.alert('Error', 'Failed to update goal');
+    }
+  };
+
+  const handleGoalDeleted = async (goalId: string) => {
+    try {
+      const goal = goals.find(g => g.id === goalId);
+      const goalType = goal?.title || 'unknown';
+      const success = await goalService.deleteGoal(goalId, session?.access_token);
+
+      if (success) {
+        analytics.goalDeleted({ goal_type: goalType });
+        removeGoal(goalId);
+        Alert.alert('Success', 'Goal deleted successfully');
+        void refreshGoalsOnly();
+      } else {
+        Alert.alert('Error', 'Failed to delete goal');
+      }
+    } catch (error) {
+      console.error('❌ Exception during delete:', error);
+      Alert.alert('Error', 'Failed to delete goal');
+    }
+  };
+
   // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
   useFocusEffect(
     useCallback(() => {
@@ -885,116 +1008,9 @@ export default function HomeScreen() {
                     }}
                     onSetNewGoal={handleSetNewGoal}
                     onUpdateGoal={handleUpdateGoal}
-                onGoalSaved={async (goalData) => {
-                  // console.log('Goal saved callback triggered with data:', goalData);
-                  if (user) {
-                    try {
-                      // If this is a windowed goal, add starting match count
-                      if (goalData.match_window) {
-                        const { totalMatches } = await matchService.getMatchCounts(user.id);
-                        goalData.starting_match_count = totalMatches;
-                        // console.log('Adding starting_match_count:', goalData.starting_match_count);
-                      }
-                      
-                      // console.log('Saving goal to database...');
-                      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
-                      // console.log('Goal saved result:', newGoal);
-                      if (newGoal) {
-                        // Track goal creation
-                        analytics.goalSaved({ 
-                          goal_type: goalData.category || 'unknown',
-                          target: goalData.target_value
-                        });
-                        
-                        Alert.alert('Success', 'Goal created successfully!');
-                        fetchUserData(); // Refresh data after saving
-                      } else {
-                        Alert.alert('Error', 'Failed to create goal');
-                      }
-                    } catch (error) {
-                      console.error('Error saving goal:', error);
-                      Alert.alert('Error', 'Failed to create goal');
-                    }
-                  }
-                }}
-                onGoalUpdated={async (goalId, updates) => {
-                  // console.log('🔄 onGoalUpdated callback triggered with goalId:', goalId, 'updates:', updates);
-                  try {
-                    // If match_window is being added or modified, recalculate starting_match_count
-                    if (updates.match_window !== undefined && user) {
-                      const { totalMatches } = await matchService.getMatchCounts(user.id);
-                      updates.starting_match_count = totalMatches;
-                      // console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
-                    }
-                    
-                    const updatedGoal = await goalService.updateGoal(goalId, updates, session?.access_token);
-                    // console.log('Update result:', updatedGoal);
-                    
-                    if (updatedGoal && user) {
-                      // Get goal type for tracking
-                      const goal = goals.find(g => g.id === goalId);
-                      analytics.goalSaved({ 
-                        goal_type: goal?.title || 'unknown',
-                        target: updates.target_value
-                      });
-                      
-                      // console.log('✅ Goal updated, recalculating progress...');
-                      
-                      // Recalculate progress if target, window, or deadline changed
-                      const needsRecalculation = 
-                        updates.target_value !== undefined || 
-                        updates.match_window !== undefined || 
-                        updates.deadline !== undefined;
-                      
-                      if (needsRecalculation) {
-                        await goalService.recalculateGoalProgress(goalId, user.id, session?.access_token);
-                        // console.log('✅ Progress recalculated');
-                      }
-                      
-                      // Small delay to ensure database update propagates
-                      setTimeout(async () => {
-                        await fetchUserData();
-                        // console.log('✅ Home screen refreshed after update');
-                        Alert.alert('Success', 'Goal updated successfully!');
-                      }, 100);
-                    } else {
-                      // console.log('❌ Update failed');
-                      Alert.alert('Error', 'Failed to update goal');
-                    }
-                  } catch (error) {
-                    console.error('❌ Exception during update:', error);
-                    Alert.alert('Error', 'Failed to update goal');
-                  }
-                }}
-                onGoalDeleted={async (goalId) => {
-                  // console.log('🗑️ onGoalDeleted callback triggered with goalId:', goalId);
-                  try {
-                    // Get goal type before deletion for tracking
-                    const goal = goals.find(g => g.id === goalId);
-                    const goalType = goal?.title || 'unknown';
-                    
-                    const success = await goalService.deleteGoal(goalId, session?.access_token);
-                    // console.log('Delete result:', success);
-                    
-                    if (success) {
-                      analytics.goalDeleted({ goal_type: goalType });
-                      // console.log('✅ Goal deleted, refreshing home screen...');
-                      
-                      // Small delay to ensure database update propagates
-                      setTimeout(async () => {
-                        await fetchUserData();
-                        // console.log('✅ Home screen refreshed after deletion');
-                        Alert.alert('Success', 'Goal deleted successfully');
-                      }, 100);
-                    } else {
-                      // console.log('❌ Delete failed');
-                      Alert.alert('Error', 'Failed to delete goal');
-                    }
-                  } catch (error) {
-                    console.error('❌ Exception during delete:', error);
-                    Alert.alert('Error', 'Failed to delete goal');
-                  }
-                }}
+                onGoalSaved={handleGoalSaved}
+                onGoalUpdated={handleGoalUpdated}
+                onGoalDeleted={handleGoalDeleted}
                 useModal={true}
               />
                 );
@@ -1010,38 +1026,7 @@ export default function HomeScreen() {
                 currentValue={0}
                 onSetNewGoal={handleSetNewGoal}
                 onUpdateGoal={handleUpdateGoal}
-                onGoalSaved={async (goalData) => {
-                  // console.log('Goal saved callback triggered with data:', goalData);
-                  if (user) {
-                    try {
-                      // If this is a windowed goal, add starting match count
-                      if (goalData.match_window) {
-                        const { totalMatches } = await matchService.getMatchCounts(user.id);
-                        goalData.starting_match_count = totalMatches;
-                        // console.log('Adding starting_match_count:', goalData.starting_match_count);
-                      }
-                      
-                      // console.log('Saving goal to database...');
-                      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
-                      // console.log('Goal saved result:', newGoal);
-                      if (newGoal) {
-                        // Track goal creation
-                        analytics.goalSaved({ 
-                          goal_type: goalData.category || 'unknown',
-                          target: goalData.target_value
-                        });
-                        
-                        Alert.alert('Success', 'Goal created successfully!');
-                        fetchUserData(); // Refresh data after saving
-                      } else {
-                        Alert.alert('Error', 'Failed to create goal');
-                      }
-                    } catch (error) {
-                      console.error('Error saving goal:', error);
-                      Alert.alert('Error', 'Failed to create goal');
-                    }
-                  }
-                }} // Save goal to database and refresh data
+                onGoalSaved={handleGoalSaved}
                 useModal={true}
               />
             )}
