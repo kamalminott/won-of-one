@@ -24,6 +24,44 @@ const PROFILE_NAME_SETTLE_DELAY_MS = 800;
 const PROFILE_CHECK_TIMEOUT_MS = 5000;
 const USER_NAME_WAIT_TIMEOUT_MS = 3000;
 const HOME_LOAD_TIMEOUT_MS = 12000;
+const HOME_REQUEST_TIMEOUT_MS = 8000;
+
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`home_request_timeout:${label}`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
+const safeRequest = async <T,>(
+  label: string,
+  request: Promise<T>,
+  userId?: string | null
+): Promise<T | null> => {
+  try {
+    return await withTimeout(request, HOME_REQUEST_TIMEOUT_MS, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('home_request_timeout:')) {
+      analytics.capture('home_data_request_timeout', { label, user_id: userId });
+    } else {
+      analytics.capture('home_data_request_error', { label, user_id: userId, error: message });
+    }
+    return null;
+  }
+};
 
 const isPlaceholderName = (name: string, email?: string | null) => {
   const normalized = name.trim().toLowerCase();
@@ -313,22 +351,22 @@ export default function HomeScreen() {
   }, [user?.id, user?.email, authReady, isPasswordRecovery]);
 
   useEffect(() => {
-    if (!user || loading) return;
+    if (!user || !authReady) return;
     if (!hasLoadedOnce) {
       fetchUserData();
     }
-  }, [user?.id, loading, hasLoadedOnce, fetchUserData]);
+  }, [user?.id, authReady, hasLoadedOnce, fetchUserData]);
 
   useEffect(() => {
-    if (!user || loading || hasLoadedOnce) return;
+    if (!user || !authReady || hasLoadedOnce) return;
 
     const timeoutId = setTimeout(() => {
-      console.warn('Home data load timed out. Showing cached or empty state.');
+      analytics.capture('home_data_load_timeout', { user_id: user.id });
       setHasLoadedOnce(true);
     }, HOME_LOAD_TIMEOUT_MS);
 
     return () => clearTimeout(timeoutId);
-  }, [user?.id, loading, hasLoadedOnce]);
+  }, [user?.id, authReady, hasLoadedOnce]);
 
   // PAYWALL DISABLED - Commented out subscription check
   // Check subscription status and redirect to paywall if needed
@@ -435,6 +473,7 @@ export default function HomeScreen() {
       setHasLoadedOnce(true);
       return;
     }
+    if (!authReady) return;
 
     const nowMs = Date.now();
     if (fetchInFlightRef.current) return;
@@ -450,37 +489,54 @@ export default function HomeScreen() {
 
     try {
       // Fetch lightweight stats/goals first (small payload)
-      const [goalsData, counts] = await Promise.all([
-        goalService.getActiveGoals(userId),
-        matchService.getMatchCounts(userId),
+      const [goalsData, countsData] = await Promise.all([
+        safeRequest('home_active_goals', goalService.getActiveGoals(userId), userId),
+        safeRequest('home_match_counts', matchService.getMatchCounts(userId), userId),
       ]);
 
-      const maxMatchWindow = goalsData.reduce((max, goal) => Math.max(max, goal.match_window ?? 0), 0);
+      const goalsForCalc = goalsData ?? [];
+      const maxMatchWindow = goalsForCalc.reduce(
+        (max, goal) => Math.max(max, goal.match_window ?? 0),
+        0
+      );
       const matchLimit = Math.min(Math.max(20, maxMatchWindow), 200);
 
-      const matchesData = await matchService.getRecentMatches(userId, matchLimit);
+      const matchesData = await safeRequest(
+        'home_recent_matches',
+        matchService.getRecentMatches(userId, matchLimit),
+        userId
+      );
 
       const calculatedWinRate =
-        counts.totalMatches > 0 ? Math.round((counts.winMatches / counts.totalMatches) * 100) : 0;
+        countsData && countsData.totalMatches > 0
+          ? Math.round((countsData.winMatches / countsData.totalMatches) * 100)
+          : 0;
 
-      setMatches(matchesData);
-      setGoals(goalsData);
-      setMatchCounts(counts);
-      setWinRate(calculatedWinRate);
+      if (matchesData) setMatches(matchesData);
+      if (goalsData) setGoals(goalsData);
+      if (countsData) {
+        setMatchCounts(countsData);
+        setWinRate(calculatedWinRate);
+      }
+
       setHasLoadedOnce(true);
-      liveDataAppliedRef.current = true;
+      if (matchesData || goalsData || countsData) {
+        liveDataAppliedRef.current = true;
+      }
 
-      void AsyncStorage.setItem(
-        cacheKey,
-        JSON.stringify({
-          version: 2,
-          matches: matchesData,
-          goals: goalsData,
-          winRate: calculatedWinRate,
-          trainingTime: trainingTimeRef.current,
-          matchCounts: counts,
-        })
-      ).catch(error => console.warn('Failed to persist Home cache:', error));
+      if (matchesData && goalsData && countsData) {
+        void AsyncStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            version: 2,
+            matches: matchesData,
+            goals: goalsData,
+            winRate: calculatedWinRate,
+            trainingTime: trainingTimeRef.current,
+            matchCounts: countsData,
+          })
+        ).catch(error => console.warn('Failed to persist Home cache:', error));
+      }
 
       // Defer heavy work so the initial render is fast (and don't run it on every focus)
       const HEAVY_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -524,17 +580,19 @@ export default function HomeScreen() {
             const formattedTrainingTime = formatTrainingTime(totalSeconds);
             setTrainingTime(formattedTrainingTime);
 
-            void AsyncStorage.setItem(
-              cacheKey,
-              JSON.stringify({
-                version: 2,
-                matches: matchesData,
-                goals: goalsData,
-                winRate: calculatedWinRate,
-                trainingTime: formattedTrainingTime,
-                matchCounts: counts,
-              })
-            ).catch(error => console.warn('Failed to persist Home cache:', error));
+            if (matchesData && goalsData && countsData) {
+              void AsyncStorage.setItem(
+                cacheKey,
+                JSON.stringify({
+                  version: 2,
+                  matches: matchesData,
+                  goals: goalsData,
+                  winRate: calculatedWinRate,
+                  trainingTime: formattedTrainingTime,
+                  matchCounts: countsData,
+                })
+              ).catch(error => console.warn('Failed to persist Home cache:', error));
+            }
           } catch (error) {
             console.warn('Failed to fetch training time:', error);
           }
@@ -549,15 +607,15 @@ export default function HomeScreen() {
       setIsRefreshing(false);
       fetchInFlightRef.current = false;
     }
-  }, [user?.id, user?.email]);
+  }, [user?.id, user?.email, authReady]);
 
   // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
   useFocusEffect(
     useCallback(() => {
-      if (user && !loading) {
+      if (user && authReady) {
         fetchUserData();
       }
-    }, [user, loading, fetchUserData])
+    }, [user, authReady, fetchUserData])
   );
 
   const handleSettings = () => {
