@@ -6288,6 +6288,11 @@ export default function RemoteScreen() {
   };
 
   const timerStyles = getTimerDisplayStyles();
+  const isAndroid = Platform.OS === 'android';
+  const decorativeCardWidth = width * (isAndroid ? 0.065 : 0.08);
+  const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12);
+  const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
+  const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
 
   const styles = StyleSheet.create({
     container: {
@@ -6797,9 +6802,9 @@ export default function RemoteScreen() {
       gap: width * 0.03,
     },
     decorativeCard: {
-      width: width * 0.08, // Smaller cards on Nexus S
-      height: width * 0.12, // Smaller height on Nexus S
-      borderRadius: width * 0.015,
+      width: decorativeCardWidth,
+      height: decorativeCardHeight,
+      borderRadius: decorativeCardRadius,
     },
     cardRed: {
       backgroundColor: Colors.red.accent,
@@ -7123,7 +7128,7 @@ export default function RemoteScreen() {
       left: width * 0.005,
     },
     decorativeCardCount: {
-      fontSize: width * 0.03,
+      fontSize: decorativeCardCountSize,
       color: 'white',
       fontWeight: '700',
       marginTop: height * 0.005,
@@ -8577,8 +8582,8 @@ export default function RemoteScreen() {
 			              styles.decorativeCard, 
 			              styles.cardYellow,
 			              isNonSabreTimerReady ? {
-			                width: width * 0.080, // Slightly smaller
-			                height: width * 0.12, // Slightly smaller
+			                width: decorativeCardWidth,
+			                height: decorativeCardHeight,
 			              } : {}
 			            ]} onPress={addYellowCardToAlice}>
 		              {leftYellowCards.length > 0 && (
@@ -8591,8 +8596,8 @@ export default function RemoteScreen() {
 			              styles.decorativeCard, 
 			              styles.cardRed,
 			              isNonSabreTimerReady ? {
-			                width: width * 0.080, // Slightly smaller
-			                height: width * 0.12, // Slightly smaller
+			                width: decorativeCardWidth,
+			                height: decorativeCardHeight,
 			              } : {}
 			            ]} onPress={addRedCardToAlice}>
 		              {leftRedCards.length > 0 && (
@@ -8649,8 +8654,8 @@ export default function RemoteScreen() {
 			              styles.decorativeCard, 
 			              styles.cardYellow,
 			              isNonSabreTimerReady ? {
-			                width: width * 0.080, // Slightly smaller
-			                height: width * 0.12, // Slightly smaller
+			                width: decorativeCardWidth,
+			                height: decorativeCardHeight,
 			              } : {}
 			            ]} onPress={addYellowCardToBob}>
 		              {rightYellowCards.length > 0 && (
@@ -8663,8 +8668,8 @@ export default function RemoteScreen() {
 			              styles.decorativeCard, 
 			              styles.cardRed,
 			              isNonSabreTimerReady ? {
-			                width: width * 0.080, // Slightly smaller
-			                height: width * 0.12, // Slightly smaller
+			                width: decorativeCardWidth,
+			                height: decorativeCardHeight,
 			              } : {}
 			            ]} onPress={addRedCardToBob}>
 		              {rightRedCards.length > 0 && (
