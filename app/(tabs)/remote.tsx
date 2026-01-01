@@ -2874,7 +2874,7 @@ export default function RemoteScreen() {
         fencer_1_entity: leftEntity, // Stable entity for fencer_1 at completion
         fencer_2_entity: rightEntity, // Stable entity for fencer_2 at completion
         final_period: selectedWeapon === 'sabre' ? finalPeriodNumber : undefined, // Set final_period for sabre
-      });
+      }, session?.access_token);
 
       let failedGoalData: any = null; // Declare in outer scope
       let completedGoalData: any = null; // Declare in outer scope for completed goals

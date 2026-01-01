@@ -449,9 +449,11 @@ export default function MatchSummaryScreen() {
     try {
       // Update match type in the database
       if (match.match_id) {
-        await matchService.updateMatch(match.match_id, { 
-          match_type: matchType 
-        });
+        await matchService.updateMatch(
+          match.match_id,
+          { match_type: matchType },
+          session?.access_token
+        );
       }
       
       // Check if completed goal info was passed from remote.tsx (for remote matches)
@@ -591,9 +593,11 @@ export default function MatchSummaryScreen() {
   const handleSaveNotes = async () => {
     if (match?.match_id) {
       try {
-        await matchService.updateMatch(match.match_id, {
-          notes: notes
-        });
+        await matchService.updateMatch(
+          match.match_id,
+          { notes: notes },
+          session?.access_token
+        );
       } catch (error) {
         console.error('❌ Error saving notes:', error);
       }

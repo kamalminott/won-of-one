@@ -407,7 +407,7 @@ export default function AddMatchScreen() {
           event_date: eventDateTime.toISOString(),
           weapon_type: weaponType.toLowerCase(),
           notes: notes.trim() || undefined,
-        });
+        }, accessToken);
       } else {
         // Create new match
         savedMatch = await matchService.createManualMatch({

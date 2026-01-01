@@ -2569,7 +2569,9 @@ $$;
   },
 
   // Update a match
-  async updateMatch(matchId: string, updates: {
+  async updateMatch(
+    matchId: string,
+    updates: {
     final_score?: number;
     // touches_against is a generated column - removed from updates
     result?: string | null;
@@ -2591,13 +2593,29 @@ $$;
     fencer_2_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_2
     event_date?: string; // ISO string for event date/time
     weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
-  }): Promise<Match | null> {
-    // First, try to get the match to check if it's anonymous (user_id is null)
-    const { data: existingMatch } = await supabase
-      .from('match')
-      .select('user_id')
-      .eq('match_id', matchId)
-      .single();
+  },
+  accessToken?: string | null
+  ): Promise<Match | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ updateMatch blocked - auth session not ready', { matchId });
+      return null;
+    }
+
+    const { data: existingMatch, error: fetchError } = await postgrestSelectOne<{ user_id: string | null }>(
+      'match',
+      {
+        select: 'user_id',
+        match_id: `eq.${matchId}`,
+        limit: 1,
+      },
+      { accessToken: token }
+    );
+
+    if (fetchError) {
+      console.error('Error fetching match for update:', fetchError);
+      return null;
+    }
 
     // If this is an anonymous match (user_id is null), use RPC function
     if (existingMatch && existingMatch.user_id === null) {
@@ -2624,12 +2642,15 @@ $$;
     }
 
     // Regular match update (or fallback for anonymous)
-    const { data, error } = await supabase
-      .from('match')
-      .update(updates)
-      .eq('match_id', matchId)
-      .select()
-      .single();
+    const { data, error } = await postgrestUpdate<Match>(
+      'match',
+      updates,
+      {
+        match_id: `eq.${matchId}`,
+        select: '*',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error updating match:', error);
@@ -2677,7 +2698,8 @@ $$;
       return null;
     }
 
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    return row;
   },
 
   // Delete a match and all related records
@@ -2688,13 +2710,28 @@ $$;
   ): Promise<boolean> {
     try {
       console.log('🗑️ Starting deleteMatch:', { matchId, fencingRemoteId });
+
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ deleteMatch blocked - auth session not ready', { matchId });
+        return false;
+      }
       
       // Get match data before deletion for goal recalculation
-      const { data: matchData, error: matchFetchError } = await supabase
-        .from('match')
-        .select('user_id, is_win, final_score, touches_against')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchFetchError } = await postgrestSelectOne<{
+        user_id: string | null;
+        is_win: boolean | null;
+        final_score: number | null;
+        touches_against: number | null;
+      }>(
+        'match',
+        {
+          select: 'user_id, is_win, final_score, touches_against',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        { accessToken: token }
+      );
 
       if (matchFetchError) {
         console.error('❌ Error fetching match data:', matchFetchError);
@@ -2712,23 +2749,23 @@ $$;
       if (fencingRemoteId) {
         // Delete by fencing_remote_id (for events created during remote session)
         console.log('🗑️ Deleting match events by fencing_remote_id:', fencingRemoteId);
-        const { data: eventsData, error } = await supabase
-          .from('match_event')
-          .delete()
-          .eq('fencing_remote_id', fencingRemoteId)
-          .select();
+        const { error } = await postgrestDelete(
+          'match_event',
+          { fencing_remote_id: `eq.${fencingRemoteId}` },
+          { accessToken: token, preferReturn: true }
+        );
         eventsError = error;
-        console.log('🗑️ Match events delete result:', { data: eventsData, error });
+        console.log('🗑️ Match events delete result:', { error });
       } else {
         // Delete by match_id (fallback)
         console.log('🗑️ Deleting match events by match_id:', matchId);
-        const { data: eventsData, error } = await supabase
-          .from('match_event')
-          .delete()
-          .eq('match_id', matchId)
-          .select();
+        const { error } = await postgrestDelete(
+          'match_event',
+          { match_id: `eq.${matchId}` },
+          { accessToken: token, preferReturn: true }
+        );
         eventsError = error;
-        console.log('🗑️ Match events delete result:', { data: eventsData, error });
+        console.log('🗑️ Match events delete result:', { error });
       }
 
       if (eventsError) {
@@ -2742,10 +2779,11 @@ $$;
       console.log('🗑️ Deleting match periods by match_id:', matchId);
       
       // First, let's see what match_period records exist for this match_id
-      const { data: existingPeriods, error: queryError } = await supabase
-        .from('match_period')
-        .select('*')
-        .eq('match_id', matchId);
+      const { data: existingPeriods, error: queryError } = await postgrestSelect(
+        'match_period',
+        { select: '*', match_id: `eq.${matchId}` },
+        { accessToken: token }
+      );
       
       if (queryError) {
         console.error('❌ Error querying match periods:', queryError);
@@ -2753,11 +2791,11 @@ $$;
         console.log('🔍 Found match_period records to delete:', existingPeriods?.length || 0, existingPeriods);
       }
       
-      const { data: periodsData, error: periodsError } = await supabase
-        .from('match_period')
-        .delete()
-        .eq('match_id', matchId)
-        .select();
+      const { data: periodsData, error: periodsError } = await postgrestDelete(
+        'match_period',
+        { match_id: `eq.${matchId}` },
+        { accessToken: token, preferReturn: true }
+      );
 
       if (periodsError) {
         console.error('❌ Error deleting match periods:', periodsError);
@@ -2771,11 +2809,11 @@ $$;
 
       // 3. Delete the match itself
       console.log('🗑️ Deleting match by match_id:', matchId);
-      const { data: deletedMatchData, error: matchError } = await supabase
-        .from('match')
-        .delete()
-        .eq('match_id', matchId)
-        .select();
+      const { data: deletedMatchData, error: matchError } = await postgrestDelete(
+        'match',
+        { match_id: `eq.${matchId}` },
+        { accessToken: token, preferReturn: true }
+      );
 
       if (matchError) {
         console.error('❌ Error deleting match:', matchError);

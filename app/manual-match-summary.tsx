@@ -20,7 +20,7 @@ import { analytics } from '@/lib/analytics';
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
-  const { userName, session } = useAuth();
+  const { userName, session, user } = useAuth();
   const insets = useSafeAreaInsets();
   
   // Extract parameters from navigation
@@ -154,7 +154,48 @@ export default function ManualMatchSummaryScreen() {
     router.back();
   };
 
-  const handleDone = () => {
+  const handleDone = async () => {
+    const matchId = params.matchId as string | undefined;
+    const hasMatchId = !!matchId && matchId !== 'undefined' && matchId !== 'null';
+
+    if (showDoneButton && !hasMatchId) {
+      if (!user?.id) {
+        Alert.alert('Error', 'You must be logged in to save this match.');
+        return;
+      }
+
+      const normalizedMatchType = matchType === 'Training' ? 'training' : 'competition';
+      const fallbackDate = new Date().toLocaleDateString('en-GB');
+      const fallbackTime = new Date().toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      try {
+        const created = await matchService.createManualMatch({
+          userId: user.id,
+          opponentName: (opponentName as string) || 'Opponent',
+          yourScore: yourScoreNum,
+          opponentScore: opponentScoreNum,
+          matchType: normalizedMatchType,
+          date: (date as string) || fallbackDate,
+          time: (time as string) || fallbackTime,
+          notes: (notes as string) || undefined,
+          accessToken: session?.access_token,
+        });
+
+        if (!created) {
+          Alert.alert('Error', 'Failed to save match. Please try again.');
+          return;
+        }
+      } catch (error) {
+        console.error('❌ Error saving match on done:', error);
+        Alert.alert('Error', 'Failed to save match. Please try again.');
+        return;
+      }
+    }
+
     router.push('/(tabs)');
   };
 
