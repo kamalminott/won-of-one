@@ -18,6 +18,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
 }) => {
   const { width, height } = useWindowDimensions();
   const { user, session, authReady } = useAuth();
+  const accessToken = session?.access_token ?? undefined;
   
   // State for current week progress
   const [current, setCurrent] = useState(0);
@@ -186,7 +187,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     
     const progressData = await weeklyProgressService.getCurrentWeekProgress(
       user.id,
-      selectedActivity
+      selectedActivity,
+      accessToken
     );
     
     console.log('📈 Progress data received:', progressData);
@@ -225,7 +227,11 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     
     try {
       // Get all targets for this activity
-      const allTargets = await weeklyTargetService.getAllTargetsForActivity(user.id, selectedActivity);
+      const allTargets = await weeklyTargetService.getAllTargetsForActivity(
+        user.id,
+        selectedActivity,
+        accessToken
+      );
       
       if (allTargets && allTargets.length > 0) {
         const now = new Date();
@@ -315,7 +321,11 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
     try {
       const session = await weeklySessionLogService.logSession(
         user.id,
-        selectedActivity
+        selectedActivity,
+        undefined,
+        undefined,
+        undefined,
+        accessToken
       );
       
       if (session) {
@@ -341,7 +351,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             const currentTarget = await weeklyTargetService.getWeeklyTarget(
               user.id,
               selectedActivity,
-              weekStart
+              weekStart,
+              accessToken
             );
             
             if (currentTarget && currentTarget.target_id) {
@@ -400,13 +411,14 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       user.id,
       weekStart,
       weekEnd,
-      selectedActivity
+      selectedActivity,
+      accessToken
     );
     
     // Delete the most recent session
     if (sessions.length > 0) {
       const mostRecentSession = sessions[0]; // Already sorted by date descending
-      await weeklySessionLogService.deleteSession(mostRecentSession.session_id);
+      await weeklySessionLogService.deleteSession(mostRecentSession.session_id, accessToken);
       
       // Refresh progress
       await fetchProgress();
@@ -473,7 +485,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       const existingTarget = await weeklyTargetService.getWeeklyTarget(
         user.id,
         selectedActivity,
-        selectedWeekData.startDate
+        selectedWeekData.startDate,
+        accessToken
       );
       
       console.log('🔍 Existing target found:', existingTarget);
@@ -503,7 +516,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         selectedActivity,
         selectedWeekData.startDate,
         selectedWeekData.endDate,
-        sessionCount
+        sessionCount,
+        accessToken
       );
       
       if (result) {
@@ -559,7 +573,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         selectedActivity,
         selectedWeekData.startDate,
         selectedWeekData.endDate,
-        0
+        0,
+        accessToken
       );
       
       if (result) {
@@ -686,7 +701,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         targetToDelete = await weeklyTargetService.getWeeklyTarget(
           user.id,
           selectedActivity,
-          futureWeekStart
+          futureWeekStart,
+          accessToken
         );
       } else {
         // For current week targets, use current week calculation
@@ -701,7 +717,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         targetToDelete = await weeklyTargetService.getWeeklyTarget(
           user.id,
           selectedActivity,
-          weekStart
+          weekStart,
+          accessToken
         );
       }
       
@@ -738,7 +755,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                 user.id,
                 currentWeekStart,
                 currentWeekEnd,
-                selectedActivity
+                selectedActivity,
+                accessToken
               );
               
               console.log('📊 Found sessions to delete:', sessions.length);
@@ -746,7 +764,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               // Delete each session log
               for (const session of sessions) {
                 if (session.session_id) {
-                  const deleted = await weeklySessionLogService.deleteSession(session.session_id);
+                  const deleted = await weeklySessionLogService.deleteSession(
+                    session.session_id,
+                    accessToken
+                  );
                   console.log('🗑️ Deleted session:', session.session_id, deleted);
                 }
               }
@@ -877,7 +898,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           const currentTarget = await weeklyTargetService.getWeeklyTarget(
             user?.id!,
             selectedActivity,
-            targetWeek.startDate
+            targetWeek.startDate,
+            accessToken
           );
           
           if (currentTarget && currentTarget.target_id) {
@@ -895,7 +917,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
         selectedActivity,
         targetWeek.startDate,
         targetWeek.endDate,
-        targetSessions
+        targetSessions,
+        accessToken
       );
       
       // Reset progress to 0 for the new target

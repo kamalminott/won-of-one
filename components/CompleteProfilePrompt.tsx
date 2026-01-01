@@ -60,7 +60,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
 }) => {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user, userName, setUserName } = useAuth();
+  const { user, userName, setUserName, session } = useAuth();
+  const accessToken = session?.access_token ?? undefined;
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -115,7 +116,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       }
 
       const existingUser = await withTimeout(
-        userService.getUserById(user.id),
+        userService.getUserById(user.id, accessToken),
         10000,
         'Loading profile'
       );
@@ -123,13 +124,20 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
 
       if (existingUser) {
         updatedUser = await withTimeout(
-          userService.updateUser(user.id, { name: fullName }),
+          userService.updateUser(user.id, { name: fullName }, accessToken),
           10000,
           'Saving profile'
         );
       } else {
         updatedUser = await withTimeout(
-          userService.createUser(user.id, user.email, formattedFirst, formattedLast),
+          userService.createUser(
+            user.id,
+            user.email,
+            formattedFirst,
+            formattedLast,
+            undefined,
+            accessToken
+          ),
           10000,
           'Creating profile'
         );

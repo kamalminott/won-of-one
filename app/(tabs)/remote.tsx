@@ -66,7 +66,8 @@ export default function RemoteScreen() {
   const layout = useDynamicLayout();
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { user, userName } = useAuth();
+  const { user, userName, session } = useAuth();
+  const accessToken = session?.access_token ?? undefined;
   
   // Responsive breakpoints for small screens - simplified for consistency across devices
   
@@ -209,7 +210,7 @@ export default function RemoteScreen() {
       }
 
       try {
-        const userData = await userService.getUserById(user.id);
+        const userData = await userService.getUserById(user.id, accessToken);
         const preferredWeapon = normalizePreferredWeapon(userData?.preferred_weapon) || 'foil';
         await AsyncStorage.setItem('preferred_weapon', preferredWeapon);
         setPreferredWeapon(preferredWeapon);
@@ -223,7 +224,7 @@ export default function RemoteScreen() {
     };
 
     loadPreferredWeapon();
-  }, [user?.id]);
+  }, [user?.id, accessToken]);
 
   // Track if we need to set fencer names after toggle is turned off
   const pendingFencerNamesRef = useRef<{ fencer1Name: string; fencer2Name: string } | null>(null);

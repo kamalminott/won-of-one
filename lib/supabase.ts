@@ -7,6 +7,9 @@ import 'react-native-url-polyfill/auto';
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || 'https://dxgvjghcpnseglukvqao.supabase.co';
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4Z3ZqZ2hjcG5zZWdsdWt2cWFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5MzA4NzMsImV4cCI6MjA3MDUwNjg3M30.ngvJhCVvmSc7x9ggxj4A07yoRE4TaD338LK-sjFo0wI';
 
+export const SUPABASE_URL = supabaseUrl;
+export const SUPABASE_ANON_KEY = supabaseAnonKey;
+
 // Only import AsyncStorage on native platforms (not during web static rendering)
 let AsyncStorage: any = null;
 if (Platform.OS === 'ios' || Platform.OS === 'android') {

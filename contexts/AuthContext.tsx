@@ -498,10 +498,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       // First, try to load from database (retry briefly to allow profile creation to finish)
-      let dbUser = await userService.getUserById(user.id);
+      let dbUser = await userService.getUserById(user.id, session?.access_token);
       if (!dbUser) {
         await wait(300);
-        dbUser = await userService.getUserById(user.id);
+        dbUser = await userService.getUserById(user.id, session?.access_token);
       }
       if (dbUser?.name) {
         console.log('✅ Loaded name from database:', dbUser.name);
@@ -523,7 +523,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (dbUser && !dbUser.name && fallbackName) {
         try {
-          const updatedUser = await userService.updateUser(user.id, { name: fallbackName });
+          const updatedUser = await userService.updateUser(
+            user.id,
+            { name: fallbackName },
+            session?.access_token
+          );
           if (updatedUser?.name) {
             console.log('✅ Backfilled missing name in database:', updatedUser.name);
             setUserNameState(updatedUser.name);
@@ -541,7 +545,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           const nameParts = fallbackName.trim().split(' ').filter(Boolean);
           const first = nameParts[0] || fallbackName;
           const last = nameParts.slice(1).join(' ');
-          const createdUser = await userService.createUser(user.id, user.email, first, last);
+          const createdUser = await userService.createUser(
+            user.id,
+            user.email,
+            first,
+            last,
+            undefined,
+            session?.access_token
+          );
           if (createdUser?.name) {
             console.log('✅ Created missing user profile:', createdUser.name);
             setUserNameState(createdUser.name);
@@ -870,7 +881,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             
             if (isOAuthProvider) {
               try {
-                const existingUser = await userService.getUserById(session.user.id);
+                const existingUser = await userService.getUserById(
+                  session.user.id,
+                  session.access_token
+                );
                 
                 if (!existingUser) {
                   console.log('🔍 New OAuth user detected, creating user in database...');
@@ -897,7 +911,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                       session.user.id,
                       email,
                       firstName,
-                      lastName
+                      lastName,
+                      undefined,
+                      session.access_token
                     );
                     if (createdUser?.name) {
                       await setUserName(createdUser.name);
@@ -910,7 +926,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                       session.user.id,
                       email,
                       emailPrefix,
-                      ''
+                      '',
+                      undefined,
+                      session.access_token
                     );
                     if (createdUser?.name) {
                       await setUserName(createdUser.name);
@@ -922,7 +940,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                       email,
                       undefined,
                       undefined,
-                      { fallbackEmailForName: null }
+                      { fallbackEmailForName: null },
+                      session.access_token
                     );
                     if (createdUser?.name) {
                       await setUserName(createdUser.name);
@@ -946,7 +965,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           } else if (session.user.id) {
             // For existing users on other events (like TOKEN_REFRESHED), just sync name
             try {
-              const existingUser = await userService.getUserById(session.user.id);
+              const existingUser = await userService.getUserById(
+                session.user.id,
+                session.access_token
+              );
               if (existingUser?.name) {
                 await setUserName(existingUser.name);
               }
@@ -1018,7 +1040,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (data.user && !error) {
       console.log('✅ Auth signin successful, user ID:', data.user.id);
       console.log('🔍 Checking if user exists in app_user table...');
-      const existingUser = await userService.getUserById(data.user.id);
+      const accessToken = data.session?.access_token;
+      const existingUser = await userService.getUserById(data.user.id, accessToken);
       
       if (!existingUser) {
         console.log('⚠️ User not found in app_user table');
@@ -1049,7 +1072,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
 
         console.log('✅ Creating user from fallback data:', { first, last });
-        const createdUser = await userService.createUser(data.user.id, email, first, last);
+        const createdUser = await userService.createUser(
+          data.user.id,
+          email,
+          first,
+          last,
+          undefined,
+          accessToken
+        );
         if (createdUser?.name) {
           await setUserName(createdUser.name);
           console.log('✅ New user created from fallback and synced to AsyncStorage:', createdUser.name);
@@ -1135,7 +1165,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         fullName
       });
       
-      const createdUser = await userService.createUser(data.user.id, email, first, last);
+      const createdUser = await userService.createUser(
+        data.user.id,
+        email,
+        first,
+        last,
+        undefined,
+        data.session?.access_token
+      );
       
       // If user was created successfully, save name to AsyncStorage and load it
       if (createdUser?.name) {
@@ -1245,7 +1282,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Create user in app_user table if needed
       if (data.user && !error) {
-        const existingUser = await userService.getUserById(data.user.id);
+        const accessToken = data.session?.access_token;
+        const existingUser = await userService.getUserById(data.user.id, accessToken);
         
         if (!existingUser) {
           // Extract name from Apple credential or user metadata
@@ -1260,7 +1298,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.log('🔍 Extracted user info:', { firstName, lastName, email });
           
           if (firstName && lastName) {
-            const createdUser = await userService.createUser(data.user.id, email, firstName, lastName);
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              firstName,
+              lastName,
+              undefined,
+              accessToken
+            );
             if (createdUser?.name) {
               await setUserName(createdUser.name);
               console.log('✅ New user created from Apple sign in:', createdUser.name);
@@ -1271,7 +1316,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               email,
               undefined,
               undefined,
-              { fallbackEmailForName: null }
+              { fallbackEmailForName: null },
+              accessToken
             );
             if (createdUser?.name) {
               await setUserName(createdUser.name);
@@ -1384,7 +1430,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Create user in app_user table if needed
       if (data.user && !error) {
-        const existingUser = await userService.getUserById(data.user.id);
+        const accessToken = data.session?.access_token;
+        const existingUser = await userService.getUserById(data.user.id, accessToken);
         
         if (!existingUser) {
           // Extract name from Apple credential or user metadata
@@ -1399,7 +1446,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.log('🔍 Extracted user info for sign up:', { firstName, lastName, email });
           
           if (firstName && lastName) {
-            const createdUser = await userService.createUser(data.user.id, email, firstName, lastName);
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              firstName,
+              lastName,
+              undefined,
+              accessToken
+            );
             if (createdUser?.name) {
               await setUserName(createdUser.name);
               console.log('✅ New user created from Apple sign up:', createdUser.name);
@@ -1410,7 +1464,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               email,
               undefined,
               undefined,
-              { fallbackEmailForName: null }
+              { fallbackEmailForName: null },
+              accessToken
             );
             if (createdUser?.name) {
               await setUserName(createdUser.name);

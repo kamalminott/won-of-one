@@ -7,6 +7,13 @@ import {
 import type { PostgrestSingleResponse, Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { getCachedAuthSession, getLastAuthEvent } from './authSessionCache';
+import {
+  postgrestDelete,
+  postgrestInsert,
+  postgrestSelect,
+  postgrestSelectOne,
+  postgrestUpdate,
+} from './postgrest';
 
 // Re-export supabase for use in other services
 export { supabase };
@@ -153,6 +160,11 @@ const setAuthSessionCache = (session: Session | null) => {
   authSessionCache = { session, timestamp: Date.now() };
 };
 
+const resolveAccessToken = (accessToken?: string | null) => {
+  if (accessToken) return accessToken;
+  return getCachedAuthSession()?.access_token ?? null;
+};
+
 const ensureAuthSession = async (label: string): Promise<Session | null> => {
   const now = Date.now();
   const cachedSession = getCachedAuthSession();
@@ -247,23 +259,26 @@ type CreateUserOptions = {
 };
 
 export const userService = {
-  async getUserById(userId: string): Promise<AppUser | null> {
+  async getUserById(userId: string, accessToken?: string | null): Promise<AppUser | null> {
     try {
-      const result = await withTimeout<PostgrestSingleResponse<AppUser | null>>(
-        supabase
-          .from('app_user')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle(),
-        DB_REQUEST_TIMEOUT_MS,
-        'app_user fetch'
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ app_user fetch skipped - auth session missing', { userId });
+        return null;
+      }
+
+      const { data, error } = await postgrestSelectOne<AppUser>(
+        'app_user',
+        {
+          select: '*',
+          user_id: `eq.${userId}`,
+          limit: 1,
+        },
+        { accessToken: token }
       );
-      const { data, error } = result;
 
       if (error) {
-        if (error.code !== 'PGRST116') {
-          console.error('Error fetching user by ID:', error);
-        }
+        console.error('Error fetching user by ID:', error);
         return null;
       }
 
@@ -274,24 +289,19 @@ export const userService = {
     }
   },
 
-  async ensureUserById(userId: string, email?: string | null): Promise<AppUser | null> {
-    const existing = await userService.getUserById(userId);
+  async ensureUserById(
+    userId: string,
+    email?: string | null,
+    accessToken?: string | null
+  ): Promise<AppUser | null> {
+    const existing = await userService.getUserById(userId, accessToken);
     if (existing) {
       return existing;
     }
 
     let resolvedEmail = email ?? null;
     if (!resolvedEmail) {
-      try {
-        const { data } = await withTimeout(
-          supabase.auth.getUser(),
-          DB_REQUEST_TIMEOUT_MS,
-          'auth getUser'
-        );
-        resolvedEmail = data?.user?.email ?? null;
-      } catch (error) {
-        console.warn('⚠️ Unable to resolve user email for profile creation:', error);
-      }
+      console.warn('⚠️ Unable to resolve user email for profile creation');
     }
 
     const created = await userService.createUser(
@@ -299,7 +309,8 @@ export const userService = {
       resolvedEmail,
       undefined,
       undefined,
-      { fallbackEmailForName: null }
+      { fallbackEmailForName: null },
+      accessToken
     );
 
     if (!created) {
@@ -314,7 +325,8 @@ export const userService = {
     email?: string | null,
     firstName?: string,
     lastName?: string,
-    options?: CreateUserOptions
+    options?: CreateUserOptions,
+    accessToken?: string | null
   ): Promise<AppUser | null> {
     const hasFallbackOverride = options && Object.prototype.hasOwnProperty.call(options, 'fallbackEmailForName');
     const fallbackEmailForName = hasFallbackOverride ? options?.fallbackEmailForName : email;
@@ -330,32 +342,45 @@ export const userService = {
     }
 
     try {
-      const result = await withTimeout<PostgrestSingleResponse<AppUser>>(
-        supabase
-          .from('app_user')
-          .upsert(insertData, { onConflict: 'user_id' })
-          .select()
-          .single(),
-        DB_REQUEST_TIMEOUT_MS,
-        'app_user upsert'
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ app_user upsert skipped - auth session missing', { userId });
+        return null;
+      }
+
+      const { data, error } = await postgrestInsert<AppUser>(
+        'app_user',
+        insertData,
+        {
+          on_conflict: 'user_id',
+          select: '*',
+        },
+        {
+          accessToken: token,
+          prefer: 'return=representation, resolution=merge-duplicates',
+        }
       );
-      const { data, error } = result;
 
       if (error) {
         console.error('Error upserting user:', error);
         return null;
       }
 
-      return data as AppUser;
+      const row = Array.isArray(data) ? data[0] ?? null : null;
+      return row as AppUser | null;
     } catch (err) {
       console.error('Unexpected error upserting user:', err);
       return null;
     }
   },
 
-  async updateUser(userId: string, updates: Partial<AppUser>): Promise<AppUser | null> {
+  async updateUser(
+    userId: string,
+    updates: Partial<AppUser>,
+    accessToken?: string | null
+  ): Promise<AppUser | null> {
     if (!updates || Object.keys(updates).length === 0) {
-      return userService.getUserById(userId);
+      return userService.getUserById(userId, accessToken);
     }
 
     const payload: Partial<AppUser> = { ...updates };
@@ -365,19 +390,29 @@ export const userService = {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('app_user')
-        .update(payload)
-        .eq('user_id', userId)
-        .select()
-        .single();
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ app_user update skipped - auth session missing', { userId });
+        return null;
+      }
+
+      const { data, error } = await postgrestUpdate<AppUser>(
+        'app_user',
+        payload,
+        {
+          user_id: `eq.${userId}`,
+          select: '*',
+        },
+        { accessToken: token }
+      );
 
       if (error) {
         console.error('Error updating user:', error);
         return null;
       }
 
-      return data as AppUser;
+      const row = Array.isArray(data) ? data[0] ?? null : null;
+      return row as AppUser | null;
     } catch (err) {
       console.error('Unexpected error updating user:', err);
       return null;
@@ -3435,32 +3470,32 @@ export const weeklyTargetService = {
     activityType: string,
     weekStartDate: Date,
     weekEndDate: Date,
-    targetSessions: number
+    targetSessions: number,
+    accessToken?: string | null
   ): Promise<WeeklyTarget | null> {
     try {
-      const authSession = await ensureAuthSession('setWeeklyTarget');
-      if (!authSession?.access_token) {
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
         console.warn('⚠️ setWeeklyTarget blocked - auth session not ready', { userId });
         return null;
       }
-      await userService.ensureUserById(userId);
       const weekStart = weekStartDate.toISOString().split('T')[0];
       const weekEnd = weekEndDate.toISOString().split('T')[0];
 
       let existing: { target_id: string }[] | null = null;
       let existingError: any = null;
       try {
-        const existingResult = await withTimeout<PostgrestSingleResponse<{ target_id: string }[]>>(
-          supabase
-            .from('weekly_target')
-            .select('target_id')
-            .eq('user_id', userId)
-            .eq('activity_type', activityType)
-            .eq('week_start_date', weekStart)
-            .order('updated_at', { ascending: false })
-            .limit(1),
-          8000,
-          'Weekly target lookup'
+        const existingResult = await postgrestSelect<{ target_id: string }>(
+          'weekly_target',
+          {
+            select: 'target_id',
+            user_id: `eq.${userId}`,
+            activity_type: `eq.${activityType}`,
+            week_start_date: `eq.${weekStart}`,
+            order: 'updated_at.desc',
+            limit: 1,
+          },
+          { accessToken: token }
         );
         existing = existingResult.data;
         existingError = existingResult.error;
@@ -3487,26 +3522,22 @@ export const weeklyTargetService = {
       let error: any = null;
       try {
         const result = existingTarget?.target_id
-          ? await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
-              supabase
-                .from('weekly_target')
-                .update(payload)
-                .eq('target_id', existingTarget.target_id)
-                .select()
-                .single(),
-              8000,
-              'Weekly target update'
+          ? await postgrestUpdate<WeeklyTarget>(
+              'weekly_target',
+              payload,
+              {
+                target_id: `eq.${existingTarget.target_id}`,
+                select: '*',
+              },
+              { accessToken: token }
             )
-          : await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
-              supabase
-                .from('weekly_target')
-                .insert(payload)
-                .select()
-                .single(),
-              8000,
-              'Weekly target insert'
+          : await postgrestInsert<WeeklyTarget>(
+              'weekly_target',
+              payload,
+              { select: '*' },
+              { accessToken: token }
             );
-        data = result.data;
+        data = Array.isArray(result.data) ? result.data[0] ?? null : null;
         error = result.error;
       } catch (requestError) {
         console.error('Error setting weekly target (request):', requestError);
@@ -3516,28 +3547,24 @@ export const weeklyTargetService = {
       if (error) {
         if ((error as any)?.code === '23503') {
           console.warn('⚠️ Weekly target insert failed due to missing user record; retrying once');
-          await userService.ensureUserById(userId);
-          let retry: PostgrestSingleResponse<WeeklyTarget>;
+          await userService.ensureUserById(userId, undefined, token);
+          let retry;
           try {
             retry = existingTarget?.target_id
-              ? await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
-                  supabase
-                    .from('weekly_target')
-                    .update(payload)
-                    .eq('target_id', existingTarget.target_id)
-                    .select()
-                    .single(),
-                  8000,
-                  'Weekly target retry update'
+              ? await postgrestUpdate<WeeklyTarget>(
+                  'weekly_target',
+                  payload,
+                  {
+                    target_id: `eq.${existingTarget.target_id}`,
+                    select: '*',
+                  },
+                  { accessToken: token }
                 )
-              : await withTimeout<PostgrestSingleResponse<WeeklyTarget>>(
-                  supabase
-                    .from('weekly_target')
-                    .insert(payload)
-                    .select()
-                    .single(),
-                  8000,
-                  'Weekly target retry insert'
+              : await postgrestInsert<WeeklyTarget>(
+                  'weekly_target',
+                  payload,
+                  { select: '*' },
+                  { accessToken: token }
                 );
           } catch (requestError) {
             console.error('Error setting weekly target after retry (request):', requestError);
@@ -3549,7 +3576,8 @@ export const weeklyTargetService = {
             return null;
           }
 
-          return retry.data;
+          const retryRow = Array.isArray(retry.data) ? retry.data[0] ?? null : null;
+          return retryRow;
         }
 
         console.error('Error setting weekly target:', error);
@@ -3567,52 +3595,45 @@ export const weeklyTargetService = {
   async getWeeklyTarget(
     userId: string,
     activityType: string,
-    weekStartDate: Date
+    weekStartDate: Date,
+    accessToken?: string | null
   ): Promise<WeeklyTarget | null> {
     try {
-      const authSession = await ensureAuthSession('getWeeklyTarget');
-      if (!authSession?.access_token) {
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
         console.warn('⚠️ getWeeklyTarget blocked - auth session not ready', { userId });
         return null;
       }
       const dateString = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getDate()).padStart(2, '0')}`;
       
-      let data: WeeklyTarget[] | null = null;
-      let error: any = null;
       try {
-        const result = await withTimeout<PostgrestSingleResponse<WeeklyTarget[]>>(
-          supabase
-            .from('weekly_target')
-            .select('*')
-            .eq('user_id', userId)
-            .eq('activity_type', activityType)
-            .eq('week_start_date', dateString)
-            .order('updated_at', { ascending: false })
-            .limit(1),
-          8000,
-          'Weekly target fetch'
+        const result = await postgrestSelect<WeeklyTarget>(
+          'weekly_target',
+          {
+            select: '*',
+            user_id: `eq.${userId}`,
+            activity_type: `eq.${activityType}`,
+            week_start_date: `eq.${dateString}`,
+            order: 'updated_at.desc',
+            limit: 1,
+          },
+          { accessToken: token }
         );
-        data = result.data;
-        error = result.error;
+        if (result.error) {
+          console.error('Error getting weekly target:', result.error);
+          return null;
+        }
+        const target = result.data?.[0] || null;
+        if (!target) {
+          console.log('🔍 No target found for this week');
+        } else {
+          console.log('🔍 Found target:', target);
+        }
+        return target;
       } catch (requestError) {
         console.error('Error getting weekly target (request):', requestError);
         return null;
       }
-      
-      console.log('🔍 Query params:', { userId, activityType, week_start_date: dateString });
-
-      if (error) {
-        console.error('Error getting weekly target:', error);
-        return null;
-      }
-
-      const target = data?.[0] || null;
-      if (!target) {
-        console.log('🔍 No target found for this week');
-      } else {
-        console.log('🔍 Found target:', target);
-      }
-      return target;
     } catch (error) {
       console.error('Error in getWeeklyTarget:', error);
       return null;
@@ -3719,19 +3740,28 @@ export const weeklyTargetService = {
   },
 
   // Get all targets for a specific activity
-  async getAllTargetsForActivity(userId: string, activityType: string): Promise<WeeklyTarget[]> {
+  async getAllTargetsForActivity(
+    userId: string,
+    activityType: string,
+    accessToken?: string | null
+  ): Promise<WeeklyTarget[]> {
     try {
-      const result = await withTimeout<PostgrestSingleResponse<WeeklyTarget[]>>(
-        supabase
-          .from('weekly_target')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('activity_type', activityType)
-          .order('week_start_date', { ascending: true }),
-        DB_REQUEST_TIMEOUT_MS,
-        'weekly_target fetch all'
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ getAllTargetsForActivity blocked - auth session not ready', { userId });
+        return [];
+      }
+
+      const { data, error } = await postgrestSelect<WeeklyTarget>(
+        'weekly_target',
+        {
+          select: '*',
+          user_id: `eq.${userId}`,
+          activity_type: `eq.${activityType}`,
+          order: 'week_start_date.asc',
+        },
+        { accessToken: token }
       );
-      const { data, error } = result;
 
       if (error) {
         console.error('Error getting all targets for activity:', error);
@@ -3833,54 +3863,48 @@ export const weeklySessionLogService = {
     activityType: string,
     sessionDate?: Date,
     durationMinutes?: number,
-    notes?: string
+    notes?: string,
+    accessToken?: string | null
   ): Promise<WeeklySessionLog | null> {
     try {
-      const authSession = await ensureAuthSession('logSession');
-      if (!authSession?.access_token) {
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
         console.warn('⚠️ logSession blocked - auth session not ready', { userId });
         return null;
       }
-      await userService.ensureUserById(userId);
-      const result = await withTimeout<PostgrestSingleResponse<WeeklySessionLog>>(
-        supabase
-          .from('weekly_session_log')
-          .insert({
-            user_id: userId,
-            activity_type: activityType,
-            session_date: sessionDate 
-              ? sessionDate.toISOString().split('T')[0] 
-              : new Date().toISOString().split('T')[0],
-            duration_minutes: durationMinutes,
-            notes: notes
-          })
-          .select()
-          .single(),
-        DB_REQUEST_TIMEOUT_MS,
-        'weekly_session_log insert'
+      await userService.ensureUserById(userId, undefined, token);
+      const { data, error } = await postgrestInsert<WeeklySessionLog>(
+        'weekly_session_log',
+        {
+          user_id: userId,
+          activity_type: activityType,
+          session_date: sessionDate 
+            ? sessionDate.toISOString().split('T')[0] 
+            : new Date().toISOString().split('T')[0],
+          duration_minutes: durationMinutes,
+          notes: notes
+        },
+        { select: '*' },
+        { accessToken: token }
       );
-      const { data, error } = result;
 
       if (error) {
         if ((error as any)?.code === '23503') {
           console.warn('⚠️ Weekly session insert failed due to missing user record; retrying once');
-          await userService.ensureUserById(userId);
-          const retry = await withTimeout<PostgrestSingleResponse<WeeklySessionLog>>(
-            supabase
-              .from('weekly_session_log')
-              .insert({
-                user_id: userId,
-                activity_type: activityType,
-                session_date: sessionDate 
-                  ? sessionDate.toISOString().split('T')[0] 
-                  : new Date().toISOString().split('T')[0],
-                duration_minutes: durationMinutes,
-                notes: notes
-              })
-              .select()
-              .single(),
-            DB_REQUEST_TIMEOUT_MS,
-            'weekly_session_log retry insert'
+          await userService.ensureUserById(userId, undefined, token);
+          const retry = await postgrestInsert<WeeklySessionLog>(
+            'weekly_session_log',
+            {
+              user_id: userId,
+              activity_type: activityType,
+              session_date: sessionDate 
+                ? sessionDate.toISOString().split('T')[0] 
+                : new Date().toISOString().split('T')[0],
+              duration_minutes: durationMinutes,
+              notes: notes
+            },
+            { select: '*' },
+            { accessToken: token }
           );
 
           if (retry.error) {
@@ -3888,14 +3912,16 @@ export const weeklySessionLogService = {
             return null;
           }
 
-          return retry.data;
+          const retryRow = Array.isArray(retry.data) ? retry.data[0] ?? null : null;
+          return retryRow;
         }
 
         console.error('Error logging session:', error);
         return null;
       }
 
-      return data;
+      const row = Array.isArray(data) ? data[0] ?? null : null;
+      return row;
     } catch (error) {
       console.error('Error in logSession:', error);
       return null;
@@ -3903,12 +3929,19 @@ export const weeklySessionLogService = {
   },
 
   // Delete a session
-  async deleteSession(sessionId: string): Promise<boolean> {
+  async deleteSession(sessionId: string, accessToken?: string | null): Promise<boolean> {
     try {
-      const { error } = await supabase
-        .from('weekly_session_log')
-        .delete()
-        .eq('session_id', sessionId);
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ deleteSession blocked - auth session not ready', { sessionId });
+        return false;
+      }
+
+      const { error } = await postgrestDelete(
+        'weekly_session_log',
+        { session_id: `eq.${sessionId}` },
+        { accessToken: token }
+      );
 
       if (error) {
         console.error('Error deleting session:', error);
@@ -3927,27 +3960,30 @@ export const weeklySessionLogService = {
     userId: string,
     weekStartDate: Date,
     weekEndDate: Date,
-    activityType?: string
+    activityType?: string,
+    accessToken?: string | null
   ): Promise<WeeklySessionLog[]> {
     try {
-      let query = supabase
-        .from('weekly_session_log')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('session_date', weekStartDate.toISOString().split('T')[0])
-        .lte('session_date', weekEndDate.toISOString().split('T')[0])
-        .order('session_date', { ascending: false });
-
-      if (activityType) {
-        query = query.eq('activity_type', activityType);
+      const token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ getSessionsForWeek blocked - auth session not ready', { userId });
+        return [];
       }
 
-      const result = await withTimeout<PostgrestSingleResponse<WeeklySessionLog[]>>(
-        query,
-        DB_REQUEST_TIMEOUT_MS,
-        'weekly_session_log fetch'
+      const { data, error } = await postgrestSelect<WeeklySessionLog>(
+        'weekly_session_log',
+        {
+          select: '*',
+          user_id: `eq.${userId}`,
+          session_date: [
+            `gte.${weekStartDate.toISOString().split('T')[0]}`,
+            `lte.${weekEndDate.toISOString().split('T')[0]}`,
+          ],
+          activity_type: activityType ? `eq.${activityType}` : undefined,
+          order: 'session_date.desc',
+        },
+        { accessToken: token }
       );
-      const { data, error } = result;
 
       if (error) {
         console.error('Error getting sessions for week:', error);
@@ -3968,7 +4004,8 @@ export const weeklyProgressService = {
   // Get current week progress
   async getCurrentWeekProgress(
     userId: string,
-    activityType: string
+    activityType: string,
+    accessToken?: string | null
   ): Promise<WeeklyProgress | null> {
     try {
       // Calculate current week boundaries (Monday to Sunday) in local time
@@ -3997,7 +4034,8 @@ export const weeklyProgressService = {
       const target = await weeklyTargetService.getWeeklyTarget(
         userId,
         activityType,
-        weekStart
+        weekStart,
+        accessToken
       );
       
       console.log('🎯 Target fetched:', target);
@@ -4007,7 +4045,8 @@ export const weeklyProgressService = {
         userId,
         weekStart,
         weekEnd,
-        activityType
+        activityType,
+        accessToken
       );
 
       // Calculate days left
@@ -4289,7 +4328,10 @@ export const accountService = {
    * This function deletes all user-related data from the database in the correct order
    * to handle foreign key constraints, then deletes the auth user account.
    */
-  async deleteAccount(userId: string): Promise<{ success: boolean; error?: string }> {
+  async deleteAccount(
+    userId: string,
+    _accessToken?: string | null
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('🗑️ Starting account deletion for user:', userId);
 
@@ -4347,33 +4389,18 @@ export const accountService = {
         return { success: false, error: matchesDeleteError.message };
       }
 
-      // 4. Get all weekly targets for this user (needed for deleting session logs)
-      const { data: weeklyTargets, error: targetsError } = await supabase
-        .from('weekly_target')
-        .select('target_id')
+      // 4. Delete weekly session logs (table has user_id, not target_id)
+      const { error: sessionLogsError } = await supabase
+        .from('weekly_session_log')
+        .delete()
         .eq('user_id', userId);
 
-      if (targetsError) {
-        console.error('❌ Error fetching weekly targets:', targetsError);
-        // Continue - might not have any targets
+      if (sessionLogsError) {
+        console.error('❌ Error deleting weekly session logs:', sessionLogsError);
+        // Continue - not critical
       }
 
-      const targetIds = weeklyTargets?.map(t => t.target_id) || [];
-
-      // 5. Delete weekly session logs (by target_id)
-      if (targetIds.length > 0) {
-        const { error: sessionLogsError } = await supabase
-          .from('weekly_session_log')
-          .delete()
-          .in('target_id', targetIds);
-        
-        if (sessionLogsError) {
-          console.error('❌ Error deleting weekly session logs:', sessionLogsError);
-          // Continue - not critical
-        }
-      }
-
-      // 6. Delete weekly targets
+      // 5. Delete weekly targets
       const { error: targetsDeleteError } = await supabase
         .from('weekly_target')
         .delete()
@@ -4384,7 +4411,7 @@ export const accountService = {
         return { success: false, error: targetsDeleteError.message };
       }
 
-      // 7. Delete weekly completion history
+      // 6. Delete weekly completion history
       const { error: historyError } = await supabase
         .from('weekly_completion_history')
         .delete()
@@ -4395,7 +4422,7 @@ export const accountService = {
         return { success: false, error: historyError.message };
       }
 
-      // 8. Delete goals
+      // 7. Delete goals
       const { error: goalsError } = await supabase
         .from('goal')
         .delete()
@@ -4406,7 +4433,7 @@ export const accountService = {
         return { success: false, error: goalsError.message };
       }
 
-      // 9. Delete diary entries
+      // 8. Delete diary entries
       const { error: diaryError } = await supabase
         .from('diary_entry')
         .delete()
@@ -4417,7 +4444,7 @@ export const accountService = {
         return { success: false, error: diaryError.message };
       }
 
-      // 10. Delete match approvals
+      // 9. Delete match approvals
       const { error: approvalsError } = await supabase
         .from('match_approval')
         .delete()
@@ -4428,7 +4455,7 @@ export const accountService = {
         // Continue - not critical
       }
 
-      // 11. Delete fencing remote sessions (by referee_id)
+      // 10. Delete fencing remote sessions (by referee_id)
       const { error: remoteError } = await supabase
         .from('fencing_remote')
         .delete()
@@ -4439,7 +4466,7 @@ export const accountService = {
         // Continue - not critical
       }
 
-      // 12. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
+      // 11. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
       const { error: subscriptionsError } = await supabase
         .from('user_subscriptions')
         .delete()
@@ -4450,7 +4477,7 @@ export const accountService = {
         // Continue - might not have subscription
       }
 
-      // 13. Delete app_user record
+      // 12. Delete app_user record
       const { error: appUserError } = await supabase
         .from('app_user')
         .delete()
@@ -4461,7 +4488,7 @@ export const accountService = {
         return { success: false, error: appUserError.message };
       }
 
-      // 14. Delete auth user account via RPC function
+      // 13. Delete auth user account via RPC function
       const { data: deleteAuthResult, error: authError } = await supabase
         .rpc('delete_user_account', { target_user_id: userId });
       

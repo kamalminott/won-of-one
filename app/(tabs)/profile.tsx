@@ -16,7 +16,16 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function ProfileScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user, userName, setUserName, loadUserName, profileImage, setProfileImage } = useAuth();
+  const {
+    user,
+    userName,
+    setUserName,
+    loadUserName,
+    profileImage,
+    setProfileImage,
+    session,
+  } = useAuth();
+  const accessToken = session?.access_token ?? undefined;
   
   // Helper function to get stable dimensions
   const getDimension = (percentage: number, base: number) => {
@@ -135,14 +144,14 @@ export default function ProfileScreen() {
       fetchMatchStatistics();
       loadUserProfile();
     }
-  }, [user?.id]);
+  }, [user?.id, accessToken]);
 
   // Load user profile data (handedness and weapon)
   const loadUserProfile = async () => {
     if (!user?.id) return;
     
     try {
-      const userData = await userService.getUserById(user.id);
+      const userData = await userService.getUserById(user.id, accessToken);
       if (userData) {
         if (userData.handedness) {
           setHandedness(userData.handedness);
@@ -281,7 +290,7 @@ export default function ProfileScreen() {
     if (fullName) {
       if (user?.id) {
         // Save to database first (source of truth)
-        const updatedUser = await userService.updateUser(user.id, { name: fullName });
+        const updatedUser = await userService.updateUser(user.id, { name: fullName }, accessToken);
         if (updatedUser?.name) {
           // Update Supabase Auth user metadata (display_name)
           try {
@@ -425,7 +434,7 @@ export default function ProfileScreen() {
     
     if (user?.id) {
       try {
-        await userService.updateUser(user.id, { handedness: value });
+        await userService.updateUser(user.id, { handedness: value }, accessToken);
         analytics.profileUpdate({ field: 'handedness' });
         analytics.identify(user.id, { handedness: value });
         console.log('✅ Handedness updated:', value);
@@ -443,7 +452,7 @@ export default function ProfileScreen() {
     
     if (user?.id) {
       try {
-        await userService.updateUser(user.id, { preferred_weapon: value });
+        await userService.updateUser(user.id, { preferred_weapon: value }, accessToken);
         // Cache for offline/default weapon selection across the app
         await AsyncStorage.setItem('preferred_weapon', value);
         analytics.profileUpdate({ field: 'preferred_weapon' });

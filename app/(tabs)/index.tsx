@@ -88,7 +88,7 @@ const profileCompletedStorageKey = (userId: string) => `profile_completed:${user
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
-  const { user, loading, userName, profileImage, isPasswordRecovery, authReady } = useAuth();
+  const { user, session, loading, userName, profileImage, isPasswordRecovery, authReady } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
   const trimmedUserName = userName.trim();
@@ -312,7 +312,7 @@ export default function HomeScreen() {
 
       let dbName = '';
       try {
-        const dbLookup = userService.getUserById(user.id).then(existingUser =>
+        const dbLookup = userService.getUserById(user.id, session?.access_token).then(existingUser =>
           existingUser?.name?.trim() || ''
         );
         const timeout = new Promise<null>(resolve =>
@@ -348,7 +348,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email, authReady, isPasswordRecovery]);
+  }, [user?.id, user?.email, session?.access_token, authReady, isPasswordRecovery]);
 
   useEffect(() => {
     if (!user || !authReady) return;
@@ -548,7 +548,7 @@ export default function HomeScreen() {
           void (async () => {
           try {
             // Ensure user exists in app_user table (non-blocking)
-            const existingUser = await userService.getUserById(userId);
+            const existingUser = await userService.getUserById(userId, session?.access_token);
             if (!existingUser) {
               const provider = user?.app_metadata?.provider;
               const providers = Array.isArray(user?.app_metadata?.providers)
@@ -560,7 +560,8 @@ export default function HomeScreen() {
                 userEmail,
                 undefined,
                 undefined,
-                isEmailProvider ? undefined : { fallbackEmailForName: null }
+                isEmailProvider ? undefined : { fallbackEmailForName: null },
+                session?.access_token
               );
             }
           } catch (error) {
@@ -607,7 +608,7 @@ export default function HomeScreen() {
       setIsRefreshing(false);
       fetchInFlightRef.current = false;
     }
-  }, [user?.id, user?.email, authReady]);
+  }, [user?.id, user?.email, session?.access_token, authReady]);
 
   // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
   useFocusEffect(

@@ -16,7 +16,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
-  const { user, userName } = useAuth();
+  const { user, userName, session } = useAuth();
+  const accessToken = session?.access_token ?? undefined;
   const insets = useSafeAreaInsets();
   
   // Helper function to get first name from full name
@@ -237,7 +238,7 @@ export default function AddMatchScreen() {
           setWeaponType(toDisplayWeapon(cachedWeapon));
         }
 
-        const userData = await userService.getUserById(user.id);
+        const userData = await userService.getUserById(user.id, accessToken);
         const preferredWeapon = normalizePreferredWeapon(userData?.preferred_weapon);
         if (!cancelled && preferredWeapon) {
           setWeaponType(toDisplayWeapon(preferredWeapon));
@@ -251,7 +252,7 @@ export default function AddMatchScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, isEditMode, weaponType]);
+  }, [user?.id, isEditMode, weaponType, accessToken]);
 
   const formatDate = (date: Date) => {
     const safe = isNaN(date.getTime()) ? new Date() : date;

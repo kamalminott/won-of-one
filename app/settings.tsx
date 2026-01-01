@@ -295,7 +295,10 @@ export default function SettingsScreen() {
 
             try {
               // Delete all user data from database
-              const result = await accountService.deleteAccount(user.id);
+              const result = await accountService.deleteAccount(
+                user.id,
+                session?.access_token
+              );
 
               if (!result.success) {
                 Alert.alert(
