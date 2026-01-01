@@ -12,7 +12,7 @@ import { analytics } from '@/lib/analytics';
 
 export default function SetGoalScreen() {
   const { width, height } = useWindowDimensions();
-  const { user, loading } = useAuth();
+  const { user, loading, session } = useAuth();
   const [goals, setGoals] = useState<SimpleGoal[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
@@ -35,7 +35,7 @@ export default function SetGoalScreen() {
     setDataLoading(true);
     try {
       console.log('Fetching goals for user:', user.id);
-      const goalsData = await goalService.getActiveGoals(user.id);
+      const goalsData = await goalService.getActiveGoals(user.id, session?.access_token);
       console.log('Fetched goals in set-goal page:', goalsData);
       setGoals(goalsData);
     } catch (error) {
@@ -70,7 +70,7 @@ export default function SetGoalScreen() {
       console.log('User ID:', user.id);
       
       // Create goal in database
-      const newGoal = await goalService.createGoal(goalData, user.id);
+      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
       
       console.log('Created goal result:', newGoal);
       

@@ -20,7 +20,7 @@ import { analytics } from '@/lib/analytics';
 export default function ManualMatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
-  const { userName } = useAuth();
+  const { userName, session } = useAuth();
   const insets = useSafeAreaInsets();
   
   // Extract parameters from navigation
@@ -104,7 +104,7 @@ export default function ManualMatchSummaryScreen() {
           onPress: async () => {
             try {
               console.log('🗑️ Deleting match:', matchId);
-              const success = await matchService.deleteMatch(matchId);
+              const success = await matchService.deleteMatch(matchId, undefined, session?.access_token);
               
               if (success) {
                 console.log('✅ Match deleted successfully');

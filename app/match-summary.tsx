@@ -20,7 +20,7 @@ export default function MatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { user, userName, profileImage } = useAuth();
+  const { user, userName, profileImage, session } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [bestRun, setBestRun] = useState<number>(0);
   const [highestMomentum, setHighestMomentum] = useState<number>(0);
@@ -418,7 +418,11 @@ export default function MatchSummaryScreen() {
           onPress: async () => {
             try {
               // Delete the match from the database
-              const success = await matchService.deleteMatch(match.match_id);
+              const success = await matchService.deleteMatch(
+                match.match_id,
+                undefined,
+                session?.access_token
+              );
               
               if (success) {
                 // Navigate back to home screen
@@ -457,7 +461,7 @@ export default function MatchSummaryScreen() {
           const goalData = JSON.parse(params.completedGoalData as string);
           setCompletedGoal(goalData);
           // Get the goal ID from the active goals
-          const activeGoals = await goalService.getActiveGoals(user.id);
+          const activeGoals = await goalService.getActiveGoals(user.id, session?.access_token);
           const matchingGoal = activeGoals.find(g => g.title === goalData.title);
           if (matchingGoal) {
             setCompletedGoalId(matchingGoal.id);
@@ -480,7 +484,8 @@ export default function MatchSummaryScreen() {
           user.id, 
           match.result as 'win' | 'loss', 
           match.final_score || 0,
-          match.touches_against || 0
+          match.touches_against || 0,
+          session?.access_token
         );
         
         // Check if any goals were completed
@@ -489,7 +494,7 @@ export default function MatchSummaryScreen() {
           const goalData = result.completedGoals[0];
           setCompletedGoal(goalData);
           // Store the goal ID from the activeGoals list
-          const activeGoals = await goalService.getActiveGoals(user.id);
+          const activeGoals = await goalService.getActiveGoals(user.id, session?.access_token);
           const matchingGoal = activeGoals.find(g => g.title === goalData.title);
           if (matchingGoal) {
             setCompletedGoalId(matchingGoal.id);
@@ -549,7 +554,7 @@ export default function MatchSummaryScreen() {
     
     // Deactivate the completed goal
     if (completedGoalId) {
-      await goalService.deactivateGoal(completedGoalId);
+      await goalService.deactivateGoal(completedGoalId, session?.access_token);
     }
     
     setCompletedGoal(null);
@@ -569,7 +574,7 @@ export default function MatchSummaryScreen() {
     
     // Deactivate the completed goal
     if (completedGoalId) {
-      await goalService.deactivateGoal(completedGoalId);
+      await goalService.deactivateGoal(completedGoalId, session?.access_token);
     }
     
     setCompletedGoal(null);

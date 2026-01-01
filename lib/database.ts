@@ -430,15 +430,21 @@ export interface GoalUpdateResponse {
 }
 
 interface GoalService {
-  getActiveGoals(userId: string): Promise<SimpleGoal[]>;
-  createGoal(goalData: Partial<Goal>, userId: string): Promise<SimpleGoal | null>;
-  updateGoal(goalId: string, updates: Partial<Goal>): Promise<SimpleGoal | null>;
-  deleteGoal(goalId: string): Promise<boolean>;
-  deactivateGoal(goalId: string): Promise<boolean>;
-  deactivateAllCompletedGoals(userId: string): Promise<number>;
-  deactivateExpiredGoals(userId: string): Promise<number>;
-  recalculateGoalProgress(goalId: string, userId: string): Promise<SimpleGoal | null>;
-  updateGoalsAfterMatch(userId: string, matchResult: 'win' | 'loss' | null, finalScore: number, opponentScore: number): Promise<GoalUpdateResponse>;
+  getActiveGoals(userId: string, accessToken?: string | null): Promise<SimpleGoal[]>;
+  createGoal(goalData: Partial<Goal>, userId: string, accessToken?: string | null): Promise<SimpleGoal | null>;
+  updateGoal(goalId: string, updates: Partial<Goal>, accessToken?: string | null): Promise<SimpleGoal | null>;
+  deleteGoal(goalId: string, accessToken?: string | null): Promise<boolean>;
+  deactivateGoal(goalId: string, accessToken?: string | null): Promise<boolean>;
+  deactivateAllCompletedGoals(userId: string, accessToken?: string | null): Promise<number>;
+  deactivateExpiredGoals(userId: string, accessToken?: string | null): Promise<number>;
+  recalculateGoalProgress(goalId: string, userId: string, accessToken?: string | null): Promise<SimpleGoal | null>;
+  updateGoalsAfterMatch(
+    userId: string,
+    matchResult: 'win' | 'loss' | null,
+    finalScore: number,
+    opponentScore: number,
+    accessToken?: string | null
+  ): Promise<GoalUpdateResponse>;
 }
 
 const calculateProgressPercentage = (currentValue: number, targetValue: number): number => {
@@ -469,35 +475,62 @@ const normalizeGoalRecord = (goal: GoalRecord): SimpleGoal => {
   };
 };
 
-const fetchGoalRecord = async (goalId: string): Promise<GoalRecord | null> => {
-  const { data, error } = await supabase
-    .from('goal')
-    .select('*')
-    .eq('goal_id', goalId)
-    .single();
+const fetchGoalRecord = async (
+  goalId: string,
+  accessToken?: string | null
+): Promise<GoalRecord | null> => {
+  const token = resolveAccessToken(accessToken);
+  if (!token) {
+    console.warn('⚠️ goal fetch skipped - auth session missing', { goalId });
+    return null;
+  }
+
+  const { data, error } = await postgrestSelectOne<GoalRecord>(
+    'goal',
+    {
+      select: '*',
+      goal_id: `eq.${goalId}`,
+      limit: 1,
+    },
+    { accessToken: token }
+  );
 
   if (error) {
     console.error('Error fetching goal record:', error);
     return null;
   }
 
-  return data as GoalRecord;
+  return data as GoalRecord | null;
 };
 
-const updateGoalRecord = async (goalId: string, updates: Partial<Goal>): Promise<GoalRecord | null> => {
-  const { data, error } = await supabase
-    .from('goal')
-    .update(updates)
-    .eq('goal_id', goalId)
-    .select()
-    .single();
+const updateGoalRecord = async (
+  goalId: string,
+  updates: Partial<Goal>,
+  accessToken?: string | null
+): Promise<GoalRecord | null> => {
+  const token = resolveAccessToken(accessToken);
+  if (!token) {
+    console.warn('⚠️ goal update skipped - auth session missing', { goalId });
+    return null;
+  }
+
+  const { data, error } = await postgrestUpdate<GoalRecord>(
+    'goal',
+    updates,
+    {
+      goal_id: `eq.${goalId}`,
+      select: '*',
+    },
+    { accessToken: token }
+  );
 
   if (error) {
     console.error('Error updating goal record:', error);
     return null;
   }
 
-  return data as GoalRecord;
+  const row = Array.isArray(data) ? data[0] ?? null : null;
+  return row as GoalRecord | null;
 };
 
 interface SimplifiedMatch {
@@ -505,18 +538,34 @@ interface SimplifiedMatch {
   margin: number;
 }
 
-const fetchUserMatchesForGoal = async (userId: string): Promise<SimplifiedMatch[]> => {
+const fetchUserMatchesForGoal = async (
+  userId: string,
+  accessToken?: string | null
+): Promise<SimplifiedMatch[]> => {
   if (!isValidUuid(userId)) {
     console.warn('Skipping match fetch for goal recalculation due to invalid userId', { userId });
     return [];
   }
 
-  const { data, error } = await supabase
-    .from('match')
-    .select('match_id, final_score, touches_against, result, event_date')
-    .eq('user_id', userId)
-    .order('event_date', { ascending: false })
-    .order('match_id', { ascending: false });
+  const token = resolveAccessToken(accessToken);
+  if (!token) {
+    console.warn('⚠️ match fetch skipped - auth session missing', { userId });
+    return [];
+  }
+
+  const { data, error } = await postgrestSelect<{
+    final_score: number | null;
+    touches_against: number | null;
+    result: string | null;
+  }>(
+    'match',
+    {
+      select: 'match_id, final_score, touches_against, result, event_date',
+      user_id: `eq.${userId}`,
+      order: 'event_date.desc,match_id.desc',
+    },
+    { accessToken: token }
+  );
 
   if (error) {
     console.error('Error fetching matches for goal recalculation:', {
@@ -579,7 +628,10 @@ const computeGoalValueFromMatches = (goal: GoalRecord, matches: SimplifiedMatch[
   }
 };
 
-const handleDeadlineStatus = async (goal: GoalRecord): Promise<{ updatedGoal?: GoalRecord; failed?: { id: string; title: string; reason: string } }> => {
+const handleDeadlineStatus = async (
+  goal: GoalRecord,
+  accessToken?: string | null
+): Promise<{ updatedGoal?: GoalRecord; failed?: { id: string; title: string; reason: string } }> => {
   if (!goal.deadline) {
     return {};
   }
@@ -588,11 +640,15 @@ const handleDeadlineStatus = async (goal: GoalRecord): Promise<{ updatedGoal?: G
   const now = new Date();
 
   if (!goal.is_completed && goal.is_active !== false && deadlineDate < now) {
-    const updated = await updateGoalRecord(goal.goal_id, {
-      is_active: false,
-      is_failed: true,
-      updated_at: now.toISOString(),
-    });
+    const updated = await updateGoalRecord(
+      goal.goal_id,
+      {
+        is_active: false,
+        is_failed: true,
+        updated_at: now.toISOString(),
+      },
+      accessToken
+    );
 
     if (updated) {
       return {
@@ -609,17 +665,25 @@ const handleDeadlineStatus = async (goal: GoalRecord): Promise<{ updatedGoal?: G
   return {};
 };
 
-const updateGoalProgressInternal = async (goal: GoalRecord, newValue: number): Promise<GoalRecord | null> => {
+const updateGoalProgressInternal = async (
+  goal: GoalRecord,
+  newValue: number,
+  accessToken?: string | null
+): Promise<GoalRecord | null> => {
   const targetValue = goal.target_value ?? 0;
   const currentValue = Number.isFinite(newValue) ? newValue : 0;
   const isCompleted = targetValue > 0 ? currentValue >= targetValue : false;
 
-  return updateGoalRecord(goal.goal_id, {
-    current_value: currentValue,
-    is_completed: isCompleted,
-    is_failed: isCompleted ? false : goal.is_failed,
-    updated_at: new Date().toISOString(),
-  });
+  return updateGoalRecord(
+    goal.goal_id,
+    {
+      current_value: currentValue,
+      is_completed: isCompleted,
+      is_failed: isCompleted ? false : goal.is_failed,
+      updated_at: new Date().toISOString(),
+    },
+    accessToken
+  );
 };
 
 const computeIncrementalUpdate = (
@@ -657,18 +721,28 @@ const computeIncrementalUpdate = (
 };
 
 export const goalService: GoalService = {
-  async getActiveGoals(userId: string): Promise<SimpleGoal[]> {
+  async getActiveGoals(userId: string, accessToken?: string | null): Promise<SimpleGoal[]> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping active goal fetch due to invalid userId', { userId });
       return [];
     }
 
-    const { data, error } = await supabase
-      .from('goal')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getActiveGoals blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<GoalRecord>(
+      'goal',
+      {
+        select: '*',
+        user_id: `eq.${userId}`,
+        is_active: 'eq.true',
+        order: 'created_at.desc',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching active goals:', error);
@@ -678,7 +752,11 @@ export const goalService: GoalService = {
     return (data || []).map(goal => normalizeGoalRecord(goal as GoalRecord));
   },
 
-  async createGoal(goalData: Partial<Goal>, userId: string): Promise<SimpleGoal | null> {
+  async createGoal(
+    goalData: Partial<Goal>,
+    userId: string,
+    accessToken?: string | null
+  ): Promise<SimpleGoal | null> {
     const insertData: Partial<Goal> & { user_id: string } = {
       user_id: userId,
       category: goalData.category || 'Goal',
@@ -697,39 +775,85 @@ export const goalService: GoalService = {
       updated_at: goalData.updated_at,
     };
 
-    const { data, error } = await supabase
-      .from('goal')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating goal:', error);
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ createGoal blocked - auth session not ready', { userId });
       return null;
     }
 
-    return normalizeGoalRecord(data as GoalRecord);
+    let result;
+    try {
+      result = await postgrestInsert<GoalRecord>(
+        'goal',
+        insertData,
+        { select: '*' },
+        { accessToken: token }
+      );
+    } catch (error) {
+      console.error('Error creating goal (request):', error);
+      return null;
+    }
+
+    if (result.error) {
+      if (result.error.code === '23503') {
+        console.warn('⚠️ Goal insert failed due to missing user record; retrying once');
+        await userService.ensureUserById(userId, undefined, token);
+        try {
+          result = await postgrestInsert<GoalRecord>(
+            'goal',
+            insertData,
+            { select: '*' },
+            { accessToken: token }
+          );
+        } catch (error) {
+          console.error('Error creating goal after retry (request):', error);
+          return null;
+        }
+
+        if (result.error) {
+          console.error('Error creating goal after retry:', result.error);
+          return null;
+        }
+      } else {
+        console.error('Error creating goal:', result.error);
+        return null;
+      }
+    }
+
+    const row = Array.isArray(result.data) ? result.data[0] ?? null : null;
+    return row ? normalizeGoalRecord(row as GoalRecord) : null;
   },
 
-  async updateGoal(goalId: string, updates: Partial<Goal>): Promise<SimpleGoal | null> {
+  async updateGoal(
+    goalId: string,
+    updates: Partial<Goal>,
+    accessToken?: string | null
+  ): Promise<SimpleGoal | null> {
     if (!updates || Object.keys(updates).length === 0) {
-      const existing = await fetchGoalRecord(goalId);
+      const existing = await fetchGoalRecord(goalId, accessToken);
       return existing ? normalizeGoalRecord(existing) : null;
     }
 
     const updated = await updateGoalRecord(goalId, {
       ...updates,
       updated_at: new Date().toISOString(),
-    });
+    }, accessToken);
 
     return updated ? normalizeGoalRecord(updated) : null;
   },
 
-  async deleteGoal(goalId: string): Promise<boolean> {
-    const { error } = await supabase
-      .from('goal')
-      .delete()
-      .eq('goal_id', goalId);
+  async deleteGoal(goalId: string, accessToken?: string | null): Promise<boolean> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ deleteGoal blocked - auth session not ready', { goalId });
+      return false;
+    }
+
+    const { error } = await postgrestDelete(
+      'goal',
+      { goal_id: `eq.${goalId}` },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error deleting goal:', error);
@@ -739,28 +863,38 @@ export const goalService: GoalService = {
     return true;
   },
 
-  async deactivateGoal(goalId: string): Promise<boolean> {
+  async deactivateGoal(goalId: string, accessToken?: string | null): Promise<boolean> {
     const updated = await updateGoalRecord(goalId, {
       is_active: false,
       updated_at: new Date().toISOString(),
-    });
+    }, accessToken);
 
     return !!updated;
   },
 
-  async deactivateAllCompletedGoals(userId: string): Promise<number> {
+  async deactivateAllCompletedGoals(userId: string, accessToken?: string | null): Promise<number> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping deactivateAllCompletedGoals due to invalid userId', { userId });
       return 0;
     }
 
-    const { data, error } = await supabase
-      .from('goal')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .eq('is_completed', true)
-      .select('goal_id');
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ deactivateAllCompletedGoals blocked - auth session not ready', { userId });
+      return 0;
+    }
+
+    const { data, error } = await postgrestUpdate<{ goal_id: string }>(
+      'goal',
+      { is_active: false, updated_at: new Date().toISOString() },
+      {
+        user_id: `eq.${userId}`,
+        is_active: 'eq.true',
+        is_completed: 'eq.true',
+        select: 'goal_id',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error deactivating completed goals:', error);
@@ -770,21 +904,31 @@ export const goalService: GoalService = {
     return data?.length ?? 0;
   },
 
-  async deactivateExpiredGoals(userId: string): Promise<number> {
+  async deactivateExpiredGoals(userId: string, accessToken?: string | null): Promise<number> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping deactivateExpiredGoals due to invalid userId', { userId });
       return 0;
     }
 
     const nowIso = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('goal')
-      .update({ is_active: false, is_failed: true, updated_at: nowIso })
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .eq('is_completed', false)
-      .lt('deadline', nowIso)
-      .select('goal_id');
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ deactivateExpiredGoals blocked - auth session not ready', { userId });
+      return 0;
+    }
+
+    const { data, error } = await postgrestUpdate<{ goal_id: string }>(
+      'goal',
+      { is_active: false, is_failed: true, updated_at: nowIso },
+      {
+        user_id: `eq.${userId}`,
+        is_active: 'eq.true',
+        is_completed: 'eq.false',
+        deadline: `lt.${nowIso}`,
+        select: 'goal_id',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error deactivating expired goals:', error);
@@ -794,26 +938,30 @@ export const goalService: GoalService = {
     return data?.length ?? 0;
   },
 
-  async recalculateGoalProgress(goalId: string, userId: string): Promise<SimpleGoal | null> {
+  async recalculateGoalProgress(
+    goalId: string,
+    userId: string,
+    accessToken?: string | null
+  ): Promise<SimpleGoal | null> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping goal recalculation due to invalid userId', { userId });
       return null;
     }
 
-    const goalRecord = await fetchGoalRecord(goalId);
+    const goalRecord = await fetchGoalRecord(goalId, accessToken);
     if (!goalRecord) {
       return null;
     }
 
-    const matches = await fetchUserMatchesForGoal(userId);
+    const matches = await fetchUserMatchesForGoal(userId, accessToken);
     const recomputedValue = computeGoalValueFromMatches(goalRecord, matches);
-    const updatedRecord = await updateGoalProgressInternal(goalRecord, recomputedValue);
+    const updatedRecord = await updateGoalProgressInternal(goalRecord, recomputedValue, accessToken);
 
     if (!updatedRecord) {
       return null;
     }
 
-    const deadlineCheck = await handleDeadlineStatus(updatedRecord);
+    const deadlineCheck = await handleDeadlineStatus(updatedRecord, accessToken);
     const finalRecord = deadlineCheck.updatedGoal ?? updatedRecord;
 
     return normalizeGoalRecord(finalRecord);
@@ -823,18 +971,29 @@ export const goalService: GoalService = {
     userId: string,
     matchResult: 'win' | 'loss' | null,
     finalScore: number,
-    opponentScore: number
+    opponentScore: number,
+    accessToken?: string | null
   ): Promise<GoalUpdateResponse> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping goal updates due to invalid userId', { userId, matchResult, finalScore, opponentScore });
       return { completedGoals: [], failedGoals: [] };
     }
 
-    const { data: activeGoals, error } = await supabase
-      .from('goal')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true);
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ updateGoalsAfterMatch blocked - auth session not ready', { userId });
+      return { completedGoals: [], failedGoals: [] };
+    }
+
+    const { data: activeGoals, error } = await postgrestSelect<GoalRecord>(
+      'goal',
+      {
+        select: '*',
+        user_id: `eq.${userId}`,
+        is_active: 'eq.true',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching goals for match update:', error);
@@ -859,12 +1018,12 @@ export const goalService: GoalService = {
 
       if (needsRecalc) {
         if (!cachedMatches) {
-          cachedMatches = await fetchUserMatchesForGoal(userId);
+          cachedMatches = await fetchUserMatchesForGoal(userId, accessToken);
         }
         const recomputedValue = computeGoalValueFromMatches(goalRecord, cachedMatches);
-        updatedRecord = await updateGoalProgressInternal(goalRecord, recomputedValue);
+        updatedRecord = await updateGoalProgressInternal(goalRecord, recomputedValue, accessToken);
       } else if (newValue !== null) {
-        updatedRecord = await updateGoalProgressInternal(goalRecord, newValue);
+        updatedRecord = await updateGoalProgressInternal(goalRecord, newValue, accessToken);
       } else {
         updatedRecord = goalRecord;
       }
@@ -873,7 +1032,7 @@ export const goalService: GoalService = {
         continue;
       }
 
-      const deadlineResult = await handleDeadlineStatus(updatedRecord);
+      const deadlineResult = await handleDeadlineStatus(updatedRecord, accessToken);
       const effectiveRecord = deadlineResult.updatedGoal ?? updatedRecord;
 
       if (deadlineResult.failed) {
@@ -2506,7 +2665,11 @@ $$;
   },
 
   // Delete a match and all related records
-  async deleteMatch(matchId: string, fencingRemoteId?: string): Promise<boolean> {
+  async deleteMatch(
+    matchId: string,
+    fencingRemoteId?: string,
+    accessToken?: string | null
+  ): Promise<boolean> {
     try {
       console.log('🗑️ Starting deleteMatch:', { matchId, fencingRemoteId });
       
@@ -2611,7 +2774,13 @@ $$;
         try {
           // Reverse the match result for goal recalculation
           const reverseResult = wasWin ? 'loss' : 'win';
-          await goalService.updateGoalsAfterMatch(userId, reverseResult as 'win' | 'loss', opponentScore, finalScore);
+          await goalService.updateGoalsAfterMatch(
+            userId,
+            reverseResult as 'win' | 'loss',
+            opponentScore,
+            finalScore,
+            accessToken
+          );
           console.log('✅ Goals recalculated after match deletion');
         } catch (goalError) {
           console.error('❌ Error recalculating goals after deletion:', goalError);

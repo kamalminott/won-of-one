@@ -2899,7 +2899,8 @@ export default function RemoteScreen() {
               user.id,
               result as 'win' | 'loss',
               finalScore,
-              touchesAgainst
+              touchesAgainst,
+              session?.access_token
             );
             console.log('✅ Goals updated successfully:', goalResult);
             
@@ -4682,7 +4683,11 @@ export default function RemoteScreen() {
         if (currentMatchPeriod.match_id.startsWith('offline_')) {
           console.log('📱 Offline match detected - skipping database deletion (match only exists locally)');
         } else {
-          const matchDeleted = await matchService.deleteMatch(currentMatchPeriod.match_id, remoteSession.remote_id);
+          const matchDeleted = await matchService.deleteMatch(
+            currentMatchPeriod.match_id,
+            remoteSession.remote_id,
+            session?.access_token
+          );
           if (matchDeleted) {
             console.log('✅ Match and related records deleted successfully');
           } else {
@@ -4737,7 +4742,7 @@ export default function RemoteScreen() {
             console.log('🗑️ Found incomplete matches:', incompleteMatches.length);
             // Delete these incomplete matches and their related records
             for (const match of incompleteMatches) {
-              await matchService.deleteMatch(match.match_id);
+              await matchService.deleteMatch(match.match_id, undefined, session?.access_token);
             }
             console.log('✅ Cleaned up incomplete matches');
           } else {

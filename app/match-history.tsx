@@ -39,7 +39,7 @@ interface Match {
 export default function RecentMatchesScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [matches, setMatches] = useState<Match[]>([]);
@@ -296,7 +296,7 @@ export default function RecentMatchesScreen() {
     
     try {
       setDeletingMatchId(matchId);
-      const success = await matchService.deleteMatch(matchId);
+      const success = await matchService.deleteMatch(matchId, undefined, session?.access_token);
       
       if (success) {
         // Track match deletion

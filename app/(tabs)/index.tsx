@@ -499,7 +499,7 @@ export default function HomeScreen() {
     try {
       // Fetch lightweight stats/goals first (small payload)
       const [goalsData, countsData] = await Promise.all([
-        safeRequest('home_active_goals', goalService.getActiveGoals(userId), userId),
+        safeRequest('home_active_goals', goalService.getActiveGoals(userId, session?.access_token), userId),
         safeRequest('home_match_counts', matchService.getMatchCounts(userId), userId),
       ]);
 
@@ -578,8 +578,8 @@ export default function HomeScreen() {
           }
 
           try {
-            await goalService.deactivateAllCompletedGoals(userId);
-            await goalService.deactivateExpiredGoals(userId);
+            await goalService.deactivateAllCompletedGoals(userId, session?.access_token);
+            await goalService.deactivateExpiredGoals(userId, session?.access_token);
           } catch (error) {
             console.warn('Failed to run goal cleanup:', error);
           }
@@ -897,7 +897,7 @@ export default function HomeScreen() {
                       }
                       
                       // console.log('Saving goal to database...');
-                      const newGoal = await goalService.createGoal(goalData, user.id);
+                      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
                       // console.log('Goal saved result:', newGoal);
                       if (newGoal) {
                         // Track goal creation
@@ -927,7 +927,7 @@ export default function HomeScreen() {
                       // console.log('🔄 Recalculating starting_match_count for window change:', updates.starting_match_count);
                     }
                     
-                    const updatedGoal = await goalService.updateGoal(goalId, updates);
+                    const updatedGoal = await goalService.updateGoal(goalId, updates, session?.access_token);
                     // console.log('Update result:', updatedGoal);
                     
                     if (updatedGoal && user) {
@@ -947,7 +947,7 @@ export default function HomeScreen() {
                         updates.deadline !== undefined;
                       
                       if (needsRecalculation) {
-                        await goalService.recalculateGoalProgress(goalId, user.id);
+                        await goalService.recalculateGoalProgress(goalId, user.id, session?.access_token);
                         // console.log('✅ Progress recalculated');
                       }
                       
@@ -973,7 +973,7 @@ export default function HomeScreen() {
                     const goal = goals.find(g => g.id === goalId);
                     const goalType = goal?.title || 'unknown';
                     
-                    const success = await goalService.deleteGoal(goalId);
+                    const success = await goalService.deleteGoal(goalId, session?.access_token);
                     // console.log('Delete result:', success);
                     
                     if (success) {
@@ -1022,7 +1022,7 @@ export default function HomeScreen() {
                       }
                       
                       // console.log('Saving goal to database...');
-                      const newGoal = await goalService.createGoal(goalData, user.id);
+                      const newGoal = await goalService.createGoal(goalData, user.id, session?.access_token);
                       // console.log('Goal saved result:', newGoal);
                       if (newGoal) {
                         // Track goal creation

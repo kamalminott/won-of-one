@@ -28,7 +28,7 @@ interface MatchDetailsProps {
 
 export default function MatchDetailsScreen() {
   const { width, height } = useWindowDimensions();
-  const { userName, profileImage, user } = useAuth();
+  const { userName, profileImage, user, session } = useAuth();
   const params = useLocalSearchParams();
   type MatchInsights = {
     avgTimeBetweenTouches: string;
@@ -605,7 +605,7 @@ export default function MatchDetailsScreen() {
           onPress: async () => {
             try {
               console.log('🗑️ Deleting match:', matchId);
-              const success = await matchService.deleteMatch(matchId);
+              const success = await matchService.deleteMatch(matchId, undefined, session?.access_token);
 
               if (success) {
                 console.log('✅ Match deleted successfully');
