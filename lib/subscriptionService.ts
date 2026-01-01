@@ -4,6 +4,7 @@
  */
 
 import { Platform } from 'react-native';
+import { postgrestInsert, postgrestSelectOne } from './postgrest';
 import { supabase } from './supabase';
 
 // Lazy import RevenueCat (only available in production builds, not dev mode)
@@ -302,9 +303,9 @@ export const subscriptionService = {
       const subscriptionInfo = this.parseCustomerInfo(customerInfo);
 
       // Upsert subscription status to Supabase
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .upsert({
+      const { error } = await postgrestInsert(
+        'user_subscriptions',
+        {
           user_id: userId,
           subscription_status: subscriptionInfo.status,
           is_active: subscriptionInfo.isActive,
@@ -314,9 +315,14 @@ export const subscriptionService = {
           entitlement_id: subscriptionInfo.entitlementId,
           revenuecat_user_id: customerInfo.originalAppUserId,
           updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id',
-        });
+        },
+        {
+          on_conflict: 'user_id',
+        },
+        {
+          prefer: 'resolution=merge-duplicates, return=minimal',
+        }
+      );
 
       if (error) {
         console.error('❌ Error syncing subscription to Supabase:', error);
@@ -333,11 +339,21 @@ export const subscriptionService = {
    */
   async getSubscriptionFromSupabase(userId: string): Promise<SubscriptionInfo | null> {
     try {
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
+      const { data, error } = await postgrestSelectOne<{
+        subscription_status: SubscriptionStatus;
+        is_active: boolean;
+        is_trial: boolean;
+        expires_at: string | null;
+        product_id: string | null;
+        entitlement_id: string | null;
+      }>(
+        'user_subscriptions',
+        {
+          select: '*',
+          user_id: `eq.${userId}`,
+          limit: 1,
+        }
+      );
 
       if (error || !data) {
         return null;

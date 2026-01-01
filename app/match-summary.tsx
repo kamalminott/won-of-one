@@ -6,7 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { goalService, matchService } from '@/lib/database';
-import { supabase } from '@/lib/supabase';
+import { postgrestSelect } from '@/lib/postgrest';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -165,7 +165,10 @@ export default function MatchSummaryScreen() {
         
         // Online match - fetch from database
         try {
-          const matchData = await matchService.getMatchById(params.matchId as string);
+          const matchData = await matchService.getMatchById(
+            params.matchId as string,
+            session?.access_token
+          );
           if (!matchData) {
             console.warn('⚠️ Match not found, showing missing match state', params.matchId);
             setMatch(null);
@@ -207,9 +210,10 @@ export default function MatchSummaryScreen() {
             setUserCardCounts(userCards);
             
             const calculatedBestRun = await matchService.calculateBestRun(
-              params.matchId as string, 
+              params.matchId as string,
               userFencerName,
-              params.remoteId as string // Pass the remoteId to help find events
+              params.remoteId as string, // Pass the remoteId to help find events
+              session?.access_token
             );
             setBestRun(calculatedBestRun);
             const sabreWeaponType = matchData.weapon_type || (params.weaponType as string | undefined);
@@ -218,7 +222,10 @@ export default function MatchSummaryScreen() {
               : 0;
             setHighestMomentum(sabreMomentum);
             if (isEpeeWeapon(matchData.weapon_type)) {
-              const calculatedDoubleTouches = await matchService.calculateDoubleTouchCount(params.matchId as string);
+              const calculatedDoubleTouches = await matchService.calculateDoubleTouchCount(
+                params.matchId as string,
+                session?.access_token
+              );
               setDoubleTouchCount(calculatedDoubleTouches);
             } else {
               setDoubleTouchCount(0);
@@ -228,7 +235,8 @@ export default function MatchSummaryScreen() {
             // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
             // This returns fencer1Data/fencer2Data which matches the header's fencer_1_name/fencer_2_name
             const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
-              params.matchId as string
+              params.matchId as string,
+              session?.access_token
             );
         // Map progression to user/opponent based on which fencer is the user
         // Map progression to user/opponent based on which fencer is the user
@@ -258,11 +266,19 @@ export default function MatchSummaryScreen() {
 
             // Use position-based touchesByPeriod from match_period table (same approach as header and neutral match summary)
             // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
-            const { data: matchPeriods, error: periodsError } = await supabase
-              .from('match_period')
-              .select('period_number, fencer_1_score, fencer_2_score')
-              .eq('match_id', params.matchId as string)
-              .order('period_number', { ascending: true });
+            const { data: matchPeriods, error: periodsError } = await postgrestSelect<{
+              period_number: number | null;
+              fencer_1_score: number | null;
+              fencer_2_score: number | null;
+            }>(
+              'match_period',
+              {
+                select: 'period_number,fencer_1_score,fencer_2_score',
+                match_id: `eq.${params.matchId as string}`,
+                order: 'period_number.asc',
+              },
+              session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true }
+            );
 
             if (periodsError) {
               console.error('Error fetching match periods:', periodsError);
@@ -270,7 +286,10 @@ export default function MatchSummaryScreen() {
               const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
                 params.matchId as string,
                 userFencerName,
-                params.remoteId as string
+                params.remoteId as string,
+                undefined,
+                undefined,
+                session?.access_token
               );
               setTouchesByPeriod(calculatedTouchesByPeriod);
             } else if (matchPeriods && matchPeriods.length > 0) {
@@ -344,7 +363,8 @@ export default function MatchSummaryScreen() {
                   userFencerName,
                   params.remoteId as string,
                   progressionFencer1Total,
-                  progressionFencer2Total
+                  progressionFencer2Total,
+                  session?.access_token
                 );
                 const recalculatedMappedRaw = isFencer1User ? recalculatedRaw : {
                   period1: { user: recalculatedRaw.period1.opponent, opponent: recalculatedRaw.period1.user },
@@ -361,7 +381,10 @@ export default function MatchSummaryScreen() {
               const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
                 params.matchId as string,
                 userFencerName,
-                params.remoteId as string
+                params.remoteId as string,
+                undefined,
+                undefined,
+                session?.access_token
               );
               setTouchesByPeriod(calculatedTouchesByPeriod);
             }
@@ -712,12 +735,26 @@ export default function MatchSummaryScreen() {
     }
 
     try {
-      const { data: events, error } = await supabase
-        .from('match_event')
-        .select('match_event_id, event_type, card_given, scoring_user_id, scoring_user_name, event_time, timestamp, match_time_elapsed, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order('event_time', { ascending: true })
-        .order('timestamp', { ascending: true });
+      const { data: events, error } = await postgrestSelect<{
+        match_event_id: string;
+        event_type: string | null;
+        card_given: string | null;
+        scoring_user_id: string | null;
+        scoring_user_name: string | null;
+        event_time: string | null;
+        timestamp: string | null;
+        match_time_elapsed: number | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'match_event_id,event_type,card_given,scoring_user_id,scoring_user_name,event_time,timestamp,match_time_elapsed,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'event_time.asc,timestamp.asc',
+        },
+        session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true }
+      );
 
       if (error) {
         console.error('Error fetching match events for user card counts:', error);

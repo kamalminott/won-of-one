@@ -9,7 +9,7 @@ import MatchSummaryCardWithBorder from '@/components/MatchSummaryCardWithBorder'
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
-import { supabase } from '@/lib/supabase';
+import { postgrestSelect } from '@/lib/postgrest';
 
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
@@ -92,11 +92,15 @@ export default function MatchDetailsScreen() {
     
     try {
       // Get match events for this match
-      const { data: matchEvents, error } = await supabase
-        .from('match_event')
-        .select('*')
-        .eq('match_id', match.match_id)
-        .order('timestamp', { ascending: true });
+      const { data: matchEvents, error } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: '*',
+          match_id: `eq.${match.match_id}`,
+          order: 'timestamp.asc',
+        },
+        session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true }
+      );
 
       if (error) {
         console.error('Error fetching match events for insights calculation:', error);
@@ -277,7 +281,8 @@ export default function MatchDetailsScreen() {
 
       // Use anonymous progression to avoid relying on name matching (handles epee double touches and swapped fencers)
       const progression = await matchService.calculateAnonymousScoreProgression(
-        match.match_id
+        match.match_id,
+        session?.access_token
       );
       const mappedProgression = isFencer1User
         ? { userData: progression.fencer1Data, opponentData: progression.fencer2Data }
@@ -361,7 +366,10 @@ export default function MatchDetailsScreen() {
 
       try {
         console.log('🔍 Fetching match data for matchId:', params.matchId);
-        const matchData = await matchService.getMatchById(params.matchId as string);
+        const matchData = await matchService.getMatchById(
+          params.matchId as string,
+          session?.access_token
+        );
         console.log('✅ Match data fetched:', {
           matchId: matchData?.match_id,
           fencer1Name: matchData?.fencer_1_name,

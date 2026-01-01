@@ -501,7 +501,7 @@ export default function HomeScreen() {
       // Fetch lightweight stats/goals first (small payload)
       const [goalsData, countsData] = await Promise.all([
         safeRequest('home_active_goals', goalService.getActiveGoals(userId, session?.access_token), userId),
-        safeRequest('home_match_counts', matchService.getMatchCounts(userId), userId),
+        safeRequest('home_match_counts', matchService.getMatchCounts(userId, session?.access_token), userId),
       ]);
 
       const goalsForCalc = goalsData ?? [];
@@ -513,7 +513,7 @@ export default function HomeScreen() {
 
       const matchesData = await safeRequest(
         'home_recent_matches',
-        matchService.getRecentMatches(userId, matchLimit),
+        matchService.getRecentMatches(userId, matchLimit, undefined, session?.access_token),
         userId
       );
 
@@ -586,7 +586,7 @@ export default function HomeScreen() {
           }
 
           try {
-            const trainingTimeData = await matchService.getAllMatchesForTrainingTime(userId);
+            const trainingTimeData = await matchService.getAllMatchesForTrainingTime(userId, session?.access_token);
             const totalSeconds = trainingTimeData.reduce((sum, match) => sum + (match.bout_length_s || 0), 0);
             const formattedTrainingTime = formatTrainingTime(totalSeconds);
             setTrainingTime(formattedTrainingTime);
@@ -656,7 +656,7 @@ export default function HomeScreen() {
     if (!user) return;
     try {
       if (goalData.match_window) {
-        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id)).totalMatches;
+        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id, session?.access_token)).totalMatches;
         goalData.starting_match_count = totalMatches;
       }
 
@@ -681,7 +681,7 @@ export default function HomeScreen() {
   const handleGoalUpdated = async (goalId: string, updates: Partial<Goal>) => {
     try {
       if (updates.match_window !== undefined && user) {
-        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id)).totalMatches;
+        const totalMatches = matchCounts?.totalMatches ?? (await matchService.getMatchCounts(user.id, session?.access_token)).totalMatches;
         updates.starting_match_count = totalMatches;
       }
 

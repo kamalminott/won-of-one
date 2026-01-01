@@ -78,7 +78,12 @@ export default function ProfileScreen() {
 
     try {
       // Get all user matches (using high limit to get all matches)
-      const matches = await matchService.getRecentMatches(user.id, 1000);
+      const matches = await matchService.getRecentMatches(
+        user.id,
+        1000,
+        undefined,
+        session?.access_token
+      );
       
       console.log('📊 Profile statistics debug:', {
         userId: user.id,

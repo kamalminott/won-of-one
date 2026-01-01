@@ -1,6 +1,6 @@
 import {
     AppUser, DiaryEntry, Drill, Equipment,
-    FencingRemote, Goal, Match,
+    FencingRemote, Goal, Match, MatchPeriod,
     MatchApproval, MatchEvent,
     SimpleGoal, SimpleMatch
 } from '@/types/database';
@@ -10,6 +10,8 @@ import { getCachedAuthSession, getLastAuthEvent } from './authSessionCache';
 import {
   postgrestDelete,
   postgrestInsert,
+  postgrestCount,
+  postgrestRpc,
   postgrestSelect,
   postgrestSelectOne,
   postgrestUpdate,
@@ -1056,7 +1058,8 @@ export const matchService = {
   async getRecentMatches(
     userId: string,
     limit: number = 10,
-    userDisplayNameOverride?: string
+    userDisplayNameOverride?: string,
+    accessToken?: string | null
   ): Promise<SimpleMatch[]> {
     const debug = __DEV__;
     if (debug) {
@@ -1085,27 +1088,22 @@ export const matchService = {
 
     const normalizedUserName = normalizeName(userDisplayName);
 
-    const { data, error } = await supabase
-      .from('match')
-      .select(
-        `
-        match_id,
-        event_date,
-        final_score,
-        touches_against,
-        is_win,
-        match_type,
-        source,
-        notes,
-        fencer_1_name,
-        fencer_2_name,
-        match_period(end_time)
-      `
-      )
-      .eq('user_id', userId)
-      .order('event_date', { ascending: false })
-      .order('match_id', { ascending: false }) // Secondary sort by match_id for same-day matches
-      .limit(limit);
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getRecentMatches blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<any>(
+      'match',
+      {
+        select: 'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,match_period(end_time)',
+        user_id: `eq.${userId}`,
+        order: 'event_date.desc,match_id.desc',
+        limit,
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching matches:', error);
@@ -1221,45 +1219,68 @@ export const matchService = {
     return sortedMatches;
   },
 
-  async getMatchCounts(userId: string): Promise<{ totalMatches: number; winMatches: number }> {
+  async getMatchCounts(
+    userId: string,
+    accessToken?: string | null
+  ): Promise<{ totalMatches: number; winMatches: number }> {
     if (!isValidUuid(userId)) {
       console.warn('Skipping match count fetch due to invalid userId', { userId });
       return { totalMatches: 0, winMatches: 0 };
     }
 
-    const [{ count: totalMatches, error: totalError }, { count: winMatches, error: winError }] = await Promise.all([
-      supabase
-        .from('match')
-        .select('match_id', { count: 'exact', head: true })
-        .eq('user_id', userId),
-      supabase
-        .from('match')
-        .select('match_id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('is_win', true),
-    ]);
-
-    if (totalError) {
-      console.error('Error fetching match count:', totalError);
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getMatchCounts blocked - auth session not ready', { userId });
+      return { totalMatches: 0, winMatches: 0 };
     }
 
-    if (winError) {
-      console.error('Error fetching win match count:', winError);
+    const [totalResult, winResult] = await Promise.all([
+      postgrestCount(
+        'match',
+        { select: 'match_id', user_id: `eq.${userId}` },
+        { accessToken: token }
+      ),
+      postgrestCount(
+        'match',
+        { select: 'match_id', user_id: `eq.${userId}`, is_win: 'eq.true' },
+        { accessToken: token }
+      ),
+    ]);
+
+    if (totalResult.error) {
+      console.error('Error fetching match count:', totalResult.error);
+    }
+
+    if (winResult.error) {
+      console.error('Error fetching win match count:', winResult.error);
     }
 
     return {
-      totalMatches: totalMatches ?? 0,
-      winMatches: winMatches ?? 0,
+      totalMatches: totalResult.count ?? 0,
+      winMatches: winResult.count ?? 0,
     };
   },
 
   // Get all matches for training time calculation
-  async getAllMatchesForTrainingTime(userId: string): Promise<{ bout_length_s: number }[]> {
-    const { data, error } = await supabase
-      .from('match')
-      .select('bout_length_s')
-      .eq('user_id', userId)
-      .not('bout_length_s', 'is', null); // Only get matches with duration data
+  async getAllMatchesForTrainingTime(
+    userId: string,
+    accessToken?: string | null
+  ): Promise<{ bout_length_s: number }[]> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getAllMatchesForTrainingTime blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<{ bout_length_s: number }>(
+      'match',
+      {
+        select: 'bout_length_s',
+        user_id: `eq.${userId}`,
+        'bout_length_s': 'not.is.null',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching matches for training time:', error);
@@ -1421,9 +1442,19 @@ export const matchService = {
   },
 
   // Create a new match from fencing remote data
-  async createMatchFromRemote(remoteData: FencingRemote, userId: string | null): Promise<Match | null> {
+  async createMatchFromRemote(
+    remoteData: FencingRemote,
+    userId: string | null,
+    accessToken?: string | null
+  ): Promise<Match | null> {
+    let token: string | null = null;
     if (userId) {
-      await userService.ensureUserById(userId);
+      token = resolveAccessToken(accessToken);
+      if (!token) {
+        console.warn('⚠️ createMatchFromRemote blocked - auth session not ready', { userId });
+        return null;
+      }
+      await userService.ensureUserById(userId, undefined, token);
     }
     const matchData = {
       user_id: userId, // Can be null if user toggle is off
@@ -1445,10 +1476,11 @@ export const matchService = {
       // Try RPC function for anonymous matches first
       console.log('🔄 Attempting RPC call for anonymous match with data:', matchData);
       
-      const { data: rpcData, error: rpcError } = await supabase
-        .rpc('create_anonymous_match', {
-          match_data: matchData
-        });
+      const { data: rpcData, error: rpcError } = await postgrestRpc<Match>(
+        'create_anonymous_match',
+        { match_data: matchData },
+        { allowAnon: true }
+      );
 
       console.log('📡 RPC call result:', { rpcData, rpcError });
 
@@ -1510,36 +1542,57 @@ $$;
     }
 
     // Regular match creation (for authenticated users)
-    const { data, error } = await supabase
-      .from('match')
-      .insert(matchData)
-      .select()
-      .single();
+    let result = await postgrestInsert<Match>(
+      'match',
+      matchData,
+      { select: '*' },
+      { accessToken: token }
+    );
 
-    if (error) {
-      console.error('❌ Error creating match:', error);
+    if (result.error) {
+      if (result.error.code === '23503' && userId && token) {
+        console.warn('⚠️ Match insert failed due to missing user record; retrying once');
+        await userService.ensureUserById(userId, undefined, token);
+        result = await postgrestInsert<Match>(
+          'match',
+          matchData,
+          { select: '*' },
+          { accessToken: token }
+        );
+      }
+    }
+
+    if (result.error) {
+      console.error('❌ Error creating match:', result.error);
       return null;
     }
 
+    const row = Array.isArray(result.data) ? result.data[0] ?? null : null;
+
     // Validate that we got a match_id back
-    if (!data?.match_id) {
+    if (!row?.match_id) {
       console.error('❌ Match insert succeeded but returned no match_id. This should not happen for authenticated users.');
       return null;
     }
 
-    console.log('✅ Match created successfully:', data.match_id);
-    return data;
+    console.log('✅ Match created successfully:', row.match_id);
+    return row;
   },
 
   // Get match by ID
-  async getMatchById(matchId: string): Promise<Match | null> {
-    const { data, error, status } = await supabase
-      .from('match')
-      .select('*')
-      .eq('match_id', matchId)
-      .maybeSingle();
+  async getMatchById(matchId: string, accessToken?: string | null): Promise<Match | null> {
+    const token = resolveAccessToken(accessToken);
+    const { data, error } = await postgrestSelectOne<Match>(
+      'match',
+      {
+        select: '*',
+        match_id: `eq.${matchId}`,
+        limit: 1,
+      },
+      token ? { accessToken: token } : { allowAnon: true }
+    );
 
-    if (status === 406 || (!data && !error)) {
+    if (!data && !error) {
       console.warn('⚠️ Match not found for match_id:', matchId);
       return null;
     }
@@ -1553,16 +1606,28 @@ $$;
   },
 
   // Calculate best run for a match using Event + Period Hybrid approach
-  async calculateBestRun(matchId: string, userName: string, remoteId?: string): Promise<number> {
+  async calculateBestRun(
+    matchId: string,
+    userName: string,
+    remoteId?: string,
+    accessToken?: string | null
+  ): Promise<number> {
     try {
       console.log('🏃 Calculating best run for match:', matchId, 'user:', userName);
+
+      const token = resolveAccessToken(accessToken);
+      const postgrestOptions = token ? { accessToken: token } : { allowAnon: true };
       
       // Fetch weapon type so we can handle epee double hits correctly
-      const { data: matchMeta, error: matchMetaError } = await supabase
-        .from('match')
-        .select('weapon_type')
-        .eq('match_id', matchId)
-        .maybeSingle();
+      const { data: matchMeta, error: matchMetaError } = await postgrestSelectOne<{ weapon_type?: string | null }>(
+        'match',
+        {
+          select: 'weapon_type',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchMetaError) {
         console.error('Error fetching match metadata for best run:', matchMetaError);
@@ -1572,10 +1637,14 @@ $$;
       const isEpee = weaponType === 'epee';
 
       // Debug: Check what events exist in the database
-      const { data: allEvents, error: allEventsError } = await supabase
-        .from('match_event')
-        .select('*')
-        .order('timestamp', { ascending: true });
+      const { data: allEvents, error: allEventsError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: '*',
+          order: 'timestamp.asc',
+        },
+        postgrestOptions
+      );
       
       if (allEventsError) {
         console.error('Error fetching all events for debugging:', allEventsError);
@@ -1596,11 +1665,15 @@ $$;
       let eventsError = null;
       
       // First try to get events by match_id
-      const { data: eventsByMatchId, error: matchIdError } = await supabase
-        .from('match_event')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('timestamp', { ascending: true });
+      const { data: eventsByMatchId, error: matchIdError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: '*',
+          match_id: `eq.${matchId}`,
+          order: 'timestamp.asc',
+        },
+        postgrestOptions
+      );
       
       if (matchIdError) {
         console.error('Error fetching match events by match_id:', matchIdError);
@@ -1611,11 +1684,15 @@ $$;
         // If no events found by match_id, try to find events by fencing_remote_id
         if (remoteId) {
           console.log('Trying to find events by fencing_remote_id:', remoteId);
-          const { data: eventsByRemoteId, error: remoteIdError } = await supabase
-            .from('match_event')
-            .select('*')
-            .eq('fencing_remote_id', remoteId)
-            .order('timestamp', { ascending: true });
+          const { data: eventsByRemoteId, error: remoteIdError } = await postgrestSelect<any>(
+            'match_event',
+            {
+              select: '*',
+              fencing_remote_id: `eq.${remoteId}`,
+              order: 'timestamp.asc',
+            },
+            postgrestOptions
+          );
           
           if (remoteIdError) {
             console.error('Error fetching match events by fencing_remote_id:', remoteIdError);
@@ -1638,11 +1715,15 @@ $$;
       }
 
       // 2. Get all match periods for context
-      const { data: matchPeriods, error: periodsError } = await supabase
-        .from('match_period')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('period_number', { ascending: true });
+      const { data: matchPeriods, error: periodsError } = await postgrestSelect<any>(
+        'match_period',
+        {
+          select: '*',
+          match_id: `eq.${matchId}`,
+          order: 'period_number.asc',
+        },
+        postgrestOptions
+      );
 
       if (periodsError) {
         console.error('Error fetching match periods for best run:', periodsError);
@@ -1761,14 +1842,18 @@ $$;
   },
 
   // Count double touches for a match (used for epee stats)
-  async calculateDoubleTouchCount(matchId: string): Promise<number> {
+  async calculateDoubleTouchCount(matchId: string, accessToken?: string | null): Promise<number> {
     try {
-      const { data: matchEventsRaw, error: eventsError } = await supabase
-        .from('match_event')
-        .select('match_event_id, event_type, cancelled_event_id, match_time_elapsed, event_time, timestamp, reset_segment')
-        .eq('match_id', matchId)
-        .order('event_time', { ascending: true })
-        .order('timestamp', { ascending: true });
+      const token = resolveAccessToken(accessToken);
+      const { data: matchEventsRaw, error: eventsError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_event_id,event_type,cancelled_event_id,match_time_elapsed,event_time,timestamp,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'event_time.asc,timestamp.asc',
+        },
+        token ? { accessToken: token } : { allowAnon: true }
+      );
 
       if (eventsError) {
         console.error('Error fetching match events for double touch count:', eventsError);
@@ -1833,18 +1918,30 @@ $$;
   },
 
   // Calculate score progression data for chart (for user vs opponent matches)
-  async calculateScoreProgression(matchId: string, userName: string, remoteId?: string): Promise<{
+  async calculateScoreProgression(
+    matchId: string,
+    userName: string,
+    remoteId?: string,
+    accessToken?: string | null
+  ): Promise<{
     userData: {x: string, y: number}[],
     opponentData: {x: string, y: number}[]
   }> {
     try {
       console.log('📈 Calculating score progression for USER vs OPPONENT match:', matchId, 'user:', userName);
+
+      const token = resolveAccessToken(accessToken);
+      const postgrestOptions = token ? { accessToken: token } : { allowAnon: true };
       
       // DEBUG: First check if ANY events exist for this match (without null filter)
-      const { data: allEvents, error: allEventsError } = await supabase
-        .from('match_event')
-        .select('match_event_id, scoring_user_name, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, points_awarded, card_given, reset_segment')
-        .eq('match_id', matchId);
+      const { data: allEvents, error: allEventsError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_event_id,scoring_user_name,match_time_elapsed,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,points_awarded,card_given,reset_segment',
+          match_id: `eq.${matchId}`,
+        },
+        postgrestOptions
+      );
       
       console.log('🔍 DEBUG - All events for match:', {
         matchId,
@@ -1865,12 +1962,15 @@ $$;
       
       // 1. Get all match events (including cancellation events), keeping timestamp so we can rebuild elapsed time when missing
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
-      const { data: matchEventsRaw, error: eventsError } = await supabase
-        .from('match_event')
-        .select('match_event_id, scoring_user_name, scoring_entity, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
-        .eq('match_id', matchId)
-        .order('event_time', { ascending: true })
-        .order('timestamp', { ascending: true });
+      const { data: matchEventsRaw, error: eventsError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_event_id,scoring_user_name,scoring_entity,match_time_elapsed,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,timestamp,event_time,points_awarded,card_given,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'event_time.asc,timestamp.asc',
+        },
+        postgrestOptions
+      );
       
       if (eventsError) {
         console.error('Error fetching match events for score progression:', eventsError);
@@ -1910,11 +2010,22 @@ $$;
       console.log('📊 Total events:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
 
       // 3. Get match data to determine user vs opponent AND final scores for validation
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name, fencer_1_entity, fencer_2_entity, final_score, touches_against')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        fencer_1_entity?: string | null;
+        fencer_2_entity?: string | null;
+        final_score: number | null;
+        touches_against: number | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name,fencer_1_entity,fencer_2_entity,final_score,touches_against',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for score progression:', matchError);
@@ -2235,23 +2346,37 @@ $$;
   },
 
   // Calculate touches by period
-  async calculateTouchesByPeriod(matchId: string, userName: string, remoteId?: string, finalUserScore?: number, finalOpponentScore?: number): Promise<{
+  async calculateTouchesByPeriod(
+    matchId: string,
+    userName: string,
+    remoteId?: string,
+    finalUserScore?: number,
+    finalOpponentScore?: number,
+    accessToken?: string | null
+  ): Promise<{
     period1: { user: number; opponent: number };
     period2: { user: number; opponent: number };
     period3: { user: number; opponent: number };
   }> {
     try {
       console.log('📊 Calculating touches by period for match:', matchId, 'user:', userName);
+
+      const token = resolveAccessToken(accessToken);
+      const postgrestOptions = token ? { accessToken: token } : { allowAnon: true };
       
       // 1. Get all match events ordered by timestamp
       let matchEvents = null;
       
       // First try to get events by match_id
-      const { data: eventsByMatchId, error: matchIdError } = await supabase
-        .from('match_event')
-        .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id, points_awarded, card_given, reset_segment')
-        .eq('match_id', matchId)
-        .order('timestamp', { ascending: true });
+      const { data: eventsByMatchId, error: matchIdError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_event_id,event_type,cancelled_event_id,scoring_user_name,timestamp,match_time_elapsed,match_period_id,points_awarded,card_given,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'timestamp.asc',
+        },
+        postgrestOptions
+      );
       
       if (matchIdError) {
         console.error('Error fetching match events by match_id for touches by period:', matchIdError);
@@ -2262,11 +2387,15 @@ $$;
         // If no events found by match_id, try to find events by fencing_remote_id
         if (remoteId) {
           console.log('Trying to find events by fencing_remote_id for touches by period:', remoteId);
-          const { data: eventsByRemoteId, error: remoteIdError } = await supabase
-            .from('match_event')
-            .select('match_event_id, event_type, cancelled_event_id, scoring_user_name, timestamp, match_time_elapsed, match_period_id, points_awarded, card_given, reset_segment')
-            .eq('fencing_remote_id', remoteId)
-            .order('timestamp', { ascending: true });
+          const { data: eventsByRemoteId, error: remoteIdError } = await postgrestSelect<any>(
+            'match_event',
+            {
+              select: 'match_event_id,event_type,cancelled_event_id,scoring_user_name,timestamp,match_time_elapsed,match_period_id,points_awarded,card_given,reset_segment',
+              fencing_remote_id: `eq.${remoteId}`,
+              order: 'timestamp.asc',
+            },
+            postgrestOptions
+          );
           
           if (remoteIdError) {
             console.error('Error fetching match events by fencing_remote_id for touches by period:', remoteIdError);
@@ -2331,11 +2460,19 @@ $$;
       
       // If final scores weren't passed, fetch them from the database
       if (authoritativeUserScore === undefined || authoritativeOpponentScore === undefined) {
-        const { data: matchData, error: matchError } = await supabase
-          .from('match')
-          .select('final_score, touches_against, is_complete')
-          .eq('match_id', matchId)
-          .single();
+        const { data: matchData, error: matchError } = await postgrestSelectOne<{
+          final_score: number | null;
+          touches_against: number | null;
+          is_complete: boolean | null;
+        }>(
+          'match',
+          {
+            select: 'final_score,touches_against,is_complete',
+            match_id: `eq.${matchId}`,
+            limit: 1,
+          },
+          postgrestOptions
+        );
 
         if (matchError) {
           console.error('Error fetching match data for touches by period:', matchError);
@@ -2348,11 +2485,15 @@ $$;
       console.log('📊 Using authoritative final scores for touches by period:', authoritativeUserScore, '-', authoritativeOpponentScore);
 
       // 4. Get match periods to determine period boundaries
-      const { data: matchPeriods, error: periodsError } = await supabase
-        .from('match_period')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('period_number', { ascending: true });
+      const { data: matchPeriods, error: periodsError } = await postgrestSelect<any>(
+        'match_period',
+        {
+          select: '*',
+          match_id: `eq.${matchId}`,
+          order: 'period_number.asc',
+        },
+        postgrestOptions
+      );
 
       if (periodsError || !matchPeriods || matchPeriods.length === 0) {
         console.log('No match periods found, assuming all events are in period 1');
@@ -2621,11 +2762,14 @@ $$;
     if (existingMatch && existingMatch.user_id === null) {
       console.log('🔄 Updating anonymous match via RPC function');
       
-      const { data: rpcData, error: rpcError } = await supabase
-        .rpc('update_anonymous_match', {
+      const { data: rpcData, error: rpcError } = await postgrestRpc<Match>(
+        'update_anonymous_match',
+        {
           match_id_param: matchId,
           updates: updates
-        });
+        },
+        { accessToken: token, allowAnon: true }
+      );
 
       console.log('📡 RPC update result:', { rpcData, rpcError });
 
@@ -2791,7 +2935,9 @@ $$;
         console.log('🔍 Found match_period records to delete:', existingPeriods?.length || 0, existingPeriods);
       }
       
-      const { data: periodsData, error: periodsError } = await postgrestDelete(
+      const { data: periodsData, error: periodsError } = await postgrestDelete<{
+        match_period_id: string;
+      }>(
         'match_period',
         { match_id: `eq.${matchId}` },
         { accessToken: token, preferReturn: true }
@@ -2823,7 +2969,12 @@ $$;
       }
 
       // 4. Recalculate goals after deletion (reverse the match impact)
-      if (userId && wasWin !== undefined && finalScore !== undefined && opponentScore !== undefined) {
+      if (
+        userId &&
+        typeof wasWin === 'boolean' &&
+        typeof finalScore === 'number' &&
+        typeof opponentScore === 'number'
+      ) {
         console.log('🔄 Recalculating goals after match deletion...');
         try {
           // Reverse the match result for goal recalculation
@@ -2851,21 +3002,30 @@ $$;
   },
 
   // Calculate score progression data for anonymous matches (no user/opponent concept)
-  async calculateAnonymousScoreProgression(matchId: string): Promise<{
+  async calculateAnonymousScoreProgression(
+    matchId: string,
+    accessToken?: string | null
+  ): Promise<{
     fencer1Data: {x: string, y: number}[],
     fencer2Data: {x: string, y: number}[]
   }> {
     try {
       console.log('📈 Calculating ANONYMOUS score progression for match:', matchId);
+
+      const token = resolveAccessToken(accessToken);
+      const postgrestOptions = token ? { accessToken: token } : { allowAnon: true };
       
       // 1. Get all match events (including cancellation events), keeping timestamp so we can rebuild elapsed time when missing
       // Include fencer_1_name and fencer_2_name from events to handle swaps correctly
-      const { data: matchEventsRaw, error: eventsError } = await supabase
-        .from('match_event')
-        .select('match_event_id, scoring_user_name, scoring_entity, match_time_elapsed, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, timestamp, event_time, points_awarded, card_given, reset_segment')
-        .eq('match_id', matchId)
-        .order('event_time', { ascending: true })
-        .order('timestamp', { ascending: true });
+      const { data: matchEventsRaw, error: eventsError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_event_id,scoring_user_name,scoring_entity,match_time_elapsed,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,timestamp,event_time,points_awarded,card_given,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'event_time.asc,timestamp.asc',
+        },
+        postgrestOptions
+      );
       
       if (eventsError) {
         console.error('Error fetching match events for anonymous score progression:', eventsError);
@@ -2905,11 +3065,22 @@ $$;
       console.log('📊 Total events:', matchEvents.length, 'Cancelled events:', cancelledEventIds.size);
 
       // 3. Get match data to get fencer names and final scores
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name, fencer_1_entity, fencer_2_entity, final_score, touches_against')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        fencer_1_entity?: string | null;
+        fencer_2_entity?: string | null;
+        final_score: number | null;
+        touches_against: number | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name,fencer_1_entity,fencer_2_entity,final_score,touches_against',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for anonymous score progression:', matchError);
@@ -3156,16 +3327,26 @@ $$;
 // Fencing Remote functions
 export const fencingRemoteService = {
   // Create a new fencing remote session
-  async createRemoteSession(remoteData: Partial<FencingRemote>): Promise<FencingRemote | null> {
-    if (remoteData.referee_id) {
-      await userService.ensureUserById(remoteData.referee_id);
+  async createRemoteSession(
+    remoteData: Partial<FencingRemote>,
+    accessToken?: string | null
+  ): Promise<FencingRemote | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ fencingRemoteService.createRemoteSession blocked - auth session not ready');
+      return null;
     }
 
-    const { data, error } = await supabase
-      .from('fencing_remote')
-      .insert(remoteData)
-      .select()
-      .single();
+    if (remoteData.referee_id) {
+      await userService.ensureUserById(remoteData.referee_id, undefined, token);
+    }
+
+    const { data, error } = await postgrestInsert<FencingRemote>(
+      'fencing_remote',
+      remoteData,
+      { select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error creating remote session:', {
@@ -3177,18 +3358,29 @@ export const fencingRemoteService = {
       return null;
     }
 
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    return row;
   },
 
   // Update remote session scores
-  async updateRemoteScores(remoteId: string, score1: number, score2: number): Promise<boolean> {
-    const { error } = await supabase
-      .from('fencing_remote')
-      .update({ 
-        score_1: score1,
-        score_2: score2,
-      })
-      .eq('remote_id', remoteId);
+  async updateRemoteScores(
+    remoteId: string,
+    score1: number,
+    score2: number,
+    accessToken?: string | null
+  ): Promise<boolean> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ fencingRemoteService.updateRemoteScores blocked - auth session not ready');
+      return false;
+    }
+
+    const { error } = await postgrestUpdate(
+      'fencing_remote',
+      { score_1: score1, score_2: score2 },
+      { remote_id: `eq.${remoteId}` },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error updating remote scores:', error);
@@ -3199,13 +3391,27 @@ export const fencingRemoteService = {
   },
 
   // Complete remote session and create match
-  async completeRemoteSession(remoteId: string, userId: string): Promise<Match | null> {
+  async completeRemoteSession(
+    remoteId: string,
+    userId: string,
+    accessToken?: string | null
+  ): Promise<Match | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ fencingRemoteService.completeRemoteSession blocked - auth session not ready');
+      return null;
+    }
+
     // Get the remote session data
-    const { data: remoteData, error: remoteError } = await supabase
-      .from('fencing_remote')
-      .select('*')
-      .eq('remote_id', remoteId)
-      .single();
+    const { data: remoteData, error: remoteError } = await postgrestSelectOne<FencingRemote>(
+      'fencing_remote',
+      {
+        select: '*',
+        remote_id: `eq.${remoteId}`,
+        limit: 1,
+      },
+      { accessToken: token }
+    );
 
     if (remoteError || !remoteData) {
       console.error('Error fetching remote session:', remoteError);
@@ -3213,21 +3419,23 @@ export const fencingRemoteService = {
     }
 
     // Create match from remote data
-    const match = await matchService.createMatchFromRemote(remoteData, userId);
+    const match = await matchService.createMatchFromRemote(remoteData, userId, token);
 
     if (match) {
       // Update remote session with linked match ID
-      await supabase
-        .from('fencing_remote')
-        .update({ linked_match_id: match.match_id })
-        .eq('remote_id', remoteId);
+      await postgrestUpdate(
+        'fencing_remote',
+        { linked_match_id: match.match_id },
+        { remote_id: `eq.${remoteId}` },
+        { accessToken: token }
+      );
     }
 
     return match;
   },
 
   // Delete a fencing remote session
-  async deleteRemoteSession(remoteId: string): Promise<boolean> {
+  async deleteRemoteSession(remoteId: string, accessToken?: string | null): Promise<boolean> {
     console.log('🗑️ Deleting remote session:', remoteId);
     
     // Skip database deletion for offline sessions (they don't exist in the database)
@@ -3236,11 +3444,17 @@ export const fencingRemoteService = {
       return true; // Return true since offline sessions don't need database deletion
     }
     
-    const { data, error } = await supabase
-      .from('fencing_remote')
-      .delete()
-      .eq('remote_id', remoteId)
-      .select();
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ fencingRemoteService.deleteRemoteSession blocked - auth session not ready');
+      return false;
+    }
+
+    const { data, error } = await postgrestDelete(
+      'fencing_remote',
+      { remote_id: `eq.${remoteId}` },
+      { accessToken: token, preferReturn: true }
+    );
 
     if (error) {
       console.error('❌ Error deleting remote session:', error);
@@ -3255,27 +3469,50 @@ export const fencingRemoteService = {
   async cleanupOrphanedPeriods(): Promise<boolean> {
     try {
       console.log('🧹 Checking for orphaned match_period records...');
-      
-      // Find match_period records that don't have corresponding match records
-      const { data: orphanedPeriods, error } = await supabase
-        .from('match_period')
-        .select('match_period_id, match_id')
-        .not('match_id', 'in', `(SELECT match_id FROM match)`);
-      
-      if (error) {
-        console.error('❌ Error finding orphaned periods:', error);
+      const token = resolveAccessToken();
+      if (!token) {
+        console.warn('⚠️ fencingRemoteService.cleanupOrphanedPeriods blocked - auth session not ready');
         return false;
       }
+
+      const { data: allPeriods, error: periodsError } = await postgrestSelect<{ match_period_id: string; match_id: string | null }>(
+        'match_period',
+        { select: 'match_period_id,match_id' },
+        { accessToken: token }
+      );
+
+      if (periodsError) {
+        console.error('❌ Error finding orphaned periods:', periodsError);
+        return false;
+      }
+
+      const { data: allMatches, error: matchesError } = await postgrestSelect<{ match_id: string }>(
+        'match',
+        { select: 'match_id' },
+        { accessToken: token }
+      );
+
+      if (matchesError) {
+        console.error('❌ Error fetching match ids:', matchesError);
+        return false;
+      }
+
+      const matchIdSet = new Set((allMatches || []).map(match => match.match_id));
+      const orphanedPeriods = (allPeriods || []).filter(period => {
+        if (!period.match_id) return true;
+        return !matchIdSet.has(period.match_id);
+      });
       
       if (orphanedPeriods && orphanedPeriods.length > 0) {
         console.log('🗑️ Found orphaned match_period records:', orphanedPeriods.length);
         console.log('Orphaned period IDs:', orphanedPeriods.map(p => p.match_period_id));
         
         // Delete the orphaned records
-        const { error: deleteError } = await supabase
-          .from('match_period')
-          .delete()
-          .in('match_period_id', orphanedPeriods.map(p => p.match_period_id));
+        const { error: deleteError } = await postgrestDelete(
+          'match_period',
+          { match_period_id: `in.(${orphanedPeriods.map(p => p.match_period_id).join(',')})` },
+          { accessToken: token }
+        );
         
         if (deleteError) {
           console.error('❌ Error deleting orphaned periods:', deleteError);
@@ -3299,12 +3536,22 @@ export const fencingRemoteService = {
 export const diaryService = {
   // Get diary entries for a user
   async getDiaryEntries(userId: string, limit: number = 20): Promise<DiaryEntry[]> {
-    const { data, error } = await supabase
-      .from('diary_entry')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ diaryService.getDiaryEntries blocked - auth session not ready');
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<DiaryEntry>(
+      'diary_entry',
+      {
+        select: '*',
+        user_id: `eq.${userId}`,
+        order: 'created_at.desc',
+        limit,
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching diary entries:', error);
@@ -3321,43 +3568,63 @@ export const diaryService = {
       user_id: userId,
     };
 
-    const { data, error } = await supabase
-      .from('diary_entry')
-      .insert(newEntry)
-      .select()
-      .single();
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ diaryService.createDiaryEntry blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestInsert<DiaryEntry>(
+      'diary_entry',
+      newEntry,
+      { select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error creating diary entry:', error);
       return null;
     }
 
-    return data;
+    return data?.[0] ?? null;
   },
 
   // Update diary entry
   async updateDiaryEntry(entryId: string, updates: Partial<DiaryEntry>): Promise<DiaryEntry | null> {
-    const { data, error } = await supabase
-      .from('diary_entry')
-      .update(updates)
-      .eq('entry_id', entryId)
-      .select()
-      .single();
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ diaryService.updateDiaryEntry blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestUpdate<DiaryEntry>(
+      'diary_entry',
+      updates,
+      { entry_id: `eq.${entryId}`, select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error updating diary entry:', error);
       return null;
     }
 
-    return data;
+    return data?.[0] ?? null;
   },
 
   // Delete diary entry
   async deleteDiaryEntry(entryId: string): Promise<boolean> {
-    const { error } = await supabase
-      .from('diary_entry')
-      .delete()
-      .eq('entry_id', entryId);
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ diaryService.deleteDiaryEntry blocked - auth session not ready');
+      return false;
+    }
+
+    const { error } = await postgrestDelete(
+      'diary_entry',
+      { entry_id: `eq.${entryId}` },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error deleting diary entry:', error);
@@ -3372,16 +3639,26 @@ export const diaryService = {
 export const drillService = {
   // Get all drills
   async getDrills(category?: string): Promise<Drill[]> {
-    let query = supabase
-      .from('drill')
-      .select('*')
-      .order('name', { ascending: true });
-
-    if (category) {
-      query = query.eq('category', category);
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ drillService.getDrills blocked - auth session not ready');
+      return [];
     }
 
-    const { data, error } = await query;
+    const query: Record<string, string | number | boolean> = {
+      select: '*',
+      order: 'name.asc',
+    };
+
+    if (category) {
+      query.category = `eq.${category}`;
+    }
+
+    const { data, error } = await postgrestSelect<Drill>(
+      'drill',
+      query,
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching drills:', error);
@@ -3393,11 +3670,21 @@ export const drillService = {
 
   // Get drill by ID
   async getDrillById(drillId: string): Promise<Drill | null> {
-    const { data, error } = await supabase
-      .from('drill')
-      .select('*')
-      .eq('drill_id', drillId)
-      .single();
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ drillService.getDrillById blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestSelectOne<Drill>(
+      'drill',
+      {
+        select: '*',
+        drill_id: `eq.${drillId}`,
+        limit: 1,
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching drill:', error);
@@ -3409,18 +3696,25 @@ export const drillService = {
 
   // Create a new drill
   async createDrill(drillData: Partial<Drill>): Promise<Drill | null> {
-    const { data, error } = await supabase
-      .from('drill')
-      .insert(drillData)
-      .select()
-      .single();
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ drillService.createDrill blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestInsert<Drill>(
+      'drill',
+      drillData,
+      { select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error creating drill:', error);
       return null;
     }
 
-    return data;
+    return data?.[0] ?? null;
   },
 };
 
@@ -3428,16 +3722,26 @@ export const drillService = {
 export const equipmentService = {
   // Get all equipment
   async getEquipment(sport?: string): Promise<Equipment[]> {
-    let query = supabase
-      .from('equipment')
-      .select('*')
-      .order('name', { ascending: true });
-
-    if (sport) {
-      query = query.eq('sport', sport);
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ equipmentService.getEquipment blocked - auth session not ready');
+      return [];
     }
 
-    const { data, error } = await query;
+    const query: Record<string, string | number | boolean> = {
+      select: '*',
+      order: 'name.asc',
+    };
+
+    if (sport) {
+      query.sport = `eq.${sport}`;
+    }
+
+    const { data, error } = await postgrestSelect<Equipment>(
+      'equipment',
+      query,
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching equipment:', error);
@@ -3449,11 +3753,21 @@ export const equipmentService = {
 
   // Get equipment by ID
   async getEquipmentById(equipmentId: string): Promise<Equipment | null> {
-    const { data, error } = await supabase
-      .from('equipment')
-      .select('*')
-      .eq('equipment_id', equipmentId)
-      .single();
+    const token = resolveAccessToken();
+    if (!token) {
+      console.warn('⚠️ equipmentService.getEquipmentById blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestSelectOne<Equipment>(
+      'equipment',
+      {
+        select: '*',
+        equipment_id: `eq.${equipmentId}`,
+        limit: 1,
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching equipment:', error);
@@ -3467,12 +3781,22 @@ export const equipmentService = {
 // Match Approval-related functions
 export const matchApprovalService = {
   // Get approvals for a user
-  async getUserApprovals(userId: string): Promise<MatchApproval[]> {
-    const { data, error } = await supabase
-      .from('match_approval')
-      .select('*')
-      .eq('user_id', userId)
-      .order('timestamp', { ascending: false });
+  async getUserApprovals(userId: string, accessToken?: string | null): Promise<MatchApproval[]> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ matchApprovalService.getUserApprovals blocked - auth session not ready');
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<MatchApproval>(
+      'match_approval',
+      {
+        select: '*',
+        user_id: `eq.${userId}`,
+        order: 'timestamp.desc',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error fetching match approvals:', error);
@@ -3483,7 +3807,12 @@ export const matchApprovalService = {
   },
 
   // Create or update approval
-  async approveMatch(remoteId: string, userId: string, approved: boolean): Promise<MatchApproval | null> {
+  async approveMatch(
+    remoteId: string,
+    userId: string,
+    approved: boolean,
+    accessToken?: string | null
+  ): Promise<MatchApproval | null> {
     const approvalData = {
       remote_id: remoteId,
       user_id: userId,
@@ -3491,30 +3820,49 @@ export const matchApprovalService = {
       timestamp: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
-      .from('match_approval')
-      .upsert(approvalData, { onConflict: 'remote_id,user_id' })
-      .select()
-      .single();
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ matchApprovalService.approveMatch blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestInsert<MatchApproval>(
+      'match_approval',
+      approvalData,
+      {
+        on_conflict: 'remote_id,user_id',
+        select: '*',
+      },
+      {
+        accessToken: token,
+        prefer: 'return=representation, resolution=merge-duplicates',
+      }
+    );
 
     if (error) {
       console.error('Error creating/updating approval:', error);
       return null;
     }
 
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    return row;
   },
 };
 
 // Match Event-related functions
 export const matchEventService = {
   // Get events for a match
-  async getMatchEvents(matchId: string): Promise<MatchEvent[]> {
-    const { data, error } = await supabase
-      .from('match_event')
-      .select('*')
-      .eq('match_id', matchId)
-      .order('event_time', { ascending: true });
+  async getMatchEvents(matchId: string, accessToken?: string | null): Promise<MatchEvent[]> {
+    const token = resolveAccessToken(accessToken);
+    const { data, error } = await postgrestSelect<MatchEvent>(
+      'match_event',
+      {
+        select: '*',
+        match_id: `eq.${matchId}`,
+        order: 'event_time.asc',
+      },
+      token ? { accessToken: token } : { allowAnon: true }
+    );
 
     if (error) {
       console.error('Error fetching match events:', error);
@@ -3525,19 +3873,29 @@ export const matchEventService = {
   },
 
   // Create a match event
-  async createMatchEvent(eventData: Partial<MatchEvent>): Promise<MatchEvent | null> {
+  async createMatchEvent(
+    eventData: Partial<MatchEvent>,
+    accessToken?: string | null
+  ): Promise<MatchEvent | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ matchEventService.createMatchEvent blocked - auth session not ready');
+      return null;
+    }
+
     // If a match_id is provided, ensure it exists; if not, return null so caller can retry/queue
     if (eventData.match_id) {
-      const { data: matchExists, error: matchError, status } = await supabase
-        .from('match')
-        .select('match_id')
-        .eq('match_id', eventData.match_id)
-        .maybeSingle();
+      const { data: matchExists, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+        'match',
+        {
+          select: 'match_id',
+          match_id: `eq.${eventData.match_id}`,
+          limit: 1,
+        },
+        { accessToken: token }
+      );
 
-      const notFound = (!matchExists && status === 406);
-      const fatalError = matchError && (matchError as any).code !== 'PGRST116';
-
-      if (fatalError) {
+      if (matchError) {
         console.warn('⚠️ matchEventService.createMatchEvent: error checking match existence, aborting insert so caller can retry', {
           match_id: eventData.match_id,
           error: matchError,
@@ -3545,27 +3903,28 @@ export const matchEventService = {
         return null;
       }
 
-      if (notFound) {
+      if (!matchExists) {
         console.warn('⚠️ matchEventService.createMatchEvent: match not found, aborting insert so caller can retry once match exists', {
           match_id: eventData.match_id,
-          status,
         });
         return null;
       }
     }
 
-    const { data, error } = await supabase
-      .from('match_event')
-      .insert(eventData)
-      .select()
-      .single();
+    const { data, error } = await postgrestInsert<MatchEvent>(
+      'match_event',
+      eventData,
+      { select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error creating match event:', error);
       return null;
     }
 
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    return row;
   },
 };
 
@@ -3584,31 +3943,44 @@ export const matchPeriodService = {
     priority_assigned?: string;
     priority_to?: string;
     notes?: string;
-  }) => {
+  }, accessToken?: string | null): Promise<MatchPeriod | null> => {
     console.log('🔄 matchPeriodService.createMatchPeriod called with:', periodData);
-    
-    const { data, error } = await supabase
-      .from('match_period')
-      .insert(periodData)
-      .select()
-      .single();
+
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ matchPeriodService.createMatchPeriod blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestInsert<MatchPeriod>(
+      'match_period',
+      periodData,
+      { select: '*' },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('❌ Error creating match period:', error);
       return null;
     }
 
-    console.log('✅ Match period created successfully:', data);
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    console.log('✅ Match period created successfully:', row);
+    return row;
   },
 
   // Get match periods for a specific match
-  getMatchPeriods: async (matchId: string) => {
-    const { data, error } = await supabase
-      .from('match_period')
-      .select('*')
-      .eq('match_id', matchId)
-      .order('period_number', { ascending: true });
+  getMatchPeriods: async (matchId: string, accessToken?: string | null) => {
+    const token = resolveAccessToken(accessToken);
+    const { data, error } = await postgrestSelect(
+      'match_period',
+      {
+        select: '*',
+        match_id: `eq.${matchId}`,
+        order: 'period_number.asc',
+      },
+      token ? { accessToken: token } : { allowAnon: true }
+    );
 
     if (error) {
       console.error('Error fetching match periods:', error);
@@ -3629,20 +4001,30 @@ export const matchPeriodService = {
     priority_to?: string;
     notes?: string;
     timestamp?: string; // Add timestamp to updates
-  }) => {
-    const { data, error } = await supabase
-      .from('match_period')
-      .update(updates)
-      .eq('match_period_id', periodId)
-      .select()
-      .single();
+  }, accessToken?: string | null) => {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ matchPeriodService.updateMatchPeriod blocked - auth session not ready');
+      return null;
+    }
+
+    const { data, error } = await postgrestUpdate(
+      'match_period',
+      updates,
+      {
+        match_period_id: `eq.${periodId}`,
+        select: '*',
+      },
+      { accessToken: token }
+    );
 
     if (error) {
       console.error('Error updating match period:', error);
       return null;
     }
 
-    return data;
+    const row = Array.isArray(data) ? data[0] ?? null : null;
+    return row;
   },
 
   // Note: Removed duplicate calculateScoreProgression function that was causing score inconsistencies
@@ -4386,18 +4768,28 @@ export const priorityAnalyticsService = {
   // Get priority stats for a user
   async getPriorityStats(userId: string) {
     try {
+      const token = resolveAccessToken();
+      if (!token) {
+        console.warn('⚠️ priorityAnalyticsService.getPriorityStats blocked - auth session not ready');
+        return {
+          totalPriorityRounds: 0,
+          priorityWins: 0,
+          priorityLosses: 0,
+          priorityWinRate: 0
+        };
+      }
+
       // Get all match periods with priority data for the user
-      const { data, error } = await supabase
-        .from('match_period')
-        .select(`
-          match_id,
-          priority_assigned,
-          priority_to,
-          match!inner(user_id, fencer_1_name, fencer_2_name, event_date)
-        `)
-        .eq('match.user_id', userId)
-        .not('priority_assigned', 'is', null)
-        .eq('match.is_complete', true);
+      const { data, error } = await postgrestSelect<any>(
+        'match_period',
+        {
+          select: 'match_id,priority_assigned,priority_to,match!inner(user_id,fencer_1_name,fencer_2_name,event_date)',
+          'match.user_id': `eq.${userId}`,
+          priority_assigned: 'not.is.null',
+          'match.is_complete': 'eq.true',
+        },
+        { accessToken: token }
+      );
 
       if (error) throw error;
 
@@ -4412,11 +4804,15 @@ export const priorityAnalyticsService = {
 
       // Get priority winners from match events
       const matchIds = data.map(mp => mp.match_id);
-      const { data: winnerEvents, error: winnerError } = await supabase
-        .from('match_event')
-        .select('match_id, scoring_user_name, event_time')
-        .in('match_id', matchIds)
-        .eq('event_type', 'priority_winner');
+      const { data: winnerEvents, error: winnerError } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_id,scoring_user_name,event_time',
+          match_id: `in.(${matchIds.join(',')})`,
+          event_type: 'eq.priority_winner',
+        },
+        { accessToken: token }
+      );
 
       if (winnerError) throw winnerError;
 
@@ -4450,18 +4846,23 @@ export const priorityAnalyticsService = {
   // Get priority performance over time
   async getPriorityPerformanceOverTime(userId: string, days: number = 30) {
     try {
-      const { data, error } = await supabase
-        .from('match_period')
-        .select(`
-          match_id,
-          priority_assigned,
-          priority_to,
-          match!inner(user_id, event_date, fencer_1_name, fencer_2_name)
-        `)
-        .eq('match.user_id', userId)
-        .not('priority_assigned', 'is', null)
-        .eq('match.is_complete', true)
-        .gte('match.event_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString());
+      const token = resolveAccessToken();
+      if (!token) {
+        console.warn('⚠️ priorityAnalyticsService.getPriorityPerformanceOverTime blocked - auth session not ready');
+        return [];
+      }
+
+      const { data, error } = await postgrestSelect<any>(
+        'match_period',
+        {
+          select: 'match_id,priority_assigned,priority_to,match!inner(user_id,event_date,fencer_1_name,fencer_2_name)',
+          'match.user_id': `eq.${userId}`,
+          priority_assigned: 'not.is.null',
+          'match.is_complete': 'eq.true',
+          'match.event_date': `gte.${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()}`,
+        },
+        { accessToken: token }
+      );
 
       if (error) throw error;
 
@@ -4471,11 +4872,15 @@ export const priorityAnalyticsService = {
 
       // Get priority winners
       const matchIds = data.map(mp => mp.match_id);
-      const { data: winnerEvents } = await supabase
-        .from('match_event')
-        .select('match_id, scoring_user_name, event_time')
-        .in('match_id', matchIds)
-        .eq('event_type', 'priority_winner');
+      const { data: winnerEvents } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_id,scoring_user_name,event_time',
+          match_id: `in.(${matchIds.join(',')})`,
+          event_type: 'eq.priority_winner',
+        },
+        { accessToken: token }
+      );
 
       // Group by date and calculate stats
       const dailyStats: { [key: string]: { priorityRounds: number; priorityWins: number } } = {};
@@ -4508,16 +4913,27 @@ export const priorityAnalyticsService = {
   // Get priority duration stats
   async getPriorityDurationStats(userId: string) {
     try {
-      const { data, error } = await supabase
-        .from('match_event')
-        .select(`
-          match_id,
-          event_time,
-          match!inner(user_id)
-        `)
-        .eq('match.user_id', userId)
-        .in('event_type', ['priority_round_start', 'priority_round_end'])
-        .order('event_time', { ascending: true });
+      const token = resolveAccessToken();
+      if (!token) {
+        console.warn('⚠️ priorityAnalyticsService.getPriorityDurationStats blocked - auth session not ready');
+        return {
+          avgDurationSeconds: 0,
+          minDurationSeconds: 0,
+          maxDurationSeconds: 0,
+          totalPriorityRounds: 0
+        };
+      }
+
+      const { data, error } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_id,event_time,match!inner(user_id)',
+          'match.user_id': `eq.${userId}`,
+          event_type: 'in.(priority_round_start,priority_round_end)',
+          order: 'event_time.asc',
+        },
+        { accessToken: token }
+      );
 
       if (error) throw error;
 
@@ -4572,19 +4988,24 @@ export const priorityAnalyticsService = {
   // Get recent priority rounds
   async getRecentPriorityRounds(userId: string, limit: number = 10) {
     try {
-      const { data, error } = await supabase
-        .from('match_period')
-        .select(`
-          match_id,
-          priority_assigned,
-          priority_to,
-          match!inner(user_id, event_date, fencer_1_name, fencer_2_name, result)
-        `)
-        .eq('match.user_id', userId)
-        .not('priority_assigned', 'is', null)
-        .eq('match.is_complete', true)
-        .order('match.event_date', { ascending: false })
-        .limit(limit);
+      const token = resolveAccessToken();
+      if (!token) {
+        console.warn('⚠️ priorityAnalyticsService.getRecentPriorityRounds blocked - auth session not ready');
+        return [];
+      }
+
+      const { data, error } = await postgrestSelect<any>(
+        'match_period',
+        {
+          select: 'match_id,priority_assigned,priority_to,match!inner(user_id,event_date,fencer_1_name,fencer_2_name,result)',
+          'match.user_id': `eq.${userId}`,
+          priority_assigned: 'not.is.null',
+          'match.is_complete': 'eq.true',
+          order: 'match.event_date.desc',
+          limit,
+        },
+        { accessToken: token }
+      );
 
       if (error) throw error;
 
@@ -4594,11 +5015,15 @@ export const priorityAnalyticsService = {
 
       // Get priority winners
       const matchIds = data.map(mp => mp.match_id);
-      const { data: winnerEvents } = await supabase
-        .from('match_event')
-        .select('match_id, scoring_user_name, event_time')
-        .in('match_id', matchIds)
-        .eq('event_type', 'priority_winner');
+      const { data: winnerEvents } = await postgrestSelect<any>(
+        'match_event',
+        {
+          select: 'match_id,scoring_user_name,event_time',
+          match_id: `in.(${matchIds.join(',')})`,
+          event_type: 'eq.priority_winner',
+        },
+        { accessToken: token }
+      );
 
       return data.map((mp: any) => {
         const winnerEvent = winnerEvents?.find(we => we.match_id === mp.match_id);
@@ -4635,12 +5060,21 @@ export const accountService = {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('🗑️ Starting account deletion for user:', userId);
+      const token = resolveAccessToken(_accessToken);
+      if (!token) {
+        console.warn('⚠️ accountService.deleteAccount blocked - auth session not ready');
+        return { success: false, error: 'Auth session not ready' };
+      }
 
       // Get all matches for this user first (needed for deleting related events and periods)
-      const { data: userMatches, error: matchesError } = await supabase
-        .from('match')
-        .select('match_id')
-        .eq('user_id', userId);
+      const { data: userMatches, error: matchesError } = await postgrestSelect<{ match_id: string }>(
+        'match',
+        {
+          select: 'match_id',
+          user_id: `eq.${userId}`,
+        },
+        { accessToken: token }
+      );
 
       if (matchesError) {
         console.error('❌ Error fetching user matches:', matchesError);
@@ -4653,10 +5087,11 @@ export const accountService = {
       // Delete in order (handle foreign keys):
       // 1. Delete match events (by match_id or user_id)
       if (matchIds.length > 0) {
-        const { error: eventsError } = await supabase
-          .from('match_event')
-          .delete()
-          .in('match_id', matchIds);
+        const { error: eventsError } = await postgrestDelete(
+          'match_event',
+          { match_id: `in.(${matchIds.join(',')})` },
+          { accessToken: token }
+        );
         
         if (eventsError) {
           console.error('❌ Error deleting match events:', eventsError);
@@ -4668,10 +5103,11 @@ export const accountService = {
 
       // 2. Delete match periods (by match_id)
       if (matchIds.length > 0) {
-        const { error: periodsError } = await supabase
-          .from('match_period')
-          .delete()
-          .in('match_id', matchIds);
+        const { error: periodsError } = await postgrestDelete(
+          'match_period',
+          { match_id: `in.(${matchIds.join(',')})` },
+          { accessToken: token }
+        );
         
         if (periodsError) {
           console.error('❌ Error deleting match periods:', periodsError);
@@ -4680,10 +5116,11 @@ export const accountService = {
       }
 
       // 3. Delete matches
-      const { error: matchesDeleteError } = await supabase
-        .from('match')
-        .delete()
-        .eq('user_id', userId);
+      const { error: matchesDeleteError } = await postgrestDelete(
+        'match',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (matchesDeleteError) {
         console.error('❌ Error deleting matches:', matchesDeleteError);
@@ -4691,10 +5128,11 @@ export const accountService = {
       }
 
       // 4. Delete weekly session logs (table has user_id, not target_id)
-      const { error: sessionLogsError } = await supabase
-        .from('weekly_session_log')
-        .delete()
-        .eq('user_id', userId);
+      const { error: sessionLogsError } = await postgrestDelete(
+        'weekly_session_log',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
 
       if (sessionLogsError) {
         console.error('❌ Error deleting weekly session logs:', sessionLogsError);
@@ -4702,10 +5140,11 @@ export const accountService = {
       }
 
       // 5. Delete weekly targets
-      const { error: targetsDeleteError } = await supabase
-        .from('weekly_target')
-        .delete()
-        .eq('user_id', userId);
+      const { error: targetsDeleteError } = await postgrestDelete(
+        'weekly_target',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (targetsDeleteError) {
         console.error('❌ Error deleting weekly targets:', targetsDeleteError);
@@ -4713,10 +5152,11 @@ export const accountService = {
       }
 
       // 6. Delete weekly completion history
-      const { error: historyError } = await supabase
-        .from('weekly_completion_history')
-        .delete()
-        .eq('user_id', userId);
+      const { error: historyError } = await postgrestDelete(
+        'weekly_completion_history',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (historyError) {
         console.error('❌ Error deleting weekly completion history:', historyError);
@@ -4724,10 +5164,11 @@ export const accountService = {
       }
 
       // 7. Delete goals
-      const { error: goalsError } = await supabase
-        .from('goal')
-        .delete()
-        .eq('user_id', userId);
+      const { error: goalsError } = await postgrestDelete(
+        'goal',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (goalsError) {
         console.error('❌ Error deleting goals:', goalsError);
@@ -4735,10 +5176,11 @@ export const accountService = {
       }
 
       // 8. Delete diary entries
-      const { error: diaryError } = await supabase
-        .from('diary_entry')
-        .delete()
-        .eq('user_id', userId);
+      const { error: diaryError } = await postgrestDelete(
+        'diary_entry',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (diaryError) {
         console.error('❌ Error deleting diary entries:', diaryError);
@@ -4746,10 +5188,11 @@ export const accountService = {
       }
 
       // 9. Delete match approvals
-      const { error: approvalsError } = await supabase
-        .from('match_approval')
-        .delete()
-        .eq('user_id', userId);
+      const { error: approvalsError } = await postgrestDelete(
+        'match_approval',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (approvalsError) {
         console.error('❌ Error deleting match approvals:', approvalsError);
@@ -4757,10 +5200,11 @@ export const accountService = {
       }
 
       // 10. Delete fencing remote sessions (by referee_id)
-      const { error: remoteError } = await supabase
-        .from('fencing_remote')
-        .delete()
-        .eq('referee_id', userId);
+      const { error: remoteError } = await postgrestDelete(
+        'fencing_remote',
+        { referee_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (remoteError) {
         console.error('❌ Error deleting fencing remote sessions:', remoteError);
@@ -4768,10 +5212,11 @@ export const accountService = {
       }
 
       // 11. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
-      const { error: subscriptionsError } = await supabase
-        .from('user_subscriptions')
-        .delete()
-        .eq('user_id', userId);
+      const { error: subscriptionsError } = await postgrestDelete(
+        'user_subscriptions',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (subscriptionsError) {
         console.error('❌ Error deleting user subscriptions:', subscriptionsError);
@@ -4779,10 +5224,11 @@ export const accountService = {
       }
 
       // 12. Delete app_user record
-      const { error: appUserError } = await supabase
-        .from('app_user')
-        .delete()
-        .eq('user_id', userId);
+      const { error: appUserError } = await postgrestDelete(
+        'app_user',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
       
       if (appUserError) {
         console.error('❌ Error deleting app_user:', appUserError);
@@ -4790,8 +5236,11 @@ export const accountService = {
       }
 
       // 13. Delete auth user account via RPC function
-      const { data: deleteAuthResult, error: authError } = await supabase
-        .rpc('delete_user_account', { target_user_id: userId });
+      const { data: deleteAuthResult, error: authError } = await postgrestRpc<{ success: boolean; error?: string }>(
+        'delete_user_account',
+        { target_user_id: userId },
+        { accessToken: token }
+      );
       
       if (authError) {
         console.error('❌ Error deleting auth user:', authError);

@@ -2,7 +2,8 @@ import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, ScoreBasedLeadingC
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
-import { supabase } from '@/lib/supabase';
+import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,6 +18,8 @@ export default function NeutralMatchSummary() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { session } = useAuth();
+  const postgrestOptions = session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true };
   
   const [matchData, setMatchData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -88,11 +91,19 @@ export default function NeutralMatchSummary() {
   const calculateLongestRuns = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
       // Get match data to get final fencer names (handles swaps) and weapon type
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name, weapon_type')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        weapon_type: string | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name,weapon_type',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for longest runs:', matchError);
@@ -107,11 +118,23 @@ export default function NeutralMatchSummary() {
       const weaponType = (matchData.weapon_type || '').toLowerCase();
       const isEpee = weaponType === 'epee';
 
-      const { data: matchEvents, error } = await supabase
-        .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order('match_time_elapsed', { ascending: true });
+      const { data: matchEvents, error } = await postgrestSelect<{
+        scoring_user_name: string | null;
+        match_time_elapsed: number | null;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        event_type: string | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'match_time_elapsed.asc',
+        },
+        postgrestOptions
+      );
 
       if (error) {
         console.error('Error fetching match events for longest runs:', error);
@@ -229,11 +252,18 @@ export default function NeutralMatchSummary() {
   const calculateBounceBackTimes = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
       // Get match data to get final fencer names (handles swaps)
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for bounce back times:', matchError);
@@ -244,11 +274,23 @@ export default function NeutralMatchSummary() {
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
 
-      const { data: matchEvents, error } = await supabase
-        .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order('match_time_elapsed', { ascending: true });
+      const { data: matchEvents, error } = await postgrestSelect<{
+        scoring_user_name: string | null;
+        match_time_elapsed: number | null;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        event_type: string | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'match_time_elapsed.asc',
+        },
+        postgrestOptions
+      );
 
       if (error) {
         console.error('Error fetching match events for bounce back times:', error);
@@ -423,11 +465,18 @@ export default function NeutralMatchSummary() {
   const calculateScoreBasedLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
       // Get match data to get final fencer names (handles swaps)
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for score-based leading:', matchError);
@@ -499,11 +548,23 @@ export default function NeutralMatchSummary() {
       }
       
       // For sabre, order by timestamp (not match_time_elapsed which is NULL)
-      const { data: matchEventsRaw, error } = await supabase
-        .from('match_event')
-        .select('scoring_user_name, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order('timestamp', { ascending: true });
+      const { data: matchEventsRaw, error } = await postgrestSelect<{
+        scoring_user_name: string | null;
+        timestamp: string | null;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        event_type: string | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'scoring_user_name,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'timestamp.asc',
+        },
+        postgrestOptions
+      );
 
       if (error) {
         console.error('Error fetching match events for score-based leading:', error);
@@ -619,11 +680,18 @@ export default function NeutralMatchSummary() {
   const calculateTimeLeading = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
       // Get match data to get final fencer names (handles swaps)
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for time leading:', matchError);
@@ -637,11 +705,23 @@ export default function NeutralMatchSummary() {
       console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
       console.log('🔍 TIME LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
       
-      const { data: matchEventsRaw, error } = await supabase
-        .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order('match_time_elapsed', { ascending: true });
+      const { data: matchEventsRaw, error } = await postgrestSelect<{
+        scoring_user_name: string | null;
+        match_time_elapsed: number | null;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        event_type: string | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: 'match_time_elapsed.asc',
+        },
+        postgrestOptions
+      );
 
       if (error) {
         console.error('Error fetching match events for time leading:', error);
@@ -773,11 +853,19 @@ export default function NeutralMatchSummary() {
   const calculateLeadChanges = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
       // Get match data to get final fencer names and weapon type (handles swaps)
-      const { data: matchData, error: matchError } = await supabase
-        .from('match')
-        .select('fencer_1_name, fencer_2_name, weapon_type')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchData, error: matchError } = await postgrestSelectOne<{
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        weapon_type: string | null;
+      }>(
+        'match',
+        {
+          select: 'fencer_1_name,fencer_2_name,weapon_type',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        postgrestOptions
+      );
 
       if (matchError || !matchData) {
         console.error('Error fetching match data for lead changes:', matchError);
@@ -834,11 +922,25 @@ export default function NeutralMatchSummary() {
       }
 
       // For sabre, order by timestamp; for foil/epee, order by match_time_elapsed
-      const { data: matchEventsRaw, error } = await supabase
-        .from('match_event')
-        .select('scoring_user_name, match_time_elapsed, timestamp, fencer_1_name, fencer_2_name, event_type, cancelled_event_id, reset_segment')
-        .eq('match_id', matchId)
-        .order(isSabre ? 'timestamp' : 'match_time_elapsed', { ascending: true });
+      const orderField = isSabre ? 'timestamp' : 'match_time_elapsed';
+      const { data: matchEventsRaw, error } = await postgrestSelect<{
+        scoring_user_name: string | null;
+        match_time_elapsed: number | null;
+        timestamp: string | null;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+        event_type: string | null;
+        cancelled_event_id: string | null;
+        reset_segment: number | null;
+      }>(
+        'match_event',
+        {
+          select: 'scoring_user_name,match_time_elapsed,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+          match_id: `eq.${matchId}`,
+          order: `${orderField}.asc`,
+        },
+        postgrestOptions
+      );
 
       if (error) {
         console.error('Error fetching match events for lead changes:', error);
@@ -1059,7 +1161,10 @@ export default function NeutralMatchSummary() {
           // Add a small delay to ensure database update has propagated (if just completed)
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          const data = await matchService.getMatchById(matchId as string);
+          const data = await matchService.getMatchById(
+            matchId as string,
+            session?.access_token
+          );
           setMatchData(data);
           
           console.log('📊 [NEUTRAL SUMMARY] Fetched match data from database:', {
@@ -1071,11 +1176,20 @@ export default function NeutralMatchSummary() {
           
           // Fetch actual period scores from match_period table
           try {
-            const { data: matchPeriods, error: periodsError } = await supabase
-              .from('match_period')
-              .select('match_period_id, period_number, fencer_1_score, fencer_2_score')
-              .eq('match_id', matchId as string)
-              .order('period_number', { ascending: true });
+            const { data: matchPeriods, error: periodsError } = await postgrestSelect<{
+              match_period_id: string | null;
+              period_number: number | null;
+              fencer_1_score: number | null;
+              fencer_2_score: number | null;
+            }>(
+              'match_period',
+              {
+                select: 'match_period_id,period_number,fencer_1_score,fencer_2_score',
+                match_id: `eq.${matchId as string}`,
+                order: 'period_number.asc',
+              },
+              postgrestOptions
+            );
 
             if (periodsError) {
               console.error('Error fetching match periods:', periodsError);
@@ -1157,11 +1271,26 @@ export default function NeutralMatchSummary() {
               if (hasNegativeDelta) {
                 try {
                   console.warn('⚠️ Negative period deltas detected, recalculating touches by period from events');
-                    const { data: periodEvents, error: periodEventsError } = await supabase
-                      .from('match_event')
-                      .select('match_event_id, match_period_id, scoring_user_name, event_type, cancelled_event_id, fencer_1_name, fencer_2_name, points_awarded, card_given, reset_segment')
-                      .eq('match_id', matchId as string)
-                      .order('timestamp', { ascending: true });
+                    const { data: periodEvents, error: periodEventsError } = await postgrestSelect<{
+                      match_event_id: string | null;
+                      match_period_id: string | null;
+                      scoring_user_name: string | null;
+                      event_type: string | null;
+                      cancelled_event_id: string | null;
+                      fencer_1_name: string | null;
+                      fencer_2_name: string | null;
+                      points_awarded: number | null;
+                      card_given: string | null;
+                      reset_segment: number | null;
+                    }>(
+                      'match_event',
+                      {
+                        select: 'match_event_id,match_period_id,scoring_user_name,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,points_awarded,card_given,reset_segment',
+                        match_id: `eq.${matchId as string}`,
+                        order: 'timestamp.asc',
+                      },
+                      postgrestOptions
+                    );
                   
                   if (periodEventsError || !periodEvents) {
                     console.error('❌ Error fetching events for period recalculation:', periodEventsError);

@@ -5,9 +5,10 @@
  */
 
 import { analytics } from './analytics';
-import { fencingRemoteService, matchEventService, matchPeriodService, matchService, supabase } from './database';
+import { fencingRemoteService, matchEventService, matchPeriodService, matchService } from './database';
 import { networkService } from './networkService';
 import { offlineCache, PendingEvent, RemoteSession } from './offlineCache';
+import { postgrestSelect, postgrestSelectOne } from './postgrest';
 
 export const offlineRemoteService = {
   /**
@@ -453,28 +454,22 @@ export const offlineRemoteService = {
 
           // Ensure match exists before attempting insert; if not, retry later
           if (matchId) {
-            const { data: matchExists, error: matchExistsError, status } = await supabase
-              .from('match')
-              .select('match_id')
-              .eq('match_id', matchId)
-              .maybeSingle();
+            const { data: matchExists, error: matchExistsError } = await postgrestSelectOne<{ match_id: string }>(
+              'match',
+              {
+                select: 'match_id',
+                match_id: `eq.${matchId}`,
+                limit: 1,
+              }
+            );
 
-            if (matchExistsError && (matchExistsError as any).code !== 'PGRST116') {
+            if (matchExistsError) {
               console.error(`❌ Error checking match existence for ${matchId}:`, matchExistsError);
               continue; // retry later
             }
 
-            if (!matchExists && status === 406) {
+            if (!matchExists) {
               console.log(`⚠️ Match ${matchId} not found yet, keeping event queued: ${event.event_type}`);
-              continue;
-            }
-
-            // If the match truly doesn't exist anymore (deleted), drop all events for it
-            if (!matchExists && !matchExistsError && status !== 406) {
-              console.log(`⚠️ Match ${matchId} appears deleted. Dropping queued events for this match.`);
-              if (event.id) {
-                syncedEventIds.push(event.id);
-              }
               continue;
             }
           }
@@ -492,17 +487,22 @@ export const offlineRemoteService = {
             // #endregion
             
             // Use limit to detect multiple matches instead of maybeSingle()
-            let duplicateQuery = supabase
-              .from('match_event')
-              .select('match_event_id, event_time, timestamp')
-              .eq('match_id', matchId)
-              .eq('match_time_elapsed', event.match_time_elapsed)
-              .eq('scoring_user_name', event.scoring_user_name)
-              .eq('event_type', event.event_type)
-              .eq('reset_segment', resetSegment)
-              .limit(5);
-
-            const { data: existingEvents, error: checkError } = await duplicateQuery;
+            const { data: existingEvents, error: checkError } = await postgrestSelect<{
+              match_event_id: string;
+              event_time?: string | null;
+              timestamp?: string | null;
+            }>(
+              'match_event',
+              {
+                select: 'match_event_id,event_time,timestamp',
+                match_id: `eq.${matchId}`,
+                match_time_elapsed: `eq.${event.match_time_elapsed}`,
+                scoring_user_name: `eq.${event.scoring_user_name}`,
+                event_type: `eq.${event.event_type}`,
+                reset_segment: `eq.${resetSegment}`,
+                limit: 5,
+              }
+            );
             
             // #region agent log
             console.log('[DEBUG] Duplicate check query result:', {
@@ -569,15 +569,18 @@ export const offlineRemoteService = {
           // Additional duplicate guard using event_time second precision
           if (matchId && event.scoring_user_name && event.event_time) {
             const compositeTimeKey = event.event_time;
-            const { data: existingComposite, error: compositeError } = await supabase
-              .from('match_event')
-              .select('match_event_id')
-              .eq('match_id', matchId)
-              .eq('event_type', event.event_type)
-              .eq('scoring_user_name', event.scoring_user_name)
-              .eq('event_time', compositeTimeKey)
-              .eq('reset_segment', resetSegment)
-              .maybeSingle();
+            const { data: existingComposite, error: compositeError } = await postgrestSelectOne<{ match_event_id: string }>(
+              'match_event',
+              {
+                select: 'match_event_id',
+                match_id: `eq.${matchId}`,
+                event_type: `eq.${event.event_type}`,
+                scoring_user_name: `eq.${event.scoring_user_name}`,
+                event_time: `eq.${compositeTimeKey}`,
+                reset_segment: `eq.${resetSegment}`,
+                limit: 1,
+              }
+            );
 
             if (compositeError) {
               console.error('❌ Error checking composite duplicate:', {

@@ -99,12 +99,13 @@ export const postgrestRequest = async <T>(
     preferReturn?: boolean;
     prefer?: string;
     headers?: Record<string, string>;
+    allowAnon?: boolean;
   } = {}
 ): Promise<PostgrestResult<T>> => {
   const method = options.method ?? 'GET';
   const accessToken = resolveAccessToken(options.accessToken);
 
-  if (!accessToken) {
+  if (!accessToken && !options.allowAnon) {
     return {
       data: null,
       error: { message: 'auth_session_missing', status: 401 },
@@ -115,8 +116,11 @@ export const postgrestRequest = async <T>(
   const url = buildUrl(path, options.query);
   const headers: Record<string, string> = {
     apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${accessToken}`,
   };
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
 
   if (options.prefer) {
     headers.Prefer = options.prefer;
@@ -180,19 +184,20 @@ export const postgrestRequest = async <T>(
 export const postgrestSelect = async <T>(
   table: string,
   query: QueryParams,
-  options?: { accessToken?: string | null }
+  options?: { accessToken?: string | null; allowAnon?: boolean }
 ): Promise<PostgrestResult<T[]>> => {
   return postgrestRequest<T[]>(table, {
     method: 'GET',
     query,
     accessToken: options?.accessToken,
+    allowAnon: options?.allowAnon,
   });
 };
 
 export const postgrestSelectOne = async <T>(
   table: string,
   query: QueryParams,
-  options?: { accessToken?: string | null }
+  options?: { accessToken?: string | null; allowAnon?: boolean }
 ): Promise<PostgrestResult<T | null>> => {
   const result = await postgrestSelect<T>(table, query, options);
   if (result.error) {
@@ -244,6 +249,87 @@ export const postgrestDelete = async <T>(
     query,
     accessToken: options?.accessToken,
     preferReturn: options?.preferReturn ?? false,
+    prefer: options?.prefer,
+  });
+};
+
+export const postgrestCount = async (
+  table: string,
+  query: QueryParams,
+  options?: { accessToken?: string | null; allowAnon?: boolean }
+): Promise<{ count: number; error: PostgrestError | null; status: number }> => {
+  const accessToken = resolveAccessToken(options?.accessToken);
+  if (!accessToken && !options?.allowAnon) {
+    return {
+      count: 0,
+      error: { message: 'auth_session_missing', status: 401 },
+      status: 401,
+    };
+  }
+
+  const url = buildUrl(table, query);
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY,
+    Prefer: 'count=exact',
+  };
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      { method: 'GET', headers },
+      POSTGREST_TIMEOUT_MS
+    );
+
+    if (!response.ok) {
+      const payload = await parseJson(response);
+      const error = payload || {};
+      return {
+        count: 0,
+        error: {
+          message: error.message || error.error || 'postgrest_error',
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          status: response.status,
+        },
+        status: response.status,
+      };
+    }
+
+    const contentRange = response.headers.get('content-range') || '';
+    const totalPart = contentRange.split('/')[1];
+    const parsedCount = totalPart ? Number(totalPart) : NaN;
+    return {
+      count: Number.isFinite(parsedCount) ? parsedCount : 0,
+      error: null,
+      status: response.status,
+    };
+  } catch (error) {
+    return {
+      count: 0,
+      error: {
+        message: error instanceof Error ? error.message : 'postgrest_request_failed',
+        status: 0,
+      },
+      status: 0,
+    };
+  }
+};
+
+export const postgrestRpc = async <T>(
+  functionName: string,
+  body?: unknown,
+  options?: { accessToken?: string | null; allowAnon?: boolean; prefer?: string }
+): Promise<PostgrestResult<T>> => {
+  return postgrestRequest<T>(`rpc/${functionName}`, {
+    method: 'POST',
+    body,
+    accessToken: options?.accessToken,
+    allowAnon: options?.allowAnon,
     prefer: options?.prefer,
   });
 };

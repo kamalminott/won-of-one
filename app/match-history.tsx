@@ -262,7 +262,12 @@ export default function RecentMatchesScreen() {
     try {
       setLoading(true);
       console.log('🔄 Fetching matches for match history...');
-      const simpleMatches = await matchService.getRecentMatches(user.id, 50); // Get more matches for history page
+      const simpleMatches = await matchService.getRecentMatches(
+        user.id,
+        50,
+        undefined,
+        session?.access_token
+      ); // Get more matches for history page
       const convertedMatches = simpleMatches.map(convertToMatch);
       console.log(`📊 Fetched ${convertedMatches.length} matches for history`);
       setAllMatches(convertedMatches);

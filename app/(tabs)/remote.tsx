@@ -6,7 +6,8 @@ import { fencingRemoteService, goalService, matchEventService, matchPeriodServic
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
-import { supabase } from '@/lib/supabase';
+import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
+import type { MatchPeriod } from '@/types/database';
 import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -67,7 +68,7 @@ export default function RemoteScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user, userName, session } = useAuth();
-  const accessToken = session?.access_token ?? undefined;
+  const accessToken = session?.access_token ?? null;
   
   // Responsive breakpoints for small screens - simplified for consistency across devices
   
@@ -1766,11 +1767,15 @@ export default function RemoteScreen() {
     // Skip database check for offline sessions or when offline
     if (!isOfflineSession && isOnline) {
       // Only verify session exists in database if we're online and it's an online session
-      const { data: sessionCheck, error: sessionError } = await supabase
-        .from('fencing_remote')
-        .select('remote_id')
-        .eq('remote_id', activeSession.remote_id)
-        .single();
+      const { data: sessionCheck, error: sessionError } = await postgrestSelectOne<{ remote_id: string }>(
+        'fencing_remote',
+        {
+          select: 'remote_id',
+          remote_id: `eq.${activeSession.remote_id}`,
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
       
       if (sessionError || !sessionCheck) {
         console.log('⚠️ Remote session not in database (may be offline), will queue event');
@@ -1855,11 +1860,18 @@ export default function RemoteScreen() {
       
       if (currentMatchPeriod?.match_id) {
         try {
-          const { data: periodsData } = await supabase
-            .from('match_period')
-            .select('period_number, start_time')
-            .eq('match_id', currentMatchPeriod.match_id)
-            .order('period_number', { ascending: true });
+          const { data: periodsData } = await postgrestSelect<{
+            period_number: number | null;
+            start_time: string | null;
+          }>(
+            'match_period',
+            {
+              select: 'period_number,start_time',
+              match_id: `eq.${currentMatchPeriod.match_id}`,
+              order: 'period_number.asc',
+            },
+            accessToken ? { accessToken } : { allowAnon: true }
+          );
           
           const matchPeriods = periodsData || [];
           
@@ -2019,22 +2031,30 @@ export default function RemoteScreen() {
       try {
         // Verify match and remote session still exist before creating event
         // This prevents foreign key violations if reset was called during async operations
-        const { data: matchCheck, error: matchError } = await supabase
-          .from('match')
-          .select('match_id')
-          .eq('match_id', effectivePeriod.match_id)
-          .single();
+        const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+          'match',
+          {
+            select: 'match_id',
+            match_id: `eq.${effectivePeriod.match_id}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
-        const { data: remoteCheck, error: remoteError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id')
-          .eq('remote_id', activeSession.remote_id)
-          .single();
+        const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+          'fencing_remote',
+          {
+            select: 'remote_id',
+            remote_id: `eq.${activeSession.remote_id}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         // Only create event if both match and remote session still exist
         if (!matchError && matchCheck && !remoteError && remoteCheck) {
           const eventData = { ...baseEvent, match_id: effectivePeriod.match_id, match_period_id: effectivePeriod.match_period_id || null };
-          const createdEvent = await matchEventService.createMatchEvent(eventData);
+          const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
           
           // If creation failed (e.g., FK), leave it to the queued offline event to sync later
           if (!createdEvent) {
@@ -2298,7 +2318,7 @@ export default function RemoteScreen() {
         priority_assigned: priorityFencer || undefined, // Entity-based: 'fencerA' | 'fencerB' (stable identifier)
         priority_to: priorityFencer ? getNameByEntity(priorityFencer) : undefined, // Entity-based name (stable identifier)
         timestamp: new Date().toISOString(), // Update timestamp when period is updated
-      });
+      }, accessToken);
     } catch (error) {
       console.error('Error updating match period:', error);
     }
@@ -2313,11 +2333,15 @@ export default function RemoteScreen() {
 
     try {
       // Verify match exists before creating event
-      const { data: matchCheck, error: matchError } = await supabase
-        .from('match')
-        .select('match_id')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+        'match',
+        {
+          select: 'match_id',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
       
       if (matchError || !matchCheck) {
         console.log('⚠️ Match no longer exists, skipping priority winner event');
@@ -2325,12 +2349,16 @@ export default function RemoteScreen() {
       }
 
       // Check if priority winner event already exists for this match
-      const { data: existingEvent } = await supabase
-        .from('match_event')
-        .select('event_id')
-        .eq('match_id', matchId)
-        .eq('event_type', 'priority_winner')
-        .single();
+      const { data: existingEvent } = await postgrestSelectOne<{ event_id: string }>(
+        'match_event',
+        {
+          select: 'event_id',
+          match_id: `eq.${matchId}`,
+          event_type: 'eq.priority_winner',
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
 
       if (existingEvent) {
         console.log('⚠️ Priority winner event already exists for this match, skipping creation');
@@ -2350,11 +2378,15 @@ export default function RemoteScreen() {
 
       // Only include fencing_remote_id if remote session exists and is verified
       if (remoteSession?.remote_id) {
-        const { data: remoteCheck, error: remoteError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id')
-          .eq('remote_id', remoteSession.remote_id)
-          .single();
+        const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+          'fencing_remote',
+          {
+            select: 'remote_id',
+            remote_id: `eq.${remoteSession.remote_id}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         if (!remoteError && remoteCheck) {
           eventData.fencing_remote_id = remoteSession.remote_id;
@@ -2363,7 +2395,7 @@ export default function RemoteScreen() {
         }
       }
 
-      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
       
       if (!createdEvent) {
         console.log('⚠️ Priority winner event creation failed (match may have been deleted)');
@@ -2393,11 +2425,15 @@ export default function RemoteScreen() {
 
     try {
       // Verify match exists before creating event
-      const { data: matchCheck, error: matchError } = await supabase
-        .from('match')
-        .select('match_id')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+        'match',
+        {
+          select: 'match_id',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
       
       if (matchError || !matchCheck) {
         console.log('⚠️ Match no longer exists, skipping priority round start event');
@@ -2416,11 +2452,15 @@ export default function RemoteScreen() {
 
       // Only include fencing_remote_id if remote session exists and is verified
       if (remoteSession?.remote_id) {
-        const { data: remoteCheck, error: remoteError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id')
-          .eq('remote_id', remoteSession.remote_id)
-          .single();
+        const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+          'fencing_remote',
+          {
+            select: 'remote_id',
+            remote_id: `eq.${remoteSession.remote_id}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         if (!remoteError && remoteCheck) {
           eventData.fencing_remote_id = remoteSession.remote_id;
@@ -2429,7 +2469,7 @@ export default function RemoteScreen() {
         }
       }
 
-      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
       
       if (!createdEvent) {
         console.log('⚠️ Priority round start event creation failed (match may have been deleted)');
@@ -2459,11 +2499,15 @@ export default function RemoteScreen() {
 
     try {
       // Verify match exists before creating event
-      const { data: matchCheck, error: matchError } = await supabase
-        .from('match')
-        .select('match_id')
-        .eq('match_id', matchId)
-        .single();
+      const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+        'match',
+        {
+          select: 'match_id',
+          match_id: `eq.${matchId}`,
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
       
       if (matchError || !matchCheck) {
         console.log('⚠️ Match no longer exists, skipping priority round end event');
@@ -2471,12 +2515,16 @@ export default function RemoteScreen() {
       }
 
       // Check if priority round end event already exists for this match
-      const { data: existingEvent } = await supabase
-        .from('match_event')
-        .select('event_id')
-        .eq('match_id', matchId)
-        .eq('event_type', 'priority_round_end')
-        .single();
+      const { data: existingEvent } = await postgrestSelectOne<{ event_id: string }>(
+        'match_event',
+        {
+          select: 'event_id',
+          match_id: `eq.${matchId}`,
+          event_type: 'eq.priority_round_end',
+          limit: 1,
+        },
+        accessToken ? { accessToken } : { allowAnon: true }
+      );
 
       if (existingEvent) {
         console.log('⚠️ Priority round end event already exists for this match, skipping creation');
@@ -2496,11 +2544,15 @@ export default function RemoteScreen() {
 
       // Only include fencing_remote_id if remote session exists and is verified
       if (remoteSession?.remote_id) {
-        const { data: remoteCheck, error: remoteError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id')
-          .eq('remote_id', remoteSession.remote_id)
-          .single();
+        const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+          'fencing_remote',
+          {
+            select: 'remote_id',
+            remote_id: `eq.${remoteSession.remote_id}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         if (!remoteError && remoteCheck) {
           eventData.fencing_remote_id = remoteSession.remote_id;
@@ -2509,7 +2561,7 @@ export default function RemoteScreen() {
         }
       }
 
-      const createdEvent = await matchEventService.createMatchEvent(eventData);
+      const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
       
       if (!createdEvent) {
         console.log('⚠️ Priority round end event creation failed (match may have been deleted)');
@@ -2613,11 +2665,18 @@ export default function RemoteScreen() {
       
       if (hasMatchStarted) {
         // Query match_period table to see which periods were actually played
-        const { data: periodsData } = await supabase
-          .from('match_period')
-          .select('period_number, start_time')
-          .eq('match_id', currentMatchPeriod.match_id)
-          .order('period_number', { ascending: true });
+        const { data: periodsData } = await postgrestSelect<{
+          period_number: number | null;
+          start_time: string | null;
+        }>(
+          'match_period',
+          {
+            select: 'period_number,start_time',
+            match_id: `eq.${currentMatchPeriod.match_id}`,
+            order: 'period_number.asc',
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         matchPeriods = periodsData || null;
         
@@ -2720,7 +2779,7 @@ export default function RemoteScreen() {
         fencer_1_cards: leftCards.yellow + leftCards.red, // Position-based: cards of entity currently on left
         fencer_2_cards: rightCards.yellow + rightCards.red, // Position-based: cards of entity currently on right
         timestamp: matchCompletionTime,
-      });
+      }, accessToken);
       console.log('✅ Current period ended with completion time:', matchCompletionTime);
 
       // Calculate period-based data
@@ -2732,7 +2791,14 @@ export default function RemoteScreen() {
       if (user?.id && showUserProfile) {
         // User match - use existing logic
         const effectiveUserName = userDisplayName;
-        touchesByPeriod = await matchService.calculateTouchesByPeriod(currentMatchPeriod.match_id, effectiveUserName, undefined, finalScore, touchesAgainst);
+        touchesByPeriod = await matchService.calculateTouchesByPeriod(
+          currentMatchPeriod.match_id,
+          effectiveUserName,
+          undefined,
+          finalScore,
+          touchesAgainst,
+          accessToken
+        );
         
         // Calculate period number (count non-zero periods)
         periodNumber = [touchesByPeriod.period1, touchesByPeriod.period2, touchesByPeriod.period3]
@@ -2752,38 +2818,49 @@ export default function RemoteScreen() {
         console.log('📊 Anonymous match - using match_period data directly');
         
         // Get the actual match period data
-        const { data: matchPeriods } = await supabase
-          .from('match_period')
-          .select('fencer_1_score, fencer_2_score, period_number')
-          .eq('match_id', currentMatchPeriod.match_id)
-          .order('period_number', { ascending: true });
+        const { data: matchPeriods } = await postgrestSelect<{
+          fencer_1_score: number | null;
+          fencer_2_score: number | null;
+          period_number: number | null;
+        }>(
+          'match_period',
+          {
+            select: 'fencer_1_score,fencer_2_score,period_number',
+            match_id: `eq.${currentMatchPeriod.match_id}`,
+            order: 'period_number.asc',
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
 
         if (matchPeriods && matchPeriods.length > 0) {
+          const firstPeriod = matchPeriods[0];
+          const fencer1Score = firstPeriod?.fencer_1_score ?? 0;
+          const fencer2Score = firstPeriod?.fencer_2_score ?? 0;
           // Use the actual period_number from the database (could be 1, 2, or 3)
           // This correctly handles cases where user skipped to period 2 or 3
-          const actualPeriodNumber = matchPeriods[0].period_number || 1;
+          const actualPeriodNumber = firstPeriod?.period_number ?? 1;
           periodNumber = actualPeriodNumber;
           
           console.log('📊 [ANONYMOUS MATCH] Using actual period number:', {
             actualPeriodNumber,
-            periodData: matchPeriods[0],
+            periodData: firstPeriod,
             allPeriods: matchPeriods.map(p => ({ period_number: p.period_number, fencer_1_score: p.fencer_1_score, fencer_2_score: p.fencer_2_score }))
           });
           
           // Calculate score per period based on actual period number
-          scoreSpp = Math.round((matchPeriods[0].fencer_1_score + matchPeriods[0].fencer_2_score) / periodNumber);
+          scoreSpp = Math.round((fencer1Score + fencer2Score) / periodNumber);
           
           // Structure score by period data - only populate the period that was actually played
           scoreByPeriod = {
-            period1: actualPeriodNumber === 1 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
-            period2: actualPeriodNumber === 2 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
-            period3: actualPeriodNumber === 3 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 }
+            period1: actualPeriodNumber === 1 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 },
+            period2: actualPeriodNumber === 2 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 },
+            period3: actualPeriodNumber === 3 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 }
           };
           
           touchesByPeriod = {
-            period1: actualPeriodNumber === 1 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
-            period2: actualPeriodNumber === 2 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 },
-            period3: actualPeriodNumber === 3 ? { user: matchPeriods[0].fencer_1_score, opponent: matchPeriods[0].fencer_2_score } : { user: 0, opponent: 0 }
+            period1: actualPeriodNumber === 1 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 },
+            period2: actualPeriodNumber === 2 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 },
+            period3: actualPeriodNumber === 3 ? { user: fencer1Score, opponent: fencer2Score } : { user: 0, opponent: 0 }
           };
         } else {
           // Fallback if no period data
@@ -2839,18 +2916,30 @@ export default function RemoteScreen() {
           };
         } else {
           // Anonymous match - use match_period data
-          const { data: sabrePeriods } = await supabase
-            .from('match_period')
-            .select('fencer_1_score, fencer_2_score, period_number')
-            .eq('match_id', currentMatchPeriod.match_id)
-            .order('period_number', { ascending: true });
+          const { data: sabrePeriods } = await postgrestSelect<{
+            fencer_1_score: number | null;
+            fencer_2_score: number | null;
+            period_number: number | null;
+          }>(
+            'match_period',
+            {
+              select: 'fencer_1_score,fencer_2_score,period_number',
+              match_id: `eq.${currentMatchPeriod.match_id}`,
+              order: 'period_number.asc',
+            },
+            accessToken ? { accessToken } : { allowAnon: true }
+          );
           
           if (sabrePeriods && sabrePeriods.length > 0) {
             const period1Data = sabrePeriods.find(p => p.period_number === 1) || { fencer_1_score: 0, fencer_2_score: 0 };
             const period2Data = sabrePeriods.find(p => p.period_number === 2) || { fencer_1_score: 0, fencer_2_score: 0 };
+            const period1User = period1Data.fencer_1_score ?? 0;
+            const period1Opponent = period1Data.fencer_2_score ?? 0;
+            const period2User = period2Data.fencer_1_score ?? 0;
+            const period2Opponent = period2Data.fencer_2_score ?? 0;
             finalScoreByPeriod = {
-              period1: { user: period1Data.fencer_1_score, opponent: period1Data.fencer_2_score },
-              period2: { user: period2Data.fencer_1_score, opponent: period2Data.fencer_2_score },
+              period1: { user: period1User, opponent: period1Opponent },
+              period2: { user: period2User, opponent: period2Opponent },
               period3: { user: 0, opponent: 0 }
             };
           }
@@ -3672,7 +3761,7 @@ export default function RemoteScreen() {
           fencer_2_score: scores.fencerB,
           fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
           fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-        });
+        }, accessToken);
         
         // Create new period record for the next period
         console.log('🆕 Creating new period:', newPeriod);
@@ -3688,7 +3777,7 @@ export default function RemoteScreen() {
           priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
         };
         
-        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData, accessToken);
         if (newPeriodRecord) {
           console.log('✅ New period created successfully:', newPeriodRecord);
           setCurrentMatchPeriod(newPeriodRecord);
@@ -3716,12 +3805,16 @@ export default function RemoteScreen() {
       // Note: Decrementing period is unusual in a real match, but we'll support it
       // We need to find the previous period record
       if (currentMatchPeriod) {
-        const { data: previousPeriod } = await supabase
-          .from('match_period')
-          .select('*')
-          .eq('match_id', currentMatchPeriod.match_id)
-          .eq('period_number', newPeriod)
-          .single();
+        const { data: previousPeriod } = await postgrestSelectOne<MatchPeriod>(
+          'match_period',
+          {
+            select: '*',
+            match_id: `eq.${currentMatchPeriod.match_id}`,
+            period_number: `eq.${newPeriod}`,
+            limit: 1,
+          },
+          accessToken ? { accessToken } : { allowAnon: true }
+        );
         
         if (previousPeriod) {
           setCurrentMatchPeriod(previousPeriod);
@@ -4056,11 +4149,18 @@ export default function RemoteScreen() {
       
       if (currentMatchPeriod?.match_id) {
         try {
-          const { data: periodsData } = await supabase
-            .from('match_period')
-            .select('period_number, start_time')
-            .eq('match_id', currentMatchPeriod.match_id)
-            .order('period_number', { ascending: true });
+          const { data: periodsData } = await postgrestSelect<{
+            period_number: number | null;
+            start_time: string | null;
+          }>(
+            'match_period',
+            {
+              select: 'period_number,start_time',
+              match_id: `eq.${currentMatchPeriod.match_id}`,
+              order: 'period_number.asc',
+            },
+            accessToken ? { accessToken } : { allowAnon: true }
+          );
           
           const matchPeriods = periodsData || [];
           
@@ -4146,17 +4246,25 @@ export default function RemoteScreen() {
       try {
         // Verify match and remote session still exist before creating event
         // This prevents foreign key violations if reset was called during async operations
-        const { data: matchCheck, error: matchError } = await supabase
-          .from('match')
-          .select('match_id')
-          .eq('match_id', currentMatchPeriod.match_id)
-          .single();
-        
-        const { data: remoteCheck, error: remoteError } = await supabase
-          .from('fencing_remote')
-          .select('remote_id')
-          .eq('remote_id', remoteSession.remote_id)
-          .single();
+        const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+          'match',
+          {
+            select: 'match_id',
+            match_id: `eq.${currentMatchPeriod.match_id}`,
+            limit: 1,
+          },
+          { accessToken }
+        );
+
+        const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+          'fencing_remote',
+          {
+            select: 'remote_id',
+            remote_id: `eq.${remoteSession.remote_id}`,
+            limit: 1,
+          },
+          { accessToken }
+        );
         
         // Only create event if both match and remote session still exist
         if (!matchError && matchCheck && !remoteError && remoteCheck) {
@@ -4174,7 +4282,7 @@ export default function RemoteScreen() {
             reset_segment: resetSegmentRef.current,
             match_time_elapsed: matchTimeElapsed
           };
-          const createdEvent = await matchEventService.createMatchEvent(eventData);
+          const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
           
           if (!createdEvent) {
             console.log('⚠️ Cancellation event creation failed (match may have been deleted), event already queued for sync');
@@ -4549,20 +4657,28 @@ export default function RemoteScreen() {
       const isOfflineSession = activeSession.remote_id.startsWith('offline_');
       if (isOnline && !isOfflineSession) {
         try {
-          const { data: matchCheck, error: matchError } = await supabase
-            .from('match')
-            .select('match_id')
-            .eq('match_id', effectivePeriod.match_id)
-            .single();
+          const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
+            'match',
+            {
+              select: 'match_id',
+              match_id: `eq.${effectivePeriod.match_id}`,
+              limit: 1,
+            },
+            { accessToken }
+          );
 
-          const { data: remoteCheck, error: remoteError } = await supabase
-            .from('fencing_remote')
-            .select('remote_id')
-            .eq('remote_id', activeSession.remote_id)
-            .single();
+          const { data: remoteCheck, error: remoteError } = await postgrestSelectOne<{ remote_id: string }>(
+            'fencing_remote',
+            {
+              select: 'remote_id',
+              remote_id: `eq.${activeSession.remote_id}`,
+              limit: 1,
+            },
+            { accessToken }
+          );
 
           if (!matchError && matchCheck && !remoteError && remoteCheck) {
-            const createdEvent = await matchEventService.createMatchEvent(baseEvent);
+            const createdEvent = await matchEventService.createMatchEvent(baseEvent, accessToken);
             if (createdEvent && queuedEventId) {
               await offlineCache.removePendingRemoteEvent(queuedEventId);
             }
@@ -4708,7 +4824,7 @@ export default function RemoteScreen() {
             console.error('❌ Error clearing offline session cache:', error);
           }
         } else {
-          const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id);
+          const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id, accessToken);
           if (sessionDeleted) {
             console.log('✅ Remote session deleted successfully');
           } else {
@@ -4731,10 +4847,14 @@ export default function RemoteScreen() {
         console.log('🧹 Attempting to clean up any incomplete records...');
         try {
           // Find incomplete matches (no timestamp filter since created_at doesn't exist)
-          const { data: incompleteMatches, error: recentError } = await supabase
-            .from('match')
-            .select('match_id, is_complete')
-            .eq('is_complete', false);
+          const { data: incompleteMatches, error: recentError } = await postgrestSelect<{ match_id: string; is_complete: boolean }>(
+            'match',
+            {
+              select: 'match_id,is_complete',
+              is_complete: 'eq.false',
+            },
+            { accessToken }
+          );
           
           if (recentError) {
             console.error('❌ Error finding incomplete matches:', recentError);
