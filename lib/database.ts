@@ -141,6 +141,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const AUTH_SESSION_CACHE_MS = 2000;
 const AUTH_SESSION_TIMEOUT_COOLDOWN_MS = 15000;
+const DB_REQUEST_TIMEOUT_MS = 8000;
 let authSessionCache: { session: Session | null; timestamp: number } = {
   session: null,
   timestamp: 0,
@@ -248,11 +249,16 @@ type CreateUserOptions = {
 export const userService = {
   async getUserById(userId: string): Promise<AppUser | null> {
     try {
-      const { data, error } = await supabase
-        .from('app_user')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const result = await withTimeout<PostgrestSingleResponse<AppUser | null>>(
+        supabase
+          .from('app_user')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
+        DB_REQUEST_TIMEOUT_MS,
+        'app_user fetch'
+      );
+      const { data, error } = result;
 
       if (error) {
         if (error.code !== 'PGRST116') {
@@ -277,7 +283,11 @@ export const userService = {
     let resolvedEmail = email ?? null;
     if (!resolvedEmail) {
       try {
-        const { data } = await supabase.auth.getUser();
+        const { data } = await withTimeout(
+          supabase.auth.getUser(),
+          DB_REQUEST_TIMEOUT_MS,
+          'auth getUser'
+        );
         resolvedEmail = data?.user?.email ?? null;
       } catch (error) {
         console.warn('⚠️ Unable to resolve user email for profile creation:', error);
@@ -320,11 +330,16 @@ export const userService = {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('app_user')
-        .upsert(insertData, { onConflict: 'user_id' })
-        .select()
-        .single();
+      const result = await withTimeout<PostgrestSingleResponse<AppUser>>(
+        supabase
+          .from('app_user')
+          .upsert(insertData, { onConflict: 'user_id' })
+          .select()
+          .single(),
+        DB_REQUEST_TIMEOUT_MS,
+        'app_user upsert'
+      );
+      const { data, error } = result;
 
       if (error) {
         console.error('Error upserting user:', error);
@@ -3706,12 +3721,17 @@ export const weeklyTargetService = {
   // Get all targets for a specific activity
   async getAllTargetsForActivity(userId: string, activityType: string): Promise<WeeklyTarget[]> {
     try {
-      const { data, error } = await supabase
-        .from('weekly_target')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('activity_type', activityType)
-        .order('week_start_date', { ascending: true });
+      const result = await withTimeout<PostgrestSingleResponse<WeeklyTarget[]>>(
+        supabase
+          .from('weekly_target')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('activity_type', activityType)
+          .order('week_start_date', { ascending: true }),
+        DB_REQUEST_TIMEOUT_MS,
+        'weekly_target fetch all'
+      );
+      const { data, error } = result;
 
       if (error) {
         console.error('Error getting all targets for activity:', error);
@@ -3822,37 +3842,46 @@ export const weeklySessionLogService = {
         return null;
       }
       await userService.ensureUserById(userId);
-      const { data, error } = await supabase
-        .from('weekly_session_log')
-        .insert({
-          user_id: userId,
-          activity_type: activityType,
-          session_date: sessionDate 
-            ? sessionDate.toISOString().split('T')[0] 
-            : new Date().toISOString().split('T')[0],
-          duration_minutes: durationMinutes,
-          notes: notes
-        })
-        .select()
-        .single();
+      const result = await withTimeout<PostgrestSingleResponse<WeeklySessionLog>>(
+        supabase
+          .from('weekly_session_log')
+          .insert({
+            user_id: userId,
+            activity_type: activityType,
+            session_date: sessionDate 
+              ? sessionDate.toISOString().split('T')[0] 
+              : new Date().toISOString().split('T')[0],
+            duration_minutes: durationMinutes,
+            notes: notes
+          })
+          .select()
+          .single(),
+        DB_REQUEST_TIMEOUT_MS,
+        'weekly_session_log insert'
+      );
+      const { data, error } = result;
 
       if (error) {
         if ((error as any)?.code === '23503') {
           console.warn('⚠️ Weekly session insert failed due to missing user record; retrying once');
           await userService.ensureUserById(userId);
-          const retry = await supabase
-            .from('weekly_session_log')
-            .insert({
-              user_id: userId,
-              activity_type: activityType,
-              session_date: sessionDate 
-                ? sessionDate.toISOString().split('T')[0] 
-                : new Date().toISOString().split('T')[0],
-              duration_minutes: durationMinutes,
-              notes: notes
-            })
-            .select()
-            .single();
+          const retry = await withTimeout<PostgrestSingleResponse<WeeklySessionLog>>(
+            supabase
+              .from('weekly_session_log')
+              .insert({
+                user_id: userId,
+                activity_type: activityType,
+                session_date: sessionDate 
+                  ? sessionDate.toISOString().split('T')[0] 
+                  : new Date().toISOString().split('T')[0],
+                duration_minutes: durationMinutes,
+                notes: notes
+              })
+              .select()
+              .single(),
+            DB_REQUEST_TIMEOUT_MS,
+            'weekly_session_log retry insert'
+          );
 
           if (retry.error) {
             console.error('Error logging session after retry:', retry.error);
@@ -3913,7 +3942,12 @@ export const weeklySessionLogService = {
         query = query.eq('activity_type', activityType);
       }
 
-      const { data, error } = await query;
+      const result = await withTimeout<PostgrestSingleResponse<WeeklySessionLog[]>>(
+        query,
+        DB_REQUEST_TIMEOUT_MS,
+        'weekly_session_log fetch'
+      );
+      const { data, error } = result;
 
       if (error) {
         console.error('Error getting sessions for week:', error);
