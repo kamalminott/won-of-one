@@ -6293,6 +6293,7 @@ export default function RemoteScreen() {
   const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12);
   const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
   const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
+  const tabBarHeight = height * 0.08 + insets.bottom;
   const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
   const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
   const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04);
@@ -6300,13 +6301,13 @@ export default function RemoteScreen() {
   const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
   const fencerCardMinHeightCompact = height * (isAndroid ? 0.19 : 0.22);
   const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
-  const timerReadyDockBottom = height * (isAndroid ? 0.06 : 0.08);
-  const timerReadyBottomControlsGap = height * (isAndroid ? 0.01 : 0.018);
-  const timerReadyPlayBlockGap = height * (isAndroid ? 0.008 : 0.012);
-  const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0.002 : 0.006);
-  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0.006 : 0.012);
-  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.032 : 0.038);
-  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.105 : 0.12);
+  const timerReadyDockBottom = isAndroid ? tabBarHeight + height * 0.012 : height * 0.08;
+  const timerReadyBottomControlsGap = height * (isAndroid ? 0.008 : 0.018);
+  const timerReadyPlayBlockGap = height * (isAndroid ? 0.006 : 0.012);
+  const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006);
+  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0.004 : 0.012);
+  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.028 : 0.038);
+  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.095 : 0.12);
   const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012);
 
   const styles = StyleSheet.create({
