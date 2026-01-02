@@ -249,6 +249,10 @@ export default function RemoteScreen() {
   const changeOneFencerAppliedRef = useRef(false);
   // Helper: only allow automatic toggle OFF when user hasn't manually chosen a state
   const autoToggleOff = useCallback((reason: string) => {
+    if (hasMatchStarted) {
+      console.log(`⏭️ Skipping auto toggle OFF (${reason}) because match already started`);
+      return;
+    }
     if (userHasToggledProfileRef.current) {
       console.log(`⏭️ Skipping auto toggle OFF (${reason}) because user manually set toggle`, {
         keepToggleOff: params?.keepToggleOff === 'true',
@@ -933,11 +937,26 @@ export default function RemoteScreen() {
     }, [])
   );
 
-  // Handle focus/blur events for match persistence
+  // Handle true focus/blur transitions for resume persistence
   useFocusEffect(
     useCallback(() => {
-      resumePromptShownRef.current = false; // reset for this focus
+      resumePromptShownRef.current = false; // reset only on real focus
 
+      return () => {
+        if (!isActivelyUsingAppRef.current) {
+          setHasNavigatedAway(true);
+        }
+        void saveMatchStateRef.current();
+        if (isPlayingRef.current) {
+          pauseTimerRef.current();
+        }
+      };
+    }, [])
+  );
+
+  // Handle focus-based param syncing and resume prompt
+  useFocusEffect(
+    useCallback(() => {
       if (params.resetAll !== 'true') {
         // Check for reset names request first (e.g., "Different Fencers" from neutral match summary)
         if (params.resetNames === 'true' && params.keepToggleOff === 'true') {
@@ -1111,16 +1130,9 @@ export default function RemoteScreen() {
       run();
 
       return () => {
-        // Only mark as navigated away if we're not actively using the app
-        if (!isActivelyUsingAppRef.current) {
-          setHasNavigatedAway(true);
-        }
-        // don't await in cleanup
-        saveMatchState();
-        if (isPlaying) pauseTimer();
         cancelled = true;
       };
-    }, [isPlaying, params.fencer1Name, params.fencer2Name, params.isAnonymous, autoToggleOff]) // Include params for anonymous match handling
+    }, [params.fencer1Name, params.fencer2Name, params.isAnonymous, autoToggleOff]) // Include params for anonymous match handling
   );
 
   const loadStoredImages = async () => {
@@ -1258,6 +1270,10 @@ export default function RemoteScreen() {
       console.error('Error saving match state:', error);
     }
   };
+
+  useEffect(() => {
+    saveMatchStateRef.current = saveMatchState;
+  }, [saveMatchState]);
 
   const loadPersistedMatchState = async (opts?: { forcePrompt?: boolean }) => {
     const forcePrompt = !!opts?.forcePrompt;
@@ -3330,6 +3346,10 @@ export default function RemoteScreen() {
 
   // Prevent double prompts
   const resumePromptShownRef = useRef(false);
+  const saveMatchStateRef = useRef<() => Promise<void>>(async () => {});
+  const pauseTimerRef = useRef<() => void>(() => {});
+  const resetAllInFlightRef = useRef(false);
+  const incompleteCleanupRanRef = useRef(false);
   // Track if user is actively using the app (to prevent resume prompts during normal interaction)
   const isActivelyUsingAppRef = useRef(false);
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
@@ -4775,78 +4795,65 @@ export default function RemoteScreen() {
 
   // Helper function to perform the actual reset
   const performResetAll = useCallback(async (keepOpponentName: boolean = false) => {
+    if (resetAllInFlightRef.current) {
+      console.log('⏭️ Reset All skipped - already running');
+      return;
+    }
+
+    resetAllInFlightRef.current = true;
     setIsResetting(true); // Block new operations during reset
     // Store the current toggle state to preserve it after reset
     const currentToggleState = showUserProfile;
-    let resetErrored = false;
-    try {
-      console.log('🔄 Starting Reset All - cleaning up database records...');
-      setIsCompletingMatch(false); // Reset the completion flag
-      isActivelyUsingAppRef.current = false; // Reset active usage flag
-      console.log('🔍 Current state:', { 
-        currentMatchPeriod: currentMatchPeriod ? 'exists' : 'null',
-        remoteSession: remoteSession ? 'exists' : 'null',
-        matchId: currentMatchPeriod?.match_id,
-        remoteId: remoteSession?.remote_id
-      });
-      
-      // 1. Clean up database records first
-      if (currentMatchPeriod && remoteSession) {
-        console.log('🗑️ Deleting match and related records...');
-        
-        // Delete the match and all related records (only if it's an online match)
-        // Offline matches don't exist in the database, so skip deletion
-        if (currentMatchPeriod.match_id.startsWith('offline_')) {
-          console.log('📱 Offline match detected - skipping database deletion (match only exists locally)');
-        } else {
-          const matchDeleted = await matchService.deleteMatch(
-            currentMatchPeriod.match_id,
-            remoteSession.remote_id,
-            session?.access_token
-          );
-          if (matchDeleted) {
-            console.log('✅ Match and related records deleted successfully');
-          } else {
-            console.error('❌ Failed to delete match records');
+    const matchPeriodSnapshot = currentMatchPeriod;
+    const remoteSessionSnapshot = remoteSession;
+    const sessionAccessToken = session?.access_token ?? accessToken;
+
+    console.log('🔄 Starting Reset All - cleaning up database records...');
+    setIsCompletingMatch(false); // Reset the completion flag
+    isActivelyUsingAppRef.current = false; // Reset active usage flag
+    console.log('🔍 Current state:', { 
+      currentMatchPeriod: matchPeriodSnapshot ? 'exists' : 'null',
+      remoteSession: remoteSessionSnapshot ? 'exists' : 'null',
+      matchId: matchPeriodSnapshot?.match_id,
+      remoteId: remoteSessionSnapshot?.remote_id
+    });
+
+    void (async () => {
+      try {
+        if (matchPeriodSnapshot || remoteSessionSnapshot) {
+          console.log('🗑️ Deleting match and related records...');
+          if (matchPeriodSnapshot) {
+            if (matchPeriodSnapshot.match_id.startsWith('offline_')) {
+              console.log('📱 Offline match detected - skipping database deletion (match only exists locally)');
+            } else {
+              const matchDeleted = await matchService.deleteMatch(
+                matchPeriodSnapshot.match_id,
+                remoteSessionSnapshot?.remote_id,
+                sessionAccessToken
+              );
+              if (matchDeleted) {
+                console.log('✅ Match and related records deleted successfully');
+              } else {
+                console.error('❌ Failed to delete match records');
+              }
+            }
           }
-        }
-        
-        // Delete the remote session (only if it's an online session)
-        // Offline sessions are handled by clearing the local cache
-        if (remoteSession.remote_id.startsWith('offline_')) {
-          console.log('📱 Offline session detected - clearing local cache');
-          try {
-            const { offlineCache } = await import('@/lib/offlineCache');
-            await offlineCache.clearActiveRemoteSession();
-            await offlineCache.clearPendingRemoteEvents();
-            console.log('✅ Offline session cache cleared');
-          } catch (error) {
-            console.error('❌ Error clearing offline session cache:', error);
+
+          if (remoteSessionSnapshot) {
+            if (remoteSessionSnapshot.remote_id.startsWith('offline_')) {
+              console.log('📱 Offline session detected - skipping remote deletion (session only exists locally)');
+            } else {
+              const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSessionSnapshot.remote_id, accessToken);
+              if (sessionDeleted) {
+                console.log('✅ Remote session deleted successfully');
+              } else {
+                console.error('❌ Failed to delete remote session');
+              }
+            }
           }
-        } else {
-          const sessionDeleted = await fencingRemoteService.deleteRemoteSession(remoteSession.remote_id, accessToken);
-          if (sessionDeleted) {
-            console.log('✅ Remote session deleted successfully');
-          } else {
-            console.error('❌ Failed to delete remote session');
-          }
-        }
-        
-        // Clear the current match period and remote session state
-        setCurrentMatchPeriod(null);
-        setMatchId(null); // Clear stored match ID
-        setRemoteSession(null);
-      } else {
-        console.log('⚠️ No active match to clean up - currentMatchPeriod or remoteSession is null');
-        console.log('🔍 Debug info:', {
-          currentMatchPeriod: currentMatchPeriod,
-          remoteSession: remoteSession
-        });
-        
-        // Even if no active session, try to clean up any incomplete records
-        console.log('🧹 Attempting to clean up any incomplete records...');
-        try {
-          // Find incomplete matches (no timestamp filter since created_at doesn't exist)
+        } else if (!incompleteCleanupRanRef.current) {
+          incompleteCleanupRanRef.current = true;
+          console.log('🧹 Attempting to clean up any incomplete records...');
           const { data: incompleteMatches, error: recentError } = await postgrestSelect<{ match_id: string; is_complete: boolean }>(
             'match',
             {
@@ -4855,29 +4862,26 @@ export default function RemoteScreen() {
             },
             { accessToken }
           );
-          
+
           if (recentError) {
             console.error('❌ Error finding incomplete matches:', recentError);
           } else if (incompleteMatches && incompleteMatches.length > 0) {
             console.log('🗑️ Found incomplete matches:', incompleteMatches.length);
-            // Delete these incomplete matches and their related records
             for (const match of incompleteMatches) {
-              await matchService.deleteMatch(match.match_id, undefined, session?.access_token);
+              await matchService.deleteMatch(match.match_id, undefined, sessionAccessToken);
             }
             console.log('✅ Cleaned up incomplete matches');
           } else {
             console.log('✅ No incomplete matches found');
           }
-        } catch (error) {
-          console.error('❌ Error during incomplete records cleanup:', error);
         }
+      } catch (error) {
+        console.error('❌ Error during Reset All cleanup:', error);
       }
-    } catch (error) {
-      console.error('❌ Error during Reset All:', error);
-      resetErrored = true;
-      // Still reset UI state even if database cleanup fails
-      // ... (fallback UI reset logic could go here)
-    } finally {
+    })();
+
+    let resetErrored = false;
+    try {
       // Always reset timers and UI state, even if cleanup fails
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -4894,6 +4898,9 @@ export default function RemoteScreen() {
       setIsPlaying(false);
       isPlayingRef.current = false;
       setHasMatchStarted(false);
+      setCurrentMatchPeriod(null);
+      setMatchId(null);
+      setRemoteSession(null);
       setCurrentPeriod(1);
       currentPeriodRef.current = 1;
       setMatchTime(180);
@@ -4933,9 +4940,11 @@ export default function RemoteScreen() {
 
       // Hard stop any lingering local caches so a new match cannot inherit stale state
       try {
-        await offlineCache.clearActiveRemoteSession();
-        await offlineCache.clearPendingRemoteEvents();
-        await AsyncStorage.removeItem('ongoing_match_state');
+        await Promise.allSettled([
+          offlineCache.clearActiveRemoteSession(),
+          offlineCache.clearPendingRemoteEvents(),
+          AsyncStorage.removeItem('ongoing_match_state')
+        ]);
         console.log('🧹 Cleared offline caches and ongoing match state');
       } catch (cacheErr) {
         console.error('❌ Error clearing offline caches during reset:', cacheErr);
@@ -4978,11 +4987,21 @@ export default function RemoteScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsManualReset(true); // Set flag to prevent auto-sync
       setIsResetting(false); // Always clear reset flag
+      resetAllInFlightRef.current = false;
+    } catch (error) {
+      resetErrored = true;
+      console.error('❌ Error during Reset All:', error);
+      setIsResetting(false);
+      resetAllInFlightRef.current = false;
     }
-  }, [breakTimerRef, currentMatchPeriod, remoteSession, fencerNames, showUserProfile, userDisplayName, userEntity]);
+  }, [accessToken, breakTimerRef, currentMatchPeriod, fencerNames, remoteSession, session?.access_token, showUserProfile, userDisplayName, userEntity]);
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {
+    if (resetAllInFlightRef.current || isResetting) {
+      console.log('⏭️ Reset All ignored - reset already in progress');
+      return;
+    }
     // If user toggle is OFF, show different options
     if (!showUserProfile) {
       // Check if both names are filled in
@@ -5045,7 +5064,7 @@ export default function RemoteScreen() {
         }
       ]
     );
-  }, [fencerNames, showUserProfile, userDisplayName, toggleCardPosition, performResetAll]);
+  }, [fencerNames, isResetting, showUserProfile, userDisplayName, toggleCardPosition, performResetAll]);
 
   const swapFencers = useCallback(() => {
     if (isSwapping) return; // Prevent multiple swaps during animation
@@ -5100,10 +5119,15 @@ export default function RemoteScreen() {
   }, [isSwapping, scores, fencerNames, cards, profileEmojis, toggleCardPosition, showUserProfile]);
 
   const toggleUserProfile = useCallback(() => {
+    if (hasMatchStarted) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Alert.alert('Toggle Locked', 'You can only change this before the match starts.');
+      return;
+    }
     userHasToggledProfileRef.current = true;
     setShowUserProfile(prev => !prev);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+  }, [hasMatchStarted]);
 
   const handleFencerNameClick = useCallback((entity: 'fencerA' | 'fencerB') => {
     // Don't allow editing if user profile is shown and this is the user's position
@@ -5219,6 +5243,10 @@ export default function RemoteScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, [isPlaying]);
+
+  useEffect(() => {
+    pauseTimerRef.current = pauseTimer;
+  }, [pauseTimer]);
 
   // Handle double hit for Epee (scores both fencers simultaneously)
   const handleDoubleHit = useCallback(async () => {
@@ -6296,18 +6324,29 @@ export default function RemoteScreen() {
   const tabBarHeight = height * 0.08 + insets.bottom;
   const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
   const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
+  const fencersContainerCardsBottom = height * (isAndroid ? 0.012 : 0.01);
   const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04);
   const fencerCardCompactPadding = width * (isAndroid ? 0.028 : 0.03);
+  const fencerCardCompactPaddingTimerReady = width * (isAndroid ? 0.022 : 0.03);
   const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
   const fencerCardMinHeightCompact = height * (isAndroid ? 0.19 : 0.22);
+  const fencerCardMinHeightTimerReadyWithCards = height * (isAndroid ? 0.155 : 0.22);
   const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
-  const timerReadyDockBottom = isAndroid ? tabBarHeight + height * 0.012 : height * 0.08;
-  const timerReadyBottomControlsGap = height * (isAndroid ? 0.008 : 0.018);
-  const timerReadyPlayBlockGap = height * (isAndroid ? 0.006 : 0.012);
+  const fencerCardMinHeightTimerReady = height * (isAndroid ? 0.17 : 0.22);
+  const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03);
+  const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006);
+  const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015);
+  const timerReadyDockBottom = isAndroid ? Math.max(8, tabBarHeight - height * 0.05) : height * 0.08;
+  const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018);
+  const timerReadyBottomControlsGapNoCards = timerReadyBottomControlsGap + height * (isAndroid ? 0.006 : 0.008);
+  const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012);
   const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006);
-  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0.004 : 0.012);
-  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.028 : 0.038);
-  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.095 : 0.12);
+  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0 : 0.012);
+  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.038 : 0.038);
+  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.13 : 0.12);
+  const timerReadyResetButtonPadding = height * (isAndroid ? 0.006 : 0.012);
+  const timerReadyResetButtonMinHeight = height * (isAndroid ? 0.04 : 0.055);
+  const timerReadyResetButtonWidth = width * (isAndroid ? 0.12 : 0.15);
   const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012);
 
   const styles = StyleSheet.create({
@@ -7082,6 +7121,9 @@ export default function RemoteScreen() {
       top: 0,
       left: 0,
     },
+    switchTrackLocked: {
+      opacity: 0.55,
+    },
     switchThumb: {
       width: width * 0.05,
       height: width * 0.05,
@@ -7335,6 +7377,7 @@ export default function RemoteScreen() {
     
     const entity = getEntityAtPosition('left');
     const opponentEntity = entity === 'fencerA' ? 'fencerB' : 'fencerA';
+    let convertedToRed = false;
     
     // NEW CLEAN LOGIC: Use pure function with case statement
     setCards(prev => {
@@ -7346,6 +7389,7 @@ export default function RemoteScreen() {
       
       // If this yellow card resulted in a red card, give opponent a point
       if (newState.red > prevCards.red) {
+        convertedToRed = true;
         setScores(prevScores => ({
           ...prevScores,
           [opponentEntity]: prevScores[opponentEntity] + 1
@@ -7379,6 +7423,9 @@ export default function RemoteScreen() {
     
     // Create match event for the yellow card
     await createMatchEvent('user', 'yellow', entity);
+    if (convertedToRed) {
+      await createMatchEvent('user', 'red', entity);
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -7391,6 +7438,7 @@ export default function RemoteScreen() {
     
     const entity = getEntityAtPosition('right');
     const opponentEntity = entity === 'fencerA' ? 'fencerB' : 'fencerA';
+    let convertedToRed = false;
     
     // NEW CLEAN LOGIC: Use pure function with case statement
     setCards(prev => {
@@ -7402,6 +7450,7 @@ export default function RemoteScreen() {
       
       // If this yellow card resulted in a red card, give opponent a point
       if (newState.red > prevCards.red) {
+        convertedToRed = true;
         setScores(prevScores => ({
           ...prevScores,
           [opponentEntity]: prevScores[opponentEntity] + 1
@@ -7435,6 +7484,9 @@ export default function RemoteScreen() {
     
     // Create match event for the yellow card
     await createMatchEvent('opponent', 'yellow', entity);
+    if (convertedToRed) {
+      await createMatchEvent('opponent', 'red', entity);
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -7704,6 +7756,12 @@ export default function RemoteScreen() {
   const leftRedCards = cards[leftEntity].red > 0 ? [cards[leftEntity].red] : [];
   const rightYellowCards = cards[rightEntity].yellow === 1 ? [1] : [];
   const rightRedCards = cards[rightEntity].red > 0 ? [cards[rightEntity].red] : [];
+  const hasIssuedCards =
+    leftYellowCards.length > 0 ||
+    leftRedCards.length > 0 ||
+    rightYellowCards.length > 0 ||
+    rightRedCards.length > 0;
+  const inProgressWithCards = hasMatchStarted && hasIssuedCards && selectedWeapon !== 'sabre';
 
   const isNonSabreTimerReady =
     selectedWeapon !== 'sabre' &&
@@ -7847,7 +7905,7 @@ export default function RemoteScreen() {
               <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
           )}
-          {scores.fencerA + scores.fencerB > 0 && !isInjuryTimer && (
+          {hasMatchStarted && scores.fencerA + scores.fencerB > 0 && !isInjuryTimer && (
             <TouchableOpacity 
               style={styles.completeMatchCircle} 
               onPress={completeMatch}
@@ -8165,6 +8223,10 @@ export default function RemoteScreen() {
       
       <View style={[
         styles.fencersContainer,
+        // Tighten spacing when match is in progress and cards are issued
+        inProgressWithCards ? {
+          marginBottom: fencersContainerCardsBottom,
+        } : {},
         // Reduce margin when match is in progress and no cards issued
         (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
           marginBottom: fencersContainerTightBottom,
@@ -8178,11 +8240,16 @@ export default function RemoteScreen() {
         <View style={[
           styles.fencerCard, 
           { backgroundColor: 'rgb(252,187,187)' },
+          // Slightly shorter cards in timer-ready state on Android to avoid overlap
+          (isNonSabreTimerReady && isAndroid) ? {
+            padding: fencerCardTimerReadyPadding,
+            minHeight: fencerCardMinHeightTimerReady,
+          } : {},
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: fencerCardCompactPadding,
-            minHeight: fencerCardMinHeightCompact,
+            padding: isNonSabreTimerReady ? fencerCardCompactPaddingTimerReady : fencerCardCompactPadding,
+            minHeight: isNonSabreTimerReady ? fencerCardMinHeightTimerReadyWithCards : fencerCardMinHeightCompact,
           } : 
           // Make fencer cards longer when match is in progress and no cards issued
           (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
@@ -8206,7 +8273,8 @@ export default function RemoteScreen() {
               <TouchableOpacity 
                 style={[
                   styles.switchTrack, 
-                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
+                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' },
+                  hasMatchStarted && styles.switchTrackLocked
                 ]}
                 onPress={toggleUserProfile}
               >
@@ -8291,6 +8359,7 @@ export default function RemoteScreen() {
               style={[
                 styles.fencerName, 
                 {color: 'black'},
+                (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
                 (toggleCardPosition === 'left' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
                   : getNameByPosition('left') === 'Tap to add name') && {
@@ -8308,7 +8377,13 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('left'))}
             </Text>
           </TouchableOpacity>
-	          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('left').toString().padStart(2, '0')}</Text>
+	          <Text style={[
+              styles.fencerScore,
+              { color: 'black' },
+              (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+            ]}>
+              {getScoreByPosition('left').toString().padStart(2, '0')}
+            </Text>
           
           <View style={styles.scoreControls}>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -8405,11 +8480,16 @@ export default function RemoteScreen() {
         <View style={[
           styles.fencerCard, 
           {backgroundColor: 'rgb(176,232,236)'},
+          // Slightly shorter cards in timer-ready state on Android to avoid overlap
+          (isNonSabreTimerReady && isAndroid) ? {
+            padding: fencerCardTimerReadyPadding,
+            minHeight: fencerCardMinHeightTimerReady,
+          } : {},
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: fencerCardCompactPadding,
-            minHeight: fencerCardMinHeightCompact,
+            padding: isNonSabreTimerReady ? fencerCardCompactPaddingTimerReady : fencerCardCompactPadding,
+            minHeight: isNonSabreTimerReady ? fencerCardMinHeightTimerReadyWithCards : fencerCardMinHeightCompact,
           } : 
           // Make fencer cards longer when match is in progress and no cards issued
           (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
@@ -8433,7 +8513,8 @@ export default function RemoteScreen() {
               <TouchableOpacity 
                 style={[
                   styles.switchTrack, 
-                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
+                  { backgroundColor: showUserProfile ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)' },
+                  hasMatchStarted && styles.switchTrackLocked
                 ]}
                 onPress={toggleUserProfile}
               >
@@ -8518,6 +8599,7 @@ export default function RemoteScreen() {
               style={[
                 styles.fencerName, 
                 {color: 'black'},
+                (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
                 (toggleCardPosition === 'right' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
                   : getNameByPosition('right') === 'Tap to add name') && {
@@ -8535,7 +8617,13 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('right'))}
             </Text>
           </TouchableOpacity>
-	          <Text style={[styles.fencerScore, {color: 'black'}]}>{getScoreByPosition('right').toString().padStart(2, '0')}</Text>
+	          <Text style={[
+              styles.fencerScore,
+              { color: 'black' },
+              (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+            ]}>
+              {getScoreByPosition('right').toString().padStart(2, '0')}
+            </Text>
           
           <View style={styles.scoreControls}>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -8584,7 +8672,7 @@ export default function RemoteScreen() {
 		          styles.bottomControls,
 		          // Foil/Epee: compact + higher when timer-ready so play button has room
 		          isNonSabreTimerReady ? {
-		            marginBottom: timerReadyBottomControlsGap, // Reduce vertical gap so the row sits lower
+		            marginBottom: hasIssuedCards ? timerReadyBottomControlsGap : timerReadyBottomControlsGapNoCards, // Slight extra space when no cards
 		            gap: width * 0.03, // Slightly tighter
 		          } : {}
 		        ]}>
@@ -8805,15 +8893,15 @@ export default function RemoteScreen() {
 	          {selectedWeapon !== 'sabre' && (
 		            <TouchableOpacity 
 		              style={{
-		                width: hasMatchStarted ? width * 0.11 : width * 0.15,
+		                width: hasMatchStarted ? width * 0.11 : (isNonSabreTimerReady ? timerReadyResetButtonWidth : width * 0.15),
 		                backgroundColor: '#FB5D5C',
-		                paddingVertical: layout.adjustPadding(height * 0.012, 'bottom'),
+		                paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? timerReadyResetButtonPadding : height * 0.012, 'bottom'),
 		                borderRadius: width * 0.05,
 		                alignItems: 'center',
 		                justifyContent: 'center',
                 borderWidth: width * 0.005,
                 borderColor: 'transparent',
-                minHeight: layout.adjustPadding(height * 0.055, 'bottom'),
+                minHeight: layout.adjustPadding(isNonSabreTimerReady ? timerReadyResetButtonMinHeight : height * 0.055, 'bottom'),
                 shadowColor: '#6C5CE7',
                 shadowOffset: { width: 0, height: height * 0.005 },
                 shadowOpacity: 0.25,

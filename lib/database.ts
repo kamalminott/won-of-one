@@ -2070,7 +2070,8 @@ $$;
           ? Math.round(event.match_time_elapsed)
           : -1;
         const timeKey = (event.event_time || event.timestamp || '').slice(0, 19) || 'noTime';
-        const compositeKey = `${event.scoring_user_name || 'unknown'}|${event.event_type}|${elapsedKey}|${timeKey}`;
+        const scorerKey = event.scoring_entity || event.scoring_user_name || 'unknown';
+        const compositeKey = `${scorerKey}|${event.event_type}|${elapsedKey}|${timeKey}`;
         if (seenComposite.has(compositeKey)) {
           duplicateEvents.push(event.match_event_id || compositeKey);
           console.log(`🔄 Composite duplicate detected and skipped: ${compositeKey}`);
@@ -3110,9 +3111,10 @@ $$;
         }
 
         // Prefer match_event_id; fallback to elapsed+timestamp+scorer+type when missing
+        const scorerKey = event.scoring_entity || event.scoring_user_name || 'unknown';
         const eventKey = event.match_event_id
           ? `id_${event.match_event_id}`
-          : `${event.match_time_elapsed}_${event.timestamp || event.event_time || 'no_ts'}_${event.scoring_user_name}_${event.event_type}`;
+          : `${event.match_time_elapsed}_${event.timestamp || event.event_time || 'no_ts'}_${scorerKey}_${event.event_type}`;
         
         if (seenEvents.has(eventKey)) {
           duplicateEvents.push(event.match_event_id || 'unknown');
@@ -3127,7 +3129,7 @@ $$;
           ? Math.round(event.match_time_elapsed)
           : -1;
         const timeKey = (event.event_time || event.timestamp || '').slice(0, 19) || 'noTime';
-        const compositeKey = `${event.scoring_user_name || 'unknown'}|${event.event_type}|${elapsedKey}|${timeKey}`;
+        const compositeKey = `${scorerKey}|${event.event_type}|${elapsedKey}|${timeKey}`;
         if (seenComposite.has(compositeKey)) {
           duplicateEvents.push(event.match_event_id || compositeKey);
           console.log(`🔄 Composite duplicate detected and skipped: ${compositeKey}`);

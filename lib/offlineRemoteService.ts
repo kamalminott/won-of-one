@@ -451,6 +451,8 @@ export const offlineRemoteService = {
           const resetSegment = typeof event.metadata?.reset_segment === 'number'
             ? event.metadata.reset_segment
             : 0;
+          const scoringEntity = event.metadata?.scoring_entity || null;
+          const scoringEntityFilter = scoringEntity ? { scoring_entity: `eq.${scoringEntity}` } : {};
 
           // Ensure match exists before attempting insert; if not, retry later
           if (matchId) {
@@ -481,6 +483,7 @@ export const offlineRemoteService = {
               matchId,
               match_time_elapsed: event.match_time_elapsed,
               scoring_user_name: event.scoring_user_name,
+              scoring_entity: scoringEntity,
               event_type: event.event_type,
               event_time: event.event_time
             });
@@ -498,6 +501,7 @@ export const offlineRemoteService = {
                 match_id: `eq.${matchId}`,
                 match_time_elapsed: `eq.${event.match_time_elapsed}`,
                 scoring_user_name: `eq.${event.scoring_user_name}`,
+                ...scoringEntityFilter,
                 event_type: `eq.${event.event_type}`,
                 reset_segment: `eq.${resetSegment}`,
                 limit: 5,
@@ -576,6 +580,7 @@ export const offlineRemoteService = {
                 match_id: `eq.${matchId}`,
                 event_type: `eq.${event.event_type}`,
                 scoring_user_name: `eq.${event.scoring_user_name}`,
+                ...scoringEntityFilter,
                 event_time: `eq.${compositeTimeKey}`,
                 reset_segment: `eq.${resetSegment}`,
                 limit: 1,

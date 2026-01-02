@@ -13,6 +13,13 @@ import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacit
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
+const MemoTouchesByPeriodChart = React.memo(TouchesByPeriodChart);
+const MemoScoreProgressionChart = React.memo(ScoreProgressionChart);
+const MemoLeadChangesCard = React.memo(LeadChangesCard);
+const MemoScoreBasedLeadingCard = React.memo(ScoreBasedLeadingCard);
+const MemoTimeLeadingCard = React.memo(TimeLeadingCard);
+const MemoBounceBackTimeCard = React.memo(BounceBackTimeCard);
+const MemoLongestRunCard = React.memo(LongestRunCard);
 
 export default function NeutralMatchSummary() {
   const insets = useSafeAreaInsets();
@@ -1827,7 +1834,7 @@ export default function NeutralMatchSummary() {
           {/* Touches by Period Chart Card */}
           <View style={styles.touchesChartCard}>
             <Text style={styles.chartTitle}>Touches by Period</Text>
-            <TouchesByPeriodChart 
+            <MemoTouchesByPeriodChart 
               title=""
               touchesByPeriod={touchesByPeriod}
               userLabel={finalFencer1Name} // fencer1 label (chart prop name is userLabel)
@@ -1841,7 +1848,7 @@ export default function NeutralMatchSummary() {
         {/* Score Progression Chart Card */}
         <View style={styles.scoreProgressionCard}>
           <Text style={styles.chartTitle}>Score Progression</Text>
-          <ScoreProgressionChart 
+          <MemoScoreProgressionChart 
             title=""
             scoreProgression={scoreProgression}
             userScore={fencer1ScoreDisplay} // fencer1 score (chart prop name is userScore)
@@ -1861,17 +1868,17 @@ export default function NeutralMatchSummary() {
         {/* Two Column Layout for Lead Changes and Time Leading / Score-Based Leading */}
         <View style={styles.twoColumnContainer}>
           {/* Lead Changes Card */}
-          <LeadChangesCard leadChanges={leadChanges} />
+          <MemoLeadChangesCard leadChanges={leadChanges} />
 
           {/* Time Leading Card (for foil/epee) or Score-Based Leading Card (for sabre) */}
           {isSabre ? (
-            <ScoreBasedLeadingCard 
+            <MemoScoreBasedLeadingCard 
               fencer1Name={finalFencer1Name}
               fencer2Name={finalFencer2Name}
               scoreBasedLeading={scoreBasedLeading}
             />
           ) : (
-          <TimeLeadingCard 
+          <MemoTimeLeadingCard 
             fencer1Name={finalFencer1Name}
             fencer2Name={finalFencer2Name}
             timeLeading={timeLeading}
@@ -1883,7 +1890,7 @@ export default function NeutralMatchSummary() {
         <View style={styles.twoColumnContainer}>
           {/* Bounce Back Time Card - Only show for foil/epee (time-based metric) */}
           {!isSabre && (
-          <BounceBackTimeCard 
+          <MemoBounceBackTimeCard 
             fencer1Name={finalFencer1Name}
             fencer2Name={finalFencer2Name}
             bounceBackTimes={bounceBackTimes}
@@ -1891,7 +1898,7 @@ export default function NeutralMatchSummary() {
           )}
 
           {/* Longest Run Card */}
-          <LongestRunCard 
+          <MemoLongestRunCard 
             fencer1Name={finalFencer1Name}
             fencer2Name={finalFencer2Name}
             longestRuns={longestRuns}
