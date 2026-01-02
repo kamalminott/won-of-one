@@ -6293,6 +6293,13 @@ export default function RemoteScreen() {
   const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12);
   const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
   const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
+  const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
+  const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
+  const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04);
+  const fencerCardCompactPadding = width * (isAndroid ? 0.028 : 0.03);
+  const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
+  const fencerCardMinHeightCompact = height * (isAndroid ? 0.19 : 0.22);
+  const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
 
   const styles = StyleSheet.create({
     container: {
@@ -6602,13 +6609,13 @@ export default function RemoteScreen() {
     fencersContainer: {
       flexDirection: 'row',
       justifyContent: 'center',
-      marginBottom: height * 0.015, // Smaller margin on Nexus S
+      marginBottom: fencersContainerBottom, // Extra breathing room on Android
       gap: width * 0.03, // Smaller gap on Nexus S
     },
     fencerCard: {
       width: width * 0.42, // Slightly wider on Nexus S for better fit
-      padding: width * 0.04, // Smaller padding on Nexus S
-      minHeight: height * 0.25, // Smaller height on Nexus S
+      padding: fencerCardPadding,
+      minHeight: fencerCardMinHeight,
       backgroundColor: Colors.purple.primary,
       borderRadius: width * 0.03,
       alignItems: 'center',
@@ -8151,7 +8158,7 @@ export default function RemoteScreen() {
         styles.fencersContainer,
         // Reduce margin when match is in progress and no cards issued
         (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
-          marginBottom: height * 0.005, // Reduce margin from 0.015 to 0.005
+          marginBottom: fencersContainerTightBottom,
         } : {},
         // Move fencer cards up and closer for sabre
         selectedWeapon === 'sabre' ? {
@@ -8165,14 +8172,14 @@ export default function RemoteScreen() {
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: width * 0.03, // Reduce padding from 0.04 to 0.03
-            minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+            padding: fencerCardCompactPadding,
+            minHeight: fencerCardMinHeightCompact,
           } : 
           // Make fencer cards longer when match is in progress and no cards issued
           (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
             width: width * 0.42, // Keep width at 0.42
-            padding: width * 0.04, // Keep normal padding
-            minHeight: height * 0.32, // Increase height from 0.25 to 0.32
+            padding: fencerCardPadding,
+            minHeight: fencerCardMinHeightExtended,
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
@@ -8392,14 +8399,14 @@ export default function RemoteScreen() {
           // Make fencer card smaller when timer is ready AND cards are present
           (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
             width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: width * 0.03, // Reduce padding from 0.04 to 0.03
-            minHeight: height * 0.22, // Reduce height from 0.25 to 0.22
+            padding: fencerCardCompactPadding,
+            minHeight: fencerCardMinHeightCompact,
           } : 
           // Make fencer cards longer when match is in progress and no cards issued
           (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
             width: width * 0.42, // Keep width at 0.42
-            padding: width * 0.04, // Keep normal padding
-            minHeight: height * 0.32, // Increase height from 0.25 to 0.32
+            padding: fencerCardPadding,
+            minHeight: fencerCardMinHeightExtended,
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
