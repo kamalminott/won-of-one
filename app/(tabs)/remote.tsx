@@ -6300,6 +6300,14 @@ export default function RemoteScreen() {
   const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
   const fencerCardMinHeightCompact = height * (isAndroid ? 0.19 : 0.22);
   const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
+  const timerReadyDockBottom = height * (isAndroid ? 0.06 : 0.08);
+  const timerReadyBottomControlsGap = height * (isAndroid ? 0.01 : 0.018);
+  const timerReadyPlayBlockGap = height * (isAndroid ? 0.008 : 0.012);
+  const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0.002 : 0.006);
+  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0.006 : 0.012);
+  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.032 : 0.038);
+  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.105 : 0.12);
+  const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012);
 
   const styles = StyleSheet.create({
     container: {
@@ -8565,7 +8573,7 @@ export default function RemoteScreen() {
 		            position: 'absolute',
 		            left: 0,
 		            right: 0,
-		            bottom: height * 0.08,
+		            bottom: timerReadyDockBottom,
 		            zIndex: 20,
 		          },
 		        ]}
@@ -8575,7 +8583,7 @@ export default function RemoteScreen() {
 		          styles.bottomControls,
 		          // Foil/Epee: compact + higher when timer-ready so play button has room
 		          isNonSabreTimerReady ? {
-		            marginBottom: height * 0.018, // Push this row up (creates more space below for Play)
+		            marginBottom: timerReadyBottomControlsGap, // Reduce vertical gap so the row sits lower
 		            gap: width * 0.03, // Slightly tighter
 		          } : {}
 		        ]}>
@@ -8625,7 +8633,7 @@ export default function RemoteScreen() {
 		              // Slightly smaller in timer-ready state to free space
 		              isNonSabreTimerReady ? {
 		                paddingHorizontal: width * 0.024,
-		                paddingVertical: height * 0.012,
+		                paddingVertical: timerReadyInjuryPaddingVertical,
 		              } : {},
 		              // Grey out when match hasn't started
 		              !hasMatchStarted && {
@@ -8695,10 +8703,10 @@ export default function RemoteScreen() {
 			            alignItems: 'center',
 			            justifyContent: 'center',
 			            width: '100%',
-			            marginVertical: height * 0.012,
-			            marginTop: height * 0.006,
-			            paddingHorizontal: width * 0.04,
-			            backgroundColor: 'transparent',
+		            marginVertical: height * 0.012,
+		            marginTop: height * 0.006,
+		            paddingHorizontal: width * 0.04,
+		            backgroundColor: 'transparent',
 		            borderRadius: width * 0.02,
 		            gap: height * 0.012, // Reduced gap between elements
 		            marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
@@ -8706,8 +8714,9 @@ export default function RemoteScreen() {
 			          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
 			          isNonSabreTimerReady && {
 			            marginBottom: 0,
-			            // Bring play controls closer to the cards/injury row without moving the row itself
-			            transform: [{ translateY: -height * 0.01 }],
+			            marginTop: timerReadyPlayBlockMarginTop,
+			            marginVertical: timerReadyPlayBlockMarginVertical,
+			            gap: timerReadyPlayBlockGap,
 			          },
 			        ]}>
         
@@ -8725,7 +8734,7 @@ export default function RemoteScreen() {
 		              flex: 1,
 		              ...(hasMatchStarted ? { flex: 1.25 } : {}),
 		              backgroundColor: '#2A2A2A',
-		              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? height * 0.038 : height * 0.045, 'bottom'),
+		              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? timerReadyPlayButtonPadding : height * 0.045, 'bottom'),
 		              paddingHorizontal: width * 0.05,
 		              borderRadius: width * 0.02,
 		              alignItems: 'center',
@@ -8734,7 +8743,7 @@ export default function RemoteScreen() {
 		              marginRight: hasMatchStarted ? width * 0.01 : width * 0.025,
 		              borderWidth: width * 0.005,
 		              borderColor: 'white',
-		              minHeight: layout.adjustPadding(isNonSabreTimerReady ? height * 0.12 : height * 0.14, 'bottom'),
+		              minHeight: layout.adjustPadding(isNonSabreTimerReady ? timerReadyPlayButtonMinHeight : height * 0.14, 'bottom'),
 		              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
 		            }} 
 	            onPress={async () => {
