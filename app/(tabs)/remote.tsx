@@ -1652,6 +1652,66 @@ export default function RemoteScreen() {
   useEffect(() => {
     resetSegmentRef.current = resetSegment;
   }, [resetSegment]);
+
+  const debugSequenceRef = useRef(0);
+
+  const nextDebugId = () => {
+    debugSequenceRef.current += 1;
+    return `${Date.now()}_${debugSequenceRef.current}`;
+  };
+
+  const formatDebugError = (error: any) => {
+    if (!error) {
+      return { error_code: 'unknown', error_message: 'unknown' };
+    }
+    let message: string;
+    if (typeof error === 'string') {
+      message = error;
+    } else if (error?.message) {
+      message = String(error.message);
+    } else {
+      try {
+        message = JSON.stringify(error);
+      } catch {
+        message = String(error);
+      }
+    }
+    return {
+      error_code: error?.code ?? error?.status ?? error?.name ?? 'unknown',
+      error_message: message.slice(0, 300),
+    };
+  };
+
+  const captureMatchDebug = (step: string, details: Record<string, any> = {}) => {
+    analytics.capture('match_event_debug', {
+      step,
+      screen: 'Remote',
+      match_id: currentMatchPeriod?.match_id ?? currentMatchPeriodRef.current?.match_id ?? null,
+      match_period_id: currentMatchPeriod?.match_period_id ?? currentMatchPeriodRef.current?.match_period_id ?? null,
+      remote_id: remoteSession?.remote_id ?? null,
+      has_match_started: hasMatchStarted,
+      is_playing: isPlaying,
+      time_remaining: timeRemaining,
+      match_time: matchTime,
+      current_period: currentPeriod,
+      is_injury_timer: isInjuryTimer,
+      is_break_time: isBreakTime,
+      is_priority_round: isPriorityRound,
+      is_resetting: isResetting,
+      is_completing_match: isCompletingMatch,
+      is_offline: isOffline,
+      pending_matches: pendingMatchesCount,
+      pending_events: pendingEventsCount,
+      has_session: !!session,
+      has_access_token: !!session?.access_token,
+      access_token_len: session?.access_token?.length ?? 0,
+      has_refresh_token: !!session?.refresh_token,
+      reset_segment: resetSegmentRef.current,
+      score_a: scoresRef.current.fencerA,
+      score_b: scoresRef.current.fencerB,
+      ...details,
+    });
+  };
   
   // We'll use null for opponent scoring and store opponent name in meta field
 
@@ -1759,11 +1819,24 @@ export default function RemoteScreen() {
     scoringEntity?: 'fencerA' | 'fencerB', 
     newScore?: number,
     sessionOverride?: any,
-    eventType: 'touch' | 'double' | 'card' = 'touch'
+    eventType: 'touch' | 'double' | 'card' = 'touch',
+    debugId?: string
   ) => {
+    const eventDebugId = debugId || nextDebugId();
+    captureMatchDebug('match_event_start', {
+      debug_id: eventDebugId,
+      event_type: eventType,
+      card_given: cardGiven || null,
+      scoring_entity: scoringEntity || null,
+      scorer,
+    });
     // Early return if reset is in progress
     if (isResetting) {
       console.log('⚠️ Reset in progress, skipping event creation');
+      captureMatchDebug('match_event_skip', {
+        debug_id: eventDebugId,
+        reason: 'reset_in_progress',
+      });
       return;
     }
     
@@ -1771,6 +1844,11 @@ export default function RemoteScreen() {
     const activeSession = sessionOverride || remoteSession;
     if (!activeSession) {
       console.log('❌ No remote session - cannot create match event');
+      captureMatchDebug('match_event_skip', {
+        debug_id: eventDebugId,
+        reason: 'missing_remote_session',
+        session_override: !!sessionOverride,
+      });
       return;
     }
     // Synchronously grab latest period if state hasn't updated yet
@@ -1779,6 +1857,11 @@ export default function RemoteScreen() {
     // Check if we're offline or if this is an offline session
     const isOnline = await networkService.isOnline();
     const isOfflineSession = activeSession.remote_id.startsWith('offline_');
+    captureMatchDebug('match_event_network', {
+      debug_id: eventDebugId,
+      is_online: isOnline,
+      is_offline_session: isOfflineSession,
+    });
     
     // Skip database check for offline sessions or when offline
     if (!isOfflineSession && isOnline) {
@@ -1795,10 +1878,20 @@ export default function RemoteScreen() {
       
       if (sessionError || !sessionCheck) {
         console.log('⚠️ Remote session not in database (may be offline), will queue event');
+        captureMatchDebug('match_event_session_check_failed', {
+          debug_id: eventDebugId,
+          has_session_row: !!sessionCheck,
+          ...(sessionError ? formatDebugError(sessionError) : {}),
+        });
         // Fall through to queue the event anyway
       }
     } else {
       console.log('📱 Offline mode or offline session - will queue event');
+      captureMatchDebug('match_event_offline_mode', {
+        debug_id: eventDebugId,
+        is_online: isOnline,
+        is_offline_session: isOfflineSession,
+      });
     }
 
     const now = new Date();
@@ -1997,6 +2090,14 @@ export default function RemoteScreen() {
       reset_segment: resetSegmentRef.current,
       match_time_elapsed: matchTimeElapsed
     };
+    captureMatchDebug('match_event_payload_ready', {
+      debug_id: eventDebugId,
+      event_type: finalEventType,
+      scoring_entity: scoringEntity || null,
+      score_diff: scoreDiff,
+      match_time_elapsed: matchTimeElapsed,
+      has_match_id: !!baseEvent.match_id,
+    });
 
     // If match_id isn't ready yet (common on very first sabre touch), queue and replay once created
     if (!effectivePeriod?.match_id) {
@@ -2011,6 +2112,11 @@ export default function RemoteScreen() {
         queueLength: pendingTouchQueueRef.current.length,
         match_time_elapsed: matchTimeElapsed,
         scorer: scoringUserName,
+      });
+      captureMatchDebug('match_event_deferred_missing_match_id', {
+        debug_id: eventDebugId,
+        queue_length: pendingTouchQueueRef.current.length,
+        match_time_elapsed: matchTimeElapsed,
       });
       setLastEventTime(now); // maintain elapsed calculations for subsequent touches
       return;
@@ -2038,13 +2144,26 @@ export default function RemoteScreen() {
           seconds_since_last_event: baseEvent.seconds_since_last_event,
         }
       });
+      captureMatchDebug('match_event_queued', {
+        debug_id: eventDebugId,
+        queued_event_id: queuedEventId,
+        event_type: finalEventType,
+      });
     } catch (error) {
       console.error('❌ Error queueing match event:', error);
+      captureMatchDebug('match_event_queue_error', {
+        debug_id: eventDebugId,
+        ...formatDebugError(error),
+      });
     }
     
     // Also try to create via matchEventService if online and match exists (for immediate sync)
     if (isOnline && !isOfflineSession && effectivePeriod?.match_id) {
       try {
+        captureMatchDebug('match_event_online_insert_attempt', {
+          debug_id: eventDebugId,
+          has_access_token: !!accessToken,
+        });
         // Verify match and remote session still exist before creating event
         // This prevents foreign key violations if reset was called during async operations
         const { data: matchCheck, error: matchError } = await postgrestSelectOne<{ match_id: string }>(
@@ -2075,6 +2194,10 @@ export default function RemoteScreen() {
           // If creation failed (e.g., FK), leave it to the queued offline event to sync later
           if (!createdEvent) {
             console.log('⚠️ Match event creation deferred (FK or missing match), will sync from queue');
+            captureMatchDebug('match_event_online_insert_null', {
+              debug_id: eventDebugId,
+              reason: accessToken ? 'insert_returned_null' : 'missing_access_token',
+            });
             return;
           }
           if (queuedEventId) {
@@ -2082,6 +2205,10 @@ export default function RemoteScreen() {
           }
           
           console.log('✅ Event created immediately (online, with match_id)');
+          captureMatchDebug('match_event_online_insert_success', {
+            debug_id: eventDebugId,
+            match_event_id: createdEvent.match_event_id || null,
+          });
           
           // Track the event ID for cancellation purposes
           if (createdEvent.match_event_id && scoringEntity) {
@@ -2093,6 +2220,14 @@ export default function RemoteScreen() {
           }
         } else {
           console.log('⚠️ Match or remote session no longer exists (likely reset), event already queued for sync');
+          captureMatchDebug('match_event_online_insert_skipped', {
+            debug_id: eventDebugId,
+            reason: 'match_or_remote_missing',
+            has_match: !!matchCheck,
+            has_remote: !!remoteCheck,
+            ...(matchError ? { match_error: formatDebugError(matchError) } : {}),
+            ...(remoteError ? { remote_error: formatDebugError(remoteError) } : {}),
+          });
           // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
         }
       } catch (error: any) {
@@ -2106,6 +2241,11 @@ export default function RemoteScreen() {
         } else {
           console.error('❌ Error creating match event immediately:', error);
         }
+        captureMatchDebug('match_event_online_insert_error', {
+          debug_id: eventDebugId,
+          is_foreign_key_error: isForeignKeyError,
+          ...formatDebugError(error),
+        });
         // Event is already queued via offlineRemoteService.recordEvent above, so no action needed
       }
     }
@@ -3852,22 +3992,48 @@ export default function RemoteScreen() {
       setIsChangingScore(true);
       setHasNavigatedAway(false); // Reset navigation flag when changing scores
       isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
+      const tapDebugId = nextDebugId();
       
       // Prevent score changes if match is being completed
       if (isCompletingMatch) {
         console.log('🚫 Score change blocked - match is being completed');
+        captureMatchDebug('score_tap_blocked', {
+          debug_id: tapDebugId,
+          action: 'increase',
+          entity,
+          reason: 'match_completing',
+        });
         setIsChangingScore(false);
         return;
       }
       
       // Ensure remote session exists (create if first score)
       const session = await ensureRemoteSession();
+      if (!session) {
+        captureMatchDebug('score_tap_blocked', {
+          debug_id: tapDebugId,
+          action: 'increase',
+          entity,
+          reason: 'missing_remote_session',
+        });
+        setIsChangingScore(false);
+        return;
+      }
     
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
     const newScore = currentScore + 1;
     const otherEntity = entity === 'fencerA' ? 'fencerB' : 'fencerA';
     const otherScore = getScoreByEntity(otherEntity);
+    captureMatchDebug('score_tap', {
+      debug_id: tapDebugId,
+      action: 'increase',
+      entity,
+      current_score: currentScore,
+      new_score: newScore,
+      other_score: otherScore,
+      is_active_match: hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)),
+    });
     // Keep the ref in sync immediately so completion uses the latest values even before React updates state
     scoresRef.current = { ...scoresRef.current, [entity]: newScore };
     
@@ -3879,6 +4045,13 @@ export default function RemoteScreen() {
       
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
+        captureMatchDebug('score_tap_warning', {
+          debug_id: tapDebugId,
+          action: 'increase',
+          entity,
+          new_score: newScore,
+          score_change_count: newCount,
+        });
         setPendingScoreAction(() => async () => {
           setScores(prev => ({ ...prev, [entity]: newScore }));
           setScoreChangeCount(0); // Reset counter
@@ -3896,7 +4069,7 @@ export default function RemoteScreen() {
           
           // Create match event in background (already queued locally, this is just for immediate DB sync)
           const entityIsUser = isEntityUser(entity);
-          createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session)
+          createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session, 'touch', tapDebugId)
             .catch(error => console.error('Background event creation failed:', error));
         });
         setShowScoreWarning(true);
@@ -3933,7 +4106,7 @@ export default function RemoteScreen() {
       
       // Create match event in background (already queued locally via recordEvent, this is just for immediate DB sync)
       const entityIsUser = isEntityUser(entity);
-      createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session)
+      createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session, 'touch', tapDebugId)
         .catch(error => console.error('Background event creation failed:', error));
       
       // Check if this is the first score during priority round
@@ -4007,6 +4180,12 @@ export default function RemoteScreen() {
       // Not an active match - validate names before allowing first score
       const nameValidation = validateFencerNames();
       if (!nameValidation.isValid) {
+        captureMatchDebug('score_tap_blocked', {
+          debug_id: tapDebugId,
+          action: 'increase',
+          entity,
+          reason: 'name_required',
+        });
         Alert.alert(
           'Names Required',
           nameValidation.message || 'Please add fencer names before starting the match.',
@@ -4126,7 +4305,7 @@ export default function RemoteScreen() {
       // For Sabre: match_time_elapsed should be NULL
       const entityIsUser = isEntityUser(entity);
       try {
-        await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session);
+        await createMatchEvent(entityIsUser ? 'user' : 'opponent', undefined, entity, newScore, session, 'touch', tapDebugId);
       } catch (error) {
         console.error('❌ Error creating match event in incrementScore:', error);
         // Continue anyway - event might be queued via offline service
@@ -4338,6 +4517,7 @@ export default function RemoteScreen() {
       setIsChangingScore(true);
       setHasNavigatedAway(false); // Reset navigation flag when changing scores
       isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
+      const tapDebugId = nextDebugId();
     
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
@@ -4345,6 +4525,15 @@ export default function RemoteScreen() {
     
     // Get the most recent scoring event ID for this entity to cancel
     const eventIdToCancel = recentScoringEventIds[entity];
+    captureMatchDebug('score_tap', {
+      debug_id: tapDebugId,
+      action: 'decrease',
+      entity,
+      current_score: currentScore,
+      new_score: newScore,
+      has_cancel_event: !!eventIdToCancel,
+      is_active_match: hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)),
+    });
     
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
@@ -4354,6 +4543,13 @@ export default function RemoteScreen() {
       
       if (newCount >= 2) { // Show warning on second change
         // Show warning for multiple score changes during active match
+        captureMatchDebug('score_tap_warning', {
+          debug_id: tapDebugId,
+          action: 'decrease',
+          entity,
+          new_score: newScore,
+          score_change_count: newCount,
+        });
         setPendingScoreAction(() => async () => {
           setScores(prev => ({ ...prev, [entity]: newScore }));
           setScoreChangeCount(0); // Reset counter
@@ -5250,13 +5446,24 @@ export default function RemoteScreen() {
 
   // Handle double hit for Epee (scores both fencers simultaneously)
   const handleDoubleHit = useCallback(async () => {
+    const tapDebugId = nextDebugId();
     if (isResetting) {
       console.log('⚠️ Reset in progress, skipping double hit');
+      captureMatchDebug('score_tap_blocked', {
+        debug_id: tapDebugId,
+        action: 'double_hit',
+        reason: 'reset_in_progress',
+      });
       return;
     }
 
     if (isCompletingMatch) {
       console.log('🚫 Double hit blocked - match is being completed');
+      captureMatchDebug('score_tap_blocked', {
+        debug_id: tapDebugId,
+        action: 'double_hit',
+        reason: 'match_completing',
+      });
       return;
     }
 
@@ -5269,6 +5476,11 @@ export default function RemoteScreen() {
     const session = await ensureRemoteSession();
     if (!session) {
       console.error('❌ Cannot record double hit - no remote session');
+      captureMatchDebug('score_tap_blocked', {
+        debug_id: tapDebugId,
+        action: 'double_hit',
+        reason: 'missing_remote_session',
+      });
       return;
     }
 
@@ -5286,6 +5498,15 @@ export default function RemoteScreen() {
     const currentFencerBScore = scores.fencerB;
     const newFencerAScore = currentFencerAScore + 1;
     const newFencerBScore = currentFencerBScore + 1;
+    captureMatchDebug('score_tap', {
+      debug_id: tapDebugId,
+      action: 'double_hit',
+      current_score_a: currentFencerAScore,
+      current_score_b: currentFencerBScore,
+      new_score_a: newFencerAScore,
+      new_score_b: newFencerBScore,
+      is_active_match: hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)),
+    });
     
     // Increment both fencers' scores
     setScores(prev => ({
@@ -5309,7 +5530,8 @@ export default function RemoteScreen() {
       undefined,            // scoringEntity not needed for double
       undefined,            // newScore not used for double
       undefined,            // sessionOverride
-      'double'              // mark as double event
+      'double',             // mark as double event
+      tapDebugId
     );
 
     // Track analytics - use capture for custom event
@@ -5319,7 +5541,7 @@ export default function RemoteScreen() {
     });
 
     console.log('⚔️ Double hit recorded - both fencers scored');
-  }, [isResetting, isCompletingMatch, scores, createMatchEvent, ensureRemoteSession, remoteSession, isPlaying, pauseTimer, isEntityUser, getEntityAtPosition]);
+  }, [isResetting, isCompletingMatch, scores, createMatchEvent, ensureRemoteSession, remoteSession, isPlaying, pauseTimer, isEntityUser, getEntityAtPosition, hasMatchStarted, timeRemaining, matchTime, captureMatchDebug, nextDebugId]);
 
   const startTimer = useCallback(() => {
     setIsPlaying(true);
