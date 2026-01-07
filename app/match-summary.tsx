@@ -49,21 +49,25 @@ export default function MatchSummaryScreen() {
   const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
   const [matchType, setMatchType] = useState<'training' | 'competition'>('training');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [promptFencer1Name, setPromptFencer1Name] = useState('');
+  const [promptFencer2Name, setPromptFencer2Name] = useState('');
+  const [promptTargets, setPromptTargets] = useState({ fencer1: false, fencer2: false });
 
-  // Track keyboard height for iOS modal positioning
+  // Track keyboard height for modal positioning
   useEffect(() => {
-    if (Platform.OS === 'ios') {
-      const keyboardWillShow = Keyboard.addListener('keyboardWillShow', (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-      });
-      const keyboardWillHide = Keyboard.addListener('keyboardWillHide', () => {
-        setKeyboardHeight(0);
-      });
-      return () => {
-        keyboardWillShow.remove();
-        keyboardWillHide.remove();
-      };
-    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const keyboardShow = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const keyboardHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      keyboardShow.remove();
+      keyboardHide.remove();
+    };
   }, []);
 
   // Track screen view
@@ -464,7 +468,27 @@ export default function MatchSummaryScreen() {
     );
   };
 
-  const handleSaveMatch = async () => {
+  const normalizePlaceholderName = (value?: string | null) => {
+    if (!value) return '';
+    return value.trim().toLowerCase();
+  };
+
+  const placeholderNameValues = new Set([
+    '',
+    'tap to add name',
+    'guest',
+    'guest 1',
+    'guest 2',
+    'unknown',
+    'fencer 1',
+    'fencer 2',
+  ]);
+
+  const isPlaceholderName = (value?: string | null) => {
+    return placeholderNameValues.has(normalizePlaceholderName(value));
+  };
+
+  const saveMatchWithNames = async (overrideNames?: { fencer1?: string; fencer2?: string }) => {
     if (!match || !user?.id) {
       return;
     }
@@ -472,11 +496,32 @@ export default function MatchSummaryScreen() {
     try {
       // Update match type in the database
       if (match.match_id) {
+        const trimmedFencer1Name = (overrideNames?.fencer1 ?? match.fencer_1_name ?? '').trim();
+        const trimmedFencer2Name = (overrideNames?.fencer2 ?? match.fencer_2_name ?? '').trim();
+        if (isPlaceholderName(trimmedFencer1Name) || isPlaceholderName(trimmedFencer2Name)) {
+          Alert.alert('Names required', 'Please enter both fencer names before saving.');
+          return;
+        }
         await matchService.updateMatch(
           match.match_id,
-          { match_type: matchType },
+          {
+            match_type: matchType,
+            fencer_1_name: trimmedFencer1Name,
+            fencer_2_name: trimmedFencer2Name,
+          },
           session?.access_token
         );
+        await matchService.updateMatchEventNamesIfPlaceholder(
+          match.match_id,
+          trimmedFencer1Name,
+          trimmedFencer2Name,
+          session?.access_token
+        );
+        setMatch(prev => prev ? {
+          ...prev,
+          fencer_1_name: trimmedFencer1Name,
+          fencer_2_name: trimmedFencer2Name,
+        } : prev);
       }
       
       // Check if completed goal info was passed from remote.tsx (for remote matches)
@@ -562,6 +607,48 @@ export default function MatchSummaryScreen() {
     } catch (error) {
       console.error('Error saving match:', error);
     }
+  };
+
+  const handleSaveMatch = async () => {
+    if (!match || !user?.id) {
+      return;
+    }
+
+    const needsFencer1 = isPlaceholderName(match.fencer_1_name);
+    const needsFencer2 = isPlaceholderName(match.fencer_2_name);
+    if (needsFencer1 || needsFencer2) {
+      setPromptTargets({ fencer1: needsFencer1, fencer2: needsFencer2 });
+      setPromptFencer1Name(needsFencer1 ? '' : match.fencer_1_name || '');
+      setPromptFencer2Name(needsFencer2 ? '' : match.fencer_2_name || '');
+      setShowNamePrompt(true);
+      return;
+    }
+
+    await saveMatchWithNames();
+  };
+
+  const handleSaveMatchWithNames = async () => {
+    if (!match) {
+      return;
+    }
+
+    const trimmedFencer1 = promptFencer1Name.trim();
+    const trimmedFencer2 = promptFencer2Name.trim();
+
+    if (promptTargets.fencer1 && isPlaceholderName(trimmedFencer1)) {
+      Alert.alert('Name required', 'Please enter the missing name before saving.');
+      return;
+    }
+    if (promptTargets.fencer2 && isPlaceholderName(trimmedFencer2)) {
+      Alert.alert('Name required', 'Please enter the missing name before saving.');
+      return;
+    }
+
+    setShowNamePrompt(false);
+    await saveMatchWithNames({
+      fencer1: promptTargets.fencer1 ? trimmedFencer1 : match.fencer_1_name || '',
+      fencer2: promptTargets.fencer2 ? trimmedFencer2 : match.fencer_2_name || '',
+    });
   };
 
   const handleNotesPress = () => {
@@ -836,6 +923,17 @@ export default function MatchSummaryScreen() {
     : isFencer2User
     ? getFirstName(match?.fencer_1_name) || 'Fencer 1'
     : getFirstName(match?.fencer_2_name) || 'Fencer 2';
+  const namePromptTitle = hasKnownUser && (promptTargets.fencer1 !== promptTargets.fencer2)
+    ? 'Add opponent name?'
+    : 'Add fencer names?';
+  const getPromptLabel = (target: 'fencer1' | 'fencer2') => {
+    if (hasKnownUser) {
+      if (target === 'fencer1' && isFencer1User) return 'Your name';
+      if (target === 'fencer2' && isFencer2User) return 'Your name';
+      return 'Opponent name';
+    }
+    return target === 'fencer1' ? 'Fencer 1 name' : 'Fencer 2 name';
+  };
   const weaponType = match?.weapon_type || (params.weaponType as string | undefined);
 
   const matchData = match ? {
@@ -979,6 +1077,30 @@ export default function MatchSummaryScreen() {
       padding: width * 0.03,
       textAlignVertical: 'top',
       minHeight: height * 0.25,
+    },
+    namePromptBody: {
+      gap: height * 0.02,
+      marginBottom: height * 0.02,
+    },
+    namePromptField: {
+      gap: height * 0.008,
+    },
+    namePromptLabel: {
+      color: 'rgba(255, 255, 255, 0.75)',
+      fontSize: Math.round(width * 0.035),
+      fontWeight: '500',
+    },
+    namePromptInputContainer: {
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.2)',
+      paddingHorizontal: width * 0.03,
+      paddingVertical: height * 0.012,
+    },
+    namePromptInput: {
+      color: 'white',
+      fontSize: Math.round(width * 0.04),
     },
     modalFooter: {
       alignItems: 'center',
@@ -1135,13 +1257,13 @@ export default function MatchSummaryScreen() {
           onPress={() => Keyboard.dismiss()}
         >
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
             style={{ 
               flex: 1, 
-              justifyContent: Platform.OS === 'ios' && keyboardHeight > 0 ? 'flex-end' : 'center',
-              paddingBottom: Platform.OS === 'ios' && keyboardHeight > 0 ? keyboardHeight + 40 : 0,
-              marginTop: Platform.OS === 'android' ? height * 0.15 : 0
+              justifyContent: keyboardHeight > 0 ? 'flex-end' : 'center',
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 40 : 0,
+              marginTop: Platform.OS === 'android' && keyboardHeight === 0 ? height * 0.15 : 0
             }}
           >
             <TouchableOpacity activeOpacity={1}>
@@ -1181,6 +1303,95 @@ export default function MatchSummaryScreen() {
                         <Text style={styles.cancelButtonText}>Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
+                        <Text style={styles.saveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </LinearGradient>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Save Match Name Prompt */}
+      <Modal
+        visible={showNamePrompt}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowNamePrompt(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => Keyboard.dismiss()}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
+            style={{
+              flex: 1,
+              justifyContent: keyboardHeight > 0 ? 'flex-end' : 'center',
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 40 : 0,
+              marginTop: Platform.OS === 'android' && keyboardHeight === 0 ? height * 0.15 : 0,
+            }}
+          >
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.modalContainer}>
+                <LinearGradient
+                  colors={Colors.glassyGradient.colors}
+                  style={styles.modalContent}
+                  start={Colors.glassyGradient.start}
+                  end={Colors.glassyGradient.end}
+                >
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{namePromptTitle}</Text>
+                    <TouchableOpacity onPress={() => setShowNamePrompt(false)} style={styles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.namePromptBody}>
+                    {promptTargets.fencer1 && (
+                      <View style={styles.namePromptField}>
+                        <Text style={styles.namePromptLabel}>{getPromptLabel('fencer1')}</Text>
+                        <View style={styles.namePromptInputContainer}>
+                          <TextInput
+                            style={styles.namePromptInput}
+                            value={promptFencer1Name}
+                            onChangeText={setPromptFencer1Name}
+                            placeholder="Enter name"
+                            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                            autoCapitalize="words"
+                            returnKeyType="done"
+                          />
+                        </View>
+                      </View>
+                    )}
+                    {promptTargets.fencer2 && (
+                      <View style={styles.namePromptField}>
+                        <Text style={styles.namePromptLabel}>{getPromptLabel('fencer2')}</Text>
+                        <View style={styles.namePromptInputContainer}>
+                          <TextInput
+                            style={styles.namePromptInput}
+                            value={promptFencer2Name}
+                            onChangeText={setPromptFencer2Name}
+                            placeholder="Enter name"
+                            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                            autoCapitalize="words"
+                            returnKeyType="done"
+                          />
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.modalFooter}>
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity onPress={() => setShowNamePrompt(false)} style={styles.cancelButton}>
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleSaveMatchWithNames} style={styles.saveButton}>
                         <Text style={styles.saveButtonText}>Save</Text>
                       </TouchableOpacity>
                     </View>

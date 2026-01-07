@@ -214,7 +214,10 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
       
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.saveButton} onPress={onSaveMatch}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={onSaveMatch}
+        >
           <Text style={styles.saveButtonText}>Save Match</Text>
         </TouchableOpacity>
       </View>

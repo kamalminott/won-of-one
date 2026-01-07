@@ -2,8 +2,8 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "3.2.1",
-    "runtimeVersion": "3.2.1",
+    "version": "4.0.0",
+    "runtimeVersion": "4.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
@@ -12,6 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kamalminott.wonofone",
+      "buildNumber": "4.0.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
@@ -27,7 +28,7 @@
     },
     "android": {
       "package": "com.kamalminott.wonofone",
-      "versionCode": 321,
+      "versionCode": 400,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

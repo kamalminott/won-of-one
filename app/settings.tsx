@@ -58,14 +58,17 @@ export default function SettingsScreen() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
+  const showDiagnostics = __DEV__;
 
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Settings');
-      loadUpdateInfo();
-      loadTokenInfo();
-    }, [])
+      if (showDiagnostics) {
+        loadUpdateInfo();
+        loadTokenInfo();
+      }
+    }, [showDiagnostics])
   );
 
   // Load token information
@@ -112,14 +115,18 @@ export default function SettingsScreen() {
   };
 
   useEffect(() => {
+    if (!showDiagnostics) {
+      return;
+    }
+
     if (session) {
       loadTokenInfo(session);
     }
-  }, [session?.access_token, session?.refresh_token]);
+  }, [showDiagnostics, session?.access_token, session?.refresh_token]);
 
   // Listen for token refresh events
   useEffect(() => {
-    if (!user) return;
+    if (!showDiagnostics || !user) return;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED') {
@@ -129,7 +136,7 @@ export default function SettingsScreen() {
     });
 
     return () => subscription.unsubscribe();
-  }, [user]);
+  }, [showDiagnostics, user]);
 
   // Load update information
   const loadUpdateInfo = async () => {
@@ -611,61 +618,62 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Session Status Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Session Status</Text>
-          <View style={[styles.card, styles.matchDefaultsCard]}>
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Access Token</Text>
-              <Text style={[styles.settingValue, { color: tokenInfo.hasAccessToken ? '#4CAF50' : '#F44336' }]}>
-                {tokenInfo.hasAccessToken ? '✅ Valid' : '❌ Missing'}
-              </Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Refresh Token</Text>
-              <Text style={[styles.settingValue, { color: tokenInfo.hasRefreshToken ? '#4CAF50' : '#F44336' }]}>
-                {tokenInfo.hasRefreshToken ? '✅ Present' : '❌ Missing'}
-              </Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Expires In</Text>
-              <Text style={styles.settingValue}>
-                {tokenInfo.minutesUntilExpiry !== null 
-                  ? tokenInfo.minutesUntilExpiry > 0
-                    ? `${tokenInfo.minutesUntilExpiry} minutes`
-                    : 'Expired (will refresh)'
-                  : 'Unknown'}
-              </Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Auto-Refresh</Text>
-              <Text style={[styles.settingValue, { color: tokenInfo.willAutoRefresh ? '#FF9800' : '#4CAF50' }]}>
-                {tokenInfo.willAutoRefresh ? '⚠️ Will refresh soon' : '✅ Active'}
-              </Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <TouchableOpacity 
-              style={[styles.settingRow, styles.settingRowLast]} 
-              onPress={loadTokenInfo}
-            >
-              <View style={styles.iconContainer}>
-                <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+        {showDiagnostics && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Session Status</Text>
+            <View style={[styles.card, styles.matchDefaultsCard]}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Access Token</Text>
+                <Text style={[styles.settingValue, { color: tokenInfo.hasAccessToken ? '#4CAF50' : '#F44336' }]}>
+                  {tokenInfo.hasAccessToken ? '✅ Valid' : '❌ Missing'}
+                </Text>
               </View>
-              <Text style={styles.optionText}>Refresh Status</Text>
-            </TouchableOpacity>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Refresh Token</Text>
+                <Text style={[styles.settingValue, { color: tokenInfo.hasRefreshToken ? '#4CAF50' : '#F44336' }]}>
+                  {tokenInfo.hasRefreshToken ? '✅ Present' : '❌ Missing'}
+                </Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Expires In</Text>
+                <Text style={styles.settingValue}>
+                  {tokenInfo.minutesUntilExpiry !== null 
+                    ? tokenInfo.minutesUntilExpiry > 0
+                      ? `${tokenInfo.minutesUntilExpiry} minutes`
+                      : 'Expired (will refresh)'
+                    : 'Unknown'}
+                </Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Auto-Refresh</Text>
+                <Text style={[styles.settingValue, { color: tokenInfo.willAutoRefresh ? '#FF9800' : '#4CAF50' }]}>
+                  {tokenInfo.willAutoRefresh ? '⚠️ Will refresh soon' : '✅ Active'}
+                </Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <TouchableOpacity 
+                style={[styles.settingRow, styles.settingRowLast]} 
+                onPress={loadTokenInfo}
+              >
+                <View style={styles.iconContainer}>
+                  <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+                </View>
+                <Text style={styles.optionText}>Refresh Status</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Match Defaults Section */}
         <View style={styles.section}>
@@ -685,48 +693,49 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* App Updates Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>App Updates</Text>
-          <View style={[styles.card, styles.matchDefaultsCard]}>
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Update ID</Text>
-              <Text style={[styles.settingValue, { fontSize: width * 0.03 }]} numberOfLines={1}>
-                {updateInfo.updateId || 'Loading...'}
-              </Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Channel</Text>
-              <Text style={styles.settingValue}>{updateInfo.channel || 'Loading...'}</Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Runtime Version</Text>
-              <Text style={styles.settingValue}>{updateInfo.runtimeVersion || 'Loading...'}</Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <TouchableOpacity 
-              style={[styles.settingRow, styles.settingRowLast]} 
-              onPress={checkForUpdates}
-              disabled={updateInfo.isChecking || !Updates || !Updates.isEnabled}
-            >
-              <View style={styles.iconContainer}>
-                <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+        {showDiagnostics && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>App Updates</Text>
+            <View style={[styles.card, styles.matchDefaultsCard]}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Update ID</Text>
+                <Text style={[styles.settingValue, { fontSize: width * 0.03 }]} numberOfLines={1}>
+                  {updateInfo.updateId || 'Loading...'}
+                </Text>
               </View>
-              <Text style={styles.optionText}>Check for Updates</Text>
-              {updateInfo.isChecking && (
-                <ActivityIndicator size="small" color="#6C5CE7" style={{ marginLeft: width * 0.02 }} />
-              )}
-            </TouchableOpacity>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Channel</Text>
+                <Text style={styles.settingValue}>{updateInfo.channel || 'Loading...'}</Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Runtime Version</Text>
+                <Text style={styles.settingValue}>{updateInfo.runtimeVersion || 'Loading...'}</Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <TouchableOpacity 
+                style={[styles.settingRow, styles.settingRowLast]} 
+                onPress={checkForUpdates}
+                disabled={updateInfo.isChecking || !Updates || !Updates.isEnabled}
+              >
+                <View style={styles.iconContainer}>
+                  <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+                </View>
+                <Text style={styles.optionText}>Check for Updates</Text>
+                {updateInfo.isChecking && (
+                  <ActivityIndicator size="small" color="#6C5CE7" style={{ marginLeft: width * 0.02 }} />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Support Section */}
         <View style={styles.section}>

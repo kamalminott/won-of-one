@@ -1117,7 +1117,24 @@ export const matchService = {
       return `${hours}:${minutes}`;
     };
 
-    const matches = data?.map((match: any) => {
+    const placeholderNames = new Set([
+      '',
+      'tap to add name',
+      'guest',
+      'guest 1',
+      'guest 2',
+      'unknown',
+      'fencer 1',
+      'fencer 2',
+    ]);
+    const isPlaceholder = (value?: string | null) =>
+      placeholderNames.has(normalizeName(value));
+
+    const filteredData = (data || []).filter((match: any) => {
+      return !isPlaceholder(match.fencer_1_name) && !isPlaceholder(match.fencer_2_name);
+    });
+
+    const matches = filteredData.map((match: any) => {
       // Get the latest period end time as the match completion time
       const matchPeriods = match.match_period as any[] | undefined;
       let completionTime: string | undefined;
@@ -2845,6 +2862,90 @@ $$;
 
     const row = Array.isArray(data) ? data[0] ?? null : null;
     return row;
+  },
+
+  async updateMatchEventNamesIfPlaceholder(
+    matchId: string,
+    fencer1Name: string,
+    fencer2Name: string,
+    accessToken?: string | null
+  ): Promise<boolean> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ updateMatchEventNamesIfPlaceholder blocked - auth session not ready', { matchId });
+      return false;
+    }
+
+    const normalize = (value?: string | null) => {
+      if (!value) return '';
+      return value.trim().toLowerCase();
+    };
+
+    const placeholderNames = new Set([
+      '',
+      'tap to add name',
+      'guest',
+      'guest 1',
+      'guest 2',
+      'unknown',
+      'fencer 1',
+      'fencer 2',
+    ]);
+
+    const isPlaceholder = (value?: string | null) => {
+      return placeholderNames.has(normalize(value));
+    };
+
+    try {
+      const { data: events, error } = await postgrestSelect<{
+        match_event_id: string;
+        fencer_1_name: string | null;
+        fencer_2_name: string | null;
+      }>(
+        'match_event',
+        {
+          select: 'match_event_id,fencer_1_name,fencer_2_name',
+          match_id: `eq.${matchId}`,
+        },
+        { accessToken: token }
+      );
+
+      if (error) {
+        console.error('❌ Error fetching match events for name update:', error);
+        return false;
+      }
+
+      const targetEventIds = (events || [])
+        .filter(event => isPlaceholder(event.fencer_1_name) || isPlaceholder(event.fencer_2_name))
+        .map(event => event.match_event_id);
+
+      if (targetEventIds.length === 0) {
+        return true;
+      }
+
+      const { error: updateError } = await postgrestUpdate(
+        'match_event',
+        {
+          fencer_1_name: fencer1Name,
+          fencer_2_name: fencer2Name,
+        },
+        {
+          match_id: `eq.${matchId}`,
+          match_event_id: `in.(${targetEventIds.join(',')})`,
+        },
+        { accessToken: token, preferReturn: false }
+      );
+
+      if (updateError) {
+        console.error('❌ Error updating match event names:', updateError);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error updating match event names:', error);
+      return false;
+    }
   },
 
   // Delete a match and all related records

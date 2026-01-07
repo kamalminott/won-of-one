@@ -2254,7 +2254,7 @@ export default function RemoteScreen() {
   };
 
   // Create remote session if it doesn't exist (now uses offline service)
-  const ensureRemoteSession = async () => {
+  const ensureRemoteSession = async (overrideNames?: { fencerA?: string; fencerB?: string }) => {
     if (remoteSession) return remoteSession;
     
     if (!user) {
@@ -2264,11 +2264,13 @@ export default function RemoteScreen() {
 
     try {
       console.log('Creating remote session (offline-capable)...');
+      const fencerAName = overrideNames?.fencerA ?? getLockedAdjustedName('fencerA');
+      const fencerBName = overrideNames?.fencerB ?? getLockedAdjustedName('fencerB');
       const result = await offlineRemoteService.createRemoteSession({
         referee_id: user.id,
         fencer_1_id: showUserProfile ? user.id : undefined, // Only set fencer_1_id if user toggle is on
-        fencer_1_name: showUserProfile ? userDisplayName : getLockedAdjustedName('fencerA'), // Use fencerA when user toggle is off
-        fencer_2_name: getLockedAdjustedName('fencerB'), // Always fencerB for fencer 2
+        fencer_1_name: showUserProfile ? userDisplayName : fencerAName, // Use fencerA when user toggle is off
+        fencer_2_name: fencerBName, // Always fencerB for fencer 2
         scoring_mode: "15-point",
         device_serial: "REMOTE_001",
         weapon: selectedWeapon // Include selected weapon type
@@ -3665,41 +3667,67 @@ export default function RemoteScreen() {
 	    }
 	  }, [showUserProfile, userDisplayName, userEntity, params?.isAnonymous, params?.fencer1Name, params?.fencer2Name, params?.keepToggleOff]);
 
-  // Validate that fencer names are filled before starting a match
-  const validateFencerNames = useCallback((): { isValid: boolean; message?: string } => {
+  const resolveGuestNamesIfNeeded = useCallback((): { fencerA: string; fencerB: string } | null => {
+    const isMissing = (name: string) => name === 'Tap to add name' || !name.trim();
+    const fencerAName = getNameByEntity('fencerA');
+    const fencerBName = getNameByEntity('fencerB');
+    let nextFencerA = fencerAName;
+    let nextFencerB = fencerBName;
+
     if (showUserProfile) {
-      // User's name is automatically set from profile, check opponent
-      const userPosition = toggleCardPosition;
-      const opponentPosition = userPosition === 'left' ? 'right' : 'left';
-      const opponentName = getNameByPosition(opponentPosition);
-      
-      if (opponentName === 'Tap to add name' || !opponentName.trim()) {
-        return {
-          isValid: false,
-          message: 'Please add the opponent\'s name before starting the match.'
-        };
+      const opponentPosition = toggleCardPosition === 'left' ? 'right' : 'left';
+      const opponentEntity = getEntityAtPosition(opponentPosition);
+      const opponentName = getNameByEntity(opponentEntity);
+
+      if (!isMissing(opponentName)) {
+        return null;
+      }
+
+      if (opponentEntity === 'fencerA') {
+        nextFencerA = 'Guest';
+      } else {
+        nextFencerB = 'Guest';
       }
     } else {
-      // Both names must be set
-      const fencerAName = getNameByEntity('fencerA');
-      const fencerBName = getNameByEntity('fencerB');
-      
-      if (fencerAName === 'Tap to add name' || !fencerAName.trim()) {
-        return {
-          isValid: false,
-          message: 'Please add both fencer names before starting the match.'
-        };
+      const fencerAMissing = isMissing(fencerAName);
+      const fencerBMissing = isMissing(fencerBName);
+
+      if (!fencerAMissing && !fencerBMissing) {
+        return null;
       }
-      if (fencerBName === 'Tap to add name' || !fencerBName.trim()) {
-        return {
-          isValid: false,
-          message: 'Please add both fencer names before starting the match.'
-        };
+
+      if (fencerAMissing && fencerBMissing) {
+        nextFencerA = 'Guest 1';
+        nextFencerB = 'Guest 2';
+      } else if (fencerAMissing) {
+        nextFencerA = 'Guest';
+      } else if (fencerBMissing) {
+        nextFencerB = 'Guest';
       }
     }
-    
+
+    if (nextFencerA === fencerAName && nextFencerB === fencerBName) {
+      return null;
+    }
+
+    setFencerNames(prev => {
+      if (prev.fencerA === nextFencerA && prev.fencerB === nextFencerB) {
+        return prev;
+      }
+      return {
+        ...prev,
+        fencerA: nextFencerA,
+        fencerB: nextFencerB,
+      };
+    });
+
+    return { fencerA: nextFencerA, fencerB: nextFencerB };
+  }, [showUserProfile, toggleCardPosition, getEntityAtPosition, getNameByEntity]);
+
+  // Validate that fencer names are filled before starting a match
+  const validateFencerNames = useCallback((): { isValid: boolean; message?: string } => {
     return { isValid: true };
-  }, [showUserProfile, toggleCardPosition, getNameByPosition, getNameByEntity]);
+  }, []);
 
   // Keep baseline names in sync for keep-toggle-off flows so user edits persist when starting match
   useEffect(() => {
@@ -4008,7 +4036,8 @@ export default function RemoteScreen() {
       }
       
       // Ensure remote session exists (create if first score)
-      const session = await ensureRemoteSession();
+      const resolvedGuestNames = resolveGuestNamesIfNeeded();
+      const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
       if (!session) {
         captureMatchDebug('score_tap_blocked', {
           debug_id: tapDebugId,
@@ -4676,6 +4705,7 @@ export default function RemoteScreen() {
     if (isPlaying) {
       pauseTimer();
     } else {
+      const resolvedGuestNames = resolveGuestNamesIfNeeded();
       // Validate fencer names before starting match
       const nameValidation = validateFencerNames();
       if (!nameValidation.isValid) {
@@ -4731,7 +4761,7 @@ export default function RemoteScreen() {
       (async () => {
         try {
           // Create remote session when starting timer (in background)
-          const session = await ensureRemoteSession();
+          const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
           if (!session) {
             console.log('❌ Failed to create remote session - will retry');
             return;
@@ -4759,7 +4789,7 @@ export default function RemoteScreen() {
         }
       })();
     }
-  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, validateFencerNames, openEditNamesPopup]);
+  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, resolveGuestNamesIfNeeded, validateFencerNames, openEditNamesPopup]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
