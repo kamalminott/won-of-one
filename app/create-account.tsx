@@ -36,6 +36,23 @@ export default function CreateAccountScreen() {
   const [loading, setLoading] = useState(false);
   const [hasStartedForm, setHasStartedForm] = useState(false);
 
+  const getEmailStatus = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return 'pending';
+    const atIndex = trimmed.indexOf('@');
+    const dotIndex = trimmed.lastIndexOf('.');
+    if (atIndex <= 0 || dotIndex <= atIndex + 1 || dotIndex >= trimmed.length - 1) {
+      return 'pending';
+    }
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? 'valid' : 'invalid';
+  };
+
+  const emailStatus = getEmailStatus(email);
+  const emailStatusIcon =
+    emailStatus === 'valid' ? 'checkmark-circle' : emailStatus === 'invalid' ? 'close-circle' : 'remove-circle';
+  const emailStatusColor =
+    emailStatus === 'valid' ? '#00B894' : emailStatus === 'invalid' ? '#EF4444' : '#9D9D9D';
+
   // Track screen view
   useFocusEffect(
     useCallback(() => {
@@ -155,6 +172,7 @@ export default function CreateAccountScreen() {
         {/* Back Button */}
         <View style={{ width: width * 0.08, alignItems: 'flex-start' }}>
           <BackButton 
+            onPress={handleSignIn}
             style={{
               zIndex: 10
             }}
@@ -251,9 +269,14 @@ export default function CreateAccountScreen() {
               autoCapitalize="none"
             />
             <View style={[styles.checkIcon, { marginLeft: width * 0.02 }]}>
-              <Ionicons name="checkmark-circle" size={20} color="#00B894" />
+              <Ionicons name={emailStatusIcon} size={20} color={emailStatusColor} />
             </View>
           </View>
+          {emailStatus === 'invalid' && (
+            <Text style={[styles.helperText, { fontSize: width * 0.032, marginTop: height * 0.008 }]}>
+              Enter a valid email address
+            </Text>
+          )}
         </View>
 
         {/* Password Input */}
@@ -526,6 +549,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   checkIcon: {
+  },
+  helperText: {
+    color: '#EF4444',
   },
   eyeIcon: {
   },

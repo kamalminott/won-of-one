@@ -23,6 +23,7 @@ export default function ProfileScreen() {
     loadUserName,
     profileImage,
     setProfileImage,
+    signOut,
     session,
   } = useAuth();
   const accessToken = session?.access_token ?? undefined;
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState<string>('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
   // Match statistics state
   const [matchStats, setMatchStats] = useState({
@@ -66,10 +68,24 @@ export default function ProfileScreen() {
     router.back();
   };
 
-  const handleLogout = () => {
-    // TODO: Implement logout logic
-    console.log('Logging out...');
-    router.push('/login');
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    analytics.logout();
+    try {
+      await AsyncStorage.multiRemove([
+        'ongoing_match_state',
+        'user_name',
+        'user_profile_image',
+      ]);
+      await signOut();
+      router.replace('/login');
+    } catch (error) {
+      console.error('❌ Error during logout:', error);
+      Alert.alert('Logout Failed', 'Something went wrong while logging out. Please try again.');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   // Fetch user match statistics
@@ -794,6 +810,7 @@ export default function ProfileScreen() {
           borderRadius: width * 0.04
         }]}
         onPress={handleLogout}
+        disabled={isLoggingOut}
       >
         <LinearGradient
           colors={['#6C5CE7', '#5741FF']}
@@ -810,7 +827,9 @@ export default function ProfileScreen() {
           }]}>
             <Ionicons name="log-out-outline" size={width * 0.04} color="#292D32" />
           </View>
-          <Text style={[styles.logoutText, { fontSize: width * 0.04 }]}>Log Out</Text>
+          <Text style={[styles.logoutText, { fontSize: width * 0.04 }]}>
+            {isLoggingOut ? 'Logging Out...' : 'Log Out'}
+          </Text>
         </LinearGradient>
       </TouchableOpacity>
 

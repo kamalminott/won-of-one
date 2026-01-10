@@ -59,6 +59,7 @@ export default function SettingsScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
   const showDiagnostics = __DEV__;
+  const showPaywallOption = __DEV__;
 
   // Track screen view
   useFocusEffect(
@@ -556,28 +557,26 @@ export default function SettingsScreen() {
         {/* Profile Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Profile</Text>
-          <View style={[styles.card, styles.profileCard]}>
+          <TouchableOpacity style={[styles.card, styles.profileCard]} onPress={handleEditProfile}>
             <View style={styles.iconContainer}>
               <Ionicons name="create" size={width * 0.06} color="#FFFFFF" />
             </View>
             <Text style={styles.optionText}>Edit Profile</Text>
-            <TouchableOpacity onPress={handleEditProfile}>
+          </TouchableOpacity>
+        </View>
+
+        {showPaywallOption && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subscription</Text>
+            <TouchableOpacity style={[styles.card, styles.profileCard]} onPress={handleOpenPaywall}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="lock-closed" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Open Paywall</Text>
               <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Subscription Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Subscription</Text>
-          <TouchableOpacity style={[styles.card, styles.profileCard]} onPress={handleOpenPaywall}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="lock-closed" size={width * 0.06} color="#FFFFFF" />
-            </View>
-            <Text style={styles.optionText}>Open Paywall</Text>
-            <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
-          </TouchableOpacity>
-        </View>
+        )}
 
         {/* Authentication & Account Section */}
         <View style={styles.section}>

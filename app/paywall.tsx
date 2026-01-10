@@ -56,6 +56,12 @@ export default function PaywallScreen() {
     setPresenting(true);
 
     try {
+      await subscriptionService.initialize(user?.id);
+      if (!subscriptionService.isConfigured() || typeof RevenueCatUI?.presentPaywall !== 'function') {
+        setPresentError('Subscriptions are unavailable. Please try again later.');
+        return;
+      }
+
       const result = await RevenueCatUI.presentPaywall({ displayCloseButton: true });
       setPaywallResult(result);
 

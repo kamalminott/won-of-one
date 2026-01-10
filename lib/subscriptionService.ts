@@ -24,12 +24,19 @@ try {
   console.log('📦 RevenueCat native module not available (dev mode)');
 }
 
-// RevenueCat API Key (test key for development; allow in dev builds only)
+// RevenueCat API Key (production via env; test key fallback for dev builds only)
+const DEV_FALLBACK_REVENUECAT_API_KEY = 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU';
 const REVENUECAT_API_KEY = Platform.select({
-  ios: 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU', // iOS API key
-  android: 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU', // Android API key (can be different)
-  default: 'test_EzQiXQCiDOqTcPKqVVrBbjbdjvU',
-});
+  ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
+  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+  default: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY,
+}) || '';
+
+const getRevenueCatApiKey = () => {
+  const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+  if (REVENUECAT_API_KEY) return REVENUECAT_API_KEY;
+  return isDev ? DEV_FALLBACK_REVENUECAT_API_KEY : '';
+};
 
 // Subscription status types
 export type SubscriptionStatus = 'active' | 'expired' | 'trial' | 'none';
@@ -66,10 +73,11 @@ export const subscriptionService = {
 
     try {
       // Skip test keys in production builds (RevenueCat can crash in release with test keys)
+      const apiKey = getRevenueCatApiKey();
       const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-      const isTestKey = !!REVENUECAT_API_KEY && REVENUECAT_API_KEY.startsWith('test_');
+      const isTestKey = !!apiKey && apiKey.startsWith('test_');
 
-      if (!REVENUECAT_API_KEY) {
+      if (!apiKey) {
         console.warn('⚠️ RevenueCat API key missing - skipping initialization');
         isInitialized = true;
         isActuallyConfigured = false;
@@ -96,7 +104,7 @@ export const subscriptionService = {
         return;
       }
 
-      await Purchases.configure({ apiKey: REVENUECAT_API_KEY });
+      await Purchases.configure({ apiKey });
       isInitialized = true;
       isActuallyConfigured = true;
       console.log('✅ RevenueCat initialized');
@@ -123,6 +131,13 @@ export const subscriptionService = {
       isInitialized = true;
       // Don't throw - allow app to continue without RevenueCat
     }
+  },
+
+  /**
+   * Check if RevenueCat is configured and ready to use
+   */
+  isConfigured(): boolean {
+    return !!isActuallyConfigured && !!Purchases;
   },
 
   /**

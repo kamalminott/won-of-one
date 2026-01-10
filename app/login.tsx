@@ -24,6 +24,8 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -70,9 +72,35 @@ export default function LoginScreen() {
     }
   }, [user, authLoading, isPasswordRecovery]);
 
+  const validateEmail = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  };
+
+  const getEmailError = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return validateEmail(trimmed) ? null : 'Enter a valid email address';
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    if (emailTouched) {
+      setEmailError(getEmailError(value));
+    }
+  };
+
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    const nextEmailError = getEmailError(email);
+    if (nextEmailError) {
+      setEmailTouched(true);
+      setEmailError(nextEmailError);
       return;
     }
 
@@ -159,16 +187,22 @@ export default function LoginScreen() {
                 <TextInput
                   style={[styles.textInput, { fontSize: width * 0.04 }]}
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={handleEmailChange}
+                  onBlur={() => {
+                    setEmailTouched(true);
+                    setEmailError(getEmailError(email));
+                  }}
                   placeholder="Enter email"
                   placeholderTextColor="#7E7E7E"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
-                <View style={[styles.checkIcon, { marginLeft: width * 0.02 }]}>
-                  <Ionicons name="checkmark-circle" size={width * 0.05} color="#00B894" />
-                </View>
               </View>
+              {emailError && (
+                <Text style={[styles.helperText, { fontSize: width * 0.032, marginTop: height * 0.008 }]}>
+                  {emailError}
+                </Text>
+              )}
             </View>
 
             {/* Password Input */}
@@ -382,7 +416,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
   },
-  checkIcon: {
+  helperText: {
+    color: '#EF4444',
   },
   eyeIcon: {
   },
