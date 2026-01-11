@@ -162,7 +162,7 @@ export default function CreateAccountScreen() {
       {/* Header Background */}
       <View style={[styles.headerBackground, { 
         paddingHorizontal: width * 0.04,
-        paddingTop: insets.top * 0.3,
+        paddingTop: Math.max(insets.top, height * 0.01),
         paddingBottom: height * 0.015,
         flexDirection: 'row',
         alignItems: 'center',
