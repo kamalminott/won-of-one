@@ -675,22 +675,24 @@ export default function SettingsScreen() {
         )}
 
         {/* Match Defaults Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Match Defaults</Text>
-          <View style={[styles.card, styles.matchDefaultsCard]}>
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Default Match Time</Text>
-              <Text style={styles.settingValue}>3 min</Text>
-            </View>
-            
-            <View style={styles.separator} />
-            
-            <View style={[styles.settingRow, styles.settingRowLast]}>
-              <Text style={styles.settingLabel}>Default Periods</Text>
-              <Text style={styles.settingValue}>3</Text>
+        {__DEV__ && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Match Defaults</Text>
+            <View style={[styles.card, styles.matchDefaultsCard]}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Default Match Time</Text>
+                <Text style={styles.settingValue}>3 min</Text>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={[styles.settingRow, styles.settingRowLast]}>
+                <Text style={styles.settingLabel}>Default Periods</Text>
+                <Text style={styles.settingValue}>3</Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
 
         {showDiagnostics && (
           <View style={styles.section}>
