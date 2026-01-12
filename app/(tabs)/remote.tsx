@@ -113,6 +113,7 @@ export default function RemoteScreen() {
   
   // Weapon selection state
   const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'sabre'>('foil');
+  const isSabre = selectedWeapon === 'sabre';
   const preferredWeaponRef = useRef<'foil' | 'epee' | 'sabre'>('foil');
   const weaponSelectionLockedRef = useRef(false);
   const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
@@ -3884,10 +3885,15 @@ export default function RemoteScreen() {
 
   // Helper function to transition to next period (used when skipping break)
   const transitionToNextPeriod = async (currentPeriodValue: number) => {
-    const nextPeriod = currentPeriodValue + 1;
-    
+    const maxPeriods = isSabre ? 2 : 3;
+    const nextPeriod = Math.min(currentPeriodValue + 1, maxPeriods);
+
     // Reset break popup flag
     setHasShownBreakPopup(false);
+
+    if (nextPeriod === currentPeriodValue) {
+      return;
+    }
     
     // End current period and create new one
     if (currentMatchPeriod) {
@@ -3932,6 +3938,9 @@ export default function RemoteScreen() {
   };
 
   const incrementPeriod = async () => {
+    if (isSabre) {
+      return;
+    }
     if (currentPeriod < 3) {
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -3982,6 +3991,9 @@ export default function RemoteScreen() {
   };
 
   const decrementPeriod = async () => {
+    if (isSabre) {
+      return;
+    }
     if (currentPeriod > 1) {
       // Pause timer if it's currently running
       if (isPlaying) {
@@ -6130,7 +6142,9 @@ export default function RemoteScreen() {
     console.log('Starting break timer');
     
     // Reset timeRemaining to prevent timer expiration check from retriggering
-    setTimeRemaining(matchTime);
+    if (!isSabre) {
+      setTimeRemaining(matchTime);
+    }
     
     // Set break time state FIRST - this should make the break timer display appear
     setIsBreakTime(true);
@@ -6246,6 +6260,15 @@ export default function RemoteScreen() {
   };
 
   const skipBreak = () => {
+    if (isSabre) {
+      if (breakTimerRef) {
+        clearInterval(breakTimerRef);
+      }
+      setIsBreakTime(false);
+      setBreakTimeRemaining(60);
+      setHasShownBreakPopup(false);
+      return;
+    }
     // Stop break timer if running
     if (breakTimerRef) {
       clearInterval(breakTimerRef);
@@ -6378,7 +6401,7 @@ export default function RemoteScreen() {
   };
 
   const assignPriority = () => {
-    if (isAssigningPriority) return; // Prevent multiple assignments
+    if (isSabre || isAssigningPriority) return; // Prevent multiple assignments
     
     // Determine random priority (entity-based)
     const randomValue = Math.random();
@@ -6389,7 +6412,7 @@ export default function RemoteScreen() {
   };
 
   const autoAssignPriority = (shouldStartPriorityRound: boolean = true) => {
-    if (isAssigningPriority) return; // Prevent multiple assignments
+    if (isSabre || isAssigningPriority) return; // Prevent multiple assignments
     
     // Determine random priority (entity-based)
     const randomValue = Math.random();
@@ -6585,6 +6608,10 @@ export default function RemoteScreen() {
   const fencerCardMinHeightTimerReadyWithCards = height * (isAndroid ? 0.155 : 0.22);
   const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
   const fencerCardMinHeightTimerReady = height * (isAndroid ? 0.17 : 0.22);
+  const sabreFencerCardHeight = height * (isAndroid ? 0.325 : 0.35);
+  const sabreFencerCardHeightReady = height * (isAndroid ? 0.355 : 0.375);
+  const sabreFencerCardHeightWithCards = height * (isAndroid ? 0.315 : 0.335);
+  const sabreFencersContainerBottom = height * (isAndroid ? 0.012 : 0.01);
   const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03);
   const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006);
   const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015);
@@ -6859,6 +6886,13 @@ export default function RemoteScreen() {
       elevation: 6,
       borderWidth: width * 0.005,
       borderColor: 'rgba(255,255,255,0.2)',
+    },
+    periodButtonDisabled: {
+      backgroundColor: '#4C4C4C',
+      borderColor: 'rgba(255,255,255,0.12)',
+      shadowOpacity: 0,
+      elevation: 0,
+      opacity: 0.6,
     },
     periodButtonText: {
       fontSize: width * 0.05,
@@ -7656,12 +7690,13 @@ export default function RemoteScreen() {
       };
     });
     
-    // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-    if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+    // For Sabre: start the match on first card and create remote session + Period 1
+    if (selectedWeapon === 'sabre' && !hasMatchStarted) {
       setHasMatchStarted(true);
       console.log('🏁 Sabre match started with first yellow card');
+      const resolvedGuestNames = resolveGuestNamesIfNeeded();
       // Ensure remote session exists
-      const session = await ensureRemoteSession();
+      const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
       // Create Period 1 for sabre match
       if (session && !currentMatchPeriod) {
         const playClickTime = new Date().toISOString();
@@ -7717,12 +7752,13 @@ export default function RemoteScreen() {
       };
     });
     
-    // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-    if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+    // For Sabre: start the match on first card and create remote session + Period 1
+    if (selectedWeapon === 'sabre' && !hasMatchStarted) {
       setHasMatchStarted(true);
       console.log('🏁 Sabre match started with first yellow card');
+      const resolvedGuestNames = resolveGuestNamesIfNeeded();
       // Ensure remote session exists
-      const session = await ensureRemoteSession();
+      const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
       // Create Period 1 for sabre match
       if (session && !currentMatchPeriod) {
         const playClickTime = new Date().toISOString();
@@ -7774,12 +7810,13 @@ export default function RemoteScreen() {
               if (isPlaying) {
                 pauseTimer();
               }
-              // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-              if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+              // For Sabre: start the match on first card and create remote session + Period 1
+              if (selectedWeapon === 'sabre' && !hasMatchStarted) {
                 setHasMatchStarted(true);
                 console.log('🏁 Sabre match started with first red card');
+                const resolvedGuestNames = resolveGuestNamesIfNeeded();
                 // Ensure remote session exists
-                const session = await ensureRemoteSession();
+                const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
                 // Create Period 1 for sabre match
                 if (session && !currentMatchPeriod) {
                   const playClickTime = new Date().toISOString();
@@ -7825,12 +7862,13 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
-      // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-      if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+      // For Sabre: start the match on first card and create remote session + Period 1
+      if (selectedWeapon === 'sabre' && !hasMatchStarted) {
         setHasMatchStarted(true);
         console.log('🏁 Sabre match started with first red card');
+        const resolvedGuestNames = resolveGuestNamesIfNeeded();
         // Ensure remote session exists
-        const session = await ensureRemoteSession();
+        const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
         // Create Period 1 for sabre match
         if (session && !currentMatchPeriod) {
           const playClickTime = new Date().toISOString();
@@ -7889,12 +7927,13 @@ export default function RemoteScreen() {
               if (isPlaying) {
                 pauseTimer();
               }
-              // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-              if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+              // For Sabre: start the match on first card and create remote session + Period 1
+              if (selectedWeapon === 'sabre' && !hasMatchStarted) {
                 setHasMatchStarted(true);
                 console.log('🏁 Sabre match started with first red card');
+                const resolvedGuestNames = resolveGuestNamesIfNeeded();
                 // Ensure remote session exists
-                const session = await ensureRemoteSession();
+                const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
                 // Create Period 1 for sabre match
                 if (session && !currentMatchPeriod) {
                   const playClickTime = new Date().toISOString();
@@ -7940,12 +7979,13 @@ export default function RemoteScreen() {
       if (isPlaying) {
         pauseTimer();
       }
-      // For Sabre: Set hasMatchStarted when first card is added (if scores are still 0-0) and create remote session + Period 1
-      if (selectedWeapon === 'sabre' && !hasMatchStarted && scores.fencerA === 0 && scores.fencerB === 0) {
+      // For Sabre: start the match on first card and create remote session + Period 1
+      if (selectedWeapon === 'sabre' && !hasMatchStarted) {
         setHasMatchStarted(true);
         console.log('🏁 Sabre match started with first red card');
+        const resolvedGuestNames = resolveGuestNamesIfNeeded();
         // Ensure remote session exists
-        const session = await ensureRemoteSession();
+        const session = await ensureRemoteSession(resolvedGuestNames ?? undefined);
         // Create Period 1 for sabre match
         if (session && !currentMatchPeriod) {
           const playClickTime = new Date().toISOString();
@@ -8014,6 +8054,24 @@ export default function RemoteScreen() {
     rightYellowCards.length > 0 ||
     rightRedCards.length > 0;
   const inProgressWithCards = hasMatchStarted && hasIssuedCards && selectedWeapon !== 'sabre';
+  const sabreHasIssuedCards = isSabre && hasIssuedCards;
+  const sabreMatchReady = isSabre && !hasMatchStarted && !isPlaying;
+  const canAssignPriority = !isSabre && timeRemaining === 0 && scores.fencerA === scores.fencerB;
+  const sabreCardHeight = sabreHasIssuedCards
+    ? sabreFencerCardHeightWithCards
+    : sabreMatchReady
+      ? sabreFencerCardHeightReady
+      : sabreFencerCardHeight;
+  const sabreProfileSize = width * (sabreHasIssuedCards ? 0.135 : 0.16);
+  const sabreProfileRadius = sabreProfileSize / 2;
+  const sabreScoreButtonSize = width * (sabreHasIssuedCards ? 0.145 : 0.165);
+  const sabreScoreButtonRadius = sabreScoreButtonSize / 2;
+  const sabreScoreIconSize = sabreHasIssuedCards ? 32 : 38;
+  const sabreScoreFontSize = width * (sabreHasIssuedCards ? 0.115 : 0.13);
+  const sabreScoreMarginBottom = sabreHasIssuedCards ? height * 0.006 : undefined;
+  const sabreNameMarginBottom = sabreHasIssuedCards ? height * 0.004 : undefined;
+  const sabreScoreControlsGap = sabreHasIssuedCards ? width * 0.028 : undefined;
+  const sabreSwitchTranslateX = showUserProfile ? (sabreHasIssuedCards ? width * 0.058 : width * 0.065) : 0;
 
   const isNonSabreTimerReady =
     selectedWeapon !== 'sabre' &&
@@ -8181,7 +8239,9 @@ export default function RemoteScreen() {
                 {formatTime(breakTimeRemaining)}
               </Text>
               <Text style={styles.countdownWarningText}>
-                🍃 Break Time - Next: Period {Math.min(currentPeriod + 1, 3)}
+                {isSabre
+                  ? (currentPeriod < 2 ? '🍃 Break Time - Next: Period 2' : '🍃 Break Time')
+                  : `🍃 Break Time - Next: Period ${Math.min(currentPeriod + 1, 3)}`}
               </Text>
             </View>
           )}
@@ -8400,8 +8460,12 @@ export default function RemoteScreen() {
         
         {/* Period Control - moved to bottom of card */}
         <View style={hasMatchStarted ? styles.periodControlMatchStarted : styles.periodControl}>
-          <TouchableOpacity style={styles.periodButton} onPress={decrementPeriod}>
-            <Ionicons name="remove" size={16} color="white" />
+          <TouchableOpacity
+            style={[styles.periodButton, isSabre && styles.periodButtonDisabled]}
+            onPress={decrementPeriod}
+            disabled={isSabre}
+          >
+            <Ionicons name="remove" size={16} color={isSabre ? 'rgba(255, 255, 255, 0.6)' : 'white'} />
           </TouchableOpacity>
           <View style={styles.periodDisplay}>
             <Text style={styles.periodText}>Period</Text>
@@ -8409,8 +8473,12 @@ export default function RemoteScreen() {
               {isPriorityRound ? 'P' : selectedWeapon === 'sabre' ? `${breakTriggered ? 2 : 1}/2` : `${currentPeriod}/3`}
             </Text>
           </View>
-          <TouchableOpacity style={styles.periodButton} onPress={incrementPeriod}>
-            <Ionicons name="add" size={16} color="white" />
+          <TouchableOpacity
+            style={[styles.periodButton, isSabre && styles.periodButtonDisabled]}
+            onPress={incrementPeriod}
+            disabled={isSabre}
+          >
+            <Ionicons name="add" size={16} color={isSabre ? 'rgba(255, 255, 255, 0.6)' : 'white'} />
           </TouchableOpacity>
         </View>
         
@@ -8434,10 +8502,11 @@ export default function RemoteScreen() {
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
             marginTop: selectedWeapon === 'sabre' 
-              ? height * 0.02  // Proper spacing below Match Insights card for sabre
+              ? height * 0.012  // Proper spacing below Match Insights card for sabre
               : (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0)
                 ? -(height * 0.02)  // Move up when match in progress and no cards
-                : -(height * 0.035)  // Original positioning for other states
+                : -(height * 0.035),  // Original positioning for other states
+            marginBottom: selectedWeapon === 'sabre' ? height * 0.002 : undefined
           }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: width * 0.04 }}>
           <Text style={[styles.fencersHeading, selectedWeapon === 'sabre' && !isBreakTime && { marginTop: 0, marginBottom: 0 }]}>Fencers</Text>
@@ -8485,7 +8554,8 @@ export default function RemoteScreen() {
         } : {},
         // Move fencer cards up and closer for sabre
         selectedWeapon === 'sabre' ? {
-          marginTop: height * 0.01, // Reduced margin to bring cards closer to "Fencers" text
+          marginTop: height * 0.006, // Reduced margin to bring cards closer to "Fencers" text
+          marginBottom: sabreFencersContainerBottom, // Keep controls visible when cards are issued
         } : {}
       ]}>
         {/* Alice's Card */}
@@ -8511,17 +8581,25 @@ export default function RemoteScreen() {
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
-            minHeight: height * 0.32, // Increased height for sabre
+            minHeight: sabreCardHeight,
+            maxHeight: sabreCardHeight,
+            padding: sabreHasIssuedCards ? fencerCardCompactPadding : fencerCardPadding,
           } : {}
         ]}>
         {/* Sliding Switch - Top Left - Only show when toggle is on left card */}
           {toggleCardPosition === 'left' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
-              top: width * 0.02, 
+              top: sabreHasIssuedCards ? width * 0.015 : width * 0.02, 
               left: width * 0.02, 
               zIndex: 5 
-            }]}>
+            },
+            sabreHasIssuedCards && {
+              width: width * 0.105,
+              height: width * 0.052,
+              borderRadius: width * 0.026,
+            }
+            ]}>
               <TouchableOpacity 
                 style={[
                   styles.switchTrack, 
@@ -8532,8 +8610,14 @@ export default function RemoteScreen() {
               >
                 <View style={[
                   styles.switchThumb, 
+                  sabreHasIssuedCards && {
+                    width: width * 0.045,
+                    height: width * 0.045,
+                    borderRadius: width * 0.0225,
+                    top: width * 0.0035,
+                  },
                   { 
-                    transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }]
+                    transform: [{ translateX: sabreSwitchTranslateX }]
                   }
                 ]}>
                 </View>
@@ -8541,9 +8625,19 @@ export default function RemoteScreen() {
             </View>
           )}
           
-          <View style={styles.profileContainer}>
+          <View style={[
+            styles.profileContainer,
+            sabreHasIssuedCards && toggleCardPosition === 'left' && { marginTop: height * 0.002 }
+          ]}>
             <TouchableOpacity 
-              style={styles.profilePicture}
+              style={[
+                styles.profilePicture,
+                sabreHasIssuedCards && {
+                  width: sabreProfileSize,
+                  height: sabreProfileSize,
+                  borderRadius: sabreProfileRadius,
+                },
+              ]}
               onPress={() => {
                 if (toggleCardPosition === 'left' && showUserProfile) {
                   // User profile - no image selection, just show profile image
@@ -8562,8 +8656,17 @@ export default function RemoteScreen() {
                 renderProfileImage(opponentImages[getEntityAtPosition('left')] || null, getNameByPosition('left'), false)
               )}
               {!(toggleCardPosition === 'left' && showUserProfile) && (
-              <View style={styles.cameraIcon}>
-                <Text style={styles.cameraIconText}>📷</Text>
+              <View style={[
+                styles.cameraIcon,
+                sabreHasIssuedCards && {
+                  width: width * 0.055,
+                  height: width * 0.055,
+                  borderRadius: width * 0.0275,
+                  bottom: -width * 0.005,
+                  right: -width * 0.005,
+                }
+              ]}>
+                <Text style={[styles.cameraIconText, sabreHasIssuedCards && { fontSize: width * 0.028 }]}>📷</Text>
               </View>
               )}
             </TouchableOpacity>
@@ -8612,6 +8715,7 @@ export default function RemoteScreen() {
                 styles.fencerName, 
                 {color: 'black'},
                 (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                sabreHasIssuedCards && { marginBottom: sabreNameMarginBottom },
                 (toggleCardPosition === 'left' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
                   : getNameByPosition('left') === 'Tap to add name') && {
@@ -8629,15 +8733,16 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('left'))}
             </Text>
           </TouchableOpacity>
-	          <Text style={[
+          <Text style={[
               styles.fencerScore,
               { color: 'black' },
               (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              sabreHasIssuedCards && { fontSize: sabreScoreFontSize, marginBottom: sabreScoreMarginBottom },
             ]}>
               {getScoreByPosition('left').toString().padStart(2, '0')}
             </Text>
           
-          <View style={styles.scoreControls}>
+          <View style={[styles.scoreControls, sabreHasIssuedCards && { gap: sabreScoreControlsGap }]}>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
               shadowColor: '#000',
@@ -8647,8 +8752,12 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
+            }, sabreHasIssuedCards && {
+              width: sabreScoreButtonSize,
+              height: sabreScoreButtonSize,
+              borderRadius: sabreScoreButtonRadius,
             }]} onPress={() => decrementScore(getEntityAtPosition('left'))}>
-              <Ionicons name="remove" size={34} color="black" />
+              <Ionicons name="remove" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -8659,8 +8768,12 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
+            }, sabreHasIssuedCards && {
+              width: sabreScoreButtonSize,
+              height: sabreScoreButtonSize,
+              borderRadius: sabreScoreButtonRadius,
             }]} onPress={() => incrementScore(getEntityAtPosition('left'))}>
-              <Ionicons name="add" size={34} color="black" />
+              <Ionicons name="add" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -8751,17 +8864,25 @@ export default function RemoteScreen() {
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
-            minHeight: height * 0.32, // Increased height for sabre
+            minHeight: sabreCardHeight,
+            maxHeight: sabreCardHeight,
+            padding: sabreHasIssuedCards ? fencerCardCompactPadding : fencerCardPadding,
           } : {}
         ]}>
         {/* Sliding Switch - Top Right - Only show when toggle is on right card */}
           {toggleCardPosition === 'right' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
-              top: width * 0.02, 
+              top: sabreHasIssuedCards ? width * 0.015 : width * 0.02, 
               right: width * 0.02, // Position on right side instead of left
               zIndex: 5 
-            }]}>
+            },
+            sabreHasIssuedCards && {
+              width: width * 0.105,
+              height: width * 0.052,
+              borderRadius: width * 0.026,
+            }
+            ]}>
               <TouchableOpacity 
                 style={[
                   styles.switchTrack, 
@@ -8772,8 +8893,14 @@ export default function RemoteScreen() {
               >
                 <View style={[
                   styles.switchThumb, 
+                  sabreHasIssuedCards && {
+                    width: width * 0.045,
+                    height: width * 0.045,
+                    borderRadius: width * 0.0225,
+                    top: width * 0.0035,
+                  },
                   { 
-                    transform: [{ translateX: showUserProfile ? width * 0.065 : 0 }]
+                    transform: [{ translateX: sabreSwitchTranslateX }]
                   }
                 ]}>
                 </View>
@@ -8781,9 +8908,19 @@ export default function RemoteScreen() {
             </View>
           )}
           
-          <View style={styles.profileContainer}>
+          <View style={[
+            styles.profileContainer,
+            sabreHasIssuedCards && toggleCardPosition === 'right' && { marginTop: height * 0.002 }
+          ]}>
             <TouchableOpacity 
-              style={styles.profilePicture}
+              style={[
+                styles.profilePicture,
+                sabreHasIssuedCards && {
+                  width: sabreProfileSize,
+                  height: sabreProfileSize,
+                  borderRadius: sabreProfileRadius,
+                },
+              ]}
               onPress={() => {
                 if (toggleCardPosition === 'right' && showUserProfile) {
                   // User profile - no image selection, just show profile image
@@ -8802,8 +8939,17 @@ export default function RemoteScreen() {
                 renderProfileImage(opponentImages[getEntityAtPosition('right')] || null, getNameByPosition('right'), false)
               )}
               {!(toggleCardPosition === 'right' && showUserProfile) && (
-              <View style={styles.cameraIcon}>
-                <Text style={styles.cameraIconText}>📷</Text>
+              <View style={[
+                styles.cameraIcon,
+                sabreHasIssuedCards && {
+                  width: width * 0.055,
+                  height: width * 0.055,
+                  borderRadius: width * 0.0275,
+                  bottom: -width * 0.005,
+                  right: -width * 0.005,
+                }
+              ]}>
+                <Text style={[styles.cameraIconText, sabreHasIssuedCards && { fontSize: width * 0.028 }]}>📷</Text>
               </View>
               )}
             </TouchableOpacity>
@@ -8852,6 +8998,7 @@ export default function RemoteScreen() {
                 styles.fencerName, 
                 {color: 'black'},
                 (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                sabreHasIssuedCards && { marginBottom: sabreNameMarginBottom },
                 (toggleCardPosition === 'right' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
                   : getNameByPosition('right') === 'Tap to add name') && {
@@ -8869,15 +9016,16 @@ export default function RemoteScreen() {
                 : getDisplayName(getNameByPosition('right'))}
             </Text>
           </TouchableOpacity>
-	          <Text style={[
+          <Text style={[
               styles.fencerScore,
               { color: 'black' },
               (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              sabreHasIssuedCards && { fontSize: sabreScoreFontSize, marginBottom: sabreScoreMarginBottom },
             ]}>
               {getScoreByPosition('right').toString().padStart(2, '0')}
             </Text>
           
-          <View style={styles.scoreControls}>
+          <View style={[styles.scoreControls, sabreHasIssuedCards && { gap: sabreScoreControlsGap }]}>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
               shadowColor: '#000',
@@ -8887,8 +9035,12 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
+            }, sabreHasIssuedCards && {
+              width: sabreScoreButtonSize,
+              height: sabreScoreButtonSize,
+              borderRadius: sabreScoreButtonRadius,
             }]} onPress={() => decrementScore(getEntityAtPosition('right'))}>
-              <Ionicons name="remove" size={34} color="black" />
+              <Ionicons name="remove" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
               backgroundColor: 'rgb(255,255,255)',
@@ -8899,8 +9051,12 @@ export default function RemoteScreen() {
               elevation: 6,
               borderWidth: 2,
               borderColor: 'rgba(0,0,0,0.1)'
+            }, sabreHasIssuedCards && {
+              width: sabreScoreButtonSize,
+              height: sabreScoreButtonSize,
+              borderRadius: sabreScoreButtonRadius,
             }]} onPress={() => incrementScore(getEntityAtPosition('right'))}>
-              <Ionicons name="add" size={34} color="black" />
+              <Ionicons name="add" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
           </View>
         </View>
@@ -8920,14 +9076,17 @@ export default function RemoteScreen() {
 		        ]}
 		      >
 		        {/* Bottom Controls */}
-		        <View style={[
-		          styles.bottomControls,
-		          // Foil/Epee: compact + higher when timer-ready so play button has room
-		          isNonSabreTimerReady ? {
-		            marginBottom: hasIssuedCards ? timerReadyBottomControlsGap : timerReadyBottomControlsGapNoCards, // Slight extra space when no cards
-		            gap: width * 0.03, // Slightly tighter
-		          } : {}
-		        ]}>
+        <View style={[
+          styles.bottomControls,
+          // Foil/Epee: compact + higher when timer-ready so play button has room
+          isNonSabreTimerReady ? {
+            marginBottom: hasIssuedCards ? timerReadyBottomControlsGap : timerReadyBottomControlsGapNoCards, // Slight extra space when no cards
+            gap: width * 0.03, // Slightly tighter
+          } : {},
+          isSabre ? {
+            marginTop: -(height * 0.006),
+          } : {}
+        ]}>
 		          <View style={[
 		            styles.decorativeCards,
 		            isNonSabreTimerReady ? {
@@ -8963,14 +9122,14 @@ export default function RemoteScreen() {
 		              )}
 		            </TouchableOpacity>
 		          </View>
-		          <TouchableOpacity
-		            style={[
-		              styles.assignPriorityButton, 
-		              {
-		                backgroundColor: (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-		                  Colors.yellow.accent :
-		                  hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
-		              },
+          <TouchableOpacity
+            style={[
+              styles.assignPriorityButton, 
+              {
+                backgroundColor: canAssignPriority
+                  ? Colors.yellow.accent
+                  : hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
+              },
 		              // Slightly smaller in timer-ready state to free space
 		              isNonSabreTimerReady ? {
 		                paddingHorizontal: width * 0.024,
@@ -8980,26 +9139,25 @@ export default function RemoteScreen() {
 		              !hasMatchStarted && {
 		                opacity: 0.6
 		              }
-		            ]}
-		            onPress={
-		              hasMatchStarted ? (
-		                (timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-		                  () => setShowPriorityPopup(true) :
-		                  (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
-		              ) : undefined
-		            }
-		            disabled={!hasMatchStarted}
-		          >
-		            <Text style={styles.assignPriorityIcon}>
-		              {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ? '🎲' : '🏥'}
-		            </Text>
-		            <Text style={styles.assignPriorityText}>
-		              {(timeRemaining === 0 && scores.fencerA === scores.fencerB) ?
-		                'Assign Priority' :
-		                (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')
-		              }
-		            </Text>
-		          </TouchableOpacity>
+            ]}
+            onPress={
+              hasMatchStarted ? (
+                canAssignPriority
+                  ? () => setShowPriorityPopup(true)
+                  : (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
+              ) : undefined
+            }
+            disabled={!hasMatchStarted}
+          >
+            <Text style={styles.assignPriorityIcon}>
+              {canAssignPriority ? '🎲' : '🏥'}
+            </Text>
+            <Text style={styles.assignPriorityText}>
+              {canAssignPriority
+                ? 'Assign Priority'
+                : (isInjuryTimer ? 'Skip Injury' : 'Injury Timer')}
+            </Text>
+          </TouchableOpacity>
 		          <View style={[
 		            styles.decorativeCards,
 		            isNonSabreTimerReady ? {
@@ -9037,29 +9195,30 @@ export default function RemoteScreen() {
 		          </View>
 		        </View>
 
-		        {/* Play, Reset, and Complete Match Controls - REBUILT */}
-		        <View style={[
-			          {
-			            flexDirection: 'column',
-			            alignItems: 'center',
-			            justifyContent: 'center',
-			            width: '100%',
-		            marginVertical: height * 0.012,
-		            marginTop: height * 0.006,
-		            paddingHorizontal: width * 0.04,
-		            backgroundColor: 'transparent',
-		            borderRadius: width * 0.02,
-		            gap: height * 0.012, // Reduced gap between elements
-		            marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
-			          },
-			          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
-			          isNonSabreTimerReady && {
-			            marginBottom: 0,
-			            marginTop: timerReadyPlayBlockMarginTop,
-			            marginVertical: timerReadyPlayBlockMarginVertical,
-			            gap: timerReadyPlayBlockGap,
-			          },
-			        ]}>
+        {/* Play, Reset, and Complete Match Controls - REBUILT */}
+        {selectedWeapon !== 'sabre' && (
+        <View style={[
+          {
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            marginVertical: height * 0.012,
+            marginTop: height * 0.006,
+            paddingHorizontal: width * 0.04,
+            backgroundColor: 'transparent',
+            borderRadius: width * 0.02,
+            gap: height * 0.012, // Reduced gap between elements
+            marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
+          },
+          // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
+          isNonSabreTimerReady && {
+            marginBottom: 0,
+            marginTop: timerReadyPlayBlockMarginTop,
+            marginVertical: timerReadyPlayBlockMarginVertical,
+            gap: timerReadyPlayBlockGap,
+          },
+        ]}>
         
         {/* Play and Reset Row */}
         <View style={{
@@ -9166,9 +9325,10 @@ export default function RemoteScreen() {
             </TouchableOpacity>
           )}
         </View>
+        </View>
+        )}
 
 	      </View>
-	    </View>
 
 	      {/* Edit Time Popup */}
       {showEditPopup && (
@@ -9516,7 +9676,7 @@ export default function RemoteScreen() {
       )}
 
       {/* Priority Assignment Popup */}
-      {showPriorityPopup && (
+      {showPriorityPopup && !isSabre && (
         <View style={styles.popupOverlay}>
           <View style={{ flex: 1, justifyContent: 'center' }}>
             <View style={styles.popupContainer}>

@@ -48,27 +48,10 @@ export default function MatchSummaryScreen() {
   const [completedGoalId, setCompletedGoalId] = useState<string | null>(null);
   const [showNewGoalPrompt, setShowNewGoalPrompt] = useState(false);
   const [matchType, setMatchType] = useState<'training' | 'competition'>('training');
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [promptFencer1Name, setPromptFencer1Name] = useState('');
   const [promptFencer2Name, setPromptFencer2Name] = useState('');
   const [promptTargets, setPromptTargets] = useState({ fencer1: false, fencer2: false });
-
-  // Track keyboard height for modal positioning
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const keyboardShow = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates?.height ?? 0);
-    });
-    const keyboardHide = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
-    });
-    return () => {
-      keyboardShow.remove();
-      keyboardHide.remove();
-    };
-  }, []);
 
   // Track screen view
   useFocusEffect(
@@ -1257,14 +1240,9 @@ export default function MatchSummaryScreen() {
           onPress={() => Keyboard.dismiss()}
         >
           <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior="padding"
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
-            style={{ 
-              flex: 1, 
-              justifyContent: keyboardHeight > 0 ? 'flex-end' : 'center',
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 40 : 0,
-              marginTop: Platform.OS === 'android' && keyboardHeight === 0 ? height * 0.15 : 0
-            }}
+            style={{ flex: 1, justifyContent: 'center' }}
           >
             <TouchableOpacity activeOpacity={1}>
               <View style={styles.modalContainer}>
@@ -1327,14 +1305,9 @@ export default function MatchSummaryScreen() {
           onPress={() => Keyboard.dismiss()}
         >
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior="padding"
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
-            style={{
-              flex: 1,
-              justifyContent: keyboardHeight > 0 ? 'flex-end' : 'center',
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 40 : 0,
-              marginTop: Platform.OS === 'android' && keyboardHeight === 0 ? height * 0.15 : 0,
-            }}
+            style={{ flex: 1, justifyContent: 'center' }}
           >
             <TouchableOpacity activeOpacity={1}>
               <View style={styles.modalContainer}>

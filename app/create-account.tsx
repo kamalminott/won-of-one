@@ -1,4 +1,5 @@
 import { BackButton } from '@/components/BackButton';
+import GoogleIcon from '@/components/GoogleIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
@@ -153,7 +154,10 @@ export default function CreateAccountScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={styles.container}
+      edges={Platform.OS === 'ios' ? ['left', 'right', 'bottom'] : ['top', 'left', 'right', 'bottom']}
+    >
       <ExpoStatusBar style="light" />
       
       {/* Overlay to color the OS status bar area without affecting layout */}
@@ -162,7 +166,9 @@ export default function CreateAccountScreen() {
       {/* Header Background */}
       <View style={[styles.headerBackground, { 
         paddingHorizontal: width * 0.04,
-        paddingTop: Math.max(insets.top, height * 0.01),
+        paddingTop: Platform.OS === 'ios'
+          ? Math.max(insets.top * 0.4, height * 0.004)
+          : Math.max(insets.top, height * 0.01),
         paddingBottom: height * 0.015,
         flexDirection: 'row',
         alignItems: 'center',
@@ -178,16 +184,16 @@ export default function CreateAccountScreen() {
             }}
           />
         </View>
-        
-        {/* Title - Absolutely centered */}
-        <View style={{ flex: 1, position: 'absolute', left: 0, right: 0, alignItems: 'center' }}>
-          <Text style={[styles.headerTitle, { 
+
+        {/* Title - Centered within header */}
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, {
             fontSize: width * 0.045,
             fontWeight: '600',
             color: '#FFFFFF',
           }]}>Create an Account</Text>
         </View>
-        
+
         {/* Spacer to balance the layout */}
         <View style={{ width: width * 0.08 }} />
       </View>
@@ -439,13 +445,7 @@ export default function CreateAccountScreen() {
               }
             }}
           >
-            <View style={[styles.googleIcon, { 
-              width: width * 0.045, 
-              height: width * 0.045, 
-              borderRadius: width * 0.01 
-            }]}>
-              <Text style={[styles.googleG, { fontSize: width * 0.03 }]}>G</Text>
-            </View>
+            <GoogleIcon size={width * 0.045} />
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -623,15 +623,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 30,
     elevation: 8,
-  },
-  googleIcon: {
-    backgroundColor: '#4285F4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleG: {
-    color: 'white',
-    fontWeight: 'bold',
   },
   signInContainer: {
     alignItems: 'center',
