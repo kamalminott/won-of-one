@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import GoogleIcon from '@/components/GoogleIcon';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -316,13 +317,7 @@ export default function LoginScreen() {
                   }
                 }}
               >
-                <View style={[styles.googleIcon, { 
-                  width: width * 0.045, 
-                  height: width * 0.045, 
-                  borderRadius: width * 0.01 
-                }]}>
-                  <Text style={[styles.googleG, { fontSize: width * 0.03 }]}>G</Text>
-                </View>
+                <GoogleIcon size={width * 0.045} />
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -491,15 +486,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 30,
     elevation: 8,
-  },
-  googleIcon: {
-    backgroundColor: '#4285F4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleG: {
-    color: 'white',
-    fontWeight: 'bold',
   },
   signUpContainer: {
     alignItems: 'center',

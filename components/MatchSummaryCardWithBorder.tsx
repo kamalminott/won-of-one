@@ -18,6 +18,19 @@ const getInitials = (name: string | undefined): string => {
   }
 };
 
+const formatMatchType = (value?: string): string => {
+  const trimmed = value?.trim();
+  if (!trimmed) return '';
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'training' || normalized === 'practice' || normalized === 'sparring') {
+    return 'Training';
+  }
+  if (normalized === 'competition' || normalized === 'comp') {
+    return 'Competition';
+  }
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+};
+
 interface MatchSummaryCardProps {
   leftPlayerName: string;
   leftPlayerImage?: string;
@@ -331,7 +344,7 @@ export default function MatchSummaryCardWithBorder({
               <Text style={styles.score}>{youScore} - {opponentScore}</Text>
               <Text style={styles.duration}>Duration: {duration}</Text>
               <View style={styles.matchTypeBadge}>
-                <Text style={styles.matchTypeText}>{matchType}</Text>
+                <Text style={styles.matchTypeText}>{formatMatchType(matchType)}</Text>
               </View>
             </View>
           </View>
