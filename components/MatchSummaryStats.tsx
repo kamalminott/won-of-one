@@ -30,6 +30,7 @@ interface MatchSummaryStatsProps {
   matchType?: 'training' | 'competition';
   onMatchTypeChange?: (type: 'training' | 'competition') => void;
   showMatchTypeSelector?: boolean;
+  onEditOpponentName?: () => void;
 }
 
 export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({ 
@@ -37,7 +38,8 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
   customStyle = {}, 
   matchType = 'training',
   onMatchTypeChange,
-  showMatchTypeSelector = false 
+  showMatchTypeSelector = false,
+  onEditOpponentName
 }) => {
   const { width, height } = useWindowDimensions();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
@@ -208,15 +210,25 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
       textAlign: 'center',
     },
     playerName: {
-      position: 'absolute',
-      bottom: 0,
-      left: -10,
-      right: -10,
       color: '#FFFFFF',
       fontSize: 14,
       fontWeight: '600',
       textAlign: 'center',
       fontFamily: 'System',
+      flexShrink: 1,
+    },
+    playerNameRow: {
+      position: 'absolute',
+      bottom: 0,
+      left: -10,
+      right: -10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    editIcon: {
+      marginLeft: 4,
     },
     scoreContainer: {
       position: 'absolute',
@@ -354,6 +366,7 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
   const rightIsUser = !!match.isFencer2User;
   const leftImage = leftIsUser ? match.userImage : match.opponentImage;
   const rightImage = rightIsUser ? match.userImage : match.opponentImage;
+  const opponentSide = leftIsUser ? 'right' : rightIsUser ? 'left' : 'right';
   
   console.log('🔍 [MATCH SUMMARY STATS] Header values:', {
     leftName,
@@ -398,17 +411,37 @@ export const MatchSummaryStats: React.FC<MatchSummaryStatsProps> = ({
         {/* Left Player */}
         <View style={[styles.playerContainer, styles.leftPlayer]}>
           {renderProfileImage(leftImage, leftName, leftIsUser)}
-          <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
-            {leftName.split(' ')[0]}
-          </Text>
+          <TouchableOpacity
+            style={styles.playerNameRow}
+            onPress={opponentSide === 'left' ? onEditOpponentName : undefined}
+            activeOpacity={opponentSide === 'left' && onEditOpponentName ? 0.7 : 1}
+            disabled={opponentSide !== 'left' || !onEditOpponentName}
+          >
+            <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
+              {leftName.split(' ')[0]}
+            </Text>
+            {opponentSide === 'left' && onEditOpponentName && (
+              <Ionicons name="pencil" size={12} color="rgba(255, 255, 255, 0.85)" style={styles.editIcon} />
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Right Player */}
         <View style={[styles.playerContainer, styles.rightPlayer]}>
           {renderProfileImage(rightImage, rightName, rightIsUser)}
-          <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
-            {rightName.split(' ')[0]}
-          </Text>
+          <TouchableOpacity
+            style={styles.playerNameRow}
+            onPress={opponentSide === 'right' ? onEditOpponentName : undefined}
+            activeOpacity={opponentSide === 'right' && onEditOpponentName ? 0.7 : 1}
+            disabled={opponentSide !== 'right' || !onEditOpponentName}
+          >
+            <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
+              {rightName.split(' ')[0]}
+            </Text>
+            {opponentSide === 'right' && onEditOpponentName && (
+              <Ionicons name="pencil" size={12} color="rgba(255, 255, 255, 0.85)" style={styles.editIcon} />
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Score */}

@@ -52,6 +52,9 @@ export default function MatchSummaryScreen() {
   const [promptFencer1Name, setPromptFencer1Name] = useState('');
   const [promptFencer2Name, setPromptFencer2Name] = useState('');
   const [promptTargets, setPromptTargets] = useState({ fencer1: false, fencer2: false });
+  const [showOpponentNameModal, setShowOpponentNameModal] = useState(false);
+  const [opponentNameInput, setOpponentNameInput] = useState('');
+  const [opponentNameTarget, setOpponentNameTarget] = useState<'fencer1' | 'fencer2'>('fencer2');
 
   // Track screen view
   useFocusEffect(
@@ -634,6 +637,61 @@ export default function MatchSummaryScreen() {
     });
   };
 
+  const openOpponentNameModal = () => {
+    if (!match) {
+      return;
+    }
+    const target = isFencer1User ? 'fencer2' : isFencer2User ? 'fencer1' : 'fencer2';
+    const currentName = target === 'fencer1' ? match.fencer_1_name : match.fencer_2_name;
+    setOpponentNameTarget(target);
+    setOpponentNameInput(currentName || '');
+    setShowOpponentNameModal(true);
+  };
+
+  const handleSaveOpponentName = async () => {
+    if (!match) {
+      return;
+    }
+    const trimmed = opponentNameInput.trim();
+    if (!trimmed) {
+      Alert.alert('Name required', 'Please enter the opponent name.');
+      return;
+    }
+
+    const nextFencer1Name = opponentNameTarget === 'fencer1' ? trimmed : (match.fencer_1_name || '');
+    const nextFencer2Name = opponentNameTarget === 'fencer2' ? trimmed : (match.fencer_2_name || '');
+    const isOfflineMatch = params.isOffline === 'true' || (params.matchId as string)?.startsWith('offline_');
+
+    try {
+      if (!isOfflineMatch && match.match_id && session?.access_token) {
+        await matchService.updateMatch(
+          match.match_id,
+          {
+            fencer_1_name: nextFencer1Name,
+            fencer_2_name: nextFencer2Name,
+          },
+          session?.access_token
+        );
+        await matchService.updateMatchEventNamesIfPlaceholder(
+          match.match_id,
+          nextFencer1Name,
+          nextFencer2Name,
+          session?.access_token
+        );
+      }
+
+      setMatch(prev => prev ? {
+        ...prev,
+        fencer_1_name: nextFencer1Name,
+        fencer_2_name: nextFencer2Name,
+      } : prev);
+      setShowOpponentNameModal(false);
+    } catch (error) {
+      console.error('Error updating opponent name:', error);
+      Alert.alert('Error', 'Failed to update opponent name. Please try again.');
+    }
+  };
+
   const handleNotesPress = () => {
     setShowNotesModal(true);
   };
@@ -909,6 +967,11 @@ export default function MatchSummaryScreen() {
   const namePromptTitle = hasKnownUser && (promptTargets.fencer1 !== promptTargets.fencer2)
     ? 'Add opponent name?'
     : 'Add fencer names?';
+  const opponentEditLabel = hasKnownUser
+    ? 'Opponent name'
+    : opponentNameTarget === 'fencer1'
+      ? 'Fencer 1 name'
+      : 'Fencer 2 name';
   const getPromptLabel = (target: 'fencer1' | 'fencer2') => {
     if (hasKnownUser) {
       if (target === 'fencer1' && isFencer1User) return 'Your name';
@@ -1199,6 +1262,7 @@ export default function MatchSummaryScreen() {
             matchType={matchType}
             onMatchTypeChange={setMatchType}
             showMatchTypeSelector={!!user}
+            onEditOpponentName={openOpponentNameModal}
           />
 
         {/* Match Summary Card */}
@@ -1281,6 +1345,73 @@ export default function MatchSummaryScreen() {
                         <Text style={styles.cancelButtonText}>Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={handleSaveNotes} style={styles.saveButton}>
+                        <Text style={styles.saveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </LinearGradient>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Edit Opponent Name Modal */}
+      <Modal
+        visible={showOpponentNameModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowOpponentNameModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => Keyboard.dismiss()}
+        >
+          <KeyboardAvoidingView
+            behavior="padding"
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
+            style={{ flex: 1, justifyContent: 'center' }}
+          >
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.modalContainer}>
+                <LinearGradient
+                  colors={Colors.glassyGradient.colors}
+                  style={styles.modalContent}
+                  start={Colors.glassyGradient.start}
+                  end={Colors.glassyGradient.end}
+                >
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Edit Opponent Name</Text>
+                    <TouchableOpacity onPress={() => setShowOpponentNameModal(false)} style={styles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.namePromptBody}>
+                    <View style={styles.namePromptField}>
+                      <Text style={styles.namePromptLabel}>{opponentEditLabel}</Text>
+                      <View style={styles.namePromptInputContainer}>
+                        <TextInput
+                          style={styles.namePromptInput}
+                          value={opponentNameInput}
+                          onChangeText={setOpponentNameInput}
+                          placeholder="Enter name"
+                          placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                          autoCapitalize="words"
+                          returnKeyType="done"
+                          autoFocus
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.modalFooter}>
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity onPress={() => setShowOpponentNameModal(false)} style={styles.cancelButton}>
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleSaveOpponentName} style={styles.saveButton}>
                         <Text style={styles.saveButtonText}>Save</Text>
                       </TouchableOpacity>
                     </View>

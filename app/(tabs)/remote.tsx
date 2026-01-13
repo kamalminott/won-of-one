@@ -86,6 +86,7 @@ export default function RemoteScreen() {
   const [editTimeInput, setEditTimeInput] = useState('');
   const [showResetPopup, setShowResetPopup] = useState(false);
   const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [showFinishMatchConfirm, setShowFinishMatchConfirm] = useState(false);
   // Entity-based position mapping (tracks which entity is on left/right)
   const [fencerPositions, setFencerPositions] = useState({ fencerA: 'left' as 'left' | 'right', fencerB: 'right' as 'left' | 'right' });
   const [isSwapping, setIsSwapping] = useState(false);
@@ -8218,7 +8219,7 @@ export default function RemoteScreen() {
           {hasMatchStarted && scores.fencerA + scores.fencerB > 0 && !isInjuryTimer && (
             <TouchableOpacity 
               style={styles.completeMatchCircle} 
-              onPress={completeMatch}
+              onPress={() => setShowFinishMatchConfirm(true)}
             >
               <Text style={styles.completeMatchFlag}>🏁</Text>
             </TouchableOpacity>
@@ -8790,7 +8791,11 @@ export default function RemoteScreen() {
               zIndex: 10, 
               alignSelf: 'center',
               // Move up when Epee is selected to make room for double hit button
-              bottom: selectedWeapon === 'epee' ? height * 0.18 : height * 0.08
+              bottom: selectedWeapon === 'epee'
+                ? height * 0.18
+                : selectedWeapon === 'sabre'
+                  ? height * 0.14
+                  : height * 0.08
             }
           ]}
         >
@@ -9329,6 +9334,35 @@ export default function RemoteScreen() {
         )}
 
 	      </View>
+
+      {/* Finish Match Confirmation */}
+      {showFinishMatchConfirm && (
+        <View style={styles.popupOverlay}>
+          <View style={styles.popupContainer}>
+            <Text style={styles.popupTitle}>Finish Match?</Text>
+            <Text style={styles.popupMessage}>
+              Are you sure you want to finish this match?
+            </Text>
+            <View style={styles.popupButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowFinishMatchConfirm(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={async () => {
+                  setShowFinishMatchConfirm(false);
+                  await completeMatch();
+                }}
+              >
+                <Text style={styles.saveButtonText}>Yes, finish</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
 
 	      {/* Edit Time Popup */}
       {showEditPopup && (
