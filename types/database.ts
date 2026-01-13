@@ -82,6 +82,7 @@ export interface AppUser {
   user_id: string;
   email?: string;
   name?: string;
+  profile_image_url?: string | null;
   preferred_weapon?: string;
   handedness?: string;
   created_at?: string;

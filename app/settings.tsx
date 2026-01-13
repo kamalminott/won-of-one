@@ -259,7 +259,6 @@ export default function SettingsScreen() {
       await AsyncStorage.multiRemove([
         'ongoing_match_state',
         'user_name',
-        'user_profile_image',
       ]);
 
       // Sign out via AuthContext (supabase + auth state)

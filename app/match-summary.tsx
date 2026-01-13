@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { goalService, matchService } from '@/lib/database';
 import { postgrestSelect } from '@/lib/postgrest';
+import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
 import { Match } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,7 +21,7 @@ export default function MatchSummaryScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { user, userName, profileImage, session } = useAuth();
+  const { user, userName, session } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [bestRun, setBestRun] = useState<number>(0);
   const [highestMomentum, setHighestMomentum] = useState<number>(0);
@@ -79,7 +80,9 @@ export default function MatchSummaryScreen() {
 
   const loadUserProfileImage = async () => {
     try {
-      const savedImage = await AsyncStorage.getItem('user_profile_image');
+      const savedImage =
+        (await AsyncStorage.getItem(userProfileImageStorageKey(user?.id))) ||
+        (await AsyncStorage.getItem(userProfileImageUrlStorageKey(user?.id)));
       if (savedImage) {
         setUserProfileImage(savedImage);
       }

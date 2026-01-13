@@ -76,7 +76,6 @@ export default function ProfileScreen() {
       await AsyncStorage.multiRemove([
         'ongoing_match_state',
         'user_name',
-        'user_profile_image',
       ]);
       await signOut();
       router.replace('/login');
