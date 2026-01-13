@@ -17,6 +17,7 @@ import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
+import { subscriptionService } from '@/lib/subscriptionService';
 import { SimpleGoal, SimpleMatch } from '@/types/database';
 
 const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
@@ -100,6 +101,7 @@ export default function HomeScreen() {
   } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
+  const bypassPaywallRef = useRef(false);
   const trimmedUserName = userName.trim();
   const authMetadataName = getAuthMetadataName(user)?.trim() || '';
   const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
@@ -378,42 +380,49 @@ export default function HomeScreen() {
     return () => clearTimeout(timeoutId);
   }, [user?.id, authReady, hasLoadedOnce]);
 
-  // PAYWALL DISABLED - Commented out subscription check
+  useEffect(() => {
+    if (params.bypassPaywall === 'true') {
+      bypassPaywallRef.current = true;
+      router.setParams({ bypassPaywall: undefined });
+    }
+  }, [params.bypassPaywall]);
+
   // Check subscription status and redirect to paywall if needed
-  // useEffect(() => {
-  //   const checkSubscription = async () => {
-  //     if (!user || loading) return;
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!user || loading || !authReady) return;
+      if (bypassPaywallRef.current) return;
 
-  //     try {
-  //       const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
+      try {
+        const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
         
-  //       // If user has no active subscription and no active trial, show paywall
-  //       if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
-  //         console.log('🔒 No active subscription or trial, redirecting to paywall');
-  //         router.replace('/paywall');
-  //       } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
-  //         // Check if trial has expired
-  //         const now = new Date();
-  //         const expiresAt = subscriptionInfo.expiresAt;
-  //         if (now >= expiresAt) {
-  //           console.log('⏰ Trial expired, redirecting to paywall');
-  //           router.replace('/paywall');
-  //         } else {
-  //           console.log('✅ Trial active, allowing access');
-  //         }
-  //       } else if (subscriptionInfo.isActive) {
-  //         console.log('✅ Active subscription, allowing access');
-  //       }
-  //     } catch (error) {
-  //       console.error('Error checking subscription:', error);
-  //       // On error, allow access (fail open) - you can change this to fail closed if preferred
-  //     }
-  //   };
+        // If user has no active subscription and no active trial, show paywall
+        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
+          console.log('🔒 No active subscription or trial, redirecting to paywall');
+          router.replace('/paywall');
+        } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
+          // Check if trial has expired
+          const now = new Date();
+          const expiresAt = subscriptionInfo.expiresAt;
+          if (now >= expiresAt) {
+            console.log('⏰ Trial expired, redirecting to paywall');
+            router.replace('/paywall');
+          } else {
+            console.log('✅ Trial active, allowing access');
+          }
+        } else if (subscriptionInfo.isActive) {
+          console.log('✅ Active subscription, allowing access');
+        }
+      } catch (error) {
+        console.error('Error checking subscription:', error);
+        // On error, allow access (fail open) - you can change this to fail closed if preferred
+      }
+    };
 
-  //   if (user && !loading) {
-  //     checkSubscription();
-  //   }
-  // }, [user, loading]);
+    if (user && !loading && authReady) {
+      checkSubscription();
+    }
+  }, [user, loading, authReady]);
 
   // Screen tracking and identify
   useEffect(() => {
