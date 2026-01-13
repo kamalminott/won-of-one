@@ -352,7 +352,10 @@ export const subscriptionService = {
   /**
    * Get subscription status from Supabase (faster than RevenueCat API)
    */
-  async getSubscriptionFromSupabase(userId: string): Promise<SubscriptionInfo | null> {
+  async getSubscriptionFromSupabase(
+    userId: string,
+    accessToken?: string | null
+  ): Promise<SubscriptionInfo | null> {
     try {
       const { data, error } = await postgrestSelectOne<{
         subscription_status: SubscriptionStatus;
@@ -367,7 +370,8 @@ export const subscriptionService = {
           select: '*',
           user_id: `eq.${userId}`,
           limit: 1,
-        }
+        },
+        accessToken ? { accessToken } : undefined
       );
 
       if (error || !data) {

@@ -2,8 +2,8 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "4.3.1",
-    "runtimeVersion": "4.3.1",
+    "version": "4.4.1",
+    "runtimeVersion": "4.4.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kamalminott.wonofone",
-      "buildNumber": "4.3.1",
+      "buildNumber": "4.4.1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "com.kamalminott.wonofone",
-      "versionCode": 431,
+      "versionCode": 441,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -40,6 +40,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.664197315165-v27ulprji6dusmvr76f7slgu2v3urnb7"
+        }
+      ],
       [
         "expo-splash-screen",
         {

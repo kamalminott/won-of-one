@@ -7,6 +7,7 @@ import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
+import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
 import type { MatchPeriod } from '@/types/database';
 import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
@@ -1141,7 +1142,9 @@ export default function RemoteScreen() {
     try {
       const aliceImage = await AsyncStorage.getItem('opponent_image_alice');
       const bobImage = await AsyncStorage.getItem('opponent_image_bob');
-      const userImage = await AsyncStorage.getItem('user_profile_image');
+      const userImage =
+        (await AsyncStorage.getItem(userProfileImageStorageKey(user?.id))) ||
+        (await AsyncStorage.getItem(userProfileImageUrlStorageKey(user?.id)));
       
       // console.log('Loaded images - Alice:', aliceImage, 'Bob:', bobImage, 'User:', userImage);
       
@@ -1159,7 +1162,9 @@ export default function RemoteScreen() {
   useEffect(() => {
     const loadUserProfileImage = async () => {
       try {
-        const userImage = await AsyncStorage.getItem('user_profile_image');
+        const userImage =
+          (await AsyncStorage.getItem(userProfileImageStorageKey(user?.id))) ||
+          (await AsyncStorage.getItem(userProfileImageUrlStorageKey(user?.id)));
         if (userImage) {
           setUserProfileImage(userImage);
         }

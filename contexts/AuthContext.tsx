@@ -1,5 +1,8 @@
 import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
+import { analytics } from '@/lib/analytics';
+import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
+import type { AppUser } from '@/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session, User } from '@supabase/supabase-js';
 import { router } from 'expo-router';
@@ -7,6 +10,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import * as Linking from 'expo-linking';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
+import * as FileSystem from 'expo-file-system';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import { setCachedAuthSession } from '@/lib/authSessionCache';
@@ -92,9 +96,98 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const sessionPersistInFlightRef = useRef(false);
   const lastAuthEventRef = useRef<string | null>(null);
   const manualRetryInFlightRef = useRef(false);
+  const googleSignInConfiguredRef = useRef(false);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
+  };
+
+  const PROFILE_IMAGE_BUCKET = 'profile-images';
+  const fileSystemDirectories = FileSystem as unknown as {
+    cacheDirectory?: string | null;
+    documentDirectory?: string | null;
+  };
+  const PROFILE_IMAGE_CACHE_DIR = `${fileSystemDirectories.cacheDirectory || fileSystemDirectories.documentDirectory || ''}profile-images/`;
+
+  const getGoogleSignInModule = () => {
+    try {
+      return require('@react-native-google-signin/google-signin');
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const ensureGoogleSignInConfigured = () => {
+    const googleModule = getGoogleSignInModule();
+    if (!googleModule?.GoogleSignin) {
+      return null;
+    }
+
+    if (googleSignInConfiguredRef.current) {
+      return googleModule;
+    }
+
+    const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+    const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+
+    if (!webClientId && !iosClientId) {
+      console.warn('⚠️ Google Sign-In client IDs missing; check EXPO_PUBLIC_GOOGLE_* env vars');
+    }
+
+    googleModule.GoogleSignin.configure({
+      webClientId: webClientId || undefined,
+      iosClientId: iosClientId || undefined,
+      offlineAccess: false,
+      forceCodeForRefreshToken: false,
+    });
+
+    googleSignInConfiguredRef.current = true;
+    return googleModule;
+  };
+
+  const ensureProfileImageCacheDir = async () => {
+    try {
+      await FileSystem.makeDirectoryAsync(PROFILE_IMAGE_CACHE_DIR, { intermediates: true });
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') {
+        console.warn('⚠️ Failed to create profile image cache directory:', error);
+      }
+    }
+  };
+
+  const getCachedProfileImagePath = (userId: string) => `${PROFILE_IMAGE_CACHE_DIR}${userId}.jpg`;
+
+  const cacheProfileImage = async (imageUrl: string, userId: string) => {
+    try {
+      await ensureProfileImageCacheDir();
+      const localPath = getCachedProfileImagePath(userId);
+      await FileSystem.downloadAsync(imageUrl, localPath);
+      await AsyncStorage.setItem(userProfileImageStorageKey(userId), localPath);
+      return localPath;
+    } catch (error) {
+      console.warn('⚠️ Failed to cache profile image locally:', error);
+      return null;
+    }
+  };
+
+  const cacheLocalProfileImage = async (imageUri: string, userId: string) => {
+    try {
+      await ensureProfileImageCacheDir();
+      const localPath = getCachedProfileImagePath(userId);
+      await FileSystem.copyAsync({ from: imageUri, to: localPath });
+      await AsyncStorage.setItem(userProfileImageStorageKey(userId), localPath);
+      return localPath;
+    } catch (error) {
+      console.warn('⚠️ Failed to copy profile image locally:', error);
+      return null;
+    }
+  };
+
+  const getStoragePathFromUrl = (url: string) => {
+    const marker = `/storage/v1/object/public/${PROFILE_IMAGE_BUCKET}/`;
+    const index = url.indexOf(marker);
+    if (index === -1) return null;
+    return url.slice(index + marker.length);
   };
 
   const getSupabaseStorageKey = () => {
@@ -647,34 +740,195 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Load profile image from AsyncStorage
+  // Load profile image from local cache, then refresh from Supabase if needed
   const loadProfileImage = async () => {
+    const userId = user?.id || null;
+    const storageKey = userProfileImageStorageKey(userId);
+    const urlKey = userProfileImageUrlStorageKey(userId);
+
     try {
-      const savedImage = await AsyncStorage.getItem('user_profile_image');
-      if (savedImage) {
-        setProfileImageState(savedImage);
-      } else {
+      let cachedPath = await AsyncStorage.getItem(storageKey);
+      if (cachedPath) {
+        const info = await FileSystem.getInfoAsync(cachedPath);
+        if (!info.exists) {
+          cachedPath = null;
+        }
+      }
+
+      if (!cachedPath && userId) {
+        const legacyImage = await AsyncStorage.getItem('user_profile_image');
+        if (legacyImage) {
+          cachedPath = legacyImage;
+          await AsyncStorage.setItem(storageKey, legacyImage);
+          await AsyncStorage.removeItem('user_profile_image');
+        }
+      }
+
+      if (!userId) {
+        setProfileImageState(cachedPath || null);
+        return;
+      }
+
+      if (cachedPath) {
+        setProfileImageState(cachedPath);
+      }
+
+      let cachedUrl = await AsyncStorage.getItem(urlKey);
+      let remoteUrl = cachedUrl || null;
+      const token = session?.access_token ?? null;
+      let userData: AppUser | null = null;
+
+      if (token) {
+        userData = await userService.getUserById(userId, token);
+        if (userData?.profile_image_url) {
+          remoteUrl = userData.profile_image_url;
+        } else if (userData && !userData.profile_image_url) {
+          remoteUrl = null;
+        }
+      }
+
+      if (token && userData && !userData.profile_image_url) {
+        await AsyncStorage.multiRemove([storageKey, urlKey]);
+        if (cachedPath) {
+          try {
+            await FileSystem.deleteAsync(cachedPath, { idempotent: true });
+          } catch (error) {
+            console.warn('⚠️ Failed to remove cached profile image file:', error);
+          }
+        }
         setProfileImageState(null);
+        return;
+      }
+
+      if (remoteUrl && remoteUrl !== cachedUrl) {
+        await AsyncStorage.setItem(urlKey, remoteUrl);
+      }
+
+      if (!remoteUrl) {
+        if (!cachedPath) {
+          setProfileImageState(null);
+        }
+        return;
+      }
+
+      if (!cachedPath || remoteUrl !== cachedUrl) {
+        if (!cachedPath) {
+          setProfileImageState(remoteUrl);
+        }
+        const localPath = await cacheProfileImage(remoteUrl, userId);
+        if (localPath) {
+          setProfileImageState(localPath);
+        }
       }
     } catch (error) {
       console.error('Error loading profile image:', error);
-      setProfileImageState(null);
+      if (!userId) {
+        setProfileImageState(null);
+      }
     }
   };
 
-  // Save profile image to AsyncStorage
+  // Save profile image to Supabase Storage + app_user table, cache locally
   const setProfileImage = async (imageUri: string | null) => {
+    const userId = user?.id || null;
+    const storageKey = userProfileImageStorageKey(userId);
+    const urlKey = userProfileImageUrlStorageKey(userId);
+
     try {
-      setProfileImageState(imageUri);
-      if (imageUri) {
-        await AsyncStorage.setItem('user_profile_image', imageUri);
-        console.log('✅ Profile image saved to AsyncStorage');
-      } else {
-        await AsyncStorage.removeItem('user_profile_image');
-        console.log('✅ Profile image removed from AsyncStorage');
+      if (!userId) {
+        setProfileImageState(imageUri);
+        if (imageUri) {
+          await AsyncStorage.setItem(storageKey, imageUri);
+        } else {
+          await AsyncStorage.removeItem(storageKey);
+        }
+        return;
       }
+
+      const token = session?.access_token ?? null;
+      if (!token) {
+        throw new Error('Session missing. Please log in again.');
+      }
+
+      if (!imageUri) {
+        const existingUrl = (await AsyncStorage.getItem(urlKey)) || null;
+        const cachedPath = await AsyncStorage.getItem(storageKey);
+        if (existingUrl) {
+          const path = getStoragePathFromUrl(existingUrl);
+          if (path) {
+            await supabase.storage.from(PROFILE_IMAGE_BUCKET).remove([path]);
+          }
+        }
+
+        await userService.updateUser(userId, { profile_image_url: null }, token);
+        if (cachedPath) {
+          try {
+            await FileSystem.deleteAsync(cachedPath, { idempotent: true });
+          } catch (error) {
+            console.warn('⚠️ Failed to remove cached profile image file:', error);
+          }
+        }
+        await AsyncStorage.multiRemove([storageKey, urlKey]);
+        setProfileImageState(null);
+        console.log('✅ Profile image removed from Supabase + cache');
+        return;
+      }
+
+      setProfileImageState(imageUri);
+
+      const previousUrl =
+        (await AsyncStorage.getItem(urlKey)) ||
+        (await userService.getUserById(userId, token))?.profile_image_url ||
+        null;
+
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const sanitizedUri = imageUri.split('?')[0];
+      const extensionMatch = sanitizedUri.match(/\.([a-zA-Z0-9]+)$/);
+      const mimeExtension = blob.type && blob.type.includes('/') ? blob.type.split('/')[1] : null;
+      const extension = (extensionMatch?.[1] || mimeExtension || 'jpg').toLowerCase();
+      const filePath = `${userId}/${Date.now()}.${extension}`;
+      const contentType = blob.type && blob.type.includes('/') ? blob.type : `image/${extension}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(PROFILE_IMAGE_BUCKET)
+        .upload(filePath, blob, {
+          contentType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from(PROFILE_IMAGE_BUCKET)
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicData?.publicUrl;
+      if (!publicUrl) {
+        throw new Error('Failed to get profile image URL.');
+      }
+
+      await userService.updateUser(userId, { profile_image_url: publicUrl }, token);
+      await AsyncStorage.setItem(urlKey, publicUrl);
+
+      const localPath = await cacheLocalProfileImage(imageUri, userId);
+      if (localPath) {
+        setProfileImageState(localPath);
+      }
+
+      if (previousUrl && previousUrl !== publicUrl) {
+        const oldPath = getStoragePathFromUrl(previousUrl);
+        if (oldPath) {
+          await supabase.storage.from(PROFILE_IMAGE_BUCKET).remove([oldPath]);
+        }
+      }
+
+      console.log('✅ Profile image uploaded to Supabase');
     } catch (error) {
       console.error('Error saving profile image:', error);
+      throw error;
     }
   };
 
@@ -1026,6 +1280,54 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [user]);
 
   useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    const trimmedName = (userName || '').trim();
+    const name =
+      trimmedName && trimmedName !== 'User' && trimmedName !== 'Guest User'
+        ? trimmedName
+        : undefined;
+    const email = user.email || undefined;
+    const baseProps = {
+      ...(name ? { name } : {}),
+      ...(email ? { email } : {}),
+    };
+
+    const identifyWithProps = (extraProps?: Record<string, string>) => {
+      const mergedProps = { ...baseProps, ...(extraProps || {}) };
+      analytics.identify(
+        user.id,
+        Object.keys(mergedProps).length ? mergedProps : undefined
+      );
+    };
+
+    identifyWithProps();
+
+    const loadSubscriptionStatus = async () => {
+      try {
+        const { subscriptionService } = await import('@/lib/subscriptionService');
+        const subscriptionInfo =
+          (session?.access_token
+            ? await subscriptionService.getSubscriptionFromSupabase(
+                user.id,
+                session.access_token
+              )
+            : null) || (await subscriptionService.getSubscriptionInfo());
+        if (cancelled || !subscriptionInfo?.status) return;
+        identifyWithProps({ subscription_status: subscriptionInfo.status });
+      } catch (error) {
+        console.warn('⚠️ Failed to load subscription status for PostHog:', error);
+      }
+    };
+
+    loadSubscriptionStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.email, userName, session?.access_token]);
+
+  useEffect(() => {
     if (!user?.id || session?.access_token || isPasswordRecoveryRef.current) {
       return;
     }
@@ -1216,22 +1518,114 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return { error };
   };
 
-  // Sign in with Google
+  // Sign in with Google (native when available, OAuth fallback otherwise)
   const signInWithGoogle = async () => {
+    let googleModule: any = null;
     try {
       console.log('🔵 Starting Google sign in...');
-      const { error } = await startOAuthFlow('google');
+
+      if (Platform.OS === 'web') {
+        return await startOAuthFlow('google');
+      }
+
+      googleModule = ensureGoogleSignInConfigured();
+      if (!googleModule?.GoogleSignin) {
+        console.warn('⚠️ Google Sign-In native module not available, falling back to OAuth');
+        return await startOAuthFlow('google');
+      }
+
+      const { GoogleSignin, statusCodes } = googleModule;
+      if (Platform.OS === 'android') {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      }
+
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo?.idToken;
+
+      if (!idToken) {
+        return { error: { message: 'Google sign in failed: missing idToken' } };
+      }
+
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: idToken,
+      });
 
       if (error) {
         console.error('❌ Google sign in error:', error);
+        await logAuthHydrationStep('google_sign_in_error', null, {
+          provider: 'google',
+          error: error.message || 'unknown_error',
+        });
         return { error };
       }
 
-      console.log('✅ Google OAuth initiated, redirecting...');
-      // The OAuth flow will redirect back to the app
-      // The auth state change listener will handle the session
+      if (data.session) {
+        await logAuthHydrationStep('google_session_received', data.session, { provider: 'google' });
+        const persistedSession = await persistAuthSession(data.session, 'google');
+        setSession(persistedSession);
+        setUser(persistedSession.user ?? null);
+        setCachedAuthSession(persistedSession, 'SIGNED_IN');
+        await syncSessionFromSupabase('google_post_sign_in');
+      }
+
+      if (data.user) {
+        const accessToken = data.session?.access_token;
+        const existingUser = await userService.getUserById(data.user.id, accessToken);
+        const profile = userInfo?.user;
+        const email = profile?.email || data.user.email || '';
+        const fullName = profile?.name || '';
+        const firstName = profile?.givenName || (fullName ? fullName.split(' ')[0] : '');
+        const lastName = profile?.familyName || (fullName ? fullName.split(' ').slice(1).join(' ') : '');
+
+        if (!existingUser) {
+          if (firstName || lastName) {
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              firstName || undefined,
+              lastName || undefined,
+              undefined,
+              accessToken
+            );
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+              console.log('✅ New user created from Google sign in:', createdUser.name);
+            }
+          } else {
+            const createdUser = await userService.createUser(
+              data.user.id,
+              email,
+              undefined,
+              undefined,
+              { fallbackEmailForName: null },
+              accessToken
+            );
+            if (createdUser?.name) {
+              await setUserName(createdUser.name);
+            }
+            console.log('✅ New Google user created without name');
+          }
+        } else if (existingUser.name) {
+          await setUserName(existingUser.name);
+          console.log('✅ User name synced from database:', existingUser.name);
+        }
+      }
+
       return { error: null };
     } catch (error: any) {
+      const statusCodes = googleModule?.statusCodes;
+      if (error?.code === statusCodes?.SIGN_IN_CANCELLED) {
+        console.log('⚠️ Google sign in was canceled by user');
+        return { error: { message: 'Sign in was canceled' } };
+      }
+      if (error?.code === statusCodes?.IN_PROGRESS) {
+        return { error: { message: 'Google sign in already in progress' } };
+      }
+      if (error?.code === statusCodes?.PLAY_SERVICES_NOT_AVAILABLE) {
+        return { error: { message: 'Google Play Services not available' } };
+      }
+
       console.error('❌ Google sign in exception:', error);
       return { error };
     }
@@ -1364,25 +1758,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Sign up with Google
+  // Sign up with Google (same flow as sign in)
   const signUpWithGoogle = async () => {
-    try {
-      console.log('🔵 Starting Google sign up...');
-      const { error } = await startOAuthFlow('google');
-
-      if (error) {
-        console.error('❌ Google sign up error:', error);
-        return { error };
-      }
-
-      console.log('✅ Google OAuth initiated for sign up, redirecting...');
-      // The OAuth flow will redirect back to the app
-      // The auth state change listener will handle the session and user creation
-      return { error: null };
-    } catch (error: any) {
-      console.error('❌ Google sign up exception:', error);
-      return { error };
-    }
+    return await signInWithGoogle();
   };
 
   // Sign up with Apple
