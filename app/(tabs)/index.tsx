@@ -1,5 +1,5 @@
 import { analytics } from '@/lib/analytics';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -100,8 +100,10 @@ export default function HomeScreen() {
     retryAuthHydration,
   } = useAuth();
   const params = useLocalSearchParams();
+  const pathname = usePathname();
   const goalCardRef = useRef<GoalCardRef>(null);
   const bypassPaywallRef = useRef(false);
+  const paywallNavigationRef = useRef(false);
   const trimmedUserName = userName.trim();
   const authMetadataName = getAuthMetadataName(user)?.trim() || '';
   const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
@@ -383,15 +385,24 @@ export default function HomeScreen() {
   useEffect(() => {
     if (params.bypassPaywall === 'true') {
       bypassPaywallRef.current = true;
+      paywallNavigationRef.current = false;
       router.setParams({ bypassPaywall: undefined });
     }
   }, [params.bypassPaywall]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      paywallNavigationRef.current = false;
+      bypassPaywallRef.current = false;
+    }
+  }, [user?.id]);
 
   // Check subscription status and redirect to paywall if needed
   useEffect(() => {
     const checkSubscription = async () => {
       if (!user || loading || !authReady) return;
       if (bypassPaywallRef.current) return;
+      if (pathname === '/paywall' || paywallNavigationRef.current) return;
 
       try {
         const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
@@ -399,6 +410,7 @@ export default function HomeScreen() {
         // If user has no active subscription and no active trial, show paywall
         if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
           console.log('🔒 No active subscription or trial, redirecting to paywall');
+          paywallNavigationRef.current = true;
           router.replace('/paywall');
         } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
           // Check if trial has expired
@@ -406,12 +418,14 @@ export default function HomeScreen() {
           const expiresAt = subscriptionInfo.expiresAt;
           if (now >= expiresAt) {
             console.log('⏰ Trial expired, redirecting to paywall');
+            paywallNavigationRef.current = true;
             router.replace('/paywall');
           } else {
             console.log('✅ Trial active, allowing access');
           }
         } else if (subscriptionInfo.isActive) {
           console.log('✅ Active subscription, allowing access');
+          paywallNavigationRef.current = false;
         }
       } catch (error) {
         console.error('Error checking subscription:', error);
