@@ -10,9 +10,10 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import * as Linking from 'expo-linking';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+import { Buffer } from 'buffer';
 import { setCachedAuthSession } from '@/lib/authSessionCache';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -113,6 +114,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       return require('@react-native-google-signin/google-signin');
     } catch (error) {
+      return null;
+    }
+  };
+
+  const decodeJwtPayload = (token: string) => {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) {
+        return null;
+      }
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      return JSON.parse(decoded);
+    } catch (error) {
+      console.warn('⚠️ Failed to decode Google idToken payload:', error);
       return null;
     }
   };
@@ -881,18 +898,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         (await userService.getUserById(userId, token))?.profile_image_url ||
         null;
 
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
       const sanitizedUri = imageUri.split('?')[0];
       const extensionMatch = sanitizedUri.match(/\.([a-zA-Z0-9]+)$/);
-      const mimeExtension = blob.type && blob.type.includes('/') ? blob.type.split('/')[1] : null;
-      const extension = (extensionMatch?.[1] || mimeExtension || 'jpg').toLowerCase();
-      const filePath = `${userId}/${Date.now()}.${extension}`;
-      const contentType = blob.type && blob.type.includes('/') ? blob.type : `image/${extension}`;
+      const extension = (extensionMatch?.[1] || 'jpg').toLowerCase();
+      const contentTypeLookup: Record<string, string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+        heic: 'image/heic',
+        heif: 'image/heif',
+      };
+      let contentType = contentTypeLookup[extension] || 'image/jpeg';
+      let uploadBody: ArrayBuffer | Blob;
 
+      try {
+        const base64 = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: 'base64',
+        });
+        const buffer = Buffer.from(base64, 'base64');
+        uploadBody = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+      } catch (error) {
+        console.warn('⚠️ Failed to read image as base64, falling back to blob:', error);
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        if (blob?.type && blob.type.includes('/')) {
+          contentType = blob.type;
+        }
+        uploadBody = blob;
+      }
+
+      const filePath = `${userId}/${Date.now()}.${extension}`;
       const { error: uploadError } = await supabase.storage
         .from(PROFILE_IMAGE_BUCKET)
-        .upload(filePath, blob, {
+        .upload(filePath, uploadBody, {
           contentType,
           upsert: false,
         });
@@ -1518,13 +1557,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return { error };
   };
 
-  // Sign in with Google (native when available, OAuth fallback otherwise)
+  // Sign in with Google (native on Android, OAuth on iOS/web)
   const signInWithGoogle = async () => {
     let googleModule: any = null;
     try {
       console.log('🔵 Starting Google sign in...');
 
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' || Platform.OS === 'ios') {
         return await startOAuthFlow('google');
       }
 
@@ -1540,15 +1579,51 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       const userInfo = await GoogleSignin.signIn();
-      const idToken = userInfo?.idToken;
+      let idToken = userInfo?.idToken;
+      let tokenSource: 'userInfo' | 'getTokens' = 'userInfo';
+
+      if (typeof GoogleSignin.getTokens === 'function') {
+        try {
+          const tokens = await GoogleSignin.getTokens();
+          if (tokens?.idToken) {
+            idToken = tokens.idToken;
+            tokenSource = 'getTokens';
+          }
+        } catch (tokenError) {
+          console.warn('⚠️ Failed to fetch Google idToken from getTokens:', tokenError);
+        }
+      }
 
       if (!idToken) {
+        const hasWebClientId = Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+        const hasIosClientId = Boolean(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID);
+        analytics.capture('google_signin_missing_idtoken', {
+          hasWebClientId,
+          hasIosClientId,
+        });
         return { error: { message: 'Google sign in failed: missing idToken' } };
+      }
+
+      const tokenPayload = decodeJwtPayload(idToken);
+      const tokenNonce =
+        tokenPayload && typeof tokenPayload.nonce === 'string' && tokenPayload.nonce.length > 0
+          ? tokenPayload.nonce
+          : undefined;
+
+      if (__DEV__) {
+        console.log('🔎 Google idToken payload', {
+          source: tokenSource,
+          aud: tokenPayload?.aud,
+          azp: tokenPayload?.azp,
+          hasNonce: Boolean(tokenPayload?.nonce),
+          nonceLength: tokenPayload?.nonce?.length ?? 0,
+        });
       }
 
       const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'google',
         token: idToken,
+        nonce: tokenNonce,
       });
 
       if (error) {

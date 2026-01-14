@@ -66,9 +66,13 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   const [lastName, setLastName] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hasOptimisticCloseRef = React.useRef(false);
   const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0;
+  const isAndroid = Platform.OS === 'android';
   const keyboardVerticalOffset = Platform.OS === 'ios' ? Math.max(16, insets.top) : 0;
+  const androidKeyboardInset = isAndroid ? Math.max(0, keyboardHeight) : 0;
+  const shouldAnchorToKeyboard = isAndroid && keyboardHeight > 0;
 
   useEffect(() => {
     if (!visible) return;
@@ -80,6 +84,21 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     setIsSaving(false);
     hasOptimisticCloseRef.current = false;
   }, [visible, userName]);
+
+  useEffect(() => {
+    if (!isAndroid) return;
+    const showSub = Keyboard.addListener('keyboardDidShow', event => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [isAndroid]);
 
   const handleSave = async () => {
     if (isSaving) return;
@@ -188,12 +207,20 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       paddingTop: Math.max(16, insets.top),
       paddingBottom: Math.max(16, insets.bottom),
     },
+    modalTouchable: {
+      flex: 1,
+      width: '100%',
+    },
+    modalStack: {
+      alignItems: 'center',
+      justifyContent: shouldAnchorToKeyboard ? 'flex-end' : 'center',
+      paddingBottom: shouldAnchorToKeyboard ? androidKeyboardInset : 0,
+    },
     modalContainer: {
       backgroundColor: '#2A2A2A',
       borderRadius: 16,
       width: width * 0.9,
       padding: 20,
-      maxHeight: '85%',
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.3,
@@ -280,13 +307,13 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     >
       <View style={styles.modalOverlay}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={keyboardVerticalOffset}
-          style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}
+          style={{ flex: 1, width: '100%' }}
         >
           <TouchableOpacity
             activeOpacity={1}
-            style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}
+            style={[styles.modalTouchable, styles.modalStack]}
             onPress={Keyboard.dismiss}
           >
             <View style={styles.modalContainer}>

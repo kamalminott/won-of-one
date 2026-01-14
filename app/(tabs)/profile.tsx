@@ -54,6 +54,7 @@ export default function ProfileScreen() {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showProfileImagePicker, setShowProfileImagePicker] = useState(false);
   
   // Match statistics state
   const [matchStats, setMatchStats] = useState({
@@ -211,6 +212,11 @@ export default function ProfileScreen() {
   // No need to load profile data since it's handled by context
 
   const handleImagePicker = () => {
+    if (Platform.OS === 'android') {
+      setShowProfileImagePicker(true);
+      return;
+    }
+
     Alert.alert(
       'Select Profile Picture',
       'Choose how you want to set your profile picture',
@@ -247,7 +253,7 @@ export default function ProfileScreen() {
           return;
         }
         result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
@@ -259,7 +265,7 @@ export default function ProfileScreen() {
           return;
         }
         result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
@@ -834,6 +840,52 @@ export default function ProfileScreen() {
 
       </ScrollView>
 
+      {/* Profile Image Picker Modal (Android) */}
+      {showProfileImagePicker && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Select Profile Picture</Text>
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={() => {
+                setShowProfileImagePicker(false);
+                void pickImage('camera');
+              }}
+            >
+              <Text style={styles.modalOptionText}>Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={() => {
+                setShowProfileImagePicker(false);
+                void pickImage('library');
+              }}
+            >
+              <Text style={styles.modalOptionText}>Photo Library</Text>
+            </TouchableOpacity>
+            {profileImage ? (
+              <TouchableOpacity
+                style={[styles.modalOption, styles.modalOptionDestructive]}
+                onPress={() => {
+                  setShowProfileImagePicker(false);
+                  void removeProfileImage();
+                }}
+              >
+                <Text style={[styles.modalOptionText, styles.modalOptionTextDestructive]}>
+                  Remove Picture
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.modalCancel}
+              onPress={() => setShowProfileImagePicker(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Handedness Picker Modal */}
       {showHandednessPicker && (
         <View style={styles.modalOverlay}>
@@ -1368,10 +1420,18 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#6C5CE7',
   },
+  modalOptionDestructive: {
+    borderWidth: 1,
+    borderColor: '#FF6B6B',
+  },
   modalOptionText: {
     fontSize: 16,
     color: '#9D9D9D',
     fontWeight: '500',
+  },
+  modalOptionTextDestructive: {
+    color: '#FF6B6B',
+    fontWeight: '600',
   },
   modalOptionTextSelected: {
     color: 'white',

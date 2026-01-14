@@ -448,28 +448,30 @@ export default function CreateAccountScreen() {
             <GoogleIcon size={width * 0.045} />
           </TouchableOpacity>
           
-          <TouchableOpacity 
-            style={[styles.socialButton, { 
-              width: width * 0.12, 
-              height: width * 0.12, 
-              borderRadius: width * 0.06 
-            }]}
-            onPress={async () => {
-              analytics.capture('apple_signup_attempt');
-              const { error } = await signUpWithApple();
-              if (error) {
-                if (error.message !== 'Sign up was canceled') {
-                  analytics.capture('apple_signup_failure', { error: error.message });
-                  Alert.alert('Error', error.message || 'Failed to sign up with Apple');
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity 
+              style={[styles.socialButton, { 
+                width: width * 0.12, 
+                height: width * 0.12, 
+                borderRadius: width * 0.06 
+              }]}
+              onPress={async () => {
+                analytics.capture('apple_signup_attempt');
+                const { error } = await signUpWithApple();
+                if (error) {
+                  if (error.message !== 'Sign up was canceled') {
+                    analytics.capture('apple_signup_failure', { error: error.message });
+                    Alert.alert('Error', error.message || 'Failed to sign up with Apple');
+                  }
+                } else {
+                  analytics.capture('apple_signup_success');
+                  router.push('/(tabs)');
                 }
-              } else {
-                analytics.capture('apple_signup_success');
-                router.push('/(tabs)');
-              }
-            }}
-          >
-            <Ionicons name="logo-apple" size={width * 0.06} color="white" />
-          </TouchableOpacity>
+              }}
+            >
+              <Ionicons name="logo-apple" size={width * 0.06} color="white" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 

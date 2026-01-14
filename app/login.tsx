@@ -320,28 +320,30 @@ export default function LoginScreen() {
                 <GoogleIcon size={width * 0.045} />
               </TouchableOpacity>
               
-              <TouchableOpacity 
-                style={[styles.socialButton, { 
-                  width: width * 0.12, 
-                  height: width * 0.12, 
-                  borderRadius: width * 0.06 
-                }]}
-                onPress={async () => {
-                  analytics.capture('apple_signin_attempt');
-                  const { error } = await signInWithApple();
-                  if (error) {
-                    if (error.message !== 'Sign in was canceled') {
-                      analytics.capture('apple_signin_failure', { error: error.message });
-                      Alert.alert('Error', error.message || 'Failed to sign in with Apple');
+              {Platform.OS === 'ios' && (
+                <TouchableOpacity 
+                  style={[styles.socialButton, { 
+                    width: width * 0.12, 
+                    height: width * 0.12, 
+                    borderRadius: width * 0.06 
+                  }]}
+                  onPress={async () => {
+                    analytics.capture('apple_signin_attempt');
+                    const { error } = await signInWithApple();
+                    if (error) {
+                      if (error.message !== 'Sign in was canceled') {
+                        analytics.capture('apple_signin_failure', { error: error.message });
+                        Alert.alert('Error', error.message || 'Failed to sign in with Apple');
+                      }
+                    } else {
+                      analytics.capture('apple_signin_success');
+                      router.push('/(tabs)');
                     }
-                  } else {
-                    analytics.capture('apple_signin_success');
-                    router.push('/(tabs)');
-                  }
-                }}
-              >
-                <Ionicons name="logo-apple" size={width * 0.06} color="white" />
-              </TouchableOpacity>
+                  }}
+                >
+                  <Ionicons name="logo-apple" size={width * 0.06} color="white" />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
