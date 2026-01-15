@@ -59,7 +59,7 @@ export default function SettingsScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
   const showDiagnostics = __DEV__;
-  const showPaywallOption = __DEV__;
+  const showPaywallOption = true;
 
   // Track screen view
   useFocusEffect(
@@ -571,7 +571,7 @@ export default function SettingsScreen() {
               <View style={styles.iconContainer}>
                 <Ionicons name="lock-closed" size={width * 0.06} color="#FFFFFF" />
               </View>
-              <Text style={styles.optionText}>Open Paywall</Text>
+              <Text style={styles.optionText}>Upgrade to Premium</Text>
               <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
             </TouchableOpacity>
           </View>
