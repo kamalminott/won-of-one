@@ -526,6 +526,14 @@ export default function MatchSummaryScreen() {
             setCompletedGoalId(matchingGoal.id);
           }
           setShowCelebration(true);
+          analytics.goalCompleted({ goal_type: goalData.title || 'unknown' });
+          analytics.capture('achievement_unlocked', {
+            achievement_type: 'goal',
+            goal_title: goalData.title || 'unknown',
+            goal_id: matchingGoal?.id,
+            target_value: goalData.targetValue,
+            current_value: goalData.currentValue,
+          });
           // Don't navigate yet - wait for user to close celebration
           return;
         } catch (error) {
@@ -559,6 +567,14 @@ export default function MatchSummaryScreen() {
             setCompletedGoalId(matchingGoal.id);
           }
           setShowCelebration(true);
+          analytics.goalCompleted({ goal_type: goalData.title || 'unknown' });
+          analytics.capture('achievement_unlocked', {
+            achievement_type: 'goal',
+            goal_title: goalData.title || 'unknown',
+            goal_id: matchingGoal?.id,
+            target_value: goalData.targetValue,
+            current_value: goalData.currentValue,
+          });
           // Don't navigate yet - wait for user to close celebration
           return;
         }

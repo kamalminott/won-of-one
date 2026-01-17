@@ -45,7 +45,8 @@ export default function MatchDetailsScreen() {
   useFocusEffect(
     useCallback(() => {
       analytics.screen('MatchDetails');
-    }, [])
+      analytics.capture('match_detail_viewed', { match_id: matchData.matchId });
+    }, [matchData.matchId])
   );
 
   const handleBack = () => {

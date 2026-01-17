@@ -2,11 +2,13 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { analytics } from '@/lib/analytics';
+import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
 import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService, userService } from '@/lib/database';
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
+import { sessionTracker } from '@/lib/sessionTracker';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
 import type { MatchPeriod } from '@/types/database';
 import { setupAutoSync } from '@/lib/syncManager';
@@ -3137,13 +3139,27 @@ export default function RemoteScreen() {
         console.log('Match completed successfully:', updatedMatch);
         
         // Track match completion
+        const winner =
+          finalScore === touchesAgainst
+            ? 'draw'
+            : user?.id && showUserProfile
+              ? (finalScore > touchesAgainst ? 'you' : 'opponent')
+              : (finalScore > touchesAgainst ? 'left' : 'right');
+
         analytics.matchCompleted({
           mode: 'remote',
           duration_seconds: matchDuration,
-          your_score: user?.id && showUserProfile ? finalScore : actualFencerAScore,
-          opponent_score: user?.id && showUserProfile ? touchesAgainst : actualFencerBScore,
-          is_offline: false
+          your_score: finalScore,
+          opponent_score: touchesAgainst,
+          winner,
+          weapon_type: selectedWeapon,
+          opponent_name: getOpponentNameForAnalytics(),
+          is_offline: false,
+          remote_id: remoteSession?.remote_id,
+          match_id: currentMatchPeriod.match_id,
         });
+        sessionTracker.incrementMatches();
+        void trackOnce('first_match_completed', { mode: 'remote' }, user?.id);
         
         // Update goals if user is registered and match has a result
         if (user?.id && result) {
@@ -3380,13 +3396,27 @@ export default function RemoteScreen() {
       
       // Track offline match saved
       analytics.offlineMatchSaved();
+      const winner =
+        finalScore === touchesAgainst
+          ? 'draw'
+          : user?.id && showUserProfile
+            ? (finalScore > touchesAgainst ? 'you' : 'opponent')
+            : (finalScore > touchesAgainst ? 'left' : 'right');
+
       analytics.matchCompleted({
         mode: 'remote',
         duration_seconds: matchDuration,
-        your_score: user?.id && showUserProfile ? finalScore : actualFencerAScore,
-        opponent_score: user?.id && showUserProfile ? touchesAgainst : actualFencerBScore,
-        is_offline: true
+        your_score: finalScore,
+        opponent_score: touchesAgainst,
+        winner,
+        weapon_type: selectedWeapon,
+        opponent_name: getOpponentNameForAnalytics(),
+        is_offline: true,
+        remote_id: remoteSession?.remote_id,
+        match_id: matchId || undefined,
       });
+      sessionTracker.incrementMatches();
+      void trackOnce('first_match_completed', { mode: 'remote' }, user?.id);
 
       // Get current fencer names based on positions (handles swaps correctly)
       // (leftEntity/rightEntity already computed above)
@@ -3597,6 +3627,45 @@ export default function RemoteScreen() {
     if (!showUserProfile) return false;
     return entity === userEntity;
   }, [showUserProfile, userEntity]);
+
+  const sanitizeAnalyticsName = (name: string) => {
+    if (!name || name === 'Tap to add name') return undefined;
+    return name;
+  };
+
+  const getOpponentNameForAnalytics = useCallback(() => {
+    if (showUserProfile) {
+      const opponentEntity = userEntity === 'fencerA' ? 'fencerB' : 'fencerA';
+      return sanitizeAnalyticsName(getNameByEntity(opponentEntity));
+    }
+    return sanitizeAnalyticsName(getNameByEntity('fencerB'));
+  }, [getNameByEntity, showUserProfile, userEntity]);
+
+  const getScoreSideForAnalytics = useCallback(
+    (entity: 'fencerA' | 'fencerB'): 'you' | 'opponent' | 'left' | 'right' => {
+      if (showUserProfile) {
+        return isEntityUser(entity) ? 'you' : 'opponent';
+      }
+      const position = getPositionOfEntity(entity);
+      return position === 'left' ? 'left' : 'right';
+    },
+    [getPositionOfEntity, isEntityUser, showUserProfile]
+  );
+
+  const getAnalyticsScores = useCallback(() => {
+    if (showUserProfile) {
+      const yourScore = userEntity === 'fencerA' ? scoresRef.current.fencerA : scoresRef.current.fencerB;
+      const opponentScore = userEntity === 'fencerA' ? scoresRef.current.fencerB : scoresRef.current.fencerA;
+      return { yourScore, opponentScore };
+    }
+    return { yourScore: scoresRef.current.fencerA, opponentScore: scoresRef.current.fencerB };
+  }, [showUserProfile, userEntity]);
+
+  const getElapsedSecondsForAnalytics = useCallback(() => {
+    if (!matchStartTime) return 0;
+    const elapsedMs = Date.now() - matchStartTime.getTime() - totalPausedTime;
+    return Math.max(0, Math.floor(elapsedMs / 1000));
+  }, [matchStartTime, totalPausedTime]);
 
   // Get cards by position
   const getCardsByPosition = useCallback((position: 'left' | 'right'): { yellow: 0 | 1; red: number } => {
@@ -3992,7 +4061,15 @@ export default function RemoteScreen() {
       currentPeriodRef.current = newPeriod; // Update ref
       
       // Track period transition
-      analytics.periodTransition({ period: newPeriod });
+      const { yourScore, opponentScore } = getAnalyticsScores();
+      analytics.periodTransition({
+        period: newPeriod,
+        your_score: yourScore,
+        opponent_score: opponentScore,
+        weapon_type: selectedWeapon,
+        remote_id: remoteSession?.remote_id,
+        match_id: currentMatchPeriod?.match_id ?? currentMatchPeriodRef.current?.match_id,
+      });
     }
   };
 
@@ -4101,6 +4178,18 @@ export default function RemoteScreen() {
         });
         setPendingScoreAction(() => async () => {
           setScores(prev => ({ ...prev, [entity]: newScore }));
+          analytics.scoreIncrement({
+            side: getScoreSideForAnalytics(entity),
+            new_score: newScore,
+            period: currentPeriodRef.current,
+            is_offline: isOffline,
+            time_elapsed_seconds: getElapsedSecondsForAnalytics(),
+            time_remaining_seconds: timeRemaining,
+            weapon_type: selectedWeapon,
+            opponent_name: getOpponentNameForAnalytics(),
+            remote_id: session.remote_id,
+            match_id: currentMatchPeriod?.match_id ?? currentMatchPeriodRef.current?.match_id,
+          });
           setScoreChangeCount(0); // Reset counter
           
           // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
@@ -4125,6 +4214,18 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      analytics.scoreIncrement({
+        side: getScoreSideForAnalytics(entity),
+        new_score: newScore,
+        period: currentPeriodRef.current,
+        is_offline: isOffline,
+        time_elapsed_seconds: getElapsedSecondsForAnalytics(),
+        time_remaining_seconds: timeRemaining,
+        weapon_type: selectedWeapon,
+        opponent_name: getOpponentNameForAnalytics(),
+        remote_id: session.remote_id,
+        match_id: currentMatchPeriod?.match_id ?? currentMatchPeriodRef.current?.match_id,
+      });
       
       // Pause timer IMMEDIATELY if it's currently running (before async operations for instant response)
       if (isPlaying) {
@@ -4251,6 +4352,18 @@ export default function RemoteScreen() {
 
       // Not an active match - no warning needed, just update score
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      analytics.scoreIncrement({
+        side: getScoreSideForAnalytics(entity),
+        new_score: newScore,
+        period: currentPeriodRef.current,
+        is_offline: isOffline,
+        time_elapsed_seconds: getElapsedSecondsForAnalytics(),
+        time_remaining_seconds: timeRemaining,
+        weapon_type: selectedWeapon,
+        opponent_name: getOpponentNameForAnalytics(),
+        remote_id: session.remote_id,
+        match_id: currentMatchPeriod?.match_id ?? currentMatchPeriodRef.current?.match_id,
+      });
       
       // For Sabre: Set hasMatchStarted when first score is recorded and create Period 1
       // Note: session is already created in incrementScore at line 3325, so we use that
@@ -4759,6 +4872,7 @@ export default function RemoteScreen() {
       const playClickTime = new Date().toISOString();
       console.log('🎮 Play button clicked at:', playClickTime);
       
+      const isFirstStart = !matchStartTime;
       // Set match start time if this is the first time starting
       if (!matchStartTime) {
         setMatchStartTime(new Date());
@@ -4787,11 +4901,23 @@ export default function RemoteScreen() {
           
           // Track match start (in background)
           const isOffline = await networkService.isOnline().then(online => !online);
-          analytics.matchStart({ 
-            mode: 'remote', 
-            is_offline: isOffline,
-            remote_id: session.remote_id
-          });
+          if (isFirstStart) {
+            analytics.matchStart({ 
+              mode: 'remote', 
+              is_offline: isOffline,
+              weapon_type: selectedWeapon,
+              opponent_name: getOpponentNameForAnalytics(),
+              remote_id: session.remote_id
+            });
+            void trackFeatureFirstUse(
+              'remote_match',
+              {
+                weapon_type: selectedWeapon,
+                opponent_name: getOpponentNameForAnalytics(),
+              },
+              user?.id
+            );
+          }
           
           // Create match period only if one doesn't already exist (first time starting match)
           if (!currentMatchPeriod) {
@@ -4807,7 +4933,7 @@ export default function RemoteScreen() {
         }
       })();
     }
-  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, resolveGuestNamesIfNeeded, validateFencerNames, openEditNamesPopup]);
+  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, resolveGuestNamesIfNeeded, validateFencerNames, openEditNamesPopup, selectedWeapon, getOpponentNameForAnalytics, user?.id]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -5052,6 +5178,31 @@ export default function RemoteScreen() {
     const remoteSessionSnapshot = remoteSession;
     const sessionAccessToken = session?.access_token ?? accessToken;
 
+    const hasActiveMatch =
+      hasMatchStarted ||
+      scoresRef.current.fencerA > 0 ||
+      scoresRef.current.fencerB > 0 ||
+      currentPeriodRef.current > 1 ||
+      !!matchStartTime;
+
+    if (hasActiveMatch && !isCompletingMatch) {
+      const { yourScore, opponentScore } = getAnalyticsScores();
+      analytics.matchAbandoned({
+        mode: 'remote',
+        weapon_type: selectedWeapon,
+        opponent_name: getOpponentNameForAnalytics(),
+        period: currentPeriodRef.current,
+        your_score: yourScore,
+        opponent_score: opponentScore,
+        time_elapsed_seconds: getElapsedSecondsForAnalytics(),
+        time_remaining_seconds: timeRemaining,
+        reason: 'reset_all',
+        is_offline: isOffline,
+        remote_id: remoteSessionSnapshot?.remote_id,
+        match_id: matchPeriodSnapshot?.match_id,
+      });
+    }
+
     console.log('🔄 Starting Reset All - cleaning up database records...');
     setIsCompletingMatch(false); // Reset the completion flag
     isActivelyUsingAppRef.current = false; // Reset active usage flag
@@ -5238,7 +5389,26 @@ export default function RemoteScreen() {
       setIsResetting(false);
       resetAllInFlightRef.current = false;
     }
-  }, [accessToken, breakTimerRef, currentMatchPeriod, fencerNames, remoteSession, session?.access_token, showUserProfile, userDisplayName, userEntity]);
+  }, [
+    accessToken,
+    breakTimerRef,
+    currentMatchPeriod,
+    fencerNames,
+    remoteSession,
+    session?.access_token,
+    showUserProfile,
+    userDisplayName,
+    userEntity,
+    hasMatchStarted,
+    matchStartTime,
+    isCompletingMatch,
+    isOffline,
+    selectedWeapon,
+    timeRemaining,
+    getOpponentNameForAnalytics,
+    getElapsedSecondsForAnalytics,
+    getAnalyticsScores,
+  ]);
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {

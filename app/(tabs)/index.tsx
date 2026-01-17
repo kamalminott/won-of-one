@@ -1,4 +1,6 @@
 import { analytics } from '@/lib/analytics';
+import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
+import { sessionTracker } from '@/lib/sessionTracker';
 import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -140,6 +142,7 @@ export default function HomeScreen() {
   const userNameRef = useRef(userName);
   const profilePromptShownRef = useRef(false);
   const profilePromptSuppressedRef = useRef(false);
+  const dashboardStartRef = useRef<number | null>(null);
   const isCompleteProfilePromptEnabled = false;
   const shouldShowCompleteProfilePrompt =
     isCompleteProfilePromptEnabled && (showCompleteProfilePrompt || profileNameStatus === 'missing');
@@ -696,6 +699,16 @@ export default function HomeScreen() {
           goal_type: goalData.category || 'unknown',
           target: goalData.target_value,
         });
+        void trackFeatureFirstUse(
+          'goal_setting',
+          { goal_type: goalData.category || 'unknown' },
+          user.id
+        );
+        void trackOnce(
+          'first_goal_created',
+          { goal_type: goalData.category || 'unknown' },
+          user.id
+        );
         upsertGoal(newGoal);
         Alert.alert('Success', 'Goal created successfully!');
         void refreshGoalsOnly();
@@ -779,6 +792,21 @@ export default function HomeScreen() {
         fetchUserData();
       }
     }, [user, authReady, fetchUserData])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      dashboardStartRef.current = Date.now();
+      return () => {
+        if (!dashboardStartRef.current) return;
+        const durationSeconds = Math.max(0, Math.round((Date.now() - dashboardStartRef.current) / 1000));
+        analytics.capture('time_on_dashboard', {
+          duration_seconds: durationSeconds,
+          session_id: sessionTracker.getSessionId(),
+        });
+        dashboardStartRef.current = null;
+      };
+    }, [])
   );
 
   const handleSettings = () => {

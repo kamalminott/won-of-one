@@ -10,7 +10,7 @@ import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import React, { useEffect } from 'react';
-import { Platform, StatusBar as RNStatusBar } from 'react-native';
+import { AppState, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Safely import expo-updates for automatic update checking
@@ -24,6 +24,7 @@ try {
 import { AuthProvider } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { subscriptionService } from '@/lib/subscriptionService';
+import { sessionTracker } from '@/lib/sessionTracker';
 
 // Component to connect PostHog instance to analytics helper
 function PostHogConnector() {
@@ -61,6 +62,7 @@ function PostHogConnector() {
       }
       
       analytics.setInstance(posthog);
+      sessionTracker.startSession();
       
       // Test event to verify connection
       setTimeout(async () => {
@@ -135,6 +137,23 @@ export default function RootLayout() {
     if (Platform.OS === 'android') {
       RNStatusBar.setBackgroundColor('rgba(19, 19, 19, 1)', true);
     }
+  }, []);
+
+  // Track app sessions via AppState transitions
+  React.useEffect(() => {
+    let currentState = AppState.currentState;
+
+    const handleAppStateChange = (nextState: string) => {
+      if (currentState === 'active' && (nextState === 'inactive' || nextState === 'background')) {
+        sessionTracker.endSession(nextState);
+      } else if ((currentState === 'inactive' || currentState === 'background') && nextState === 'active') {
+        sessionTracker.startSession();
+      }
+      currentState = nextState;
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
   }, []);
 
   // Initialize RevenueCat on app launch
@@ -240,7 +259,7 @@ export default function RootLayout() {
 
   // Route password recovery and email confirmation deep links directly (before any tab render)
   React.useEffect(() => {
-    const handleAuthLink = async (url?: string | null) => {
+    const handleAuthLink = async (url?: string | null, source: 'initial' | 'event' = 'initial') => {
       if (!url) return false;
       const parsedUrl = url.includes('#') ? url.replace('#', '?') : url;
       const parsed = Linking.parse(parsedUrl);
@@ -266,6 +285,15 @@ export default function RootLayout() {
           (!type && !isResetPath && qp.redirect_to?.toString().includes('confirm'))
         );
       const shouldHandleOAuthCode = hasCode && !isRecovery;
+
+      analytics.capture('deep_link_used', {
+        source,
+        path,
+        type,
+        has_tokens: !!hasTokens,
+        has_code: hasCode,
+        has_token: hasToken,
+      });
 
       // Handle email confirmation: verify email and then redirect to login (never log in)
       if (isEmailConfirm) {
@@ -387,11 +415,11 @@ export default function RootLayout() {
     };
 
     // Handle cold start
-    Linking.getInitialURL().then((url) => handleAuthLink(url));
+    Linking.getInitialURL().then((url) => handleAuthLink(url, 'initial'));
 
     // Handle in-app deep link events
     const subscription = Linking.addEventListener('url', (event) => {
-      handleAuthLink(event.url);
+      handleAuthLink(event.url, 'event');
     });
 
     return () => subscription.remove();

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import React from 'react';
 import { TouchableOpacity, useWindowDimensions } from 'react-native';
+import { analytics } from '@/lib/analytics';
 
 interface BackButtonProps {
   onPress?: () => void;
@@ -15,8 +16,13 @@ export const BackButton: React.FC<BackButtonProps> = ({
   style
 }) => {
   const { width } = useWindowDimensions();
+  const pathname = usePathname();
 
   const handlePress = () => {
+    analytics.capture('back_button_used', {
+      path: pathname,
+      has_custom_handler: !!onPress,
+    });
     if (onPress) {
       onPress();
     } else {

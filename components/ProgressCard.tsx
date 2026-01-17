@@ -1791,7 +1791,14 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       <TouchableOpacity 
         style={styles.container}
         activeOpacity={1}
-        onPress={() => setShowEditDropdown(false)}
+        onPress={() => {
+          setShowEditDropdown(false);
+          analytics.capture('progress_card_tapped', {
+            activity_type: selectedActivity,
+            has_target: hasTarget,
+            is_future_week: isFutureWeek,
+          });
+        }}
       >
         {hasTarget ? (
           <>

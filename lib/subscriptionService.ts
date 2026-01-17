@@ -6,6 +6,7 @@
 import { Platform } from 'react-native';
 import { postgrestInsert, postgrestSelectOne } from './postgrest';
 import { supabase } from './supabase';
+import { analytics } from './analytics';
 
 // Lazy import RevenueCat (only available in production builds, not dev mode)
 let Purchases: any = null;
@@ -48,6 +49,8 @@ export interface SubscriptionInfo {
   expiresAt: Date | null;
   productId: string | null;
   entitlementId: string | null;
+  expirationReason?: string | null;
+  periodType?: string | null;
 }
 
 // Export types for use in other files
@@ -120,6 +123,13 @@ export const subscriptionService = {
         Purchases.addCustomerInfoUpdateListener(async (customerInfo: CustomerInfo) => {
           console.log('📦 Subscription status updated');
           if (userId) {
+            // Get previous subscription status before updating
+            const previousInfo = await subscriptionService.getSubscriptionFromSupabase(userId, null).catch(() => null);
+            const currentInfo = subscriptionService.parseCustomerInfo(customerInfo);
+            
+            // Track subscription status changes
+            subscriptionService.trackSubscriptionStatusChange(previousInfo, currentInfo);
+            
             await subscriptionService.syncSubscriptionToSupabase(userId, customerInfo);
           }
         });
@@ -240,6 +250,8 @@ export const subscriptionService = {
           expiresAt: null,
           productId: null,
           entitlementId: null,
+          expirationReason: null,
+          periodType: null,
         };
       }
       const customerInfo = await Purchases.getCustomerInfo();
@@ -254,6 +266,8 @@ export const subscriptionService = {
         expiresAt: null,
         productId: null,
         entitlementId: null,
+        expirationReason: null,
+        periodType: null,
       };
     }
   },
@@ -280,7 +294,10 @@ export const subscriptionService = {
     
     if (activeEntitlements.length > 0) {
       const entitlement = activeEntitlements[0] as any;
-      const isTrial = entitlement.periodType === 'TRIAL';
+      const rawPeriodType = entitlement.periodType ?? null;
+      const normalizedPeriodType =
+        typeof rawPeriodType === 'string' ? rawPeriodType.toUpperCase() : null;
+      const isTrial = normalizedPeriodType === 'TRIAL' || normalizedPeriodType === 'INTRO';
       const expiresAt = entitlement.expirationDate 
         ? new Date(entitlement.expirationDate) 
         : null;
@@ -292,12 +309,26 @@ export const subscriptionService = {
         expiresAt,
         productId: entitlement.productIdentifier,
         entitlementId: entitlement.identifier,
+        expirationReason: null,
+        periodType: normalizedPeriodType,
       };
     }
 
     // Check if there are any expired entitlements
     const allEntitlements = Object.values((customerInfo as any).entitlements?.all || {});
     const hasExpired = allEntitlements.some((e: any) => !e.isActive);
+    const expiredEntitlements = allEntitlements.filter((e: any) => !e.isActive);
+    const mostRecentExpired = expiredEntitlements
+      .slice()
+      .sort((a: any, b: any) => {
+        const aTime = a.expirationDate ? new Date(a.expirationDate).getTime() : 0;
+        const bTime = b.expirationDate ? new Date(b.expirationDate).getTime() : 0;
+        return bTime - aTime;
+      })[0];
+    const expirationReason =
+      mostRecentExpired?.expirationReason ||
+      mostRecentExpired?.expiration_reason ||
+      null;
 
     return {
       status: hasExpired ? 'expired' : 'none',
@@ -306,6 +337,8 @@ export const subscriptionService = {
       expiresAt: null,
       productId: null,
       entitlementId: null,
+      expirationReason,
+      periodType: null,
     };
   },
 
@@ -439,6 +472,100 @@ export const subscriptionService = {
       console.log('✅ RevenueCat user logged out');
     } catch (error) {
       console.error('❌ Error logging out RevenueCat user:', error);
+    }
+  },
+
+  /**
+   * Track subscription status changes for analytics
+   */
+  trackSubscriptionStatusChange(
+    previousInfo: SubscriptionInfo | null,
+    currentInfo: SubscriptionInfo
+  ): void {
+    try {
+      // Track trial start (new trial)
+      if (currentInfo.isTrial && (!previousInfo || !previousInfo.isTrial)) {
+        analytics.capture('subscription_trial_started', {
+          product_id: currentInfo.productId,
+          expires_at: currentInfo.expiresAt?.toISOString(),
+          subscription_type: currentInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+          period_type: currentInfo.periodType,
+        });
+      }
+
+      // Track trial ended (was trial, now active or expired)
+      if (previousInfo?.isTrial && !currentInfo.isTrial) {
+        const converted = currentInfo.isActive;
+        analytics.capture('subscription_trial_ended', {
+          product_id: previousInfo.productId,
+          converted,
+          subscription_type: previousInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+          period_type: previousInfo.periodType,
+        });
+
+        if (converted) {
+          // Trial converted to paid
+          analytics.capture('subscription_trial_converted', {
+            product_id: currentInfo.productId,
+            subscription_type: currentInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+            previous_product_id: previousInfo.productId,
+          });
+          analytics.capture('subscription_converted', {
+            product_id: currentInfo.productId,
+            subscription_type: currentInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+            previous_product_id: previousInfo.productId,
+          });
+        }
+      }
+
+      // Track subscription renewal (was active, still active, different expiration)
+      if (
+        previousInfo?.isActive &&
+        !previousInfo.isTrial &&
+        currentInfo.isActive &&
+        !currentInfo.isTrial &&
+        previousInfo.expiresAt &&
+        currentInfo.expiresAt &&
+        currentInfo.expiresAt > previousInfo.expiresAt
+      ) {
+        analytics.capture('subscription_renewed', {
+          product_id: currentInfo.productId,
+          subscription_type: currentInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+          previous_expires_at: previousInfo.expiresAt.toISOString(),
+          new_expires_at: currentInfo.expiresAt.toISOString(),
+        });
+      }
+
+      // Track subscription expiration (was active, now expired)
+      if (previousInfo?.isActive && !currentInfo.isActive && currentInfo.status === 'expired') {
+        analytics.capture('subscription_expired', {
+          product_id: previousInfo.productId,
+          was_trial: previousInfo.isTrial,
+          subscription_type: previousInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+        });
+      }
+
+      // Track subscription cancellation (was active, now inactive)
+      if (previousInfo?.isActive && !currentInfo.isActive) {
+        analytics.capture('subscription_cancelled', {
+          product_id: previousInfo.productId,
+          was_trial: previousInfo.isTrial,
+          subscription_type: previousInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+          cancellation_reason: currentInfo.expirationReason || (previousInfo.isTrial ? 'trial_ended' : 'expired'),
+        });
+      }
+
+      // Track new subscription (was none/expired, now active)
+      if ((!previousInfo?.isActive || previousInfo.status === 'expired') && currentInfo.isActive) {
+        if (!currentInfo.isTrial) {
+          analytics.capture('subscription_activated', {
+            product_id: currentInfo.productId,
+            subscription_type: currentInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+          });
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error tracking subscription status change:', error);
     }
   },
 };

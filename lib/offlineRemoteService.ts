@@ -562,6 +562,13 @@ export const offlineRemoteService = {
                 });
               } else {
                 console.log(`🔄 Duplicate event detected during sync, skipping: match_id=${matchId}, time=${event.match_time_elapsed}s, scorer=${event.scoring_user_name}, type=${event.event_type}`);
+                analytics.capture('sync_conflict', {
+                  conflict_type: 'duplicate_event',
+                  match_id: matchId,
+                  remote_id: remoteId,
+                  event_type: event.event_type,
+                  match_time_elapsed: event.match_time_elapsed,
+                });
                 if (event.id) {
                   syncedEventIds.push(event.id);
                 }
@@ -598,6 +605,13 @@ export const offlineRemoteService = {
 
             if (existingComposite) {
               console.log(`🔄 Composite duplicate (event_time) detected, skipping: match_id=${matchId}, event_time=${compositeTimeKey}, scorer=${event.scoring_user_name}, type=${event.event_type}`);
+              analytics.capture('sync_conflict', {
+                conflict_type: 'composite_duplicate',
+                match_id: matchId,
+                remote_id: remoteId,
+                event_type: event.event_type,
+                event_time: compositeTimeKey,
+              });
               if (event.id) {
                 syncedEventIds.push(event.id);
               }

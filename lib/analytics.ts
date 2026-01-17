@@ -135,7 +135,14 @@ export const analytics = {
   },
 
   // Domain-specific helpers
-  matchStart: (props: { mode: 'remote' | 'manual'; is_offline: boolean; remote_id?: string }) => {
+  matchStart: (props: {
+    mode: 'remote' | 'manual';
+    is_offline: boolean;
+    weapon_type?: string;
+    opponent_name?: string;
+    remote_id?: string;
+    match_id?: string;
+  }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture('match_start', props);
@@ -148,7 +155,18 @@ export const analytics = {
     }
   },
 
-  scoreIncrement: (props: { side: 'you' | 'opponent'; new_score: number; period: number; is_offline: boolean }) => {
+  scoreIncrement: (props: {
+    side: 'you' | 'opponent' | 'left' | 'right';
+    new_score: number;
+    period: number;
+    is_offline: boolean;
+    time_elapsed_seconds?: number;
+    time_remaining_seconds?: number;
+    weapon_type?: string;
+    opponent_name?: string;
+    remote_id?: string;
+    match_id?: string;
+  }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture('score_increment', props);
@@ -264,7 +282,18 @@ export const analytics = {
   },
 
   // Match tracking
-  matchCompleted: (props: { mode: 'remote' | 'manual'; duration_seconds?: number; your_score: number; opponent_score: number; is_offline: boolean }) => {
+  matchCompleted: (props: {
+    mode: 'remote' | 'manual';
+    duration_seconds?: number;
+    your_score: number;
+    opponent_score: number;
+    winner?: 'you' | 'opponent' | 'left' | 'right' | 'draw' | 'unknown';
+    weapon_type?: string;
+    opponent_name?: string;
+    is_offline: boolean;
+    remote_id?: string;
+    match_id?: string;
+  }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture('match_completed', props);
@@ -284,11 +313,24 @@ export const analytics = {
     }
   },
 
-  matchAbandoned: () => {
+  matchAbandoned: (props?: {
+    mode?: 'remote' | 'manual';
+    weapon_type?: string;
+    opponent_name?: string;
+    period?: number;
+    your_score?: number;
+    opponent_score?: number;
+    time_elapsed_seconds?: number;
+    time_remaining_seconds?: number;
+    reason?: string;
+    is_offline?: boolean;
+    remote_id?: string;
+    match_id?: string;
+  }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
-      posthogInstance.capture('match_abandoned');
-      __DEV__ && console.log('📊 PostHog: match_abandoned');
+      posthogInstance.capture('match_abandoned', props || {});
+      __DEV__ && console.log('📊 PostHog: match_abandoned', props || '');
     } catch (error) {
       console.error('PostHog matchAbandoned error:', error);
     }
@@ -314,7 +356,14 @@ export const analytics = {
     }
   },
 
-  periodTransition: (props: { period: number }) => {
+  periodTransition: (props: {
+    period: number;
+    your_score?: number;
+    opponent_score?: number;
+    weapon_type?: string;
+    remote_id?: string;
+    match_id?: string;
+  }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture('period_transition', props);

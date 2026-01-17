@@ -967,6 +967,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('✅ Profile image uploaded to Supabase');
     } catch (error) {
       console.error('Error saving profile image:', error);
+      analytics.capture('image_upload_failure', {
+        error_message: error instanceof Error ? error.message : 'unknown_error',
+        bucket: PROFILE_IMAGE_BUCKET,
+        has_user: !!userId,
+      });
       throw error;
     }
   };

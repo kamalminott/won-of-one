@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Alert, Keyboard, Modal, Animated as RNAnimated, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
@@ -167,11 +168,17 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [enableMatchWindow, setEnableMatchWindow] = useState(false);
 
+  const openGoalModal = (mode: 'create' | 'edit') => {
+    analytics.capture('goal_modal_opened', { mode });
+    analytics.goalModalOpen();
+    setShowGoalModal(true);
+  };
+
   // Expose openModal method to parent via ref
   useImperativeHandle(ref, () => ({
     openModal: () => {
       console.log('🎯 Opening goal modal via ref');
-      setShowGoalModal(true);
+      openGoalModal('create');
     }
   }));
 
@@ -212,7 +219,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
         setNotes('Focus on consistency this month.');
       }
       
-      setShowGoalModal(true);
+      openGoalModal(isUpdate ? 'edit' : 'create');
     } else {
       onSetNewGoal();
     }
@@ -480,7 +487,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       setEnableMatchWindow(false);
     }
     
-    setShowGoalModal(true);
+    openGoalModal('edit');
   };
 
   const closeDropdowns = () => {

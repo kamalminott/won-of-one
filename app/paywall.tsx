@@ -12,9 +12,27 @@ export default function PaywallScreen() {
   const { user } = useAuth();
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+  const [canDismiss, setCanDismiss] = useState(false);
+
+  const handleClose = (reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user') => {
+    if (!canDismiss && reason === 'user') {
+      return;
+    }
+    console.log('🚪 Closing paywall, navigating to home with bypass flag');
+    // Track paywall dismissed (user closed without purchasing)
+    analytics.capture('paywall_dismissed', { reason });
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        bypassPaywall: 'true',
+      },
+    });
+  };
 
   useEffect(() => {
     analytics.screen('Paywall');
+    // Track paywall viewed
+    analytics.capture('paywall_viewed');
     let isActive = true;
 
     const init = async () => {
@@ -22,6 +40,12 @@ export default function PaywallScreen() {
         await subscriptionService.initialize(user?.id);
         if (!subscriptionService.isConfigured()) {
           throw new Error('Subscriptions are unavailable. Please try again later.');
+        }
+        const info = await subscriptionService.getSubscriptionInfo();
+        if (info.isActive) {
+          setCanDismiss(true);
+          handleClose('already_subscribed');
+          return;
         }
       } catch (error: any) {
         if (isActive) {
@@ -41,16 +65,6 @@ export default function PaywallScreen() {
     };
   }, [user?.id]);
 
-  const handleClose = () => {
-    console.log('🚪 Closing paywall, navigating to home with bypass flag');
-    router.push({
-      pathname: '/(tabs)',
-      params: {
-        bypassPaywall: 'true',
-      },
-    });
-  };
-
   if (initializing) {
     return (
       <View style={styles.container}>
@@ -69,7 +83,7 @@ export default function PaywallScreen() {
         <ExpoStatusBar style="light" />
         <View style={styles.statusContainer}>
           <Text style={styles.errorText}>{initError}</Text>
-          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={() => handleClose('error')} style={styles.closeButton}>
             <Text style={styles.closeButtonText}>Close Paywall</Text>
           </TouchableOpacity>
         </View>
@@ -81,15 +95,90 @@ export default function PaywallScreen() {
     <View style={styles.container}>
       <ExpoStatusBar style="light" />
       <RevenueCatUI.Paywall
-        options={{ displayCloseButton: true }}
-        onDismiss={handleClose}
-        onPurchaseCompleted={() => handleClose()}
-        onRestoreCompleted={() => handleClose()}
+        options={{ displayCloseButton: false }}
+        onDismiss={() => handleClose('user')}
+        onPurchaseCompleted={async (customerInfo) => {
+          try {
+            // Parse subscription info from customerInfo
+            const subscriptionInfo = subscriptionService.parseCustomerInfo(customerInfo);
+            
+            // Track successful purchase
+            analytics.capture('paywall_subscribe_success', {
+              product_id: subscriptionInfo.productId,
+              entitlement_id: subscriptionInfo.entitlementId,
+              is_trial: subscriptionInfo.isTrial,
+              status: subscriptionInfo.status,
+              subscription_type: subscriptionInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+              expires_at: subscriptionInfo.expiresAt?.toISOString(),
+              period_type: subscriptionInfo.periodType,
+            });
+            
+            // Track trial start if applicable
+            if (subscriptionInfo.isTrial) {
+              analytics.capture('subscription_trial_started', {
+                product_id: subscriptionInfo.productId,
+                expires_at: subscriptionInfo.expiresAt?.toISOString(),
+                subscription_type: subscriptionInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+                period_type: subscriptionInfo.periodType,
+              });
+            } else {
+              // Track direct conversion (no trial)
+              analytics.capture('subscription_converted', {
+                product_id: subscriptionInfo.productId,
+                subscription_type: subscriptionInfo.productId?.includes('yearly') ? 'yearly' : 'monthly',
+              });
+            }
+            setCanDismiss(true);
+          } catch (error) {
+            console.error('Error tracking purchase completion:', error);
+          }
+          
+          handleClose('purchase');
+        }}
+        onRestoreCompleted={async (customerInfo) => {
+          try {
+            // Parse subscription info from customerInfo
+            const subscriptionInfo = subscriptionService.parseCustomerInfo(customerInfo);
+            
+            // Track restore success
+            analytics.capture('subscription_restored', {
+              is_active: subscriptionInfo.isActive,
+              status: subscriptionInfo.status,
+              product_id: subscriptionInfo.productId,
+              is_trial: subscriptionInfo.isTrial,
+            });
+            if (subscriptionInfo.isActive) {
+              setCanDismiss(true);
+            }
+          } catch (error) {
+            console.error('Error tracking restore completion:', error);
+          }
+          
+          handleClose('restore');
+        }}
         onPurchaseError={({ error }) => {
           console.error('Paywall purchase error:', error);
+          
+          // Track purchase error
+          analytics.capture('paywall_subscribe_error', {
+            error_message: error?.message || 'unknown_error',
+            error_code: error?.code || 'unknown',
+            user_cancelled: error?.userCancelled || false,
+          });
+          
+          // Track cancellation separately if user cancelled
+          if (error?.userCancelled) {
+            analytics.capture('paywall_subscribe_cancelled');
+          }
         }}
         onRestoreError={({ error }) => {
           console.error('Paywall restore error:', error);
+          
+          // Track restore error
+          analytics.capture('subscription_restore_error', {
+            error_message: error?.message || 'unknown_error',
+            error_code: error?.code || 'unknown',
+          });
         }}
       />
     </View>

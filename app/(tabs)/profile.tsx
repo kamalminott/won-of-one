@@ -2,6 +2,7 @@ import { BackButton } from '@/components/BackButton';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { trackOnce } from '@/lib/analyticsTracking';
 import { matchService, userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,6 +65,27 @@ export default function ProfileScreen() {
     totalPoints: 0,
     currentStreak: 0
   });
+
+  const maybeTrackProfileCompletion = useCallback(
+    (next?: { name?: string; handedness?: string; weapon?: string }) => {
+      if (!user?.id) return;
+      const nameValue = (next?.name ?? userName)?.trim();
+      const handednessValue = next?.handedness ?? handedness;
+      const weaponValue = next?.weapon ?? preferredWeapon;
+      if (!nameValue || !handednessValue || !weaponValue) return;
+      void trackOnce(
+        'profile_completed',
+        { handedness: handednessValue, preferred_weapon: weaponValue },
+        user.id
+      );
+      void trackOnce(
+        'onboarding_complete',
+        { handedness: handednessValue, preferred_weapon: weaponValue },
+        user.id
+      );
+    },
+    [user?.id, userName, handedness, preferredWeapon]
+  );
 
   const handleBack = () => {
     router.back();
@@ -342,6 +364,7 @@ export default function ProfileScreen() {
         }
         analytics.profileUpdate({ field: 'name' });
         analytics.identify(user.id, { name: fullName });
+        maybeTrackProfileCompletion({ name: fullName });
       } else {
         // No user ID, just save to AsyncStorage
         await setUserName(fullName);
@@ -463,6 +486,7 @@ export default function ProfileScreen() {
         await userService.updateUser(user.id, { handedness: value }, accessToken);
         analytics.profileUpdate({ field: 'handedness' });
         analytics.identify(user.id, { handedness: value });
+        maybeTrackProfileCompletion({ handedness: value });
         console.log('✅ Handedness updated:', value);
       } catch (error) {
         console.error('Error updating handedness:', error);
@@ -483,6 +507,7 @@ export default function ProfileScreen() {
         await AsyncStorage.setItem('preferred_weapon', value);
         analytics.profileUpdate({ field: 'preferred_weapon' });
         analytics.identify(user.id, { preferred_weapon: value });
+        maybeTrackProfileCompletion({ weapon: value });
         console.log('✅ Preferred weapon updated:', value);
       } catch (error) {
         console.error('Error updating weapon:', error);

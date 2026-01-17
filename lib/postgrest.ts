@@ -1,4 +1,5 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
+import { analytics } from './analytics';
 import { getCachedAuthSession } from './authSessionCache';
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -106,6 +107,12 @@ export const postgrestRequest = async <T>(
   const accessToken = resolveAccessToken(options.accessToken);
 
   if (!accessToken && !options.allowAnon) {
+    analytics.capture('api_error', {
+      endpoint: path,
+      status: 401,
+      code: 'auth_session_missing',
+      method,
+    });
     return {
       data: null,
       error: { message: 'auth_session_missing', status: 401 },
@@ -151,6 +158,13 @@ export const postgrestRequest = async <T>(
     const payload = await parseJson(response);
     if (!response.ok) {
       const error = payload || {};
+      analytics.capture('api_error', {
+        endpoint: path,
+        status: response.status,
+        code: error.code,
+        message: error.message || error.error,
+        method,
+      });
       return {
         data: null,
         error: {
@@ -170,6 +184,12 @@ export const postgrestRequest = async <T>(
       status: response.status,
     };
   } catch (error) {
+    analytics.capture('api_error', {
+      endpoint: path,
+      status: 0,
+      code: error instanceof Error ? error.message : 'postgrest_request_failed',
+      method,
+    });
     return {
       data: null,
       error: {

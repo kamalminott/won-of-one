@@ -3,6 +3,7 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { trackOnce } from '@/lib/analyticsTracking';
 import { matchService } from '@/lib/database';
 import { SimpleMatch } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +54,7 @@ export default function RecentMatchesScreen() {
   const [selectedDateRange, setSelectedDateRange] = useState<'All Time' | 'Today' | 'This Week' | 'This Month' | 'Last 3 Months'>('All Time');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const hasTrackedFilterRef = useRef(false);
 
   // Format date to DD/MM/YYYY
   const formatDate = (dateString: string): string => {
@@ -288,6 +290,7 @@ export default function RecentMatchesScreen() {
   useFocusEffect(
     useCallback(() => {
       analytics.screen('MatchHistory');
+      void trackOnce('first_match_history_viewed', undefined, user?.id);
       if (user) {
         console.log('🎯 Match history screen focused - refreshing matches...');
         fetchMatches();
@@ -327,6 +330,26 @@ export default function RecentMatchesScreen() {
   // Filter matches when selections or search query change
   useEffect(() => {
     filterMatches();
+    if (!hasTrackedFilterRef.current) {
+      hasTrackedFilterRef.current = true;
+      return;
+    }
+
+    const opponentQuery = searchQuery.trim();
+    const hasActiveFilters =
+      selectedType !== 'All' ||
+      selectedWinLoss !== 'All' ||
+      selectedDateRange !== 'All Time' ||
+      opponentQuery.length > 0;
+
+    if (hasActiveFilters) {
+      analytics.capture('match_history_filtered', {
+        match_type: selectedType !== 'All' ? selectedType : undefined,
+        win_loss: selectedWinLoss !== 'All' ? selectedWinLoss : undefined,
+        date_range: selectedDateRange !== 'All Time' ? selectedDateRange : undefined,
+        opponent_query: opponentQuery.length > 0 ? opponentQuery : undefined,
+      });
+    }
   }, [selectedType, selectedWinLoss, selectedDateRange, searchQuery, allMatches]);
 
   const filters = ['All', 'Type', 'Win/Loss', 'Date'];

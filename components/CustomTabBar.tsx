@@ -8,6 +8,7 @@ import Entypo from 'react-native-vector-icons/Entypo';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { analytics } from '@/lib/analytics';
 
 const iconMap = {
   'home': Entypo,
@@ -28,6 +29,7 @@ const iconNames = {
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const currentTab = state.routes[state.index]?.name;
 
   return (
     <View style={[styles.tabBar, { 
@@ -49,6 +51,10 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
 
           if (!isFocused && !event.defaultPrevented) {
             navigation.navigate(route.name);
+            analytics.capture('tab_switched', {
+              from_tab: currentTab,
+              to_tab: route.name,
+            });
           }
 
           if (process.env.EXPO_OS === 'ios') {

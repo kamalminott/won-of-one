@@ -2,7 +2,9 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
 import { matchService, userService } from '@/lib/database';
+import { sessionTracker } from '@/lib/sessionTracker';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
@@ -152,20 +154,47 @@ export default function AddMatchScreen() {
     if ((opponentName || event !== 'Training' || weaponType !== 'Foil' || notes) && !hasStartedForm) {
       setHasStartedForm(true);
       analytics.matchFormStarted();
+      if (!isEditMode) {
+        analytics.matchStart({
+          mode: 'manual',
+          is_offline: false,
+          weapon_type: weaponType.toLowerCase(),
+          opponent_name: opponentName.trim() || undefined,
+        });
+        void trackFeatureFirstUse(
+          'manual_match',
+          {
+            weapon_type: weaponType.toLowerCase(),
+            opponent_name: opponentName.trim() || undefined,
+          },
+          user?.id
+        );
+      }
     }
-  }, [opponentName, event, weaponType, notes, hasStartedForm]);
+  }, [opponentName, event, weaponType, notes, hasStartedForm, isEditMode, user?.id]);
 
   // Track form abandonment on unmount if not saved
   useEffect(() => {
     return () => {
-      if (hasStartedForm && !isSaving) {
+      if (hasStartedForm && !isSaving && !isEditMode) {
         const hasData = opponentName || event !== 'Training' || weaponType !== 'Foil' || notes;
         if (hasData) {
           analytics.formAbandon({ form_type: 'match' });
+          const parsedYourScore = parseInt(yourScore, 10);
+          const parsedOpponentScore = parseInt(opponentScore, 10);
+          analytics.matchAbandoned({
+            mode: 'manual',
+            weapon_type: weaponType.toLowerCase(),
+            opponent_name: opponentName.trim() || undefined,
+            your_score: Number.isFinite(parsedYourScore) ? parsedYourScore : undefined,
+            opponent_score: Number.isFinite(parsedOpponentScore) ? parsedOpponentScore : undefined,
+            reason: 'form_abandon',
+            is_offline: false,
+          });
         }
       }
     };
-  }, [hasStartedForm, isSaving, opponentName, event, weaponType, notes]);
+  }, [hasStartedForm, isSaving, opponentName, event, weaponType, notes, yourScore, opponentScore, isEditMode]);
 
   // Fetch match data when in edit mode to populate weaponType
   useEffect(() => {
@@ -436,6 +465,29 @@ export default function AddMatchScreen() {
           match_type: event === 'Training' ? 'training' : 'competition',
           weapon_type: weaponType
         });
+
+        if (!isEditing) {
+          const winner =
+            yourScoreNum === opponentScoreNum
+              ? 'draw'
+              : yourScoreNum > opponentScoreNum
+                ? 'you'
+                : 'opponent';
+
+          analytics.matchCompleted({
+            mode: 'manual',
+            duration_seconds: undefined,
+            your_score: yourScoreNum,
+            opponent_score: opponentScoreNum,
+            winner,
+            weapon_type: weaponType.toLowerCase(),
+            opponent_name: opponentName.trim() || undefined,
+            is_offline: false,
+            match_id: savedMatch.match_id,
+          });
+          sessionTracker.incrementMatches();
+          void trackOnce('first_match_completed', { mode: 'manual' }, user?.id);
+        }
         
         // Navigate to manual match summary page
         router.push({
