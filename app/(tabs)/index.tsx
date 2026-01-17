@@ -140,7 +140,9 @@ export default function HomeScreen() {
   const userNameRef = useRef(userName);
   const profilePromptShownRef = useRef(false);
   const profilePromptSuppressedRef = useRef(false);
-  const shouldShowCompleteProfilePrompt = showCompleteProfilePrompt || profileNameStatus === 'missing';
+  const isCompleteProfilePromptEnabled = false;
+  const shouldShowCompleteProfilePrompt =
+    isCompleteProfilePromptEnabled && (showCompleteProfilePrompt || profileNameStatus === 'missing');
   const handleProfilePromptCompleted = useCallback(() => {
     profilePromptSuppressedRef.current = true;
     setShowCompleteProfilePrompt(false);
@@ -148,11 +150,16 @@ export default function HomeScreen() {
   }, []);
 
   const handleProfilePromptDismiss = useCallback(() => {
-    if (profileNameStatus === 'missing') {
-      return;
-    }
+    profilePromptSuppressedRef.current = true;
     setShowCompleteProfilePrompt(false);
-  }, [profileNameStatus]);
+    setProfileNameStatus('present');
+    setUserNameWaitTimedOut(true);
+    if (user?.id) {
+      AsyncStorage.setItem(profileCompletedStorageKey(user.id), 'true').catch(error => {
+        console.warn('Failed to persist profile skip flag:', error);
+      });
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     trainingTimeRef.current = trainingTime;

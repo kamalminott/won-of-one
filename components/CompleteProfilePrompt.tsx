@@ -68,7 +68,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hasOptimisticCloseRef = React.useRef(false);
-  const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0;
+  const canSubmit = firstName.trim().length > 0 || lastName.trim().length > 0;
   const isAndroid = Platform.OS === 'android';
   const keyboardVerticalOffset = Platform.OS === 'ios' ? Math.max(16, insets.top) : 0;
   const androidKeyboardInset = isAndroid ? Math.max(0, keyboardHeight) : 0;
@@ -105,8 +105,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
 
-    if (!trimmedFirst || !trimmedLast) {
-      setErrorMessage('Please enter your first and last name.');
+    if (!trimmedFirst && !trimmedLast) {
+      setErrorMessage('Please enter a first or last name, or tap Not now.');
       return;
     }
 
@@ -152,8 +152,8 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
           userService.createUser(
             user.id,
             user.email,
-            formattedFirst,
-            formattedLast,
+            formattedFirst || undefined,
+            formattedLast || undefined,
             undefined,
             accessToken
           ),
@@ -196,6 +196,20 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSkip = async () => {
+    if (hasOptimisticCloseRef.current) return;
+    hasOptimisticCloseRef.current = true;
+    setErrorMessage('');
+    if (user?.id) {
+      try {
+        await AsyncStorage.setItem(profileCompletedStorageKey(user.id), 'true');
+      } catch (error) {
+        console.warn('⚠️ Failed to persist profile skip flag:', error);
+      }
+    }
+    onDismiss();
   };
 
   const styles = StyleSheet.create({
@@ -265,9 +279,10 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       marginTop: 16,
       paddingBottom: 4,
       alignItems: 'stretch',
+      gap: 12,
     },
     modalButton: {
-      flex: 1,
+      width: '100%',
       minHeight: 48,
       paddingVertical: 16,
       borderRadius: 8,
@@ -278,10 +293,6 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       backgroundColor: '#6C5CE7',
       opacity: isSaving || !canSubmit ? 0.7 : 1,
     },
-    requiredIndicator: {
-      color: '#FF6B6B',
-      fontWeight: '700',
-    },
     modalButtonSaveText: {
       fontSize: 16,
       color: '#FFFFFF',
@@ -289,6 +300,16 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       textAlign: 'center',
       width: '100%',
       includeFontPadding: false,
+    },
+    modalButtonSecondary: {
+      backgroundColor: '#3A3A3A',
+      borderWidth: 1,
+      borderColor: '#4A4A4A',
+    },
+    modalButtonSecondaryText: {
+      fontSize: 15,
+      color: '#DADADA',
+      fontWeight: '600',
     },
     errorText: {
       color: '#FF6B6B',
@@ -303,7 +324,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={() => {}}
+      onRequestClose={handleSkip}
     >
       <View style={styles.modalOverlay}>
         <KeyboardAvoidingView
@@ -319,15 +340,13 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
             <View style={styles.modalContainer}>
               <Text style={styles.modalTitle}>Complete Your Profile</Text>
               <Text style={styles.modalSubtitle}>
-                Add your name so matches and stats look right.
+                Add your name now or later from Profile.
               </Text>
 
               {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>
-                  First Name<Text style={styles.requiredIndicator}> *</Text>
-                </Text>
+                <Text style={styles.nameInputLabel}>First Name (optional)</Text>
                 <TextInput
                   style={styles.nameInput}
                   value={firstName}
@@ -340,9 +359,7 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
               </View>
 
               <View style={styles.nameInputContainer}>
-                <Text style={styles.nameInputLabel}>
-                  Last Name<Text style={styles.requiredIndicator}> *</Text>
-                </Text>
+                <Text style={styles.nameInputLabel}>Last Name (optional)</Text>
                 <TextInput
                   style={styles.nameInput}
                   value={lastName}
@@ -362,6 +379,13 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
                   <Text style={styles.modalButtonSaveText}>
                     {isSaving ? 'Saving...' : 'Save'}
                   </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonSecondary]}
+                  onPress={handleSkip}
+                  disabled={isSaving}
+                >
+                  <Text style={styles.modalButtonSecondaryText}>Not now</Text>
                 </TouchableOpacity>
               </View>
             </View>

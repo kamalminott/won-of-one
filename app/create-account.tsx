@@ -135,8 +135,8 @@ export default function CreateAccountScreen() {
       } else {
         analytics.signupSuccess();
         Alert.alert(
-          'Success', 
-          'Account created successfully! You can now log in.',
+          'Success',
+          'Account created! Please verify your email address to sign in.',
           [
             {
               text: 'OK',

@@ -5338,13 +5338,15 @@ export const accountService = {
         return { success: false, error: appUserError.message };
       }
 
-      // 13. Delete auth user account via RPC function
-      const { data: deleteAuthResult, error: authError } = await postgrestRpc<{ success: boolean; error?: string }>(
-        'delete_user_account',
-        { target_user_id: userId },
-        { accessToken: token }
+      // 13. Delete auth user account via Edge Function (service role)
+      const { data: deleteAuthResult, error: authError } = await supabase.functions.invoke(
+        'delete-account',
+        {
+          body: { userId },
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
-      
+
       if (authError) {
         console.error('❌ Error deleting auth user:', authError);
         return { success: false, error: `Failed to delete auth account: ${authError.message}` };
