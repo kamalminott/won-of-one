@@ -69,7 +69,7 @@ export default function SettingsScreen() {
         loadUpdateInfo();
         loadTokenInfo();
       }
-    }, [showDiagnostics])
+    }, [loadTokenInfo, loadUpdateInfo, showDiagnostics, user?.id])
   );
 
   // Load token information
@@ -247,7 +247,10 @@ export default function SettingsScreen() {
 
   const handleOpenPaywall = () => {
     analytics.capture('paywall_opened_from_settings');
-    router.push('/paywall');
+    router.push({
+      pathname: '/paywall',
+      params: { source: 'settings' },
+    });
   };
 
   const handleLogOut = async () => {

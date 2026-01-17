@@ -1,6 +1,6 @@
 import { subscriptionService } from '@/lib/subscriptionService';
 import { analytics } from '@/lib/analytics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -9,10 +9,13 @@ import { Colors } from '@/constants/Colors';
 import RevenueCatUI from 'react-native-purchases-ui';
 
 export default function PaywallScreen() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const params = useLocalSearchParams();
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [canDismiss, setCanDismiss] = useState(false);
+  const paywallSource = params.source === 'settings' ? 'settings' : 'auto';
+  const allowUserDismiss = paywallSource === 'settings' && canDismiss;
 
   const handleClose = (reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user') => {
     if (!canDismiss && reason === 'user') {
@@ -30,6 +33,12 @@ export default function PaywallScreen() {
   };
 
   useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace('/login');
+      return;
+    }
+
     analytics.screen('Paywall');
     // Track paywall viewed
     analytics.capture('paywall_viewed');
@@ -44,8 +53,10 @@ export default function PaywallScreen() {
         const info = await subscriptionService.getSubscriptionInfo();
         if (info.isActive) {
           setCanDismiss(true);
-          handleClose('already_subscribed');
-          return;
+          if (paywallSource !== 'settings') {
+            handleClose('already_subscribed');
+            return;
+          }
         }
       } catch (error: any) {
         if (isActive) {
@@ -63,7 +74,7 @@ export default function PaywallScreen() {
     return () => {
       isActive = false;
     };
-  }, [user?.id]);
+  }, [user?.id, loading, paywallSource]);
 
   if (initializing) {
     return (
@@ -95,8 +106,12 @@ export default function PaywallScreen() {
     <View style={styles.container}>
       <ExpoStatusBar style="light" />
       <RevenueCatUI.Paywall
-        options={{ displayCloseButton: false }}
-        onDismiss={() => handleClose('user')}
+        options={{ displayCloseButton: allowUserDismiss }}
+        onDismiss={() => {
+          if (allowUserDismiss) {
+            handleClose('user');
+          }
+        }}
         onPurchaseCompleted={async (customerInfo) => {
           try {
             // Parse subscription info from customerInfo
