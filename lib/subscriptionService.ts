@@ -170,6 +170,44 @@ export const subscriptionService = {
   },
 
   /**
+   * Get a specific offering by identifier (falls back to current if not provided)
+   */
+  async getOffering(identifier?: string): Promise<PurchasesOffering | null> {
+    // If RevenueCat isn't initialized, return null
+    if (!isActuallyConfigured || !Purchases) {
+      console.warn('⚠️ RevenueCat not initialized - cannot fetch offering');
+      return null;
+    }
+
+    try {
+      const offerings = await Purchases.getOfferings();
+      if (!offerings) return null;
+
+      if (!identifier) {
+        return offerings.current ?? null;
+      }
+
+      const allOfferings = offerings.all || {};
+      let offering = allOfferings[identifier];
+
+      if (!offering) {
+        const normalizedId = identifier.toLowerCase();
+        const matchedKey = Object.keys(allOfferings).find(
+          key => key.toLowerCase() === normalizedId
+        );
+        if (matchedKey) {
+          offering = allOfferings[matchedKey];
+        }
+      }
+
+      return offering ?? null;
+    } catch (error: any) {
+      console.error('❌ Error fetching offering (non-fatal):', error?.message || error);
+      return null;
+    }
+  },
+
+  /**
    * Purchase a subscription package
    */
   async purchasePackage(packageToPurchase: PurchasesPackage): Promise<CustomerInfo> {

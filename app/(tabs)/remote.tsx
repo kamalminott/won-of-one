@@ -6773,6 +6773,7 @@ export default function RemoteScreen() {
   const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
   const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
   const tabBarHeight = height * 0.08 + insets.bottom;
+  const timerReadyDockGap = height * 0.01;
   const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
   const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
   const fencersContainerCardsBottom = height * (isAndroid ? 0.012 : 0.01);
@@ -6791,7 +6792,7 @@ export default function RemoteScreen() {
   const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03);
   const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006);
   const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015);
-  const timerReadyDockBottom = isAndroid ? Math.max(8, tabBarHeight - height * 0.05) : height * 0.08;
+  const timerReadyDockBottom = isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08;
   const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018);
   const timerReadyBottomControlsGapNoCards = timerReadyBottomControlsGap + height * (isAndroid ? 0.006 : 0.008);
   const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012);

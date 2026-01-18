@@ -1,4 +1,4 @@
-import { subscriptionService } from '@/lib/subscriptionService';
+import { subscriptionService, type PurchasesOffering } from '@/lib/subscriptionService';
 import { analytics } from '@/lib/analytics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
@@ -14,8 +14,10 @@ export default function PaywallScreen() {
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [canDismiss, setCanDismiss] = useState(false);
+  const [paywallOffering, setPaywallOffering] = useState<PurchasesOffering | null>(null);
   const paywallSource = params.source === 'settings' ? 'settings' : 'auto';
   const allowUserDismiss = paywallSource === 'settings' && canDismiss;
+  const paywallOfferingId = 'Main';
 
   const handleClose = (reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user') => {
     if (!canDismiss && reason === 'user') {
@@ -58,6 +60,12 @@ export default function PaywallScreen() {
             return;
           }
         }
+
+        const offering = await subscriptionService.getOffering(paywallOfferingId);
+        if (!offering) {
+          throw new Error('Paywall offering is unavailable. Please try again later.');
+        }
+        setPaywallOffering(offering);
       } catch (error: any) {
         if (isActive) {
           setInitError(error?.message || 'Subscriptions are unavailable. Please try again later.');
@@ -106,7 +114,10 @@ export default function PaywallScreen() {
     <View style={styles.container}>
       <ExpoStatusBar style="light" />
       <RevenueCatUI.Paywall
-        options={{ displayCloseButton: allowUserDismiss }}
+        options={{
+          displayCloseButton: allowUserDismiss,
+          offering: paywallOffering,
+        }}
         onDismiss={() => {
           if (allowUserDismiss) {
             handleClose('user');
