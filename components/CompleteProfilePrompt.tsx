@@ -25,6 +25,7 @@ interface CompleteProfilePromptProps {
 
 const FALLBACK_NAMES = new Set(['', 'User', 'Guest User']);
 const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
+const PROFILE_PROMPT_DISMISSED_KEY = 'profile_name_prompt_dismissed';
 
 const capitalizeName = (value: string) => {
   return value
@@ -207,6 +208,17 @@ export const CompleteProfilePrompt: React.FC<CompleteProfilePromptProps> = ({
         await AsyncStorage.setItem(profileCompletedStorageKey(user.id), 'true');
       } catch (error) {
         console.warn('⚠️ Failed to persist profile skip flag:', error);
+      }
+    }
+    if (user?.id) {
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            [PROFILE_PROMPT_DISMISSED_KEY]: true,
+          },
+        });
+      } catch (error) {
+        console.warn('⚠️ Failed to persist profile prompt dismissal:', error);
       }
     }
     onDismiss();

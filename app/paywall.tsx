@@ -19,18 +19,25 @@ export default function PaywallScreen() {
   const allowUserDismiss = paywallSource === 'settings' && canDismiss;
   const paywallOfferingId = 'Main';
 
-  const handleClose = (reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user') => {
+  const handleClose = (
+    reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user',
+    options?: { profilePrompt?: boolean }
+  ) => {
     if (!canDismiss && reason === 'user') {
       return;
     }
     console.log('🚪 Closing paywall, navigating to home with bypass flag');
     // Track paywall dismissed (user closed without purchasing)
     analytics.capture('paywall_dismissed', { reason });
+    const params: Record<string, string> = {
+      bypassPaywall: 'true',
+    };
+    if (options?.profilePrompt) {
+      params.profilePrompt = 'true';
+    }
     router.push({
       pathname: '/(tabs)',
-      params: {
-        bypassPaywall: 'true',
-      },
+      params,
     });
   };
 
@@ -159,7 +166,7 @@ export default function PaywallScreen() {
             console.error('Error tracking purchase completion:', error);
           }
           
-          handleClose('purchase');
+          handleClose('purchase', { profilePrompt: true });
         }}
         onRestoreCompleted={async (customerInfo) => {
           try {
@@ -180,7 +187,7 @@ export default function PaywallScreen() {
             console.error('Error tracking restore completion:', error);
           }
           
-          handleClose('restore');
+          handleClose('restore', { profilePrompt: true });
         }}
         onPurchaseError={({ error }) => {
           console.error('Paywall purchase error:', error);

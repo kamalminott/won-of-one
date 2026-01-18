@@ -75,6 +75,13 @@ const isPlaceholderName = (name: string, email?: string | null) => {
   return false;
 };
 
+const hasFullNameParts = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.length >= 2;
+};
+
+const isProfilePromptDismissed = (value: unknown) => value === true || value === 'true';
+
 const getAuthMetadataName = (authUser?: { user_metadata?: Record<string, any> } | null) => {
   if (!authUser?.user_metadata) return '';
   const metadata = authUser.user_metadata;
@@ -112,7 +119,12 @@ export default function HomeScreen() {
   const effectiveUserName = trimmedUserName || (metadataNameReady ? authMetadataName : '');
   const normalizedUserName = effectiveUserName.toLowerCase();
   const isUserNameReady =
-    effectiveUserName.length > 0 && !isPlaceholderName(effectiveUserName, user?.email);
+    effectiveUserName.length > 0 &&
+    !isPlaceholderName(effectiveUserName, user?.email) &&
+    hasFullNameParts(effectiveUserName);
+  const profilePromptDismissed = isProfilePromptDismissed(
+    user?.user_metadata?.profile_name_prompt_dismissed
+  );
   const [profileNameStatus, setProfileNameStatus] = useState<'unknown' | 'missing' | 'present'>('unknown');
   const [userNameWaitTimedOut, setUserNameWaitTimedOut] = useState(false);
   const shouldHoldForProfileCheck = !!user && authReady && profileNameStatus === 'unknown';
@@ -132,6 +144,7 @@ export default function HomeScreen() {
   const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
+  const [profilePromptRequested, setProfilePromptRequested] = useState(false);
 
   const fetchInFlightRef = useRef(false);
   const lastFetchAtMsRef = useRef(0);
@@ -143,13 +156,14 @@ export default function HomeScreen() {
   const profilePromptShownRef = useRef(false);
   const profilePromptSuppressedRef = useRef(false);
   const dashboardStartRef = useRef<number | null>(null);
-  const isCompleteProfilePromptEnabled = false;
+  const isCompleteProfilePromptEnabled = profilePromptRequested && !profilePromptDismissed;
   const shouldShowCompleteProfilePrompt =
     isCompleteProfilePromptEnabled && (showCompleteProfilePrompt || profileNameStatus === 'missing');
   const handleProfilePromptCompleted = useCallback(() => {
     profilePromptSuppressedRef.current = true;
     setShowCompleteProfilePrompt(false);
     setProfileNameStatus('present');
+    setProfilePromptRequested(false);
   }, []);
 
   const handleProfilePromptDismiss = useCallback(() => {
@@ -157,6 +171,7 @@ export default function HomeScreen() {
     setShowCompleteProfilePrompt(false);
     setProfileNameStatus('present');
     setUserNameWaitTimedOut(true);
+    setProfilePromptRequested(false);
     if (user?.id) {
       AsyncStorage.setItem(profileCompletedStorageKey(user.id), 'true').catch(error => {
         console.warn('Failed to persist profile skip flag:', error);
@@ -240,6 +255,7 @@ export default function HomeScreen() {
     setProfileNameStatus('unknown');
     setShowCompleteProfilePrompt(false);
     setUserNameWaitTimedOut(false);
+    setProfilePromptRequested(false);
   }, [user?.id]);
 
   useEffect(() => {
@@ -247,6 +263,16 @@ export default function HomeScreen() {
 
     let cancelled = false;
     const key = profileCompletedStorageKey(user.id);
+
+    if (profilePromptDismissed) {
+      profilePromptSuppressedRef.current = true;
+      setProfileNameStatus('present');
+      setShowCompleteProfilePrompt(false);
+      setProfilePromptRequested(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     AsyncStorage.getItem(key)
       .then(flag => {
@@ -264,7 +290,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, authReady, isPasswordRecovery]);
+  }, [user?.id, authReady, isPasswordRecovery, profilePromptDismissed]);
 
   useEffect(() => {
     if (!user || !authReady || isPasswordRecovery) return;
@@ -311,14 +337,14 @@ export default function HomeScreen() {
       const getLocalCandidate = () => {
         const metadataName = getAuthMetadataName(user)?.trim() || '';
         const localName = (userNameRef.current || '').trim();
-        return { metadataName, localName, candidate: localName || metadataName };
+        return { metadataName, localName };
       };
 
       const isCandidateValid = (candidate: string) =>
-        !!candidate && !isPlaceholderName(candidate, user.email);
+        !!candidate && !isPlaceholderName(candidate, user.email) && hasFullNameParts(candidate);
 
-      let { candidate } = getLocalCandidate();
-      if (isCandidateValid(candidate)) {
+      let { metadataName, localName } = getLocalCandidate();
+      if (isCandidateValid(metadataName) || isCandidateValid(localName)) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
         return;
@@ -327,8 +353,8 @@ export default function HomeScreen() {
       await new Promise(resolve => setTimeout(resolve, PROFILE_NAME_SETTLE_DELAY_MS));
       if (cancelled) return;
 
-      ({ candidate } = getLocalCandidate());
-      if (isCandidateValid(candidate)) {
+      ({ metadataName, localName } = getLocalCandidate());
+      if (isCandidateValid(metadataName) || isCandidateValid(localName)) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
         return;
@@ -352,8 +378,8 @@ export default function HomeScreen() {
         console.warn('Failed to check profile name:', error);
       }
 
-      const finalCandidate = dbName || candidate;
-      if (isCandidateValid(finalCandidate)) {
+      const finalCandidate = [dbName, metadataName, localName].find(isCandidateValid) || '';
+      if (finalCandidate) {
         setProfileNameStatus('present');
         setShowCompleteProfilePrompt(false);
         return;
@@ -399,6 +425,15 @@ export default function HomeScreen() {
       router.setParams({ bypassPaywall: undefined });
     }
   }, [params.bypassPaywall]);
+
+  useEffect(() => {
+    if (params.profilePrompt === 'true') {
+      if (!profilePromptDismissed) {
+        setProfilePromptRequested(true);
+      }
+      router.setParams({ profilePrompt: undefined });
+    }
+  }, [params.profilePrompt, profilePromptDismissed, router]);
 
   useEffect(() => {
     if (!user?.id) {
