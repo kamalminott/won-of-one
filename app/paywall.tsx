@@ -3,7 +3,7 @@ import { analytics } from '@/lib/analytics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors } from '@/constants/Colors';
 import RevenueCatUI from 'react-native-purchases-ui';
@@ -14,16 +14,18 @@ export default function PaywallScreen() {
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [canDismiss, setCanDismiss] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [paywallOffering, setPaywallOffering] = useState<PurchasesOffering | null>(null);
+  const paywallStartTimeRef = React.useRef<number>(Date.now());
   const paywallSource = params.source === 'settings' ? 'settings' : 'auto';
-  const allowUserDismiss = paywallSource === 'settings' && canDismiss;
+  const allowUserDismiss = paywallSource === 'settings' || canDismiss;
   const paywallOfferingId = 'Main';
 
   const handleClose = (
-    reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' = 'user',
+    reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' | 'preview' = 'user',
     options?: { profilePrompt?: boolean }
   ) => {
-    if (!canDismiss && reason === 'user') {
+    if (!allowUserDismiss && reason === 'user') {
       return;
     }
     console.log('🚪 Closing paywall, navigating to home with bypass flag');
@@ -51,10 +53,21 @@ export default function PaywallScreen() {
     analytics.screen('Paywall');
     // Track paywall viewed
     analytics.capture('paywall_viewed');
+    paywallStartTimeRef.current = Date.now();
     let isActive = true;
 
     const init = async () => {
       try {
+        const previewSnapshot = subscriptionService.getPaywallPreviewStatusFromMetadata(
+          user?.user_metadata ?? null
+        );
+        setCanDismiss(!previewSnapshot.hasStarted);
+
+        if (paywallSource !== 'settings' && previewSnapshot.isActive) {
+          handleClose('preview');
+          return;
+        }
+
         await subscriptionService.initialize(user?.id);
         if (!subscriptionService.isConfigured()) {
           throw new Error('Subscriptions are unavailable. Please try again later.');
@@ -91,6 +104,22 @@ export default function PaywallScreen() {
     };
   }, [user?.id, loading, paywallSource]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        const timeOnPaywallMs = Date.now() - paywallStartTimeRef.current;
+        analytics.capture('paywall_abandoned', {
+          source: paywallSource,
+          time_on_paywall_ms: Math.max(0, timeOnPaywallMs),
+        });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [paywallSource]);
+
   if (initializing) {
     return (
       <View style={styles.container}>
@@ -120,15 +149,72 @@ export default function PaywallScreen() {
   return (
     <View style={styles.container}>
       <ExpoStatusBar style="light" />
+      <Modal
+        visible={showPreviewModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowPreviewModal(false);
+          handleClose('preview');
+        }}
+      >
+        <View style={styles.previewOverlay}>
+          <View style={styles.previewContainer}>
+            <Text style={styles.previewTitle}>We don't want to lose you</Text>
+            <Text style={styles.previewBody}>
+              Enjoy 3 days of full access on behalf of the Won Of One team - no card details needed.
+            </Text>
+            <TouchableOpacity
+              style={styles.previewButton}
+              onPress={() => {
+                setShowPreviewModal(false);
+                handleClose('preview');
+              }}
+            >
+              <Text style={styles.previewButtonText}>Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <RevenueCatUI.Paywall
         options={{
           displayCloseButton: allowUserDismiss,
           offering: paywallOffering,
         }}
         onDismiss={() => {
-          if (allowUserDismiss) {
-            handleClose('user');
+          if (!allowUserDismiss) {
+            return;
           }
+          if (paywallSource === 'settings') {
+            handleClose('user');
+            return;
+          }
+          void (async () => {
+            try {
+              const { status, granted } = await subscriptionService.grantPaywallPreview(user);
+              if (granted) {
+                analytics.capture('paywall_preview_started', {
+                  ends_at: status.endsAt?.toISOString(),
+                });
+                setShowPreviewModal(true);
+                return;
+              }
+              if (status.isActive) {
+                setShowPreviewModal(true);
+                return;
+              }
+              Alert.alert(
+                'Preview already used',
+                'Your free preview has ended. Please subscribe to continue.'
+              );
+            } catch (error) {
+              console.error('❌ Failed to grant paywall preview:', error);
+              Alert.alert(
+                'Unable to start preview',
+                'Please check your connection and try again.'
+              );
+            }
+          })();
         }}
         onPurchaseCompleted={async (customerInfo) => {
           try {
@@ -249,6 +335,48 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     color: Colors.purple.primary,
+    fontWeight: '600',
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  previewContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#1F1F1F',
+    borderRadius: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  previewTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  previewBody: {
+    color: '#DADADA',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  previewButton: {
+    backgroundColor: Colors.purple.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  previewButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

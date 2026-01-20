@@ -4,6 +4,7 @@
  */
 
 import { Platform } from 'react-native';
+import type { User } from '@supabase/supabase-js';
 import { postgrestInsert, postgrestSelectOne } from './postgrest';
 import { supabase } from './supabase';
 import { analytics } from './analytics';
@@ -52,6 +53,45 @@ export interface SubscriptionInfo {
   expirationReason?: string | null;
   periodType?: string | null;
 }
+
+type PaywallPreviewStatus = {
+  startedAt: Date | null;
+  endsAt: Date | null;
+  isActive: boolean;
+  isExpired: boolean;
+  hasStarted: boolean;
+};
+
+const PAYWALL_PREVIEW_DEFAULT_DAYS = 3;
+const PAYWALL_PREVIEW_METADATA_KEYS = {
+  startedAt: 'paywall_preview_started_at',
+  endsAt: 'paywall_preview_ends_at',
+} as const;
+
+const parseMetadataDate = (value: unknown): Date | null => {
+  if (typeof value !== 'string') return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const buildPaywallPreviewStatus = (
+  metadata?: Record<string, any> | null
+): PaywallPreviewStatus => {
+  const startedAt = parseMetadataDate(metadata?.[PAYWALL_PREVIEW_METADATA_KEYS.startedAt]);
+  const endsAt = parseMetadataDate(metadata?.[PAYWALL_PREVIEW_METADATA_KEYS.endsAt]);
+  const now = new Date();
+  const hasStarted = !!startedAt || !!endsAt;
+  const isActive = !!endsAt && now < endsAt;
+  const isExpired = !!endsAt && now >= endsAt;
+  return {
+    startedAt,
+    endsAt,
+    isActive,
+    isExpired,
+    hasStarted,
+  };
+};
 
 // Export types for use in other files
 // In dev mode, these will be null, but TypeScript will still allow the types
@@ -321,6 +361,58 @@ export const subscriptionService = {
       console.error('❌ Error checking subscription:', error);
       return false;
     }
+  },
+
+  getPaywallPreviewStatusFromMetadata(
+    metadata?: Record<string, any> | null
+  ): PaywallPreviewStatus {
+    return buildPaywallPreviewStatus(metadata);
+  },
+
+  async getPaywallPreviewStatus(user?: User | null): Promise<PaywallPreviewStatus> {
+    if (user?.user_metadata) {
+      return buildPaywallPreviewStatus(user.user_metadata);
+    }
+    try {
+      const { data } = await supabase.auth.getUser();
+      return buildPaywallPreviewStatus(data.user?.user_metadata ?? null);
+    } catch (error) {
+      console.error('❌ Error loading paywall preview status:', error);
+      return buildPaywallPreviewStatus(null);
+    }
+  },
+
+  async grantPaywallPreview(
+    user?: User | null,
+    durationDays: number = PAYWALL_PREVIEW_DEFAULT_DAYS
+  ): Promise<{ status: PaywallPreviewStatus; granted: boolean }> {
+    const resolvedUser =
+      user ??
+      (await supabase.auth.getUser().then(result => result.data.user).catch(() => null));
+    if (!resolvedUser) {
+      throw new Error('User not authenticated');
+    }
+
+    const existing = buildPaywallPreviewStatus(resolvedUser.user_metadata ?? null);
+    if (existing.hasStarted) {
+      return { status: existing, granted: false };
+    }
+
+    const now = new Date();
+    const endsAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+    const { data, error } = await supabase.auth.updateUser({
+      data: {
+        [PAYWALL_PREVIEW_METADATA_KEYS.startedAt]: now.toISOString(),
+        [PAYWALL_PREVIEW_METADATA_KEYS.endsAt]: endsAt.toISOString(),
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const status = buildPaywallPreviewStatus(data.user?.user_metadata ?? null);
+    return { status, granted: true };
   },
 
   /**

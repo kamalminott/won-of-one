@@ -451,9 +451,10 @@ export default function HomeScreen() {
 
       try {
         const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
+        const previewStatus = await subscriptionService.getPaywallPreviewStatus(user);
         
         // If user has no active subscription and no active trial, show paywall
-        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial) {
+        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial && !previewStatus.isActive) {
           console.log('🔒 No active subscription or trial, redirecting to paywall');
           paywallNavigationRef.current = true;
           router.replace('/paywall');
@@ -462,12 +463,18 @@ export default function HomeScreen() {
           const now = new Date();
           const expiresAt = subscriptionInfo.expiresAt;
           if (now >= expiresAt) {
-            console.log('⏰ Trial expired, redirecting to paywall');
-            paywallNavigationRef.current = true;
-            router.replace('/paywall');
+            if (previewStatus.isActive) {
+              console.log('✅ Preview active, allowing access');
+            } else {
+              console.log('⏰ Trial expired, redirecting to paywall');
+              paywallNavigationRef.current = true;
+              router.replace('/paywall');
+            }
           } else {
             console.log('✅ Trial active, allowing access');
           }
+        } else if (previewStatus.isActive) {
+          console.log('✅ Preview active, allowing access');
         } else if (subscriptionInfo.isActive) {
           console.log('✅ Active subscription, allowing access');
           paywallNavigationRef.current = false;
