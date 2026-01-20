@@ -204,6 +204,8 @@ export const offlineRemoteService = {
    */
   async recordEvent(eventData: {
     remote_id: string;
+    event_uuid?: string;
+    event_sequence?: number;
     event_type: string;
     scoring_user_name?: string;
     match_time_elapsed?: number;
@@ -216,6 +218,8 @@ export const offlineRemoteService = {
     // Always save to pending queue (even if online, for reliability)
     const queuedEventId = await offlineCache.addPendingRemoteEvent({
       remote_id: eventData.remote_id,
+      event_uuid: eventData.event_uuid,
+      event_sequence: eventData.event_sequence,
       event_type: eventData.event_type,
       event_time: eventTime,
       scoring_user_name: eventData.scoring_user_name,
@@ -330,19 +334,27 @@ export const offlineRemoteService = {
 
       const matchData = {
         opponentName: session.fencer_2_name || 'Unknown Opponent',
+        matchType: 'training',
+        fencer1Name: session.fencer_1_name,
+        fencer2Name: session.fencer_2_name,
         youScore: session.score_1,
         opponentScore: session.score_2,
         date: new Date().toISOString().split('T')[0],
         isWin: session.score_1 > session.score_2,
         notes: `Remote session (offline): ${session.fencer_1_name} vs ${session.fencer_2_name}`,
+        weaponType: session.weapon_type,
         duration_sec: totalDuration,
         total_touches: session.score_1 + session.score_2,
         periods,
         events: sessionEvents.map((e) => ({
+          event_uuid: e.event_uuid,
+          event_sequence: e.event_sequence,
           event_type: e.event_type,
           event_time: e.event_time,
           scoring_user_name: e.scoring_user_name,
           match_time_elapsed: e.match_time_elapsed,
+          cancelled_event_id: e.metadata?.cancelled_event_id,
+          cancelled_event_uuid: e.metadata?.cancelled_event_uuid,
         })),
         is_offline: true,
       };
@@ -399,15 +411,27 @@ export const offlineRemoteService = {
 
       for (const match of pendingMatches) {
         try {
+          const normalizedWeapon = match.weaponType?.toLowerCase() === 'saber'
+            ? 'sabre'
+            : match.weaponType?.toLowerCase();
+          const matchType = match.matchType === 'competition' ? 'competition' : 'training';
+          const fencer1Name = match.fencer1Name?.trim() || undefined;
+          const fencer2Name = match.fencer2Name?.trim() || undefined;
+          const opponentName = match.opponentName?.trim()
+            || fencer2Name
+            || 'Unknown Opponent';
           const matchResult = await matchService.createManualMatch({
             userId,
-            opponentName: match.opponentName,
+            opponentName,
             yourScore: match.youScore,
             opponentScore: match.opponentScore,
-            matchType: 'training', // Default to training
+            matchType,
             date: match.date,
             time: new Date(match.queuedAt).toTimeString().split(' ')[0],
             notes: match.notes,
+            weaponType: normalizedWeapon,
+            fencer1Name,
+            fencer2Name,
           });
 
           if (matchResult) {
@@ -453,6 +477,9 @@ export const offlineRemoteService = {
             : 0;
           const scoringEntity = event.metadata?.scoring_entity || null;
           const scoringEntityFilter = scoringEntity ? { scoring_entity: `eq.${scoringEntity}` } : {};
+          const hasEventUuid = !!event.event_uuid;
+          const cancelledEventUuid = event.metadata?.cancelled_event_uuid || null;
+          let cancelledEventId = event.metadata?.cancelled_event_id || null;
 
           // Ensure match exists before attempting insert; if not, retry later
           if (matchId) {
@@ -476,8 +503,25 @@ export const offlineRemoteService = {
             }
           }
 
-          // Check for duplicate event before creating
-          if (matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
+          if (!cancelledEventId && cancelledEventUuid && matchId) {
+            const { data: cancelledMatchEvent, error: cancelledError } = await postgrestSelectOne<{ match_event_id: string }>(
+              'match_event',
+              {
+                select: 'match_event_id',
+                event_uuid: `eq.${cancelledEventUuid}`,
+                match_id: `eq.${matchId}`,
+                limit: 1,
+              }
+            );
+            if (cancelledError) {
+              console.error('❌ Error resolving cancelled_event_uuid:', cancelledError);
+            } else if (cancelledMatchEvent?.match_event_id) {
+              cancelledEventId = cancelledMatchEvent.match_event_id;
+            }
+          }
+
+          // Check for duplicate event before creating (legacy events without UUID)
+          if (!hasEventUuid && matchId && event.match_time_elapsed !== null && event.match_time_elapsed !== undefined && event.scoring_user_name) {
             // #region agent log
             console.log('[DEBUG] Duplicate check query params:', {
               matchId,
@@ -577,8 +621,8 @@ export const offlineRemoteService = {
             }
           }
 
-          // Additional duplicate guard using event_time second precision
-          if (matchId && event.scoring_user_name && event.event_time) {
+          // Additional duplicate guard using event_time second precision (legacy events without UUID)
+          if (!hasEventUuid && matchId && event.scoring_user_name && event.event_time) {
             const compositeTimeKey = event.event_time;
             const { data: existingComposite, error: compositeError } = await postgrestSelectOne<{ match_event_id: string }>(
               'match_event',
@@ -639,6 +683,7 @@ export const offlineRemoteService = {
 
           try {
             const created = await matchEventService.createMatchEvent({
+              event_uuid: event.event_uuid,
               match_id: matchId || null,
               fencing_remote_id: event.remote_id,
               event_type: event.event_type,
@@ -651,7 +696,7 @@ export const offlineRemoteService = {
               fencer_1_name: event.metadata?.fencer_1_name || null,
               fencer_2_name: event.metadata?.fencer_2_name || null,
               card_given: event.metadata?.card_given || null,
-              cancelled_event_id: event.metadata?.cancelled_event_id || null,
+              cancelled_event_id: cancelledEventId,
               reset_segment: resetSegment,
               score_diff: event.metadata?.score_diff || null,
               seconds_since_last_event: event.metadata?.seconds_since_last_event || null,

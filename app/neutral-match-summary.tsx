@@ -2,6 +2,7 @@ import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, ScoreBasedLeadingC
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
 import { matchService } from '@/lib/database';
+import { offlineCache } from '@/lib/offlineCache';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -67,6 +68,7 @@ export default function NeutralMatchSummary() {
     fencer2: number;
   }>({ fencer1: 0, fencer2: 0 });
   const [showNewMatchModal, setShowNewMatchModal] = useState(false);
+  const [localMatchEvents, setLocalMatchEvents] = useState<any[]>([]);
 
   const getResetSegmentValue = (value?: number | null) => {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -79,6 +81,175 @@ export default function NeutralMatchSummary() {
       0
     );
     return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+  };
+
+  const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null; event_time?: string | null; event_sequence?: number | null }>(events: T[]): T[] => {
+    if (!events || events.length === 0) return [];
+
+    const getMs = (ev: T) => {
+      const ts = ev.timestamp || ev.event_time;
+      if (!ts) return null;
+      const ms = new Date(ts).getTime();
+      return Number.isFinite(ms) ? ms : null;
+    };
+
+    const parseElapsed = (value?: number | null) => {
+      if (typeof value === 'number') return value;
+      if (value !== null && value !== undefined) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const sorted = [...events].sort((a, b) => {
+      const aElapsed = parseElapsed(a.match_time_elapsed);
+      const bElapsed = parseElapsed(b.match_time_elapsed);
+      if (aElapsed !== null && bElapsed !== null) return aElapsed - bElapsed;
+      if (aElapsed !== null) return -1;
+      if (bElapsed !== null) return 1;
+
+      const aMs = getMs(a) ?? 0;
+      const bMs = getMs(b) ?? 0;
+      if (aMs !== bMs) return aMs - bMs;
+
+      const aSeq = typeof a.event_sequence === 'number' ? a.event_sequence : Number.MAX_SAFE_INTEGER;
+      const bSeq = typeof b.event_sequence === 'number' ? b.event_sequence : Number.MAX_SAFE_INTEGER;
+      return aSeq - bSeq;
+    });
+
+    const firstTimestampMs = sorted
+      .map(ev => getMs(ev))
+      .find(ms => ms !== null) ?? null;
+
+    let lastElapsed = 0;
+
+    return sorted.map((event, index) => {
+      let elapsed = parseElapsed(event.match_time_elapsed);
+
+      if (elapsed === null) {
+        const eventMs = getMs(event);
+        if (eventMs !== null && firstTimestampMs !== null) {
+          elapsed = Math.max(0, Math.round((eventMs - firstTimestampMs) / 1000));
+        } else if (typeof event.event_sequence === 'number') {
+          elapsed = event.event_sequence;
+        } else {
+          elapsed = index === 0 ? 0 : lastElapsed + 1;
+        }
+      }
+
+      if (elapsed <= lastElapsed) {
+        elapsed = lastElapsed + 1;
+      }
+      lastElapsed = elapsed;
+
+      return { ...event, match_time_elapsed: elapsed };
+    });
+  };
+
+  const resolveEventFencer = (event: any, matchData: any) => {
+    if (event.scoring_entity && matchData?.fencer_1_entity && matchData?.fencer_2_entity) {
+      if (event.scoring_entity === matchData.fencer_1_entity) return 'fencer1';
+      if (event.scoring_entity === matchData.fencer_2_entity) return 'fencer2';
+    }
+
+    if (event.fencer_1_name && event.fencer_2_name && event.scoring_user_name) {
+      if (event.scoring_user_name === event.fencer_1_name) return 'fencer1';
+      if (event.scoring_user_name === event.fencer_2_name) return 'fencer2';
+    }
+
+    if (event.scoring_user_name && matchData?.fencer_1_name && matchData?.fencer_2_name) {
+      if (event.scoring_user_name === matchData.fencer_1_name) return 'fencer1';
+      if (event.scoring_user_name === matchData.fencer_2_name) return 'fencer2';
+    }
+
+    return 'fencer1';
+  };
+
+  const buildAnonymousProgressionFromEvents = (events: any[], matchData: any) => {
+    const normalized = normalizeEventsForProgression(events);
+    const filtered = filterEventsByLatestResetSegment(normalized);
+    if (filtered.length === 0) {
+      return { fencer1Data: [], fencer2Data: [] };
+    }
+
+    const cancelledEventIds = new Set<string>();
+    for (const event of filtered) {
+      if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
+        cancelledEventIds.add(event.cancelled_event_id);
+      }
+    }
+
+    const scoringEvents = filtered.filter(event => {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel') return false;
+      if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) return false;
+      if (eventType === 'touch') return true;
+      if (eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit') return true;
+      if (eventType === 'card') {
+        const points = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : event.card_given === 'red'
+            ? 1
+            : 0;
+        return points > 0;
+      }
+      return false;
+    });
+
+    const ordered = [...scoringEvents].sort((a, b) => {
+      const aTime = (a.event_time || a.timestamp) ?? '';
+      const bTime = (b.event_time || b.timestamp) ?? '';
+      if (aTime && bTime && aTime !== bTime) return aTime < bTime ? -1 : 1;
+      const aElapsed = a.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      const bElapsed = b.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      if (aElapsed !== bElapsed) return aElapsed - bElapsed;
+      const aSeq = typeof a.event_sequence === 'number' ? a.event_sequence : Number.MAX_SAFE_INTEGER;
+      const bSeq = typeof b.event_sequence === 'number' ? b.event_sequence : Number.MAX_SAFE_INTEGER;
+      return aSeq - bSeq;
+    });
+
+    let fencer1Score = 0;
+    let fencer2Score = 0;
+    const fencer1Data: { x: string; y: number }[] = [];
+    const fencer2Data: { x: string; y: number }[] = [];
+
+    for (const event of ordered) {
+      const eventType = (event.event_type || '').toLowerCase();
+      const isDouble = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+      const points = typeof event.points_awarded === 'number'
+        ? event.points_awarded
+        : event.card_given === 'red'
+          ? 1
+          : 0;
+
+      if (isDouble) {
+        fencer1Score += 1;
+        fencer2Score += 1;
+      } else if (eventType === 'touch' || points > 0) {
+        const scorer = resolveEventFencer(event, matchData);
+        const awardedToFencer1 = eventType === 'card' && points > 0
+          ? scorer !== 'fencer1'
+          : scorer === 'fencer1';
+        const awardedPoints = eventType === 'touch' ? 1 : points;
+        if (awardedToFencer1) {
+          fencer1Score += awardedPoints;
+        } else {
+          fencer2Score += awardedPoints;
+        }
+      } else {
+        continue;
+      }
+
+      const elapsed = event.match_time_elapsed ?? 0;
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = elapsed % 60;
+      const label = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      fencer1Data.push({ x: label, y: fencer1Score });
+      fencer2Data.push({ x: label, y: fencer2Score });
+    }
+
+    return { fencer1Data, fencer2Data };
   };
 
   // Extract match data from params
@@ -94,6 +265,42 @@ export default function NeutralMatchSummary() {
     fencer2Name,
   } = params;
 
+  useEffect(() => {
+    const loadLocalEvents = async () => {
+      if (!matchId || Array.isArray(matchId)) {
+        setLocalMatchEvents([]);
+        return;
+      }
+      const events = await offlineCache.getMatchEventLog(matchId);
+      setLocalMatchEvents(events);
+    };
+    loadLocalEvents();
+  }, [matchId]);
+
+  const resolveMatchEvents = async (
+    matchId: string,
+    select: string,
+    order: string
+  ): Promise<any[]> => {
+    if (localMatchEvents.length > 0) {
+      return localMatchEvents;
+    }
+    const { data, error } = await postgrestSelect<any>(
+      'match_event',
+      {
+        select,
+        match_id: `eq.${matchId}`,
+        order,
+      },
+      postgrestOptions
+    );
+    if (error) {
+      console.error('Error fetching match events:', error);
+      return [];
+    }
+    return data || [];
+  };
+
   // Function to calculate longest runs from match events
   const calculateLongestRuns = async (matchId: string, fencer1Name: string, fencer2Name: string) => {
     try {
@@ -101,11 +308,13 @@ export default function NeutralMatchSummary() {
       const { data: matchData, error: matchError } = await postgrestSelectOne<{
         fencer_1_name: string | null;
         fencer_2_name: string | null;
+        fencer_1_entity?: string | null;
+        fencer_2_entity?: string | null;
         weapon_type: string | null;
       }>(
         'match',
         {
-          select: 'fencer_1_name,fencer_2_name,weapon_type',
+          select: 'fencer_1_name,fencer_2_name,fencer_1_entity,fencer_2_entity,weapon_type',
           match_id: `eq.${matchId}`,
           limit: 1,
         },
@@ -125,28 +334,11 @@ export default function NeutralMatchSummary() {
       const weaponType = (matchData.weapon_type || '').toLowerCase();
       const isEpee = weaponType === 'epee';
 
-      const { data: matchEvents, error } = await postgrestSelect<{
-        scoring_user_name: string | null;
-        match_time_elapsed: number | null;
-        fencer_1_name: string | null;
-        fencer_2_name: string | null;
-        event_type: string | null;
-        cancelled_event_id: string | null;
-        reset_segment: number | null;
-      }>(
-        'match_event',
-        {
-          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
-          match_id: `eq.${matchId}`,
-          order: 'match_time_elapsed.asc',
-        },
-        postgrestOptions
+      const matchEvents = await resolveMatchEvents(
+        matchId,
+        'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+        'match_time_elapsed.asc'
       );
-
-      if (error) {
-        console.error('Error fetching match events for longest runs:', error);
-        return { fencer1: 0, fencer2: 0 };
-      }
 
       const filteredEvents = filterEventsByLatestResetSegment(matchEvents || []);
       if (filteredEvents.length === 0) {
@@ -262,10 +454,13 @@ export default function NeutralMatchSummary() {
       const { data: matchData, error: matchError } = await postgrestSelectOne<{
         fencer_1_name: string | null;
         fencer_2_name: string | null;
+        fencer_1_entity?: string | null;
+        fencer_2_entity?: string | null;
+        weapon_type?: string | null;
       }>(
         'match',
         {
-          select: 'fencer_1_name,fencer_2_name',
+          select: 'fencer_1_name,fencer_2_name,fencer_1_entity,fencer_2_entity,weapon_type',
           match_id: `eq.${matchId}`,
           limit: 1,
         },
@@ -281,28 +476,11 @@ export default function NeutralMatchSummary() {
       const finalFencer1Name = matchData.fencer_1_name || fencer1Name;
       const finalFencer2Name = matchData.fencer_2_name || fencer2Name;
 
-      const { data: matchEvents, error } = await postgrestSelect<{
-        scoring_user_name: string | null;
-        match_time_elapsed: number | null;
-        fencer_1_name: string | null;
-        fencer_2_name: string | null;
-        event_type: string | null;
-        cancelled_event_id: string | null;
-        reset_segment: number | null;
-      }>(
-        'match_event',
-        {
-          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
-          match_id: `eq.${matchId}`,
-          order: 'match_time_elapsed.asc',
-        },
-        postgrestOptions
+      const matchEvents = await resolveMatchEvents(
+        matchId,
+        'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+        'match_time_elapsed.asc'
       );
-
-      if (error) {
-        console.error('Error fetching match events for bounce back times:', error);
-        return { fencer1: 0, fencer2: 0 };
-      }
 
       const filteredEvents = filterEventsByLatestResetSegment(matchEvents || []);
       if (filteredEvents.length < 2) {
@@ -423,8 +601,10 @@ export default function NeutralMatchSummary() {
     const events = rawEvents
       .filter(ev => ev.event_type !== 'cancel' && !(ev.match_event_id && cancelledIds.has(ev.match_event_id)))
       .sort((a, b) => {
-        const aTime = a.timestamp ? new Date(a.timestamp).getTime() : (a.match_time_elapsed ?? 0);
-        const bTime = b.timestamp ? new Date(b.timestamp).getTime() : (b.match_time_elapsed ?? 0);
+        const aStamp = a.timestamp || a.event_time;
+        const bStamp = b.timestamp || b.event_time;
+        const aTime = aStamp ? new Date(aStamp).getTime() : (a.match_time_elapsed ?? 0);
+        const bTime = bStamp ? new Date(bStamp).getTime() : (b.match_time_elapsed ?? 0);
         return aTime - bTime;
       });
     
@@ -447,11 +627,14 @@ export default function NeutralMatchSummary() {
       if (elapsed === null || elapsed < lastElapsed) {
         if (ev.match_period_id && periodMeta[ev.match_period_id]) {
           const startMs = periodMeta[ev.match_period_id].start;
-          const evMs = ev.timestamp ? new Date(ev.timestamp).getTime() : startMs + (idx * 1000);
+          const stamp = ev.timestamp || ev.event_time;
+          const evMs = stamp ? new Date(stamp).getTime() : startMs + (idx * 1000);
           elapsed = Math.max(0, Math.round((evMs - startMs) / 1000));
-        } else if (ev.timestamp) {
-          const evMs = new Date(ev.timestamp).getTime();
-          const baseMs = events[0].timestamp ? new Date(events[0].timestamp).getTime() : evMs;
+        } else if (ev.timestamp || ev.event_time) {
+          const stamp = ev.timestamp || ev.event_time;
+          const evMs = stamp ? new Date(stamp).getTime() : 0;
+          const baseStamp = events[0].timestamp || events[0].event_time;
+          const baseMs = baseStamp ? new Date(baseStamp).getTime() : evMs;
           elapsed = Math.max(0, Math.round((evMs - baseMs) / 1000));
         } else {
           elapsed = lastElapsed + 1; // fallback monotonic
@@ -498,10 +681,12 @@ export default function NeutralMatchSummary() {
       console.log('🔍 SCORE-BASED LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
 
       // If sabre, reuse the already deduped/ordered progression to avoid duplicate/timestamp issues
-      const weaponType = (matchData as any)?.weapon_type || params.weaponType || '';
+      const weaponType = matchData?.weapon_type || params.weaponType || '';
       const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
       if (isSabre) {
-        const progression = await matchService.calculateAnonymousScoreProgression(matchId);
+        const progression = localMatchEvents.length > 0
+          ? buildAnonymousProgressionFromEvents(localMatchEvents, matchData)
+          : await matchService.calculateAnonymousScoreProgression(matchId);
 
         // Convert progression points into a single ordered list of scoring events
         const parseTimeToSeconds = (label: string) => {
@@ -555,28 +740,11 @@ export default function NeutralMatchSummary() {
       }
       
       // For sabre, order by timestamp (not match_time_elapsed which is NULL)
-      const { data: matchEventsRaw, error } = await postgrestSelect<{
-        scoring_user_name: string | null;
-        timestamp: string | null;
-        fencer_1_name: string | null;
-        fencer_2_name: string | null;
-        event_type: string | null;
-        cancelled_event_id: string | null;
-        reset_segment: number | null;
-      }>(
-        'match_event',
-        {
-          select: 'scoring_user_name,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
-          match_id: `eq.${matchId}`,
-          order: 'timestamp.asc',
-        },
-        postgrestOptions
+      const matchEventsRaw = await resolveMatchEvents(
+        matchId,
+        'scoring_user_name,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+        'timestamp.asc'
       );
-
-      if (error) {
-        console.error('Error fetching match events for score-based leading:', error);
-        return { fencer1: 0, fencer2: 0, tied: 100 };
-      }
 
       const matchEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
       console.log('🔍 SCORE-BASED LEADING DEBUG - Match events found:', matchEvents?.length || 0);
@@ -712,28 +880,11 @@ export default function NeutralMatchSummary() {
       console.log('🔍 TIME LEADING DEBUG - Starting calculation for matchId:', matchId);
       console.log('🔍 TIME LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
       
-      const { data: matchEventsRaw, error } = await postgrestSelect<{
-        scoring_user_name: string | null;
-        match_time_elapsed: number | null;
-        fencer_1_name: string | null;
-        fencer_2_name: string | null;
-        event_type: string | null;
-        cancelled_event_id: string | null;
-        reset_segment: number | null;
-      }>(
-        'match_event',
-        {
-          select: 'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
-          match_id: `eq.${matchId}`,
-          order: 'match_time_elapsed.asc',
-        },
-        postgrestOptions
+      const matchEventsRaw = await resolveMatchEvents(
+        matchId,
+        'scoring_user_name,match_time_elapsed,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+        'match_time_elapsed.asc'
       );
-
-      if (error) {
-        console.error('Error fetching match events for time leading:', error);
-        return { fencer1: 0, fencer2: 0, tied: 100 };
-      }
 
       const filteredEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
       const matchEvents = normalizeEventsForTiming(filteredEvents, []);
@@ -889,7 +1040,9 @@ export default function NeutralMatchSummary() {
 
       // For sabre, reuse the already-deduped progression to avoid duplicate/queued event ordering issues
       if (isSabre) {
-        const progression = await matchService.calculateAnonymousScoreProgression(matchId);
+        const progression = localMatchEvents.length > 0
+          ? buildAnonymousProgressionFromEvents(localMatchEvents, matchData)
+          : await matchService.calculateAnonymousScoreProgression(matchId);
         const parseTime = (label: string) => {
           const cleaned = label.replace(/[()]/g, '');
           const [m, s] = cleaned.split(':').map(Number);
@@ -930,29 +1083,11 @@ export default function NeutralMatchSummary() {
 
       // For sabre, order by timestamp; for foil/epee, order by match_time_elapsed
       const orderField = isSabre ? 'timestamp' : 'match_time_elapsed';
-      const { data: matchEventsRaw, error } = await postgrestSelect<{
-        scoring_user_name: string | null;
-        match_time_elapsed: number | null;
-        timestamp: string | null;
-        fencer_1_name: string | null;
-        fencer_2_name: string | null;
-        event_type: string | null;
-        cancelled_event_id: string | null;
-        reset_segment: number | null;
-      }>(
-        'match_event',
-        {
-          select: 'scoring_user_name,match_time_elapsed,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
-          match_id: `eq.${matchId}`,
-          order: `${orderField}.asc`,
-        },
-        postgrestOptions
+      const matchEventsRaw = await resolveMatchEvents(
+        matchId,
+        'scoring_user_name,match_time_elapsed,timestamp,fencer_1_name,fencer_2_name,event_type,cancelled_event_id,reset_segment',
+        `${orderField}.asc`
       );
-
-      if (error) {
-        console.error('Error fetching match events for lead changes:', error);
-        return 0;
-      }
 
       const filteredEvents = filterEventsByLatestResetSegment(matchEventsRaw || []);
       // For sabre, sort by timestamp directly; for foil/epee, use normalizeEventsForTiming
@@ -960,8 +1095,10 @@ export default function NeutralMatchSummary() {
       if (isSabre) {
         // For sabre, sort by timestamp (match_time_elapsed is NULL)
         matchEvents = filteredEvents.sort((a, b) => {
-          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          const aStamp = a.timestamp || a.event_time;
+          const bStamp = b.timestamp || b.event_time;
+          const aTime = aStamp ? new Date(aStamp).getTime() : 0;
+          const bTime = bStamp ? new Date(bStamp).getTime() : 0;
           return aTime - bTime;
         });
       } else {
@@ -1100,9 +1237,17 @@ export default function NeutralMatchSummary() {
               });
             }
             
-            // Simplified stats for offline matches (no event data available)
-            // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
-            setScoreProgression({ userData: [], opponentData: [] });
+            if (localMatchEvents.length > 0) {
+              const localProgression = buildAnonymousProgressionFromEvents(localMatchEvents, matchFromParams);
+              setScoreProgression({
+                userData: localProgression.fencer1Data,
+                opponentData: localProgression.fencer2Data,
+              });
+            } else {
+              // Simplified stats for offline matches (no event data available)
+              // Chart expects userData/opponentData, but for neutral matches these represent fencer1/fencer2
+              setScoreProgression({ userData: [], opponentData: [] });
+            }
             setLeadChanges(0);
             setTimeLeading({ fencer1: 0, fencer2: 0, tied: 100 });
             setBounceBackTimes({ fencer1: 0, fencer2: 0 });
@@ -1278,29 +1423,14 @@ export default function NeutralMatchSummary() {
               if (hasNegativeDelta) {
                 try {
                   console.warn('⚠️ Negative period deltas detected, recalculating touches by period from events');
-                    const { data: periodEvents, error: periodEventsError } = await postgrestSelect<{
-                      match_event_id: string | null;
-                      match_period_id: string | null;
-                      scoring_user_name: string | null;
-                      event_type: string | null;
-                      cancelled_event_id: string | null;
-                      fencer_1_name: string | null;
-                      fencer_2_name: string | null;
-                      points_awarded: number | null;
-                      card_given: string | null;
-                      reset_segment: number | null;
-                    }>(
-                      'match_event',
-                      {
-                        select: 'match_event_id,match_period_id,scoring_user_name,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,points_awarded,card_given,reset_segment',
-                        match_id: `eq.${matchId as string}`,
-                        order: 'timestamp.asc',
-                      },
-                      postgrestOptions
+                    const periodEvents = await resolveMatchEvents(
+                      matchId as string,
+                      'match_event_id,match_period_id,scoring_user_name,event_type,cancelled_event_id,fencer_1_name,fencer_2_name,points_awarded,card_given,reset_segment',
+                      'timestamp.asc'
                     );
                   
-                  if (periodEventsError || !periodEvents) {
-                    console.error('❌ Error fetching events for period recalculation:', periodEventsError);
+                  if (!periodEvents || periodEvents.length === 0) {
+                    console.error('❌ Error fetching events for period recalculation');
                     setTouchesByPeriod(clampedTouches);
                   } else {
                     const filteredPeriodEvents = filterEventsByLatestResetSegment(periodEvents);
@@ -1403,9 +1533,9 @@ export default function NeutralMatchSummary() {
                   parseInt(fencer2Score as string || '0');
 
                 try {
-                  const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
-                    matchId as string
-                  );
+                  const calculatedScoreProgression = localMatchEvents.length > 0
+                    ? buildAnonymousProgressionFromEvents(localMatchEvents, data)
+                    : await matchService.calculateAnonymousScoreProgression(matchId as string);
                   console.log('📈 Calculated anonymous score progression from database:', calculatedScoreProgression);
                   
                   // Check if we got meaningful data for both players
@@ -1570,7 +1700,7 @@ export default function NeutralMatchSummary() {
     };
 
     loadMatchData();
-  }, [matchId, params.isOffline]);
+  }, [matchId, params.isOffline, localMatchEvents.length]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);

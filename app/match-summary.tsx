@@ -6,6 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { goalService, matchService } from '@/lib/database';
+import { offlineCache } from '@/lib/offlineCache';
 import { postgrestSelect } from '@/lib/postgrest';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
 import { Match } from '@/types/database';
@@ -135,6 +136,42 @@ export default function MatchSummaryScreen() {
             yellow: userCards.yellow || 0,
             red: userCards.red || 0,
           });
+
+          const localEvents = await offlineCache.getMatchEventLog(params.matchId as string);
+          const normalizedLocalEvents = localEvents.length > 0
+            ? normalizeEventsForProgression(localEvents)
+            : [];
+          const filteredLocalEvents = normalizedLocalEvents.length > 0
+            ? filterByLatestResetSegment(normalizedLocalEvents)
+            : [];
+
+          if (filteredLocalEvents.length > 0) {
+            const localProgression = buildScoreProgressionFromEvents(filteredLocalEvents, matchFromParams);
+            const scoreProgData = isFencer1User ? {
+              userData: localProgression.fencer1Data,
+              opponentData: localProgression.fencer2Data,
+            } : {
+              userData: localProgression.fencer2Data,
+              opponentData: localProgression.fencer1Data,
+            };
+            setScoreProgression(scoreProgData);
+            setUserCardCounts(buildUserCardCounts(filteredLocalEvents));
+            const localBestRun = calculateBestRunFromEvents(
+              filteredLocalEvents,
+              isFencer1User ? (matchFromParams.fencer_1_name || 'You') : (matchFromParams.fencer_2_name || 'You'),
+              params.weaponType as string | undefined
+            );
+            setBestRun(localBestRun);
+            const sabreMomentum = isSabreWeapon(params.weaponType as string | undefined)
+              ? (localBestRun >= 2 ? localBestRun : 0)
+              : 0;
+            setHighestMomentum(sabreMomentum);
+            if (isEpeeWeapon(params.weaponType as string | undefined)) {
+              setDoubleTouchCount(calculateDoubleTouchCountFromEvents(filteredLocalEvents));
+            } else {
+              setDoubleTouchCount(0);
+            }
+          }
           
           // Set touches by period from params
           if (params.scoreByPeriod) {
@@ -146,11 +183,13 @@ export default function MatchSummaryScreen() {
             });
           }
           
-          // Simplified stats for offline matches (no event data available)
-          setBestRun(0);
-          setHighestMomentum(0);
-          setDoubleTouchCount(0);
-          setScoreProgression({ userData: [], opponentData: [] });
+          if (filteredLocalEvents.length === 0) {
+            // Simplified stats for offline matches (no event data available)
+            setBestRun(0);
+            setHighestMomentum(0);
+            setDoubleTouchCount(0);
+            setScoreProgression({ userData: [], opponentData: [] });
+          }
           
           setLoading(false);
           return;
@@ -199,47 +238,86 @@ export default function MatchSummaryScreen() {
               ? (matchData.fencer_2_name || 'You')
               : (matchData.fencer_1_name || 'You'); // Fallback to fencer_1 if no user match
 
-            const userCards = await fetchUserCardCounts(params.matchId as string);
-            setUserCardCounts(userCards);
-            
-            const calculatedBestRun = await matchService.calculateBestRun(
-              params.matchId as string,
-              userFencerName,
-              params.remoteId as string, // Pass the remoteId to help find events
-              session?.access_token
-            );
-            setBestRun(calculatedBestRun);
-            const sabreWeaponType = matchData.weapon_type || (params.weaponType as string | undefined);
-            const sabreMomentum = isSabreWeapon(sabreWeaponType)
-              ? (calculatedBestRun >= 2 ? calculatedBestRun : 0)
-              : 0;
-            setHighestMomentum(sabreMomentum);
-            if (isEpeeWeapon(matchData.weapon_type)) {
-              const calculatedDoubleTouches = await matchService.calculateDoubleTouchCount(
+            const localEvents = await offlineCache.getMatchEventLog(params.matchId as string);
+            const normalizedLocalEvents = localEvents.length > 0
+              ? normalizeEventsForProgression(localEvents)
+              : [];
+            const filteredLocalEvents = normalizedLocalEvents.length > 0
+              ? filterByLatestResetSegment(normalizedLocalEvents)
+              : [];
+            const useLocalEvents = filteredLocalEvents.length > 0;
+
+            if (useLocalEvents) {
+              setUserCardCounts(buildUserCardCounts(filteredLocalEvents));
+              const localBestRun = calculateBestRunFromEvents(
+                filteredLocalEvents,
+                userFencerName,
+                matchData.weapon_type
+              );
+              setBestRun(localBestRun);
+              const sabreWeaponType = matchData.weapon_type || (params.weaponType as string | undefined);
+              const sabreMomentum = isSabreWeapon(sabreWeaponType)
+                ? (localBestRun >= 2 ? localBestRun : 0)
+                : 0;
+              setHighestMomentum(sabreMomentum);
+              if (isEpeeWeapon(matchData.weapon_type)) {
+                setDoubleTouchCount(calculateDoubleTouchCountFromEvents(filteredLocalEvents));
+              } else {
+                setDoubleTouchCount(0);
+              }
+            } else {
+              const userCards = await fetchUserCardCounts(params.matchId as string);
+              setUserCardCounts(userCards);
+
+              const calculatedBestRun = await matchService.calculateBestRun(
+                params.matchId as string,
+                userFencerName,
+                params.remoteId as string, // Pass the remoteId to help find events
+                session?.access_token
+              );
+              setBestRun(calculatedBestRun);
+              const sabreWeaponType = matchData.weapon_type || (params.weaponType as string | undefined);
+              const sabreMomentum = isSabreWeapon(sabreWeaponType)
+                ? (calculatedBestRun >= 2 ? calculatedBestRun : 0)
+                : 0;
+              setHighestMomentum(sabreMomentum);
+              if (isEpeeWeapon(matchData.weapon_type)) {
+                const calculatedDoubleTouches = await matchService.calculateDoubleTouchCount(
+                  params.matchId as string,
+                  session?.access_token
+                );
+                setDoubleTouchCount(calculatedDoubleTouches);
+              } else {
+                setDoubleTouchCount(0);
+              }
+            }
+
+            let scoreProgData: { userData: { x: string; y: number }[]; opponentData: { x: string; y: number }[] };
+            if (useLocalEvents) {
+              const localProgression = buildScoreProgressionFromEvents(filteredLocalEvents, matchData);
+              scoreProgData = isFencer1User ? {
+                userData: localProgression.fencer1Data,
+                opponentData: localProgression.fencer2Data,
+              } : {
+                userData: localProgression.fencer2Data,
+                opponentData: localProgression.fencer1Data,
+              };
+            } else {
+              // Use calculateAnonymousScoreProgression to get position-based data directly from database
+              // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
+              // This returns fencer1Data/fencer2Data which matches the header's fencer_1_name/fencer_2_name
+              const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
                 params.matchId as string,
                 session?.access_token
               );
-              setDoubleTouchCount(calculatedDoubleTouches);
-            } else {
-              setDoubleTouchCount(0);
+              scoreProgData = isFencer1User ? {
+                userData: calculatedScoreProgression.fencer1Data, // user on left
+                opponentData: calculatedScoreProgression.fencer2Data
+              } : {
+                userData: calculatedScoreProgression.fencer2Data, // user on right
+                opponentData: calculatedScoreProgression.fencer1Data
+              };
             }
-
-            // Use calculateAnonymousScoreProgression to get position-based data directly from database
-            // Same approach as header: use fencer_1_name (left) and fencer_2_name (right) from database
-            // This returns fencer1Data/fencer2Data which matches the header's fencer_1_name/fencer_2_name
-            const calculatedScoreProgression = await matchService.calculateAnonymousScoreProgression(
-              params.matchId as string,
-              session?.access_token
-            );
-        // Map progression to user/opponent based on which fencer is the user
-        // Map progression to user/opponent based on which fencer is the user
-        const scoreProgData = isFencer1User ? {
-          userData: calculatedScoreProgression.fencer1Data, // user on left
-          opponentData: calculatedScoreProgression.fencer2Data
-            } : {
-              userData: calculatedScoreProgression.fencer2Data, // user on right
-              opponentData: calculatedScoreProgression.fencer1Data
-            };
             console.log('📈 [MATCH SUMMARY] Setting scoreProgression:', {
               userDataLength: scoreProgData.userData.length,
               opponentDataLength: scoreProgData.opponentData.length,
@@ -483,7 +561,7 @@ export default function MatchSummaryScreen() {
     }
 
     try {
-      // Update match type in the database
+      // Update match type and names (online or offline)
       if (match.match_id) {
         const trimmedFencer1Name = (overrideNames?.fencer1 ?? match.fencer_1_name ?? '').trim();
         const trimmedFencer2Name = (overrideNames?.fencer2 ?? match.fencer_2_name ?? '').trim();
@@ -491,25 +569,60 @@ export default function MatchSummaryScreen() {
           Alert.alert('Names required', 'Please enter both fencer names before saving.');
           return;
         }
-        await matchService.updateMatch(
-          match.match_id,
-          {
-            match_type: matchType,
-            fencer_1_name: trimmedFencer1Name,
-            fencer_2_name: trimmedFencer2Name,
-          },
-          session?.access_token
-        );
-        await matchService.updateMatchEventNamesIfPlaceholder(
-          match.match_id,
-          trimmedFencer1Name,
-          trimmedFencer2Name,
-          session?.access_token
-        );
+
+        const isOfflineMatch =
+          params.isOffline === 'true' ||
+          (params.matchId as string)?.startsWith('offline_') ||
+          match.match_id.startsWith('offline_');
+
+        if (isOfflineMatch) {
+          const normalizedUser = (userName || '').trim().toLowerCase();
+          const normalizedFencer1 = trimmedFencer1Name.toLowerCase();
+          const normalizedFencer2 = trimmedFencer2Name.toLowerCase();
+          const isFencer1User = normalizedUser && normalizedFencer1 === normalizedUser;
+          const isFencer2User = normalizedUser && normalizedFencer2 === normalizedUser;
+          const opponentName = (isFencer1User
+            ? trimmedFencer2Name
+            : isFencer2User
+              ? trimmedFencer1Name
+              : trimmedFencer2Name) || 'Unknown Opponent';
+          const normalizedWeaponType = (weaponType || '').toLowerCase();
+          const weaponTypeForSave = normalizedWeaponType === 'saber' ? 'sabre' : normalizedWeaponType || undefined;
+          const updated = await offlineCache.updatePendingMatch(match.match_id, {
+            opponentName,
+            matchType,
+            fencer1Name: trimmedFencer1Name,
+            fencer2Name: trimmedFencer2Name,
+            weaponType: weaponTypeForSave,
+          });
+
+          if (!updated) {
+            Alert.alert('Error', 'Failed to save match offline. Please try again.');
+            return;
+          }
+        } else {
+          await matchService.updateMatch(
+            match.match_id,
+            {
+              match_type: matchType,
+              fencer_1_name: trimmedFencer1Name,
+              fencer_2_name: trimmedFencer2Name,
+            },
+            session?.access_token
+          );
+          await matchService.updateMatchEventNamesIfPlaceholder(
+            match.match_id,
+            trimmedFencer1Name,
+            trimmedFencer2Name,
+            session?.access_token
+          );
+        }
+
         setMatch(prev => prev ? {
           ...prev,
           fencer_1_name: trimmedFencer1Name,
           fencer_2_name: trimmedFencer2Name,
+          match_type: matchType,
         } : prev);
       }
       
@@ -811,6 +924,296 @@ export default function MatchSummaryScreen() {
       0
     );
     return events.filter(ev => getResetSegmentValue(ev.reset_segment) === latestSegment);
+  };
+
+  const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null; event_time?: string | null; event_sequence?: number | null }>(events: T[]): T[] => {
+    if (!events || events.length === 0) return [];
+
+    const getMs = (ev: T) => {
+      const ts = ev.timestamp || ev.event_time;
+      if (!ts) return null;
+      const ms = new Date(ts).getTime();
+      return Number.isFinite(ms) ? ms : null;
+    };
+
+    const parseElapsed = (value?: number | null) => {
+      if (typeof value === 'number') return value;
+      if (value !== null && value !== undefined) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const sorted = [...events].sort((a, b) => {
+      const aElapsed = parseElapsed(a.match_time_elapsed);
+      const bElapsed = parseElapsed(b.match_time_elapsed);
+
+      if (aElapsed !== null && bElapsed !== null) return aElapsed - bElapsed;
+      if (aElapsed !== null) return -1;
+      if (bElapsed !== null) return 1;
+
+      const aMs = getMs(a) ?? 0;
+      const bMs = getMs(b) ?? 0;
+      if (aMs !== bMs) return aMs - bMs;
+
+      const aSeq = typeof a.event_sequence === 'number' ? a.event_sequence : Number.MAX_SAFE_INTEGER;
+      const bSeq = typeof b.event_sequence === 'number' ? b.event_sequence : Number.MAX_SAFE_INTEGER;
+      return aSeq - bSeq;
+    });
+
+    const firstTimestampMs = sorted
+      .map(ev => getMs(ev))
+      .find(ms => ms !== null) ?? null;
+
+    let lastElapsed = 0;
+
+    return sorted.map((event, index) => {
+      let elapsed = parseElapsed(event.match_time_elapsed);
+
+      if (elapsed === null) {
+        const eventMs = getMs(event);
+        if (eventMs !== null && firstTimestampMs !== null) {
+          elapsed = Math.max(0, Math.round((eventMs - firstTimestampMs) / 1000));
+        } else if (typeof event.event_sequence === 'number') {
+          elapsed = event.event_sequence;
+        } else {
+          elapsed = index === 0 ? 0 : lastElapsed + 1;
+        }
+      }
+
+      if (elapsed <= lastElapsed) {
+        elapsed = lastElapsed + 1;
+      }
+      lastElapsed = elapsed;
+
+      return { ...event, match_time_elapsed: elapsed };
+    });
+  };
+
+  const formatElapsedLabel = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remaining = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
+  };
+
+  const resolveEventFencer = (event: any, matchData: Match) => {
+    if (event.scoring_entity && matchData.fencer_1_entity && matchData.fencer_2_entity) {
+      if (event.scoring_entity === matchData.fencer_1_entity) return 'fencer1';
+      if (event.scoring_entity === matchData.fencer_2_entity) return 'fencer2';
+    }
+
+    if (event.fencer_1_name && event.fencer_2_name && event.scoring_user_name) {
+      if (event.scoring_user_name === event.fencer_1_name) return 'fencer1';
+      if (event.scoring_user_name === event.fencer_2_name) return 'fencer2';
+    }
+
+    if (event.scoring_user_name && matchData.fencer_1_name && matchData.fencer_2_name) {
+      if (event.scoring_user_name === matchData.fencer_1_name) return 'fencer1';
+      if (event.scoring_user_name === matchData.fencer_2_name) return 'fencer2';
+    }
+
+    return 'fencer1';
+  };
+
+  const buildScoreProgressionFromEvents = (events: any[], matchData: Match) => {
+    const normalized = normalizeEventsForProgression(events);
+    const filtered = filterByLatestResetSegment(normalized);
+    if (filtered.length === 0) {
+      return { fencer1Data: [], fencer2Data: [] };
+    }
+
+    const cancelledEventIds = new Set<string>();
+    for (const event of filtered) {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel' && event.cancelled_event_id) {
+        cancelledEventIds.add(event.cancelled_event_id);
+      }
+    }
+
+    const scoringEvents = filtered.filter(event => {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel') return false;
+      if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) return false;
+      if (eventType === 'touch') return true;
+      if (eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit') return true;
+      if (eventType === 'card') {
+        const points = typeof event.points_awarded === 'number'
+          ? event.points_awarded
+          : event.card_given === 'red'
+            ? 1
+            : 0;
+        return points > 0;
+      }
+      return false;
+    });
+
+    const ordered = [...scoringEvents].sort((a, b) => {
+      const aTime = (a.event_time || a.timestamp) ?? '';
+      const bTime = (b.event_time || b.timestamp) ?? '';
+      if (aTime && bTime && aTime !== bTime) return aTime < bTime ? -1 : 1;
+      const aElapsed = a.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      const bElapsed = b.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      if (aElapsed !== bElapsed) return aElapsed - bElapsed;
+      const aSeq = typeof a.event_sequence === 'number' ? a.event_sequence : Number.MAX_SAFE_INTEGER;
+      const bSeq = typeof b.event_sequence === 'number' ? b.event_sequence : Number.MAX_SAFE_INTEGER;
+      return aSeq - bSeq;
+    });
+
+    let fencer1Score = 0;
+    let fencer2Score = 0;
+    const fencer1Data: { x: string; y: number }[] = [];
+    const fencer2Data: { x: string; y: number }[] = [];
+
+    for (const event of ordered) {
+      const eventType = (event.event_type || '').toLowerCase();
+      const isDouble = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+      const points = typeof event.points_awarded === 'number'
+        ? event.points_awarded
+        : event.card_given === 'red'
+          ? 1
+          : 0;
+
+      if (isDouble) {
+        fencer1Score += 1;
+        fencer2Score += 1;
+      } else if (eventType === 'touch' || points > 0) {
+        const scorer = resolveEventFencer(event, matchData);
+        const awardedToFencer1 = eventType === 'card' && points > 0
+          ? scorer !== 'fencer1'
+          : scorer === 'fencer1';
+        const awardedPoints = eventType === 'touch' ? 1 : points;
+        if (awardedToFencer1) {
+          fencer1Score += awardedPoints;
+        } else {
+          fencer2Score += awardedPoints;
+        }
+      } else {
+        continue;
+      }
+
+      const elapsed = event.match_time_elapsed ?? 0;
+      const label = formatElapsedLabel(Math.max(0, elapsed));
+      fencer1Data.push({ x: label, y: fencer1Score });
+      fencer2Data.push({ x: label, y: fencer2Score });
+    }
+
+    return { fencer1Data, fencer2Data };
+  };
+
+  const calculateBestRunFromEvents = (
+    events: any[],
+    userFencerName: string,
+    weaponType?: string | null
+  ) => {
+    const normalized = normalizeName(userFencerName);
+    const filtered = filterByLatestResetSegment(normalizeEventsForProgression(events));
+    if (!normalized || filtered.length === 0) return 0;
+
+    const cancelledEventIds = new Set<string>();
+    for (const event of filtered) {
+      if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
+        cancelledEventIds.add(event.cancelled_event_id);
+      }
+    }
+
+    const isEpee = isEpeeWeapon(weaponType);
+    const ordered = [...filtered].sort((a, b) => {
+      const aTime = (a.event_time || a.timestamp) ?? '';
+      const bTime = (b.event_time || b.timestamp) ?? '';
+      if (aTime && bTime && aTime !== bTime) return aTime < bTime ? -1 : 1;
+      const aElapsed = a.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      const bElapsed = b.match_time_elapsed ?? Number.MAX_SAFE_INTEGER;
+      return aElapsed - bElapsed;
+    });
+
+    let currentRun = 0;
+    let bestRun = 0;
+
+    for (const event of ordered) {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel') continue;
+      if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) continue;
+
+      const points = typeof event.points_awarded === 'number'
+        ? event.points_awarded
+        : event.card_given === 'red'
+          ? 1
+          : 0;
+      const isDouble = eventType === 'double' || eventType === 'double_touch' || eventType === 'double_hit';
+      const isTouch = eventType === 'touch';
+      const isCardPoint = eventType === 'card' && points > 0;
+
+      if (!isTouch && !isDouble && !isCardPoint) {
+        continue;
+      }
+
+      if (isEpee && isDouble) {
+        currentRun = 0;
+        continue;
+      }
+
+      if (isCardPoint) {
+        if (!event.scoring_user_name) {
+          continue;
+        }
+        const scoredAgainstUser = (user?.id && event.scoring_user_id === user.id)
+          || (normalized && normalizeName(event.scoring_user_name) === normalized);
+        const awardedToUser = !scoredAgainstUser;
+        if (awardedToUser) {
+          currentRun += points;
+          bestRun = Math.max(bestRun, currentRun);
+        } else {
+          currentRun = 0;
+        }
+        continue;
+      }
+
+      const isUserEvent = (user?.id && event.scoring_user_id === user.id)
+        || (normalized && normalizeName(event.scoring_user_name) === normalized);
+      if (isUserEvent) {
+        currentRun += 1;
+        bestRun = Math.max(bestRun, currentRun);
+      } else if (event.scoring_user_name) {
+        currentRun = 0;
+      }
+    }
+
+    return bestRun;
+  };
+
+  const calculateDoubleTouchCountFromEvents = (events: any[]) => {
+    const filtered = filterByLatestResetSegment(events);
+    if (filtered.length === 0) return 0;
+
+    const cancelledEventIds = new Set<string>();
+    for (const event of filtered) {
+      if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
+        cancelledEventIds.add(event.cancelled_event_id);
+      }
+    }
+
+    const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
+    let count = 0;
+    const seen = new Set<string>();
+
+    for (const event of filtered) {
+      const eventType = (event.event_type || '').toLowerCase();
+      if (eventType === 'cancel') continue;
+      if (event.match_event_id && cancelledEventIds.has(event.match_event_id)) continue;
+
+      const dedupeKey = event.match_event_id
+        ? `id_${event.match_event_id}`
+        : `${eventType}_${event.event_time || event.timestamp || 'noTime'}_${event.match_time_elapsed ?? 'noElapsed'}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      if (doubleTypes.has(eventType)) {
+        count += 1;
+      }
+    }
+
+    return count;
   };
 
   const buildUserCardCounts = (events: any[]) => {

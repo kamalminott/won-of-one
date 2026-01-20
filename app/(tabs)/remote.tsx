@@ -15,6 +15,9 @@ import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { Asset } from 'expo-asset';
+import * as Crypto from 'expo-crypto';
+import { readAsStringAsync } from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +25,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Image, InteractionManager, Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SvgXml } from 'react-native-svg';
 // Native module not working after rebuild - using View fallback
 const USE_GESTURE_HANDLER = false; // Disabled until build issue is resolved
 
@@ -62,6 +66,13 @@ const getDisplayName = (name: string): string => {
   }
   // For actual names, return only the first name
   return name.split(' ')[0];
+};
+
+const loadWeaponSvg = async (source: number): Promise<string> => {
+  const asset = Asset.fromModule(source);
+  await asset.downloadAsync();
+  const uri = asset.localUri ?? asset.uri;
+  return readAsStringAsync(uri);
 };
 
 export default function RemoteScreen() {
@@ -118,6 +129,32 @@ export default function RemoteScreen() {
   // Weapon selection state
   const [selectedWeapon, setSelectedWeapon] = useState<'foil' | 'epee' | 'sabre'>('foil');
   const isSabre = selectedWeapon === 'sabre';
+  const weaponIconSize = width * 0.045;
+  const [weaponSvgs, setWeaponSvgs] = useState<{ foil?: string; epee?: string; sabre?: string }>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadSvgs = async () => {
+      try {
+        const [foilSvg, epeeSvg, sabreSvg] = await Promise.all([
+          loadWeaponSvg(require('../../assets/icons/weapons/foil.svg')),
+          loadWeaponSvg(require('../../assets/icons/weapons/epee.svg')),
+          loadWeaponSvg(require('../../assets/icons/weapons/sabre.svg')),
+        ]);
+        if (isMounted) {
+          setWeaponSvgs({ foil: foilSvg, epee: epeeSvg, sabre: sabreSvg });
+        }
+      } catch (error) {
+        console.error('❌ Failed to load weapon SVGs:', error);
+      }
+    };
+
+    loadSvgs();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const preferredWeaponRef = useRef<'foil' | 'epee' | 'sabre'>('foil');
   const weaponSelectionLockedRef = useRef(false);
   const [isDoubleHitPressed, setIsDoubleHitPressed] = useState(false);
@@ -1524,6 +1561,8 @@ export default function RemoteScreen() {
     setScores({ fencerA: 0, fencerB: 0 });
     resetSegmentRef.current = 0;
     setResetSegment(0);
+    matchEventSequenceRef.current = 0;
+    recentScoringEventUuidsRef.current = { fencerA: null, fencerB: null };
     setIsPlaying(false);
     setIsCompletingMatch(false);
     isActivelyUsingAppRef.current = false; // Reset active usage flag
@@ -1646,11 +1685,16 @@ export default function RemoteScreen() {
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
   const [resetSegment, setResetSegment] = useState(0);
   const resetSegmentRef = useRef(0);
+  const matchEventSequenceRef = useRef(0);
   // Track most recent scoring event IDs for each fencer (for cancellation tracking)
   const [recentScoringEventIds, setRecentScoringEventIds] = useState<{
     fencerA: string | null;
     fencerB: string | null;
   }>({ fencerA: null, fencerB: null });
+  const recentScoringEventUuidsRef = useRef<{ fencerA: string | null; fencerB: string | null }>({
+    fencerA: null,
+    fencerB: null,
+  });
   // Queue touches that happen before match_id/period exists (first sabre touch race)
   const pendingTouchQueueRef = useRef<any[]>([]);
   // Track latest match/period synchronously for immediate access in event creation
@@ -1667,6 +1711,21 @@ export default function RemoteScreen() {
   const nextDebugId = () => {
     debugSequenceRef.current += 1;
     return `${Date.now()}_${debugSequenceRef.current}`;
+  };
+
+  const nextMatchEventSequence = () => {
+    matchEventSequenceRef.current += 1;
+    return matchEventSequenceRef.current;
+  };
+
+  const buildEventIdentity = () => ({
+    event_uuid: Crypto.randomUUID(),
+    event_sequence: nextMatchEventSequence(),
+  });
+
+  const appendLocalMatchEvent = async (event: any) => {
+    if (!event?.match_id || !event?.event_uuid) return;
+    await offlineCache.appendMatchEvent(event.match_id, event);
   };
 
   const formatDebugError = (error: any) => {
@@ -1764,12 +1823,15 @@ export default function RemoteScreen() {
         match_period_id: currentMatchPeriod.match_period_id || null,
         fencing_remote_id: remoteSession.remote_id,
       };
+      void appendLocalMatchEvent(enrichedEvent);
 
       // Always queue to offline cache with correct IDs
       let queuedEventId: string | null = null;
       try {
         queuedEventId = await offlineRemoteService.recordEvent({
           remote_id: remoteSession.remote_id,
+          event_uuid: enrichedEvent.event_uuid,
+          event_sequence: enrichedEvent.event_sequence,
           event_type: enrichedEvent.event_type || "touch",
           scoring_user_name: enrichedEvent.scoring_user_name,
           match_time_elapsed: enrichedEvent.match_time_elapsed,
@@ -1793,7 +1855,8 @@ export default function RemoteScreen() {
       // If online and not an offline session, also insert immediately
       if (isOnline && !item.isOfflineSession) {
         try {
-          const createdEvent = await matchEventService.createMatchEvent(enrichedEvent);
+          const { event_sequence, ...eventForInsert } = enrichedEvent;
+          const createdEvent = await matchEventService.createMatchEvent(eventForInsert);
           if (createdEvent && queuedEventId) {
             await offlineCache.removePendingRemoteEvent(queuedEventId);
           }
@@ -2082,7 +2145,10 @@ export default function RemoteScreen() {
     // Cards should never be stored as touches; force event type to "card" when a card is given
     const finalEventType = cardGiven ? 'card' : eventType;
 
+    const { event_uuid, event_sequence } = buildEventIdentity();
     const baseEvent = {
+      event_uuid,
+      event_sequence,
       match_id: effectivePeriod?.match_id || null,
       match_period_id: effectivePeriod?.match_period_id || null,
       fencing_remote_id: activeSession.remote_id,
@@ -2099,6 +2165,12 @@ export default function RemoteScreen() {
       reset_segment: resetSegmentRef.current,
       match_time_elapsed: matchTimeElapsed
     };
+    if (scoringEntity) {
+      recentScoringEventUuidsRef.current = {
+        ...recentScoringEventUuidsRef.current,
+        [scoringEntity]: event_uuid,
+      };
+    }
     captureMatchDebug('match_event_payload_ready', {
       debug_id: eventDebugId,
       event_type: finalEventType,
@@ -2106,6 +2178,7 @@ export default function RemoteScreen() {
       score_diff: scoreDiff,
       match_time_elapsed: matchTimeElapsed,
       has_match_id: !!baseEvent.match_id,
+      event_uuid,
     });
 
     // If match_id isn't ready yet (common on very first sabre touch), queue and replay once created
@@ -2131,11 +2204,15 @@ export default function RemoteScreen() {
       return;
     }
 
+    void appendLocalMatchEvent(baseEvent);
+
     // Use offline service to record event (works online and offline)
     let queuedEventId: string | null = null;
     try {
       queuedEventId = await offlineRemoteService.recordEvent({
         remote_id: activeSession.remote_id,
+        event_uuid,
+        event_sequence,
         event_type: finalEventType,
         scoring_user_name: scoringUserName,
         match_time_elapsed: matchTimeElapsed,
@@ -2197,7 +2274,11 @@ export default function RemoteScreen() {
         
         // Only create event if both match and remote session still exist
         if (!matchError && matchCheck && !remoteError && remoteCheck) {
-          const eventData = { ...baseEvent, match_id: effectivePeriod.match_id, match_period_id: effectivePeriod.match_period_id || null };
+          const { event_sequence, ...eventData } = {
+            ...baseEvent,
+            match_id: effectivePeriod.match_id,
+            match_period_id: effectivePeriod.match_period_id || null,
+          };
           const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
           
           // If creation failed (e.g., FK), leave it to the queued offline event to sync later
@@ -4487,7 +4568,8 @@ export default function RemoteScreen() {
   // Helper function to create a cancellation event
   const createCancellationEvent = async (
     entity: 'fencerA' | 'fencerB',
-    cancelledEventId: string
+    cancelledEventId?: string | null,
+    cancelledEventUuid?: string | null
   ) => {
     if (!remoteSession || !currentMatchPeriod?.match_id) {
       console.log('⚠️ Cannot create cancellation event - no remote session or match period');
@@ -4495,6 +4577,7 @@ export default function RemoteScreen() {
     }
 
     const now = new Date();
+    const { event_uuid, event_sequence } = buildEventIdentity();
     const actualMatchTime = getActualMatchTime();
     // Calculate elapsed time accounting for completed periods
     // Query match_period table to determine which periods were actually played (have start_time)
@@ -4563,6 +4646,8 @@ export default function RemoteScreen() {
     const fencer1Name = showUserProfile && toggleCardPosition === 'left' ? userDisplayName : getNameByEntity(leftEntity);
     const fencer2Name = showUserProfile && toggleCardPosition === 'right' ? userDisplayName : getNameByEntity(rightEntity);
     const scoringUserName = entityIsUser ? fencer1Name : fencer2Name;
+    const resolvedCancelledEventId = cancelledEventId || null;
+    const resolvedCancelledEventUuid = cancelledEventUuid || null;
 
     // Check if we're online
     let isOnline = false;
@@ -4577,10 +4662,34 @@ export default function RemoteScreen() {
     const isOfflineSession = remoteSession.remote_id.startsWith('offline_');
 
     // Record cancellation event via offline service (works online and offline)
+    const baseEvent = {
+      event_uuid,
+      event_sequence,
+      match_id: currentMatchPeriod.match_id,
+      fencing_remote_id: remoteSession.remote_id,
+      match_period_id: currentMatchPeriod.match_period_id || null,
+      event_time: now.toISOString(),
+      event_type: 'cancel',
+      scoring_user_id: scorer === 'user' ? user?.id : null,
+      scoring_user_name: scoringUserName,
+      fencer_1_name: fencer1Name,
+      fencer_2_name: fencer2Name,
+      cancelled_event_id: resolvedCancelledEventId,
+      reset_segment: resetSegmentRef.current,
+      match_time_elapsed: matchTimeElapsed,
+    };
+
+    void appendLocalMatchEvent({
+      ...baseEvent,
+      cancelled_event_uuid: resolvedCancelledEventUuid,
+    });
+
     let queuedEventId: string | null = null;
     try {
       queuedEventId = await offlineRemoteService.recordEvent({
         remote_id: remoteSession.remote_id,
+        event_uuid,
+        event_sequence,
         event_type: "cancel",
         scoring_user_name: scoringUserName,
         match_time_elapsed: matchTimeElapsed,
@@ -4591,7 +4700,8 @@ export default function RemoteScreen() {
           scoring_user_id: scorer === 'user' ? user?.id : null,
           fencer_1_name: fencer1Name,
           fencer_2_name: fencer2Name,
-          cancelled_event_id: cancelledEventId,
+          cancelled_event_id: resolvedCancelledEventId,
+          cancelled_event_uuid: resolvedCancelledEventUuid,
           reset_segment: resetSegmentRef.current,
         }
       });
@@ -4627,20 +4737,7 @@ export default function RemoteScreen() {
         
         // Only create event if both match and remote session still exist
         if (!matchError && matchCheck && !remoteError && remoteCheck) {
-          const eventData = {
-            match_id: currentMatchPeriod.match_id,
-            fencing_remote_id: remoteSession.remote_id,
-            match_period_id: currentMatchPeriod.match_period_id || null,
-            event_time: now.toISOString(),
-            event_type: "cancel",
-            scoring_user_id: scorer === 'user' ? user?.id : null,
-            scoring_user_name: scoringUserName,
-            fencer_1_name: fencer1Name,
-            fencer_2_name: fencer2Name,
-            cancelled_event_id: cancelledEventId,
-            reset_segment: resetSegmentRef.current,
-            match_time_elapsed: matchTimeElapsed
-          };
+          const { event_sequence, ...eventData } = baseEvent;
           const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
           
           if (!createdEvent) {
@@ -4685,6 +4782,7 @@ export default function RemoteScreen() {
     
     // Get the most recent scoring event ID for this entity to cancel
     const eventIdToCancel = recentScoringEventIds[entity];
+    const eventUuidToCancel = recentScoringEventUuidsRef.current[entity];
     captureMatchDebug('score_tap', {
       debug_id: tapDebugId,
       action: 'decrease',
@@ -4692,6 +4790,7 @@ export default function RemoteScreen() {
       current_score: currentScore,
       new_score: newScore,
       has_cancel_event: !!eventIdToCancel,
+      has_cancel_event_uuid: !!eventUuidToCancel,
       is_active_match: hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)),
     });
     
@@ -4721,14 +4820,18 @@ export default function RemoteScreen() {
           }
           
           // Create cancellation event in background (fire-and-forget)
-          if (eventIdToCancel) {
-            createCancellationEvent(entity, eventIdToCancel)
+          if (eventIdToCancel || eventUuidToCancel) {
+            createCancellationEvent(entity, eventIdToCancel, eventUuidToCancel)
               .then(() => {
                 // Clear the tracked event ID since it's been cancelled
                 setRecentScoringEventIds(prev => ({
                   ...prev,
                   [entity]: null
                 }));
+                recentScoringEventUuidsRef.current = {
+                  ...recentScoringEventUuidsRef.current,
+                  [entity]: null,
+                };
               })
               .catch(error => console.error('Background cancellation failed:', error));
           }
@@ -4757,14 +4860,18 @@ export default function RemoteScreen() {
       logMatchEvent('score', entity, 'decrease'); // Log the score decrease
       
       // Create cancellation event in background (fire-and-forget)
-      if (eventIdToCancel) {
-        createCancellationEvent(entity, eventIdToCancel)
+      if (eventIdToCancel || eventUuidToCancel) {
+        createCancellationEvent(entity, eventIdToCancel, eventUuidToCancel)
           .then(() => {
             // Clear the tracked event ID since it's been cancelled
             setRecentScoringEventIds(prev => ({
               ...prev,
               [entity]: null
             }));
+            recentScoringEventUuidsRef.current = {
+              ...recentScoringEventUuidsRef.current,
+              [entity]: null,
+            };
           })
           .catch(error => console.error('Background cancellation failed:', error));
       }
@@ -4786,14 +4893,18 @@ export default function RemoteScreen() {
       logMatchEvent('score', entity, 'decrease'); // Log the score decrease
       
       // Create cancellation event if we have an event ID to cancel
-      if (eventIdToCancel) {
+      if (eventIdToCancel || eventUuidToCancel) {
         try {
-          await createCancellationEvent(entity, eventIdToCancel);
+          await createCancellationEvent(entity, eventIdToCancel, eventUuidToCancel);
           // Clear the tracked event ID since it's been cancelled
           setRecentScoringEventIds(prev => ({
             ...prev,
             [entity]: null
           }));
+          recentScoringEventUuidsRef.current = {
+            ...recentScoringEventUuidsRef.current,
+            [entity]: null,
+          };
         } catch (error) {
           console.error('❌ Error creating cancellation event in decrementScore:', error);
           // Continue anyway - event might be queued via offline service
@@ -4992,6 +5103,7 @@ export default function RemoteScreen() {
       setResetSegment(nextSegment);
       pendingTouchQueueRef.current = [];
       setRecentScoringEventIds({ fencerA: null, fencerB: null });
+      recentScoringEventUuidsRef.current = { fencerA: null, fencerB: null };
 
       const activeSession = remoteSession;
       const effectivePeriod = currentMatchPeriod || currentMatchPeriodRef.current;
@@ -5004,6 +5116,7 @@ export default function RemoteScreen() {
       }
 
       const now = new Date();
+      const { event_uuid, event_sequence } = buildEventIdentity();
       const leftEntity = getEntityAtPosition('left');
       const rightEntity = getEntityAtPosition('right');
       const leftIsUser = showUserProfile && isEntityUser(leftEntity);
@@ -5012,6 +5125,8 @@ export default function RemoteScreen() {
       const fencer2Name = rightIsUser ? userDisplayName : getNameByEntity(rightEntity);
 
       const baseEvent = {
+        event_uuid,
+        event_sequence,
         match_id: effectivePeriod.match_id,
         match_period_id: effectivePeriod.match_period_id || null,
         fencing_remote_id: activeSession.remote_id,
@@ -5024,10 +5139,14 @@ export default function RemoteScreen() {
         match_time_elapsed: 0,
       };
 
+      void appendLocalMatchEvent(baseEvent);
+
       let queuedEventId: string | null = null;
       try {
         queuedEventId = await offlineRemoteService.recordEvent({
           remote_id: activeSession.remote_id,
+          event_uuid,
+          event_sequence,
           event_type: 'reset',
           event_time: baseEvent.event_time,
           match_time_elapsed: baseEvent.match_time_elapsed,
@@ -5068,7 +5187,8 @@ export default function RemoteScreen() {
           );
 
           if (!matchError && matchCheck && !remoteError && remoteCheck) {
-            const createdEvent = await matchEventService.createMatchEvent(baseEvent, accessToken);
+            const { event_sequence, ...eventData } = baseEvent;
+            const createdEvent = await matchEventService.createMatchEvent(eventData, accessToken);
             if (createdEvent && queuedEventId) {
               await offlineCache.removePendingRemoteEvent(queuedEventId);
             }
@@ -7278,12 +7398,12 @@ export default function RemoteScreen() {
       flexDirection: 'row',
       justifyContent: 'flex-end',
       alignItems: 'center',
-      gap: width * 0.03,
+      gap: width * 0.015,
     },
     weaponButton: {
-      width: width * 0.082,
-      height: width * 0.082,
-      borderRadius: width * 0.041,
+      width: width * 0.09,
+      height: width * 0.09,
+      borderRadius: width * 0.045,
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       borderWidth: 1.5,
       borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -8322,11 +8442,20 @@ export default function RemoteScreen() {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
                 >
-                  <Ionicons 
-                    name="flash" 
-                    size={width * 0.032} 
-                    color={selectedWeapon === 'foil' ? '#FFFFFF' : '#9D9D9D'} 
-                  />
+                  {weaponSvgs.foil ? (
+                    <SvgXml
+                      xml={weaponSvgs.foil}
+                      width={weaponIconSize}
+                      height={weaponIconSize}
+                      color={selectedWeapon === 'foil' ? '#FFFFFF' : '#9D9D9D'}
+                    />
+                  ) : (
+                    <Ionicons 
+                      name="flash" 
+                      size={weaponIconSize} 
+                      color={selectedWeapon === 'foil' ? '#FFFFFF' : '#9D9D9D'} 
+                    />
+                  )}
                   <Text style={[
                     styles.weaponButtonLabel,
                     selectedWeapon === 'foil' && styles.weaponButtonLabelSelected
@@ -8346,11 +8475,20 @@ export default function RemoteScreen() {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
                 >
-                  <Ionicons 
-                    name="shield" 
-                    size={width * 0.032} 
-                    color={selectedWeapon === 'epee' ? '#FFFFFF' : '#9D9D9D'} 
-                  />
+                  {weaponSvgs.epee ? (
+                    <SvgXml
+                      xml={weaponSvgs.epee}
+                      width={weaponIconSize}
+                      height={weaponIconSize}
+                      color={selectedWeapon === 'epee' ? '#FFFFFF' : '#9D9D9D'}
+                    />
+                  ) : (
+                    <Ionicons 
+                      name="shield" 
+                      size={weaponIconSize} 
+                      color={selectedWeapon === 'epee' ? '#FFFFFF' : '#9D9D9D'} 
+                    />
+                  )}
                   <Text style={[
                     styles.weaponButtonLabel,
                     selectedWeapon === 'epee' && styles.weaponButtonLabelSelected
@@ -8370,11 +8508,20 @@ export default function RemoteScreen() {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
                 >
-                  <Ionicons 
-                    name="flame" 
-                    size={width * 0.032} 
-                    color={selectedWeapon === 'sabre' ? '#FFFFFF' : '#9D9D9D'} 
-                  />
+                  {weaponSvgs.sabre ? (
+                    <SvgXml
+                      xml={weaponSvgs.sabre}
+                      width={weaponIconSize}
+                      height={weaponIconSize}
+                      color={selectedWeapon === 'sabre' ? '#FFFFFF' : '#9D9D9D'}
+                    />
+                  ) : (
+                    <Ionicons 
+                      name="flame" 
+                      size={weaponIconSize} 
+                      color={selectedWeapon === 'sabre' ? '#FFFFFF' : '#9D9D9D'} 
+                    />
+                  )}
                   <Text style={[
                     styles.weaponButtonLabel,
                     selectedWeapon === 'sabre' && styles.weaponButtonLabelSelected

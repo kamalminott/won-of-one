@@ -243,6 +243,22 @@ export const postgrestInsert = async <T>(
   });
 };
 
+export const postgrestUpsert = async <T>(
+  table: string,
+  body: unknown,
+  query?: QueryParams,
+  options?: { accessToken?: string | null; preferReturn?: boolean; prefer?: string }
+): Promise<PostgrestResult<T[]>> => {
+  return postgrestRequest<T[]>(table, {
+    method: 'POST',
+    query,
+    body,
+    accessToken: options?.accessToken,
+    preferReturn: options?.preferReturn ?? true,
+    prefer: options?.prefer ?? 'return=representation, resolution=merge-duplicates',
+  });
+};
+
 export const postgrestUpdate = async <T>(
   table: string,
   body: unknown,

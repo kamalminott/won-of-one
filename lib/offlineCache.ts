@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   ACTIVE_SESSION: 'offline:active_remote_session',
   PENDING_EVENTS: 'offline:pending_remote_events',
   PENDING_MATCHES: 'offline:pending_matches',
+  MATCH_EVENT_LOG_PREFIX: 'offline:match_events:',
 };
 
 export interface RemoteSession {
@@ -34,6 +35,8 @@ export interface RemoteSession {
 
 export interface PendingEvent {
   id?: string;
+  event_uuid?: string;
+  event_sequence?: number;
   remote_id: string;
   event_type: string;
   event_time: string;
@@ -42,15 +45,43 @@ export interface PendingEvent {
   metadata?: any;
 }
 
+export interface MatchEventLogEntry {
+  event_uuid: string;
+  event_sequence?: number;
+  match_id: string;
+  fencing_remote_id?: string;
+  match_period_id?: string | null;
+  event_time?: string;
+  event_type?: string;
+  scoring_user_id?: string | null;
+  scoring_user_name?: string | null;
+  scoring_entity?: string | null;
+  card_given?: string | null;
+  points_awarded?: number | null;
+  score_diff?: number | null;
+  seconds_since_last_event?: number | null;
+  reset_segment?: number | null;
+  fencer_1_name?: string | null;
+  fencer_2_name?: string | null;
+  cancelled_event_id?: string | null;
+  cancelled_event_uuid?: string | null;
+  match_time_elapsed?: number | null;
+  match_event_id?: string | null;
+}
+
 export interface PendingMatch {
   matchId: string;
   queuedAt: number;
   opponentName: string;
+  matchType?: 'training' | 'competition';
+  fencer1Name?: string;
+  fencer2Name?: string;
   youScore: number;
   opponentScore: number;
   date: string;
   isWin: boolean;
   notes?: string;
+  weaponType?: string;
   duration_sec?: number;
   total_touches?: number;
   periods?: any[];
@@ -180,6 +211,64 @@ export const offlineCache = {
   },
 
   /**
+   * Append a match event to the local event log for a match.
+   */
+  appendMatchEvent: async (
+    matchId: string,
+    event: MatchEventLogEntry
+  ): Promise<boolean> => {
+    try {
+      const key = `${STORAGE_KEYS.MATCH_EVENT_LOG_PREFIX}${matchId}`;
+      const existing = await offlineCache.getMatchEventLog(matchId);
+      if (existing.some(item => item.event_uuid === event.event_uuid)) {
+        return false;
+      }
+      const normalized: MatchEventLogEntry = {
+        ...event,
+        match_event_id: event.match_event_id || event.event_uuid,
+      };
+      if (!normalized.cancelled_event_id && normalized.cancelled_event_uuid) {
+        normalized.cancelled_event_id = normalized.cancelled_event_uuid;
+      }
+      const updated = [...existing, normalized];
+      await AsyncStorage.setItem(key, JSON.stringify(updated));
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to append match event log:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Get local match events for a given match id.
+   */
+  getMatchEventLog: async (matchId: string): Promise<MatchEventLogEntry[]> => {
+    try {
+      const key = `${STORAGE_KEYS.MATCH_EVENT_LOG_PREFIX}${matchId}`;
+      const data = await AsyncStorage.getItem(key);
+      if (!data) {
+        return [];
+      }
+      return JSON.parse(data) as MatchEventLogEntry[];
+    } catch (error) {
+      console.error('❌ Failed to get match event log:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Clear local match event log for a match.
+   */
+  clearMatchEventLog: async (matchId: string): Promise<void> => {
+    try {
+      const key = `${STORAGE_KEYS.MATCH_EVENT_LOG_PREFIX}${matchId}`;
+      await AsyncStorage.removeItem(key);
+    } catch (error) {
+      console.error('❌ Failed to clear match event log:', error);
+    }
+  },
+
+  /**
    * Add pending match to queue for later sync
    * Returns the match ID
    */
@@ -236,6 +325,40 @@ export const offlineCache = {
       console.log('✅ Match removed from queue:', matchId);
     } catch (error) {
       console.error('❌ Failed to remove match from queue:', error);
+    }
+  },
+
+  /**
+   * Update a pending match in the queue (offline edits)
+   */
+  updatePendingMatch: async (
+    matchId: string,
+    updates: Partial<Omit<PendingMatch, 'matchId' | 'queuedAt'>>
+  ): Promise<boolean> => {
+    try {
+      const existing = await offlineCache.getPendingMatches();
+      const index = existing.findIndex(match => match.matchId === matchId);
+      if (index === -1) {
+        console.warn('⚠️ Pending match not found for update:', matchId);
+        return false;
+      }
+
+      const current = existing[index];
+      const updated: PendingMatch = {
+        ...current,
+        ...updates,
+        matchId: current.matchId,
+        queuedAt: current.queuedAt,
+      };
+
+      const next = [...existing];
+      next[index] = updated;
+      await AsyncStorage.setItem(STORAGE_KEYS.PENDING_MATCHES, JSON.stringify(next));
+      console.log('✅ Pending match updated:', matchId);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to update pending match:', error);
+      return false;
     }
   },
 };

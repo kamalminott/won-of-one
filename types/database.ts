@@ -129,6 +129,7 @@ export interface MatchApproval {
 
 export interface MatchEvent {
   match_event_id: string;
+  event_uuid?: string | null;
   match_period_id?: string;
   fencing_remote_id?: string;
   match_id?: string;

@@ -15,6 +15,7 @@ import {
   postgrestSelect,
   postgrestSelectOne,
   postgrestUpdate,
+  postgrestUpsert,
 } from './postgrest';
 
 // Re-export supabase for use in other services
@@ -1318,6 +1319,8 @@ export const matchService = {
     time: string;
     notes?: string;
     weaponType?: string;
+    fencer1Name?: string;
+    fencer2Name?: string;
     accessToken?: string | null;
   }): Promise<Match | null> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
@@ -1389,10 +1392,13 @@ export const matchService = {
     // Normalize weapon type to lowercase
     const normalizedWeaponType = weaponType ? weaponType.toLowerCase() : 'foil';
     
+    const trimmedFencer1Name = matchData.fencer1Name?.trim() || '';
+    const trimmedFencer2Name = matchData.fencer2Name?.trim() || '';
+
     const insertData = {
       user_id: userId,
-      fencer_1_name: 'You', // User is always fencer 1 in manual matches
-      fencer_2_name: opponentName.trim(),
+      fencer_1_name: trimmedFencer1Name || 'You', // Default to "You" if not provided
+      fencer_2_name: trimmedFencer2Name || opponentName.trim(),
       final_score: yourScore,
       // touches_against: opponentScore, // This is a generated column - will be calculated automatically
       event_date: eventDateTime.toISOString(),
@@ -4014,12 +4020,23 @@ export const matchEventService = {
       }
     }
 
-    const { data, error } = await postgrestInsert<MatchEvent>(
-      'match_event',
-      eventData,
-      { select: '*' },
-      { accessToken: token }
-    );
+    const useUpsert = !!eventData.event_uuid;
+    const query = useUpsert
+      ? { select: '*', on_conflict: 'event_uuid' }
+      : { select: '*' };
+    const { data, error } = useUpsert
+      ? await postgrestUpsert<MatchEvent>(
+          'match_event',
+          eventData,
+          query,
+          { accessToken: token }
+        )
+      : await postgrestInsert<MatchEvent>(
+          'match_event',
+          eventData,
+          query,
+          { accessToken: token }
+        );
 
     if (error) {
       console.error('Error creating match event:', error);
