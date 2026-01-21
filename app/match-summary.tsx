@@ -351,18 +351,42 @@ export default function MatchSummaryScreen() {
               session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true }
             );
 
+            const eventBasedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
+              params.matchId as string,
+              userFencerName,
+              params.remoteId as string,
+              progressionFencer1Total,
+              progressionFencer2Total,
+              session?.access_token
+            );
+            const eventUserTotal = eventBasedTouchesByPeriod.period1.user
+              + eventBasedTouchesByPeriod.period2.user
+              + eventBasedTouchesByPeriod.period3.user;
+            const eventOpponentTotal = eventBasedTouchesByPeriod.period1.opponent
+              + eventBasedTouchesByPeriod.period2.opponent
+              + eventBasedTouchesByPeriod.period3.opponent;
+            const eventTotalsMatch = eventUserTotal === progressionFencer1Total
+              && eventOpponentTotal === progressionFencer2Total;
+            const eventHasMeaningfulData = (eventUserTotal + eventOpponentTotal) > 0
+              || (progressionFencer1Total === 0 && progressionFencer2Total === 0);
+            const clampedEventBased = clampTouches(eventBasedTouchesByPeriod);
+
+            if (!eventTotalsMatch) {
+              console.warn('⚠️ [MATCH SUMMARY] Event-based period totals differ from progression totals', {
+                eventUserTotal,
+                eventOpponentTotal,
+                progressionFencer1Total,
+                progressionFencer2Total
+              });
+            }
+
             if (periodsError) {
               console.error('Error fetching match periods:', periodsError);
-              // Fallback to entity-based calculation
-              const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
-                params.matchId as string,
-                userFencerName,
-                params.remoteId as string,
-                undefined,
-                undefined,
-                session?.access_token
-              );
-              setTouchesByPeriod(calculatedTouchesByPeriod);
+              // Prefer event-based counts to keep identity mapping consistent with score progression
+              setTouchesByPeriod(clampedEventBased);
+            } else if (eventHasMeaningfulData) {
+              // Use event-based counts so swaps don't mis-attribute periods
+              setTouchesByPeriod(clampedEventBased);
             } else if (matchPeriods && matchPeriods.length > 0) {
               // Initialize with zeros - chart expects 'user' and 'opponent', but these represent fencer1 and fencer2
               const touchesByPeriodData = {
@@ -418,46 +442,22 @@ export default function MatchSummaryScreen() {
               };
               const mappedTouchesByPeriod = clampTouches(mappedTouchesByPeriodRaw);
 
-              // If period totals don't match progression totals, fall back to event-derived calculation
+              // If period totals don't match progression totals, log for debugging (event data missing)
               const periodUserTotal = mappedTouchesByPeriod.period1.user + mappedTouchesByPeriod.period2.user + mappedTouchesByPeriod.period3.user;
               const periodOpponentTotal = mappedTouchesByPeriod.period1.opponent + mappedTouchesByPeriod.period2.opponent + mappedTouchesByPeriod.period3.opponent;
               const totalsMatch = periodUserTotal === progressionFencer1Total && periodOpponentTotal === progressionFencer2Total;
               if (!totalsMatch) {
-                console.warn('⚠️ [MATCH SUMMARY] Period totals mismatch progression totals, recalculating from events', {
+                console.warn('⚠️ [MATCH SUMMARY] Period totals mismatch progression totals (using period data fallback)', {
                   periodUserTotal,
                   periodOpponentTotal,
                   progressionFencer1Total,
                   progressionFencer2Total
                 });
-                const recalculatedRaw = await matchService.calculateTouchesByPeriod(
-                  params.matchId as string,
-                  userFencerName,
-                  params.remoteId as string,
-                  progressionFencer1Total,
-                  progressionFencer2Total,
-                  session?.access_token
-                );
-                const recalculatedMappedRaw = isFencer1User ? recalculatedRaw : {
-                  period1: { user: recalculatedRaw.period1.opponent, opponent: recalculatedRaw.period1.user },
-                  period2: { user: recalculatedRaw.period2.opponent, opponent: recalculatedRaw.period2.user },
-                  period3: { user: recalculatedRaw.period3.opponent, opponent: recalculatedRaw.period3.user },
-                };
-                const recalculated = clampTouches(recalculatedMappedRaw);
-                setTouchesByPeriod(recalculated);
-              } else {
-                setTouchesByPeriod(mappedTouchesByPeriod);
               }
+              setTouchesByPeriod(mappedTouchesByPeriod);
             } else {
               // No period data - fallback to entity-based calculation
-              const calculatedTouchesByPeriod = await matchService.calculateTouchesByPeriod(
-                params.matchId as string,
-                userFencerName,
-                params.remoteId as string,
-                undefined,
-                undefined,
-                session?.access_token
-              );
-              setTouchesByPeriod(calculatedTouchesByPeriod);
+              setTouchesByPeriod(clampedEventBased);
             }
           }
         } catch (error) {

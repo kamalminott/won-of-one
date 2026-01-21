@@ -115,68 +115,77 @@ export default function MatchDetailsScreen() {
         return;
       }
 
-      // Build cancelled set and filter to scoring events only, excluding cancelled
-      const cancelledEventIds = new Set<string>();
-      for (const event of filteredEvents) {
-        if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
-          cancelledEventIds.add(event.cancelled_event_id);
-        }
-      }
-
       const scoringTypes = new Set(['touch', 'double', 'double_touch', 'double_hit']);
-      const scoringEvents = filteredEvents
-        .filter(ev => {
+      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
+      const userId = user?.id ?? null;
+
+      const buildScoringEvents = (events: any[]) => {
+        const cancelledEventIds = new Set<string>();
+        for (const event of events) {
+          if ((event.event_type || '').toLowerCase() === 'cancel' && event.cancelled_event_id) {
+            cancelledEventIds.add(event.cancelled_event_id);
+          }
+        }
+
+        const scoringEvents = events.filter(ev => {
           const type = (ev.event_type || '').toLowerCase();
           if (type === 'cancel') return false;
           if (ev.match_event_id && cancelledEventIds.has(ev.match_event_id)) return false;
           return scoringTypes.has(type);
-        })
-        .sort((a, b) => {
-          const aElapsed = typeof a.match_time_elapsed === 'number' ? a.match_time_elapsed : null;
-          const bElapsed = typeof b.match_time_elapsed === 'number' ? b.match_time_elapsed : null;
-          if (aElapsed !== null && bElapsed !== null && aElapsed !== bElapsed) {
-            return aElapsed - bElapsed;
-          }
-          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-          return aTime - bTime;
         });
 
-      if (scoringEvents.length === 0) {
-        setMatchInsights(EMPTY_MATCH_INSIGHTS);
-        return;
-      }
+        const byTime = [...scoringEvents].sort((a, b) => {
+          const aTime = a.event_time || a.timestamp || '';
+          const bTime = b.event_time || b.timestamp || '';
+          if (aTime && bTime && aTime !== bTime) {
+            return aTime < bTime ? -1 : 1;
+          }
+          const aElapsed = typeof a.match_time_elapsed === 'number' ? a.match_time_elapsed : 0;
+          const bElapsed = typeof b.match_time_elapsed === 'number' ? b.match_time_elapsed : 0;
+          return aElapsed - bElapsed;
+        });
 
-      const allHaveElapsed = scoringEvents.every(e => typeof e.match_time_elapsed === 'number');
-      const firstTimestampMs = scoringEvents[0]?.timestamp ? new Date(scoringEvents[0].timestamp).getTime() : null;
+        const allHaveElapsed = scoringEvents.every(e => typeof e.match_time_elapsed === 'number');
+        const hasElapsedReset = allHaveElapsed && byTime.some((event, index) => {
+          if (index === 0) return false;
+          const prev = byTime[index - 1]?.match_time_elapsed;
+          return typeof prev === 'number' &&
+            typeof event.match_time_elapsed === 'number' &&
+            event.match_time_elapsed < prev;
+        });
 
-      const getSeconds = (event: any) => {
-        if (allHaveElapsed && typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
-        if (event.timestamp && firstTimestampMs !== null) {
-          const ms = new Date(event.timestamp).getTime();
-          return Number.isFinite(ms) ? Math.max(0, Math.round((ms - firstTimestampMs) / 1000)) : 0;
-        }
-        if (typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
-        if (event.timestamp) {
-          const ms = new Date(event.timestamp).getTime();
-          return Number.isFinite(ms) ? Math.round(ms / 1000) : 0;
-        }
-        return 0;
+        const sorted = hasElapsedReset
+          ? byTime
+          : [...scoringEvents].sort((a, b) => {
+              const aElapsed = typeof a.match_time_elapsed === 'number' ? a.match_time_elapsed : null;
+              const bElapsed = typeof b.match_time_elapsed === 'number' ? b.match_time_elapsed : null;
+              if (aElapsed !== null && bElapsed !== null && aElapsed !== bElapsed) {
+                return aElapsed - bElapsed;
+              }
+              const aTime = a.event_time || a.timestamp || '';
+              const bTime = b.event_time || b.timestamp || '';
+              if (aTime && bTime && aTime !== bTime) {
+                return aTime < bTime ? -1 : 1;
+              }
+              return 0;
+            });
+
+        return { scoringEvents: sorted, hasElapsedReset };
       };
 
-      // Build user identity set for filtering (only show user insights)
       const userNameCandidates = [
         userName,
         isFencer1User ? match?.fencer_1_name : null,
         isFencer2User ? match?.fencer_2_name : null,
         'You',
-        'you'
+        'you',
       ].filter(Boolean).map(normalizeName);
 
-      const doubleTypes = new Set(['double', 'double_touch', 'double_hit']);
       const isUserScoringEvent = (event: any) => {
+        if (userId && event.scoring_user_id === userId) {
+          return true;
+        }
         const type = (event.event_type || '').toLowerCase();
-        // Double touch gives a point to both fencers; count it for the user if we know which side they're on
         if (doubleTypes.has(type)) {
           return isFencer1User || isFencer2User;
         }
@@ -184,80 +193,129 @@ export default function MatchDetailsScreen() {
         return scorerName ? userNameCandidates.includes(scorerName) : false;
       };
 
-      const userScoringEvents = scoringEvents.filter(isUserScoringEvent);
+      const computeInsightsFromEvents = (events: any[], hasElapsedReset: boolean) => {
+        if (!events.length) {
+          return {
+            insights: EMPTY_MATCH_INSIGHTS,
+            userScoringEvents: [] as any[],
+            scoringEvents: [] as any[],
+          };
+        }
 
-      // Calculate average time between scoring touches (user only)
-      const canComputeIntervals = userScoringEvents.length > 1;
-      let totalTimeBetweenTouches = 0;
-      let touchCount = 0;
+        const allHaveElapsed = events.every(e => typeof e.match_time_elapsed === 'number') && !hasElapsedReset;
+        const firstTimestampMs = events[0]?.timestamp
+          ? new Date(events[0].timestamp).getTime()
+          : null;
 
-      for (let i = 1; i < userScoringEvents.length; i++) {
-        const currentSeconds = getSeconds(userScoringEvents[i]);
-        const previousSeconds = getSeconds(userScoringEvents[i - 1]);
-        const timeDiff = Math.max(0, currentSeconds - previousSeconds);
-        
-        totalTimeBetweenTouches += timeDiff;
-        touchCount++;
-      }
+        const getSeconds = (event: any) => {
+          if (allHaveElapsed && typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
+          const eventStamp = event.event_time || event.timestamp;
+          if (eventStamp && firstTimestampMs !== null) {
+            const ms = new Date(eventStamp).getTime();
+            return Number.isFinite(ms) ? Math.max(0, Math.round((ms - firstTimestampMs) / 1000)) : 0;
+          }
+          if (typeof event.match_time_elapsed === 'number') return event.match_time_elapsed;
+          if (eventStamp) {
+            const ms = new Date(eventStamp).getTime();
+            return Number.isFinite(ms) ? Math.round(ms / 1000) : 0;
+          }
+          return 0;
+        };
 
-      const avgTime = touchCount > 0 ? Math.round(totalTimeBetweenTouches / touchCount) : 0;
+        const userScoringEvents = events.filter(isUserScoringEvent);
+        const canComputeIntervals = userScoringEvents.length > 1;
+        let totalTimeBetweenTouches = 0;
+        let touchCount = 0;
 
-      // Debug: Log all events to see what we're working with
-      console.log('🔍 Match Events Debug:', {
-        totalEvents: filteredEvents.length,
-        scoringEvents: scoringEvents.length,
-        userScoringEvents: userScoringEvents.length,
-        cancelled: cancelledEventIds.size,
-        userName: userName,
-        eventScorers: scoringEvents.map(e => e.scoring_user_name),
-        uniqueScorers: [...new Set(scoringEvents.map(e => e.scoring_user_name))]
-      });
-
-      // Calculate longest scoring drought (longest time between user scoring events)
-      let longestDrought = 0;
-      const doubleTouchCount = userScoringEvents.filter(ev => doubleTypes.has((ev.event_type || '').toLowerCase())).length;
-      
-      if (userScoringEvents.length > 1) {
         for (let i = 1; i < userScoringEvents.length; i++) {
           const currentSeconds = getSeconds(userScoringEvents[i]);
           const previousSeconds = getSeconds(userScoringEvents[i - 1]);
           const timeDiff = Math.max(0, currentSeconds - previousSeconds);
-          
-          if (timeDiff > longestDrought) {
-            longestDrought = timeDiff;
+          totalTimeBetweenTouches += timeDiff;
+          touchCount++;
+        }
+
+        const avgTime = touchCount > 0 ? Math.round(totalTimeBetweenTouches / touchCount) : 0;
+        let longestDrought = 0;
+        const doubleTouchCount = userScoringEvents.filter(ev =>
+          doubleTypes.has((ev.event_type || '').toLowerCase())
+        ).length;
+
+        if (userScoringEvents.length > 1) {
+          for (let i = 1; i < userScoringEvents.length; i++) {
+            const currentSeconds = getSeconds(userScoringEvents[i]);
+            const previousSeconds = getSeconds(userScoringEvents[i - 1]);
+            const timeDiff = Math.max(0, currentSeconds - previousSeconds);
+
+            if (timeDiff > longestDrought) {
+              longestDrought = timeDiff;
+            }
           }
         }
-      }
 
-      // Calculate touch streaks: longest run of consecutive user touches (any opponent/double breaks it)
-      let currentStreak = 0;
-      let maxStreak = 0;
-      for (const event of scoringEvents) {
-        const eventType = (event.event_type || '').toLowerCase();
-        const isUserEvent = isUserScoringEvent(event);
+        let currentStreak = 0;
+        let maxStreak = 0;
+        for (const event of events) {
+          const eventType = (event.event_type || '').toLowerCase();
+          const isUserEvent = isUserScoringEvent(event);
 
-        if (doubleTypes.has(eventType) || !isUserEvent) {
-          // Opponent or double touch breaks streak
-          currentStreak = 0;
-          continue;
+          if (doubleTypes.has(eventType) || !isUserEvent) {
+            currentStreak = 0;
+            continue;
+          }
+
+          currentStreak += 1;
+          maxStreak = Math.max(maxStreak, currentStreak);
         }
 
-        currentStreak += 1;
-        maxStreak = Math.max(maxStreak, currentStreak);
+        return {
+          insights: {
+            avgTimeBetweenTouches: canComputeIntervals ? `${avgTime}s` : 'No data',
+            longestScoringDrought: canComputeIntervals ? `${Math.round(longestDrought)}s` : 'No data',
+            touchStreaks:
+              maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data',
+            doubleTouches: `${doubleTouchCount}`,
+          },
+          userScoringEvents,
+          scoringEvents: events,
+        };
+      };
+
+      const latestSegmentEvents = filterEventsByLatestResetSegment(matchEvents || []);
+      const latestScoring = buildScoringEvents(latestSegmentEvents);
+      const latestResult = computeInsightsFromEvents(
+        latestScoring.scoringEvents,
+        latestScoring.hasElapsedReset
+      );
+
+      let finalResult = latestResult;
+      if (latestResult.userScoringEvents.length < 2 && (matchEvents || []).length > latestSegmentEvents.length) {
+        const allScoring = buildScoringEvents(matchEvents || []);
+        const allResult = computeInsightsFromEvents(
+          allScoring.scoringEvents,
+          allScoring.hasElapsedReset
+        );
+        if (allResult.userScoringEvents.length >= 2) {
+          finalResult = allResult;
+        }
       }
 
+      console.log('🔍 Match Events Debug:', {
+        totalEvents: (matchEvents || []).length,
+        scoringEvents: finalResult.scoringEvents.length,
+        userScoringEvents: finalResult.userScoringEvents.length,
+        userName: userName,
+        eventScorers: finalResult.scoringEvents.map(e => e.scoring_user_name),
+        uniqueScorers: [...new Set(finalResult.scoringEvents.map(e => e.scoring_user_name))],
+      });
+
       console.log('🔍 Calculated insights (user only):', {
-        avgTime,
-        longestDrought: Math.round(longestDrought),
-        maxStreak
+        avgTime: finalResult.insights.avgTimeBetweenTouches,
+        longestDrought: finalResult.insights.longestScoringDrought,
+        touchStreaks: finalResult.insights.touchStreaks,
       });
-      
-      setMatchInsights({
-        avgTimeBetweenTouches: canComputeIntervals ? `${avgTime}s` : 'No data',
-        longestScoringDrought: canComputeIntervals ? `${Math.round(longestDrought)}s` : 'No data',
-        touchStreaks: maxStreak > 1 ? `${maxStreak} in a row` : maxStreak === 1 ? '1 touch' : 'No data',
-        doubleTouches: `${doubleTouchCount}`
-      });
+
+      setMatchInsights(finalResult.insights);
 
     } catch (error) {
       console.error('Error calculating match insights:', error);
