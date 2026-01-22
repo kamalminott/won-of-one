@@ -1,9 +1,15 @@
 import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { KeyStatsCard } from './KeyStatsCard';
 import { MatchNotesCard } from './MatchNotesCard';
 import { ScoreProgressionChart } from './ScoreProgressionChart';
 import { TouchesByPeriodChart } from './TouchesByPeriodChart';
+
+type StatItem = {
+  icon: keyof typeof Ionicons.glyphMap;
+  text: string;
+};
 
 interface MatchSummaryCardProps {
   onEdit?: () => void;
@@ -77,12 +83,12 @@ export const MatchSummaryCard: React.FC<MatchSummaryCardProps> = ({
   const normalizedWeaponType = weaponType?.toLowerCase();
   const isSabreWeapon = normalizedWeaponType === 'sabre' || normalizedWeaponType === 'saber';
   const isEpeeWeapon = normalizedWeaponType === 'epee';
-  const sabreStats = isSabreWeapon ? [
+  const sabreStats: StatItem[] | undefined = isSabreWeapon ? [
     { icon: 'flame', text: `${bestRun} Streak` },
     { icon: 'card', text: `${yellowCards}Y or ${redCards}R Cards` },
     { icon: 'trending-up', text: `${highestMomentum} Momentum` },
   ] : undefined;
-  const epeeStats = isEpeeWeapon ? [
+  const epeeStats: StatItem[] | undefined = isEpeeWeapon ? [
     { icon: 'flame', text: `${bestRun} Streak` },
     { icon: 'swap-horizontal', text: `${doubleTouchCount} Double Touches` },
     { icon: 'card', text: `${yellowCards}Y or ${redCards}R Cards` },

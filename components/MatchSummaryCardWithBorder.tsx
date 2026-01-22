@@ -60,7 +60,7 @@ export default function MatchSummaryCardWithBorder({
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
 
   // Helper function to validate if an image URI is valid
-  const isValidImage = (imageUri: string | undefined): boolean => {
+  const isValidImage = (imageUri?: string): imageUri is string => {
     return !!(
       imageUri &&
       imageUri !== 'https://via.placeholder.com/60x60' &&

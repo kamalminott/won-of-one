@@ -85,10 +85,10 @@ const styles = StyleSheet.create({
   },
   statTitle: {
     fontFamily: 'Articulat CF',
-    fontSize: '4%',
+    fontSize: 14,
     fontWeight: '500',
     color: 'white',
-    marginBottom: '4%',
+    marginBottom: 4,
   },
   bounceBackContent: {
     flexDirection: 'row',

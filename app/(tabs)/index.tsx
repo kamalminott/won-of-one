@@ -3,6 +3,7 @@ import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
 import { sessionTracker } from '@/lib/sessionTracker';
 import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, InteractionManager, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -20,7 +21,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
 import { subscriptionService } from '@/lib/subscriptionService';
-import { SimpleGoal, SimpleMatch } from '@/types/database';
+import { Goal, SimpleGoal, SimpleMatch } from '@/types/database';
 
 const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
@@ -113,6 +114,7 @@ export default function HomeScreen() {
   const goalCardRef = useRef<GoalCardRef>(null);
   const bypassPaywallRef = useRef(false);
   const paywallNavigationRef = useRef(false);
+  const shouldAutoShowPaywall = Updates.channel === 'production';
   const trimmedUserName = userName.trim();
   const authMetadataName = getAuthMetadataName(user)?.trim() || '';
   const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
@@ -400,159 +402,6 @@ export default function HomeScreen() {
     };
   }, [user?.id, user?.email, session?.access_token, authReady, isPasswordRecovery]);
 
-  useEffect(() => {
-    if (!user || !authReady) return;
-    if (!hasLoadedOnce) {
-      fetchUserData();
-    }
-  }, [user?.id, authReady, hasLoadedOnce, fetchUserData]);
-
-  useEffect(() => {
-    if (!user || !authReady || hasLoadedOnce) return;
-
-    const timeoutId = setTimeout(() => {
-      analytics.capture('home_data_load_timeout', { user_id: user.id });
-      setHasLoadedOnce(true);
-    }, HOME_LOAD_TIMEOUT_MS);
-
-    return () => clearTimeout(timeoutId);
-  }, [user?.id, authReady, hasLoadedOnce]);
-
-  useEffect(() => {
-    if (params.bypassPaywall === 'true') {
-      bypassPaywallRef.current = true;
-      paywallNavigationRef.current = false;
-      router.setParams({ bypassPaywall: undefined });
-    }
-  }, [params.bypassPaywall]);
-
-  useEffect(() => {
-    if (params.profilePrompt === 'true') {
-      if (!profilePromptDismissed) {
-        setProfilePromptRequested(true);
-      }
-      router.setParams({ profilePrompt: undefined });
-    }
-  }, [params.profilePrompt, profilePromptDismissed, router]);
-
-  useEffect(() => {
-    if (!user?.id) {
-      paywallNavigationRef.current = false;
-      bypassPaywallRef.current = false;
-    }
-  }, [user?.id]);
-
-  // Check subscription status and redirect to paywall if needed
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (!user || loading || !authReady) return;
-      if (bypassPaywallRef.current) return;
-      if (pathname === '/paywall' || paywallNavigationRef.current) return;
-
-      try {
-        const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
-        const previewStatus = await subscriptionService.getPaywallPreviewStatus(user);
-        
-        // If user has no active subscription and no active trial, show paywall
-        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial && !previewStatus.isActive) {
-          console.log('🔒 No active subscription or trial, redirecting to paywall');
-          paywallNavigationRef.current = true;
-          router.replace('/paywall');
-        } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
-          // Check if trial has expired
-          const now = new Date();
-          const expiresAt = subscriptionInfo.expiresAt;
-          if (now >= expiresAt) {
-            if (previewStatus.isActive) {
-              console.log('✅ Preview active, allowing access');
-            } else {
-              console.log('⏰ Trial expired, redirecting to paywall');
-              paywallNavigationRef.current = true;
-              router.replace('/paywall');
-            }
-          } else {
-            console.log('✅ Trial active, allowing access');
-          }
-        } else if (previewStatus.isActive) {
-          console.log('✅ Preview active, allowing access');
-        } else if (subscriptionInfo.isActive) {
-          console.log('✅ Active subscription, allowing access');
-          paywallNavigationRef.current = false;
-        }
-      } catch (error) {
-        console.error('Error checking subscription:', error);
-        // On error, allow access (fail open) - you can change this to fail closed if preferred
-      }
-    };
-
-    if (user && !loading && authReady) {
-      checkSubscription();
-    }
-  }, [user, loading, authReady]);
-
-  // Screen tracking and identify
-  useEffect(() => {
-    analytics.screen('Home');
-    analytics.dashboardImpression();
-    if (user) {
-      analytics.identify(user.id);
-    }
-  }, [user]);
-
-  // Auto-open goal modal when returning from completed goal
-  useEffect(() => {
-    if (params.autoOpenGoalModal === 'true' && hasLoadedOnce && goalCardRef.current) {
-      // Small delay to ensure UI is ready and data is loaded
-      const timer = setTimeout(() => {
-        // console.log('🎯 Auto-opening goal modal after celebration');
-        goalCardRef.current?.openModal();
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [params.autoOpenGoalModal, hasLoadedOnce]);
-
-  // Show alert when goal fails
-  useEffect(() => {
-    if (params.showFailedGoalAlert === 'true' && params.failedGoalTitle && hasLoadedOnce) {
-      const timer = setTimeout(() => {
-        Alert.alert(
-          '💥 Goal Failed',
-          `"${params.failedGoalTitle}" is no longer achievable.\n\n${params.failedGoalReason}\n\nWould you like to set a new goal?`,
-          [
-            { 
-              text: 'Later', 
-              style: 'cancel',
-              onPress: () => {
-                // Clear the params to prevent alert from showing again
-                router.setParams({ 
-                  showFailedGoalAlert: undefined,
-                  failedGoalTitle: undefined,
-                  failedGoalReason: undefined 
-                });
-              }
-            },
-            { 
-              text: 'Set New Goal', 
-              onPress: () => {
-                // Clear params first
-                router.setParams({ 
-                  showFailedGoalAlert: undefined,
-                  failedGoalTitle: undefined,
-                  failedGoalReason: undefined 
-                });
-                // Then open goal modal
-                goalCardRef.current?.openModal();
-              }
-            }
-          ]
-        );
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [params.showFailedGoalAlert, params.failedGoalTitle, params.failedGoalReason, hasLoadedOnce]);
-
   const fetchUserData = useCallback(async () => {
     if (!user?.id) {
       setHasLoadedOnce(true);
@@ -694,6 +543,160 @@ export default function HomeScreen() {
       fetchInFlightRef.current = false;
     }
   }, [user?.id, user?.email, session?.access_token, authReady]);
+
+  useEffect(() => {
+    if (!user || !authReady) return;
+    if (!hasLoadedOnce) {
+      fetchUserData();
+    }
+  }, [user?.id, authReady, hasLoadedOnce, fetchUserData]);
+
+  useEffect(() => {
+    if (!user || !authReady || hasLoadedOnce) return;
+
+    const timeoutId = setTimeout(() => {
+      analytics.capture('home_data_load_timeout', { user_id: user.id });
+      setHasLoadedOnce(true);
+    }, HOME_LOAD_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [user?.id, authReady, hasLoadedOnce]);
+
+  useEffect(() => {
+    if (params.bypassPaywall === 'true') {
+      bypassPaywallRef.current = true;
+      paywallNavigationRef.current = false;
+      router.setParams({ bypassPaywall: undefined });
+    }
+  }, [params.bypassPaywall]);
+
+  useEffect(() => {
+    if (params.profilePrompt === 'true') {
+      if (!profilePromptDismissed) {
+        setProfilePromptRequested(true);
+      }
+      router.setParams({ profilePrompt: undefined });
+    }
+  }, [params.profilePrompt, profilePromptDismissed, router]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      paywallNavigationRef.current = false;
+      bypassPaywallRef.current = false;
+    }
+  }, [user?.id]);
+
+  // Check subscription status and redirect to paywall if needed
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!user || loading || !authReady) return;
+      if (!shouldAutoShowPaywall) return;
+      if (bypassPaywallRef.current) return;
+      if (pathname === '/paywall' || paywallNavigationRef.current) return;
+
+      try {
+        const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
+        const previewStatus = await subscriptionService.getPaywallPreviewStatus(user);
+        
+        // If user has no active subscription and no active trial, show paywall
+        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial && !previewStatus.isActive) {
+          console.log('🔒 No active subscription or trial, redirecting to paywall');
+          paywallNavigationRef.current = true;
+          router.replace('/paywall');
+        } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
+          // Check if trial has expired
+          const now = new Date();
+          const expiresAt = subscriptionInfo.expiresAt;
+          if (now >= expiresAt) {
+            if (previewStatus.isActive) {
+              console.log('✅ Preview active, allowing access');
+            } else {
+              console.log('⏰ Trial expired, redirecting to paywall');
+              paywallNavigationRef.current = true;
+              router.replace('/paywall');
+            }
+          } else {
+            console.log('✅ Trial active, allowing access');
+          }
+        } else if (previewStatus.isActive) {
+          console.log('✅ Preview active, allowing access');
+        } else if (subscriptionInfo.isActive) {
+          console.log('✅ Active subscription, allowing access');
+          paywallNavigationRef.current = false;
+        }
+      } catch (error) {
+        console.error('Error checking subscription:', error);
+        // On error, allow access (fail open) - you can change this to fail closed if preferred
+      }
+    };
+
+    if (user && !loading && authReady) {
+      checkSubscription();
+    }
+  }, [user, loading, authReady]);
+
+  // Screen tracking and identify
+  useEffect(() => {
+    analytics.screen('Home');
+    analytics.dashboardImpression();
+    if (user) {
+      analytics.identify(user.id);
+    }
+  }, [user]);
+
+  // Auto-open goal modal when returning from completed goal
+  useEffect(() => {
+    if (params.autoOpenGoalModal === 'true' && hasLoadedOnce && goalCardRef.current) {
+      // Small delay to ensure UI is ready and data is loaded
+      const timer = setTimeout(() => {
+        // console.log('🎯 Auto-opening goal modal after celebration');
+        goalCardRef.current?.openModal();
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [params.autoOpenGoalModal, hasLoadedOnce]);
+
+  // Show alert when goal fails
+  useEffect(() => {
+    if (params.showFailedGoalAlert === 'true' && params.failedGoalTitle && hasLoadedOnce) {
+      const timer = setTimeout(() => {
+        Alert.alert(
+          '💥 Goal Failed',
+          `"${params.failedGoalTitle}" is no longer achievable.\n\n${params.failedGoalReason}\n\nWould you like to set a new goal?`,
+          [
+            { 
+              text: 'Later', 
+              style: 'cancel',
+              onPress: () => {
+                // Clear the params to prevent alert from showing again
+                router.setParams({ 
+                  showFailedGoalAlert: undefined,
+                  failedGoalTitle: undefined,
+                  failedGoalReason: undefined 
+                });
+              }
+            },
+            { 
+              text: 'Set New Goal', 
+              onPress: () => {
+                // Clear params first
+                router.setParams({ 
+                  showFailedGoalAlert: undefined,
+                  failedGoalTitle: undefined,
+                  failedGoalReason: undefined 
+                });
+                // Then open goal modal
+                goalCardRef.current?.openModal();
+              }
+            }
+          ]
+        );
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [params.showFailedGoalAlert, params.failedGoalTitle, params.failedGoalReason, hasLoadedOnce]);
 
   const upsertGoal = useCallback((goal: SimpleGoal) => {
     setGoals(prev => {
