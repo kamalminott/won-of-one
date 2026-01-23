@@ -1562,13 +1562,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return { error };
   };
 
-  // Sign in with Google (native on Android, OAuth on iOS/web)
+  // Sign in with Google (OAuth on all platforms)
   const signInWithGoogle = async () => {
     let googleModule: any = null;
     try {
       console.log('🔵 Starting Google sign in...');
 
-      if (Platform.OS === 'web' || Platform.OS === 'ios') {
+      if (Platform.OS === 'android' || Platform.OS === 'web' || Platform.OS === 'ios') {
         return await startOAuthFlow('google');
       }
 
