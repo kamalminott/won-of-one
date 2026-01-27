@@ -21,9 +21,10 @@ import { readAsStringAsync } from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Image, InteractionManager, Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, AppState, Image, InteractionManager, Keyboard, KeyboardAvoidingView, LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 // Native module not working after rebuild - using View fallback
@@ -2450,6 +2451,8 @@ export default function RemoteScreen() {
           start_time: playClickTime || new Date().toISOString(),
           fencer_1_score: scoreForFencer1DB, // Score of entity currently at left (dynamic, handles swaps)
           fencer_2_score: scoreForFencer2DB, // Score of entity currently at right (dynamic, handles swaps)
+          fencer_a_score: scores.fencerA, // Identity-based score
+          fencer_b_score: scores.fencerB, // Identity-based score
           fencer_1_cards: cardsForFencer1DB.yellow + cardsForFencer1DB.red, // Cards of entity currently at left (dynamic, handles swaps)
           fencer_2_cards: cardsForFencer2DB.yellow + cardsForFencer2DB.red, // Cards of entity currently at right (dynamic, handles swaps)
         };
@@ -2498,6 +2501,8 @@ export default function RemoteScreen() {
         start_time: matchStartTime, // Use current time when Play is clicked
         fencer_1_score: scoreForFencer1DB, // Score of entity currently at left (dynamic, handles swaps)
         fencer_2_score: scoreForFencer2DB, // Score of entity currently at right (dynamic, handles swaps)
+        fencer_a_score: scores.fencerA, // Identity-based score
+        fencer_b_score: scores.fencerB, // Identity-based score
         fencer_1_cards: cardsForFencer1DB.yellow + cardsForFencer1DB.red, // Cards of entity currently at left (dynamic, handles swaps)
         fencer_2_cards: cardsForFencer2DB.yellow + cardsForFencer2DB.red, // Cards of entity currently at right (dynamic, handles swaps)
         priority_assigned: priorityFencer || undefined, // Entity-based: 'fencerA' | 'fencerB' (stable identifier)
@@ -2537,6 +2542,8 @@ export default function RemoteScreen() {
         start_time: playClickTime || new Date().toISOString(),
         fencer_1_score: scoreForFencer1DBFallback, // Score of entity currently at left (dynamic, handles swaps)
         fencer_2_score: scoreForFencer2DBFallback, // Score of entity currently at right (dynamic, handles swaps)
+        fencer_a_score: scores.fencerA, // Identity-based score
+        fencer_b_score: scores.fencerB, // Identity-based score
         fencer_1_cards: cardsForFencer1DBFallback.yellow + cardsForFencer1DBFallback.red, // Cards of entity currently at left (dynamic, handles swaps)
         fencer_2_cards: cardsForFencer2DBFallback.yellow + cardsForFencer2DBFallback.red, // Cards of entity currently at right (dynamic, handles swaps)
       };
@@ -2561,6 +2568,8 @@ export default function RemoteScreen() {
       await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
         fencer_1_score: scoreForFencer1DB, // Score of entity currently at left (dynamic, handles swaps)
         fencer_2_score: scoreForFencer2DB, // Score of entity currently at right (dynamic, handles swaps)
+        fencer_a_score: scores.fencerA, // Identity-based score
+        fencer_b_score: scores.fencerB, // Identity-based score
         fencer_1_cards: cardsForFencer1DB.yellow + cardsForFencer1DB.red, // Cards of entity currently at left (dynamic, handles swaps)
         fencer_2_cards: cardsForFencer2DB.yellow + cardsForFencer2DB.red, // Cards of entity currently at right (dynamic, handles swaps)
         priority_assigned: priorityFencer || undefined, // Entity-based: 'fencerA' | 'fencerB' (stable identifier)
@@ -3024,6 +3033,8 @@ export default function RemoteScreen() {
         end_time: matchCompletionTime,
         fencer_1_score: leftScoreLatest, // Position-based: score of entity currently on left
         fencer_2_score: rightScoreLatest, // Position-based: score of entity currently on right
+        fencer_a_score: actualFencerAScore, // Identity-based score
+        fencer_b_score: actualFencerBScore, // Identity-based score
         fencer_1_cards: leftCards.yellow + leftCards.red, // Position-based: cards of entity currently on left
         fencer_2_cards: rightCards.yellow + rightCards.red, // Position-based: cards of entity currently on right
         timestamp: matchCompletionTime,
@@ -3589,8 +3600,9 @@ export default function RemoteScreen() {
   const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
 
   const [pulseOpacity, setPulseOpacity] = useState(1); // For pulsing animation
+  const BREAK_DURATION_SECONDS = 60;
   const [isBreakTime, setIsBreakTime] = useState(false); // For break timer
-  const [breakTimeRemaining, setBreakTimeRemaining] = useState(60); // 1 minute break
+  const [breakTimeRemaining, setBreakTimeRemaining] = useState(BREAK_DURATION_SECONDS); // 1 minute break
   const [breakTimerRef, setBreakTimerRef] = useState<number | null>(null); // Break timer reference
   const [hasShownBreakPopup, setHasShownBreakPopup] = useState(false); // Flag to prevent multiple break popups
   const [isManualReset, setIsManualReset] = useState(false); // Flag to prevent auto-sync during manual reset
@@ -3622,6 +3634,7 @@ export default function RemoteScreen() {
   const [isInjuryTimer, setIsInjuryTimer] = useState(false); // Track if injury timer is active
   const [injuryTimeRemaining, setInjuryTimeRemaining] = useState(300); // 5 minutes in seconds
   const [injuryTimerRef, setInjuryTimerRef] = useState<number | null>(null); // Injury timer reference
+  const [bottomControlsHeight, setBottomControlsHeight] = useState(0);
   const [previousMatchState, setPreviousMatchState] = useState<{
     timeRemaining: number;
     wasPlaying: boolean;
@@ -3637,11 +3650,19 @@ export default function RemoteScreen() {
   const timerRef = useRef<number | null>(null);
   const currentPeriodRef = useRef<number>(1); // Ref to track current period value
   const isPlayingRef = useRef<boolean>(false); // Ref to track playing state for timer callback
+  const breakEndsAtRef = useRef<number | null>(null);
+  const breakNotificationIdRef = useRef<string | null>(null);
+  const isBreakTimeRef = useRef<boolean>(isBreakTime);
+  const breakCompletingRef = useRef<boolean>(false);
 
   // Keep period ref in sync with state so timer callbacks always see the latest period
   useEffect(() => {
     currentPeriodRef.current = currentPeriod;
   }, [currentPeriod]);
+
+  useEffect(() => {
+    isBreakTimeRef.current = isBreakTime;
+  }, [isBreakTime]);
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState<string>('');
@@ -3963,21 +3984,6 @@ export default function RemoteScreen() {
     console.log(`Match Event Logged: ${entity} ${action} at ${formatTime(newEntry.timestamp)} (Period ${currentPeriod})`);
   };
 
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      if (breakTimerRef) {
-        clearInterval(breakTimerRef);
-      }
-      if (injuryTimerRef) {
-        clearInterval(injuryTimerRef);
-      }
-    };
-  }, [breakTimerRef, injuryTimerRef]);
-
   // Sync timeRemaining with matchTime when matchTime changes
   useEffect(() => {
     if (!isManualReset) {
@@ -3985,39 +3991,9 @@ export default function RemoteScreen() {
     }
   }, [matchTime, isManualReset]);
 
-  // Pause timer when component loses focus (app goes to background)
-  useEffect(() => {
-    const handleAppStateChange = () => {
-      if (isPlaying && timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-        setIsPlaying(false);
-      }
-    };
-
-    // Add event listener for app state changes
-    // Note: In React Native, you might want to use AppState from react-native
-    // For now, we'll handle this in the cleanup effect
-    
-    return () => {
-      handleAppStateChange();
-    };
-  }, [isPlaying]);
-
   // Note: No need to restore match data when returning to remote
   // Completed matches are saved in database and accessible elsewhere
   // Remote should always start fresh for new matches
-
-  // Add a function to handle app state changes
-  const handleAppStateChange = useCallback((nextAppState: string) => {
-    if (nextAppState === 'background' || nextAppState === 'inactive') {
-      if (isPlaying && timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-        setIsPlaying(false);
-      }
-    }
-  }, [isPlaying]);
 
   // Pulsing animation effect for low time
   useEffect(() => {
@@ -4057,6 +4033,8 @@ export default function RemoteScreen() {
         end_time: new Date().toISOString(),
         fencer_1_score: scores.fencerA,
         fencer_2_score: scores.fencerB,
+        fencer_a_score: scores.fencerA,
+        fencer_b_score: scores.fencerB,
         fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
         fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
       });
@@ -4067,6 +4045,8 @@ export default function RemoteScreen() {
         start_time: new Date().toISOString(),
         fencer_1_score: scores.fencerA,
         fencer_2_score: scores.fencerB,
+        fencer_a_score: scores.fencerA,
+        fencer_b_score: scores.fencerB,
         fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
         fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
         priority_assigned: priorityFencer || undefined,
@@ -4112,6 +4092,8 @@ export default function RemoteScreen() {
           end_time: new Date().toISOString(),
           fencer_1_score: scores.fencerA,
           fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
           fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
           fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
         }, accessToken);
@@ -4124,6 +4106,8 @@ export default function RemoteScreen() {
           start_time: new Date().toISOString(),
           fencer_1_score: scores.fencerA, // Carry over current scores
           fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
           fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
           fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
           priority_assigned: priorityFencer || undefined,
@@ -4496,6 +4480,8 @@ export default function RemoteScreen() {
                       end_time: new Date().toISOString(),
                       fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
                       fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                      fencer_a_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_b_score: entity === 'fencerB' ? newScore : scores.fencerB,
                     });
                     
                     // Create Period 2
@@ -4505,6 +4491,8 @@ export default function RemoteScreen() {
                       start_time: new Date().toISOString(),
                       fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
                       fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                      fencer_a_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_b_score: entity === 'fencerB' ? newScore : scores.fencerB,
                       fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
                       fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
                     };
@@ -4525,6 +4513,8 @@ export default function RemoteScreen() {
                       end_time: new Date().toISOString(),
                       fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
                       fencer_2_score: entity === 'fencerB' ? newScore : scores.fencerB,
+                      fencer_a_score: entity === 'fencerA' ? newScore : scores.fencerA,
+                      fencer_b_score: entity === 'fencerB' ? newScore : scores.fencerB,
                     });
                   }
                   // Start break timer
@@ -5203,6 +5193,19 @@ export default function RemoteScreen() {
     [currentMatchPeriod, getEntityAtPosition, getNameByEntity, isEntityUser, remoteSession, showUserProfile, userDisplayName]
   );
 
+  const cancelBreakNotification = useCallback(async () => {
+    const id = breakNotificationIdRef.current;
+    if (!id) {
+      return;
+    }
+    try {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    } catch (error) {
+      console.warn('⚠️ Failed to cancel break notification:', error);
+    }
+    breakNotificationIdRef.current = null;
+  }, []);
+
   const resetPeriod = useCallback(() => {
     // Stop any running timers for a clean restart
     if (timerRef.current) {
@@ -5221,7 +5224,10 @@ export default function RemoteScreen() {
     setIsPlaying(false);
     setHasMatchStarted(false);
     setIsBreakTime(false);
-    setBreakTimeRemaining(60);
+    isBreakTimeRef.current = false;
+    breakEndsAtRef.current = null;
+    cancelBreakNotification();
+    setBreakTimeRemaining(BREAK_DURATION_SECONDS);
     setCurrentPeriod(1);
     setIsPriorityRound(false); // Reset priority round
     setHasShownPriorityScorePopup(false); // Reset priority popup flag
@@ -5239,7 +5245,7 @@ export default function RemoteScreen() {
     setIsManualReset(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     markResetSegment('period');
-  }, [breakTimerRef, injuryTimerRef, matchTime, markResetSegment]);
+  }, [breakTimerRef, BREAK_DURATION_SECONDS, cancelBreakNotification, injuryTimerRef, matchTime, markResetSegment]);
 
   const resetTime = useCallback(() => {
     // Stop timer if running
@@ -5251,8 +5257,13 @@ export default function RemoteScreen() {
       clearInterval(breakTimerRef);
       setBreakTimerRef(null);
     }
+    cancelBreakNotification();
+    breakEndsAtRef.current = null;
+    isBreakTimeRef.current = false;
     setIsPlaying(false);
     setHasMatchStarted(false); // Reset match started state
+    setIsBreakTime(false);
+    setBreakTimeRemaining(BREAK_DURATION_SECONDS);
     // Reset only the timer, keep current period
     setTimeRemaining(matchTime); // Same as matchTime = no paused state
     setPriorityLightPosition(null); // Reset priority light
@@ -5281,7 +5292,7 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsManualReset(false);
     markResetSegment('time');
-  }, [breakTimerRef, matchTime, markResetSegment]);
+  }, [breakTimerRef, BREAK_DURATION_SECONDS, cancelBreakNotification, matchTime, markResetSegment]);
 
   // Helper function to perform the actual reset
   const performResetAll = useCallback(async (keepOpponentName: boolean = false) => {
@@ -5409,6 +5420,9 @@ export default function RemoteScreen() {
         clearInterval(injuryTimerRef);
         setInjuryTimerRef(null);
       }
+      cancelBreakNotification();
+      breakEndsAtRef.current = null;
+      isBreakTimeRef.current = false;
 
       setIsPlaying(false);
       isPlayingRef.current = false;
@@ -5422,7 +5436,7 @@ export default function RemoteScreen() {
       setTimeRemaining(180);
       setScores({ fencerA: 0, fencerB: 0 });
       setIsBreakTime(false);
-      setBreakTimeRemaining(60);
+      setBreakTimeRemaining(BREAK_DURATION_SECONDS);
       setBreakTriggered(false);
       setMomentumStreak({ lastScorer: null, count: 0 });
       previousScoresRef.current = { fencerA: 0, fencerB: 0 };
@@ -5511,7 +5525,9 @@ export default function RemoteScreen() {
     }
   }, [
     accessToken,
+    BREAK_DURATION_SECONDS,
     breakTimerRef,
+    cancelBreakNotification,
     currentMatchPeriod,
     fencerNames,
     remoteSession,
@@ -6434,124 +6450,266 @@ export default function RemoteScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [isPlaying, timeRemaining, matchTime, isBreakTime, hasMatchStarted]);
 
+  const ensureBreakNotificationPermissions = useCallback(async () => {
+    if (Platform.OS === 'ios') {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        const request = await Notifications.requestPermissionsAsync();
+        return request.status === 'granted';
+      }
+    }
+    return true;
+  }, []);
+
+  const configureBreakNotificationChannel = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+    await Notifications.setNotificationChannelAsync('break-timer', {
+      name: 'Break Timer',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 300, 200, 300],
+      sound: 'default',
+    });
+  }, []);
+
+  const scheduleBreakNotification = useCallback(async (endAtMs: number) => {
+    try {
+      const allowed = await ensureBreakNotificationPermissions();
+      if (!allowed) {
+        return null;
+      }
+      await configureBreakNotificationChannel();
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Break complete',
+          body: 'Break time is over. Ready for the next period.',
+          sound: 'default',
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: endAtMs,
+          channelId: 'break-timer',
+        },
+      });
+      return id;
+    } catch (error) {
+      console.warn('⚠️ Failed to schedule break notification:', error);
+      return null;
+    }
+  }, [configureBreakNotificationChannel, ensureBreakNotificationPermissions]);
+
+  const completeBreakTimer = useCallback(async () => {
+    if (!isBreakTimeRef.current || breakCompletingRef.current) {
+      return;
+    }
+    breakCompletingRef.current = true;
+    isBreakTimeRef.current = false;
+    breakEndsAtRef.current = null;
+    await cancelBreakNotification();
+
+    setIsBreakTime(false);
+    setBreakTimeRemaining(BREAK_DURATION_SECONDS);
+
+    // For Sabre: Start Period 2 when break completes
+    if (selectedWeapon === 'sabre') {
+      if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+        (async () => {
+          const periodData = {
+            match_id: currentMatchPeriod.match_id,
+            period_number: 2,
+            start_time: new Date().toISOString(),
+            fencer_1_score: scores.fencerA,
+            fencer_2_score: scores.fencerB,
+            fencer_a_score: scores.fencerA,
+            fencer_b_score: scores.fencerB,
+            fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+            fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+          };
+
+          const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+          if (newPeriodRecord) {
+            setCurrentMatchPeriod(newPeriodRecord);
+            setMatchId(newPeriodRecord.match_id);
+            setCurrentPeriod(2);
+            currentPeriodRef.current = 2;
+          }
+        })();
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      breakCompletingRef.current = false;
+      return;
+    }
+
+    // For Foil/Epee: Increment period and create new period record
+    const nextPeriod = Math.min(currentPeriodRef.current + 1, 3);
+
+    if (currentMatchPeriod && nextPeriod > currentPeriodRef.current) {
+      (async () => {
+        await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
+          end_time: new Date().toISOString(),
+          fencer_1_score: scores.fencerA,
+          fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
+          fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+          fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+        });
+
+        const periodData = {
+          match_id: currentMatchPeriod.match_id,
+          period_number: nextPeriod,
+          start_time: new Date().toISOString(),
+          fencer_1_score: scores.fencerA,
+          fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
+          fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
+          fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
+          priority_assigned: priorityFencer || undefined,
+          priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
+        };
+
+        const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
+        if (newPeriodRecord) {
+          setCurrentMatchPeriod(newPeriodRecord);
+          setMatchId(newPeriodRecord.match_id); // Store match ID safely
+        }
+      })();
+    }
+
+    setCurrentPeriod(nextPeriod);
+    currentPeriodRef.current = nextPeriod; // Update ref
+
+    // Reset break popup flag for next period
+    setHasShownBreakPopup(false);
+
+    // Restart main timer from where it was paused
+    setIsManualReset(true); // Prevent auto-sync
+    setTimeRemaining(matchTime);
+    setIsPlaying(false);
+
+    // Re-enable auto-sync after a short delay
+    setTimeout(() => {
+      setIsManualReset(false);
+    }, 200);
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert('Break Complete!', 'Period incremented. Timer ready to continue.');
+    breakCompletingRef.current = false;
+  }, [
+    BREAK_DURATION_SECONDS,
+    cancelBreakNotification,
+    cards,
+    currentMatchPeriod,
+    fencerNames.fencerA,
+    fencerNames.fencerB,
+    matchTime,
+    priorityFencer,
+    scores.fencerA,
+    scores.fencerB,
+    selectedWeapon,
+  ]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      if (breakTimerRef) {
+        clearInterval(breakTimerRef);
+      }
+      if (injuryTimerRef) {
+        clearInterval(injuryTimerRef);
+      }
+      cancelBreakNotification();
+    };
+  }, [breakTimerRef, cancelBreakNotification, injuryTimerRef]);
+
+  const handleAppStateChange = useCallback((nextAppState: string) => {
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      if (isPlaying && timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+        setIsPlaying(false);
+      }
+      return;
+    }
+
+    if (nextAppState === 'active') {
+      const breakEndsAt = breakEndsAtRef.current;
+      if (isBreakTimeRef.current && breakEndsAt) {
+        const remaining = Math.max(0, Math.ceil((breakEndsAt - Date.now()) / 1000));
+        if (remaining <= 0) {
+          completeBreakTimer();
+        } else {
+          setBreakTimeRemaining(remaining);
+        }
+      }
+    }
+  }, [completeBreakTimer, isPlaying]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [handleAppStateChange]);
+
   const startBreakTimer = () => {
     console.log('Starting break timer');
-    
+
+    if (breakTimerRef) {
+      clearInterval(breakTimerRef);
+      setBreakTimerRef(null);
+    }
+    breakCompletingRef.current = false;
+    cancelBreakNotification();
+
     // Reset timeRemaining to prevent timer expiration check from retriggering
     if (!isSabre) {
       setTimeRemaining(matchTime);
     }
-    
+
     // Set break time state FIRST - this should make the break timer display appear
     setIsBreakTime(true);
-    setBreakTimeRemaining(60); // 1 minute
-    
+    isBreakTimeRef.current = true;
+    setBreakTimeRemaining(BREAK_DURATION_SECONDS);
+
+    const breakEndsAt = Date.now() + BREAK_DURATION_SECONDS * 1000;
+    breakEndsAtRef.current = breakEndsAt;
+    scheduleBreakNotification(breakEndsAt).then(id => {
+      if (id) {
+        breakNotificationIdRef.current = id;
+      }
+    });
+
     // Stop the main timer completely
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    
+
     // Update other states
     setIsPlaying(false);
     setHasShownBreakPopup(false); // Reset flag so popup can show again after break
-    
-    // Start the break countdown
+
     const interval = setInterval(() => {
-      setBreakTimeRemaining(prev => {
-        if (prev <= 0) {
-          // Break finished
-          clearInterval(interval);
-          setIsBreakTime(false);
-          setBreakTimeRemaining(60);
-          
-          // For Sabre: Start Period 2 when break completes
-          if (selectedWeapon === 'sabre') {
-            // Period 1 should already be ended when break was taken
-            // Create Period 2 now
-            if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
-              (async () => {
-                const periodData = {
-                  match_id: currentMatchPeriod.match_id,
-                  period_number: 2,
-                  start_time: new Date().toISOString(),
-                  fencer_1_score: scores.fencerA,
-                  fencer_2_score: scores.fencerB,
-                  fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                  fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                };
-                
-                const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
-                if (newPeriodRecord) {
-                  setCurrentMatchPeriod(newPeriodRecord);
-                  setMatchId(newPeriodRecord.match_id);
-                  setCurrentPeriod(2);
-                  currentPeriodRef.current = 2;
-                }
-              })();
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            return 60;
-          }
-          
-          // For Foil/Epee: Increment period and create new period record
-          const nextPeriod = Math.min(currentPeriod + 1, 3);
-          
-          // End current period and create new one
-          if (currentMatchPeriod && nextPeriod > currentPeriod) {
-            (async () => {
-              await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
-                end_time: new Date().toISOString(),
-                fencer_1_score: scores.fencerA,
-                fencer_2_score: scores.fencerB,
-                fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-              });
-              
-              const periodData = {
-                match_id: currentMatchPeriod.match_id,
-                period_number: nextPeriod,
-                start_time: new Date().toISOString(),
-                fencer_1_score: scores.fencerA,
-                fencer_2_score: scores.fencerB,
-                fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
-                fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
-                priority_assigned: priorityFencer || undefined,
-                priority_to: priorityFencer === 'fencerA' ? fencerNames.fencerA : priorityFencer === 'fencerB' ? fencerNames.fencerB : undefined,
-              };
-              
-              const newPeriodRecord = await matchPeriodService.createMatchPeriod(periodData);
-              if (newPeriodRecord) {
-                setCurrentMatchPeriod(newPeriodRecord);
-                setMatchId(newPeriodRecord.match_id); // Store match ID safely
-              }
-            })();
-          }
-          
-          setCurrentPeriod(nextPeriod);
-          currentPeriodRef.current = nextPeriod; // Update ref
-          
-          // Reset break popup flag for next period
-          setHasShownBreakPopup(false);
-          
-          // Restart main timer from where it was paused
-          setIsManualReset(true); // Prevent auto-sync
-          setTimeRemaining(matchTime);
-          setIsPlaying(false);
-          
-          // Re-enable auto-sync after a short delay
-          setTimeout(() => {
-            setIsManualReset(false);
-          }, 200);
-          
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          Alert.alert('Break Complete!', 'Period incremented. Timer ready to continue.');
-          return 60;
-        }
-        return prev - 1;
-      });
+      const endAt = breakEndsAtRef.current;
+      if (!endAt) {
+        return;
+      }
+      const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      if (remaining <= 0) {
+        clearInterval(interval);
+        setBreakTimerRef(null);
+        completeBreakTimer();
+        return;
+      }
+      setBreakTimeRemaining(remaining);
     }, 1000);
-    
+
     setBreakTimerRef(interval);
   };
 
@@ -6559,20 +6717,29 @@ export default function RemoteScreen() {
     if (isSabre) {
       if (breakTimerRef) {
         clearInterval(breakTimerRef);
+        setBreakTimerRef(null);
       }
+      cancelBreakNotification();
+      breakEndsAtRef.current = null;
+      isBreakTimeRef.current = false;
       setIsBreakTime(false);
-      setBreakTimeRemaining(60);
+      setBreakTimeRemaining(BREAK_DURATION_SECONDS);
       setHasShownBreakPopup(false);
       return;
     }
     // Stop break timer if running
     if (breakTimerRef) {
       clearInterval(breakTimerRef);
+      setBreakTimerRef(null);
     }
+
+    cancelBreakNotification();
+    breakEndsAtRef.current = null;
+    isBreakTimeRef.current = false;
     
     // Reset break state
     setIsBreakTime(false);
-    setBreakTimeRemaining(60);
+    setBreakTimeRemaining(BREAK_DURATION_SECONDS);
     
     // Increment period and create new period record
     const nextPeriod = Math.min(currentPeriod + 1, 3);
@@ -6584,6 +6751,8 @@ export default function RemoteScreen() {
           end_time: new Date().toISOString(),
           fencer_1_score: scores.fencerA,
           fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
           fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
           fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
         });
@@ -6594,6 +6763,8 @@ export default function RemoteScreen() {
           start_time: new Date().toISOString(),
           fencer_1_score: scores.fencerA,
           fencer_2_score: scores.fencerB,
+          fencer_a_score: scores.fencerA,
+          fencer_b_score: scores.fencerB,
           fencer_1_cards: cards.fencerA.yellow + cards.fencerA.red,
           fencer_2_cards: cards.fencerB.yellow + cards.fencerB.red,
           priority_assigned: priorityFencer || undefined,
@@ -6887,23 +7058,29 @@ export default function RemoteScreen() {
   };
 
   const timerStyles = getTimerDisplayStyles();
+  const handleBottomControlsLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = event.nativeEvent.layout.height;
+    setBottomControlsHeight(prev => (prev === nextHeight ? prev : nextHeight));
+  }, []);
   const isAndroid = Platform.OS === 'android';
   const decorativeCardWidth = width * (isAndroid ? 0.065 : 0.08);
   const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12);
   const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
   const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
-  const tabBarHeight = height * 0.08 + insets.bottom;
-  const timerReadyDockGap = height * 0.01;
+  const tabBarHeight = height * (isAndroid ? 0.05 : 0.08) + insets.bottom;
+  const timerReadyDockGap = height * (isAndroid ? 0 : 0.01);
+  const bottomDockOffset = isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08;
+  const bottomControlsReserveMin =
+    height * (selectedWeapon === 'sabre' ? (isAndroid ? 0.14 : 0.12) : (isAndroid ? 0.22 : 0.2));
+  const bottomControlsReserve = Math.max(bottomControlsHeight, bottomControlsReserveMin);
   const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
   const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
-  const fencersContainerCardsBottom = height * (isAndroid ? 0.012 : 0.01);
   const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04);
   const fencerCardCompactPadding = width * (isAndroid ? 0.028 : 0.03);
-  const fencerCardCompactPaddingTimerReady = width * (isAndroid ? 0.022 : 0.03);
   const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
-  const fencerCardMinHeightCompact = height * (isAndroid ? 0.19 : 0.22);
-  const fencerCardMinHeightTimerReadyWithCards = height * (isAndroid ? 0.155 : 0.22);
   const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
+  const fencerCardMinHeightInProgress = isAndroid ? fencerCardMinHeight : fencerCardMinHeightExtended;
+  const fencerCardPaddingInProgress = isAndroid ? fencerCardCompactPadding : fencerCardPadding;
   const fencerCardMinHeightTimerReady = height * (isAndroid ? 0.17 : 0.22);
   const sabreFencerCardHeight = height * (isAndroid ? 0.325 : 0.35);
   const sabreFencerCardHeightReady = height * (isAndroid ? 0.355 : 0.375);
@@ -6912,18 +7089,28 @@ export default function RemoteScreen() {
   const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03);
   const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006);
   const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015);
-  const timerReadyDockBottom = isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08;
   const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018);
   const timerReadyBottomControlsGapNoCards = timerReadyBottomControlsGap + height * (isAndroid ? 0.006 : 0.008);
+  const timerReadyCardsLowering = height * (isAndroid ? 0.006 : 0);
   const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012);
   const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006);
   const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0 : 0.012);
+  const timerReadyPlayBlockOffset = height * (isAndroid ? 0.014 : -0.012);
+  const inProgressCardsLowering = height * (isAndroid ? 0.016 : 0.012);
+  const inProgressPlayBlockOffset = height * (isAndroid ? 0.018 : 0.014);
+  const penaltyBadgeRowMarginTop = height * (isAndroid ? 0.004 : 0.005);
+  const penaltyBadgeRowMarginBottom = height * (isAndroid ? 0.002 : 0.003);
+  const fencerNameMarginBottomWithCards = height * (isAndroid ? 0.002 : 0.003);
+  const fencerScoreMarginBottomWithCards = height * (isAndroid ? 0.004 : 0.008);
   const timerReadyPlayButtonPadding = height * (isAndroid ? 0.038 : 0.038);
   const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.13 : 0.12);
+  const playButtonActivePaddingExtra = height * (isAndroid ? 0.01 : 0);
+  const playButtonActiveMinHeightExtra = height * (isAndroid ? 0.02 : 0);
   const timerReadyResetButtonPadding = height * (isAndroid ? 0.006 : 0.012);
   const timerReadyResetButtonMinHeight = height * (isAndroid ? 0.04 : 0.055);
   const timerReadyResetButtonWidth = width * (isAndroid ? 0.12 : 0.15);
   const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012);
+
 
   const styles = StyleSheet.create({
     container: {
@@ -7456,8 +7643,12 @@ export default function RemoteScreen() {
     yellowCardsContainer: {
       flexDirection: 'row',
       gap: width * 0.02,
-      marginTop: height * 0.005,
-      marginLeft: width * 0.02,
+      marginTop: penaltyBadgeRowMarginTop,
+      marginBottom: penaltyBadgeRowMarginBottom,
+      alignSelf: 'center',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 4,
     },
     yellowCard: {
       width: width * 0.035, // Much smaller cards
@@ -7777,8 +7968,12 @@ export default function RemoteScreen() {
     redCardsContainer: {
       flexDirection: 'row',
       gap: width * 0.02,
-      marginTop: height * 0.01,
-      marginLeft: width * 0.02,
+      marginTop: penaltyBadgeRowMarginTop,
+      marginBottom: penaltyBadgeRowMarginBottom,
+      alignSelf: 'center',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 4,
     },
     redCard: {
       width: width * 0.035, // Much smaller cards
@@ -8350,8 +8545,38 @@ export default function RemoteScreen() {
     leftRedCards.length > 0 ||
     rightYellowCards.length > 0 ||
     rightRedCards.length > 0;
-  const inProgressWithCards = hasMatchStarted && hasIssuedCards && selectedWeapon !== 'sabre';
+  const hasPenaltyBadges = hasIssuedCards && selectedWeapon !== 'sabre';
   const sabreHasIssuedCards = isSabre && hasIssuedCards;
+  const isNonSabreTimerReady =
+    selectedWeapon !== 'sabre' &&
+    !hasMatchStarted &&
+    !isPlaying &&
+    timeRemaining === matchTime;
+  const lockAndroidTimerReadyLayout = isAndroid && selectedWeapon !== 'sabre';
+  const useTimerReadyLayout = isNonSabreTimerReady || lockAndroidTimerReadyLayout;
+  const isNonSabreActive =
+    selectedWeapon !== 'sabre' &&
+    hasMatchStarted &&
+    !isBreakTime &&
+    (isPlaying || timeRemaining < matchTime);
+  const fencersHeaderMarginTop = selectedWeapon === 'sabre'
+    ? height * 0.012
+    : (lockAndroidTimerReadyLayout
+      ? -(height * 0.035)
+      : (hasMatchStarted ? -(height * 0.02) : -(height * 0.035)));
+  const playButtonPaddingBase = useTimerReadyLayout ? timerReadyPlayButtonPadding : height * 0.045;
+  const playButtonMinHeightBase = useTimerReadyLayout ? timerReadyPlayButtonMinHeight : height * 0.14;
+  const playButtonActiveExtra = isNonSabreActive ? playButtonActivePaddingExtra : 0;
+  const playButtonMinHeightExtra = isNonSabreActive ? playButtonActiveMinHeightExtra : 0;
+  const bottomControlsReserveExtra =
+    hasIssuedCards && selectedWeapon !== 'sabre'
+      ? height * (isAndroid ? 0.03 : 0.025)
+      : 0;
+  const bottomControlsActiveExtra =
+    isAndroid && isNonSabreActive && !lockAndroidTimerReadyLayout
+      ? height * 0.03
+      : 0;
+  const bottomControlsSpacerHeight = bottomControlsReserve + bottomDockOffset + bottomControlsReserveExtra + bottomControlsActiveExtra;
   const sabreMatchReady = isSabre && !hasMatchStarted && !isPlaying;
   const canAssignPriority = !isSabre && timeRemaining === 0 && scores.fencerA === scores.fencerB;
   const sabreCardHeight = sabreHasIssuedCards
@@ -8369,12 +8594,6 @@ export default function RemoteScreen() {
   const sabreNameMarginBottom = sabreHasIssuedCards ? height * 0.004 : undefined;
   const sabreScoreControlsGap = sabreHasIssuedCards ? width * 0.028 : undefined;
   const sabreSwitchTranslateX = showUserProfile ? (sabreHasIssuedCards ? width * 0.058 : width * 0.065) : 0;
-
-  const isNonSabreTimerReady =
-    selectedWeapon !== 'sabre' &&
-    !hasMatchStarted &&
-    !isPlaying &&
-    timeRemaining === matchTime;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -8825,11 +9044,7 @@ export default function RemoteScreen() {
 
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
-            marginTop: selectedWeapon === 'sabre' 
-              ? height * 0.012  // Proper spacing below Match Insights card for sabre
-              : (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0)
-                ? -(height * 0.02)  // Move up when match in progress and no cards
-                : -(height * 0.035),  // Original positioning for other states
+            marginTop: fencersHeaderMarginTop,  // Keep Android locked to timer-ready layout
             marginBottom: selectedWeapon === 'sabre' ? height * 0.002 : undefined
           }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: width * 0.04 }}>
@@ -8868,12 +9083,8 @@ export default function RemoteScreen() {
       
       <View style={[
         styles.fencersContainer,
-        // Tighten spacing when match is in progress and cards are issued
-        inProgressWithCards ? {
-          marginBottom: fencersContainerCardsBottom,
-        } : {},
-        // Reduce margin when match is in progress and no cards issued
-        (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
+        // Keep spacing stable regardless of penalty cards
+        (hasMatchStarted && selectedWeapon !== 'sabre' && !lockAndroidTimerReadyLayout) ? {
           marginBottom: fencersContainerTightBottom,
         } : {},
         // Move fencer cards up and closer for sabre
@@ -8887,21 +9098,19 @@ export default function RemoteScreen() {
           styles.fencerCard, 
           { backgroundColor: 'rgb(252,187,187)' },
           // Slightly shorter cards in timer-ready state on Android to avoid overlap
-          (isNonSabreTimerReady && isAndroid) ? {
+          (useTimerReadyLayout && isAndroid) ? {
             padding: fencerCardTimerReadyPadding,
             minHeight: fencerCardMinHeightTimerReady,
           } : {},
-          // Make fencer card smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-            width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: isNonSabreTimerReady ? fencerCardCompactPaddingTimerReady : fencerCardCompactPadding,
-            minHeight: isNonSabreTimerReady ? fencerCardMinHeightTimerReadyWithCards : fencerCardMinHeightCompact,
-          } : 
-          // Make fencer cards longer when match is in progress and no cards issued
-          (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
-            width: width * 0.42, // Keep width at 0.42
-            padding: fencerCardPadding,
-            minHeight: fencerCardMinHeightExtended,
+          // In-progress sizing (no card-based adjustments)
+          (hasMatchStarted && selectedWeapon !== 'sabre' && !lockAndroidTimerReadyLayout) ? {
+            width: width * 0.42,
+            padding: fencerCardPaddingInProgress,
+            minHeight: fencerCardMinHeightInProgress,
+          } : {},
+          // When penalty badges are present, tighten padding to make room without growing the card
+          hasPenaltyBadges ? {
+            padding: useTimerReadyLayout ? fencerCardTimerReadyPadding : fencerCardCompactPadding,
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
@@ -8998,7 +9207,7 @@ export default function RemoteScreen() {
           
           {/* Yellow Cards Display */}
           {leftYellowCards.length > 0 && leftRedCards.length === 0 && (
-            <View style={styles.yellowCardsContainer}>
+            <View pointerEvents="none" style={styles.yellowCardsContainer}>
               {leftYellowCards.map((cardNumber, index) => (
                 <View key={index} style={styles.yellowCard}>
                   <Text style={styles.yellowCardText}>{cardNumber}</Text>
@@ -9009,7 +9218,7 @@ export default function RemoteScreen() {
           
           {/* Red Cards Display */}
           {leftRedCards.length > 0 && (
-            <View style={styles.redCardsContainer}>
+            <View pointerEvents="none" style={styles.redCardsContainer}>
               {leftRedCards.map((cardNumber, index) => (
                 <View key={index} style={styles.redCard}>
                   <Text style={styles.redCardText}>{cardNumber}</Text>
@@ -9029,7 +9238,7 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => handleFencerNameClick(getEntityAtPosition('left'))}
             activeOpacity={0.7}
             style={styles.fencerNameContainer}
@@ -9038,7 +9247,8 @@ export default function RemoteScreen() {
               style={[
                 styles.fencerName, 
                 {color: 'black'},
-                (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                (useTimerReadyLayout && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                hasPenaltyBadges && { marginBottom: fencerNameMarginBottomWithCards },
                 sabreHasIssuedCards && { marginBottom: sabreNameMarginBottom },
                 (toggleCardPosition === 'left' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
@@ -9060,7 +9270,8 @@ export default function RemoteScreen() {
           <Text style={[
               styles.fencerScore,
               { color: 'black' },
-              (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              (useTimerReadyLayout && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              hasPenaltyBadges && { marginBottom: fencerScoreMarginBottomWithCards },
               sabreHasIssuedCards && { fontSize: sabreScoreFontSize, marginBottom: sabreScoreMarginBottom },
             ]}>
               {getScoreByPosition('left').toString().padStart(2, '0')}
@@ -9174,21 +9385,19 @@ export default function RemoteScreen() {
           styles.fencerCard, 
           {backgroundColor: 'rgb(176,232,236)'},
           // Slightly shorter cards in timer-ready state on Android to avoid overlap
-          (isNonSabreTimerReady && isAndroid) ? {
+          (useTimerReadyLayout && isAndroid) ? {
             padding: fencerCardTimerReadyPadding,
             minHeight: fencerCardMinHeightTimerReady,
           } : {},
-          // Make fencer card smaller when timer is ready AND cards are present
-          (!hasMatchStarted && (leftYellowCards.length > 0 || leftRedCards.length > 0 || rightYellowCards.length > 0 || rightRedCards.length > 0)) ? {
-            width: width * 0.42, // Keep width at 0.42 (same as non-conditional)
-            padding: isNonSabreTimerReady ? fencerCardCompactPaddingTimerReady : fencerCardCompactPadding,
-            minHeight: isNonSabreTimerReady ? fencerCardMinHeightTimerReadyWithCards : fencerCardMinHeightCompact,
-          } : 
-          // Make fencer cards longer when match is in progress and no cards issued
-          (hasMatchStarted && leftYellowCards.length === 0 && leftRedCards.length === 0 && rightYellowCards.length === 0 && rightRedCards.length === 0) ? {
-            width: width * 0.42, // Keep width at 0.42
-            padding: fencerCardPadding,
-            minHeight: fencerCardMinHeightExtended,
+          // In-progress sizing (no card-based adjustments)
+          (hasMatchStarted && selectedWeapon !== 'sabre' && !lockAndroidTimerReadyLayout) ? {
+            width: width * 0.42,
+            padding: fencerCardPaddingInProgress,
+            minHeight: fencerCardMinHeightInProgress,
+          } : {},
+          // When penalty badges are present, tighten padding to make room without growing the card
+          hasPenaltyBadges ? {
+            padding: useTimerReadyLayout ? fencerCardTimerReadyPadding : fencerCardCompactPadding,
           } : {},
           // Make fencer cards taller for sabre
           selectedWeapon === 'sabre' ? {
@@ -9285,7 +9494,7 @@ export default function RemoteScreen() {
           
           {/* Yellow Cards Display */}
           {rightYellowCards.length > 0 && rightRedCards.length === 0 && (
-            <View style={styles.yellowCardsContainer}>
+            <View pointerEvents="none" style={styles.yellowCardsContainer}>
               {rightYellowCards.map((cardNumber, index) => (
                 <View key={index} style={styles.yellowCard}>
                   <Text style={styles.yellowCardText}>{cardNumber}</Text>
@@ -9296,7 +9505,7 @@ export default function RemoteScreen() {
           
           {/* Red Cards Display */}
           {rightRedCards.length > 0 && (
-            <View style={styles.redCardsContainer}>
+            <View pointerEvents="none" style={styles.redCardsContainer}>
               {rightRedCards.map((cardNumber, index) => (
                 <View key={index} style={styles.redCard}>
                   <Text style={styles.redCardText}>{cardNumber}</Text>
@@ -9316,7 +9525,7 @@ export default function RemoteScreen() {
             ]} />
           )}
           
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => handleFencerNameClick(getEntityAtPosition('right'))}
             activeOpacity={0.7}
             style={styles.fencerNameContainer}
@@ -9325,7 +9534,8 @@ export default function RemoteScreen() {
               style={[
                 styles.fencerName, 
                 {color: 'black'},
-                (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                (useTimerReadyLayout && isAndroid) && { marginBottom: fencerNameMarginBottomTimerReady },
+                hasPenaltyBadges && { marginBottom: fencerNameMarginBottomWithCards },
                 sabreHasIssuedCards && { marginBottom: sabreNameMarginBottom },
                 (toggleCardPosition === 'right' && showUserProfile 
                   ? userDisplayName === 'Tap to add name'
@@ -9347,7 +9557,8 @@ export default function RemoteScreen() {
           <Text style={[
               styles.fencerScore,
               { color: 'black' },
-              (isNonSabreTimerReady && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              (useTimerReadyLayout && isAndroid) && { marginBottom: fencerScoreMarginBottomTimerReady },
+              hasPenaltyBadges && { marginBottom: fencerScoreMarginBottomWithCards },
               sabreHasIssuedCards && { fontSize: sabreScoreFontSize, marginBottom: sabreScoreMarginBottom },
             ]}>
               {getScoreByPosition('right').toString().padStart(2, '0')}
@@ -9390,15 +9601,18 @@ export default function RemoteScreen() {
         </View>
       </View>
 
+      {/* Reserve space for docked bottom controls */}
+      <View style={{ height: bottomControlsSpacerHeight }} />
+
 		      {/* Bottom Controls + Play Controls */}
 		      <View
+            onLayout={handleBottomControlsLayout}
 		        style={[
-		          // In timer-ready state, dock the entire bottom area above the tab bar
-		          isNonSabreTimerReady && {
+		          {
 		            position: 'absolute',
 		            left: 0,
 		            right: 0,
-		            bottom: timerReadyDockBottom,
+		            bottom: bottomDockOffset,
 		            zIndex: 20,
 		          },
 		        ]}
@@ -9407,9 +9621,13 @@ export default function RemoteScreen() {
         <View style={[
           styles.bottomControls,
           // Foil/Epee: compact + higher when timer-ready so play button has room
-          isNonSabreTimerReady ? {
+          useTimerReadyLayout ? {
             marginBottom: hasIssuedCards ? timerReadyBottomControlsGap : timerReadyBottomControlsGapNoCards, // Slight extra space when no cards
             gap: width * 0.03, // Slightly tighter
+            transform: [{ translateY: timerReadyCardsLowering }],
+          } : {},
+          (isNonSabreActive && !lockAndroidTimerReadyLayout) ? {
+            transform: [{ translateY: inProgressCardsLowering }],
           } : {},
           isSabre ? {
             marginTop: -(height * 0.006),
@@ -9417,14 +9635,14 @@ export default function RemoteScreen() {
         ]}>
 		          <View style={[
 		            styles.decorativeCards,
-		            isNonSabreTimerReady ? {
+		            useTimerReadyLayout ? {
 		              gap: width * 0.02, // Reduce gap between cards
 		            } : {}
 		          ]}>
 		            <TouchableOpacity style={[
 			              styles.decorativeCard, 
 			              styles.cardYellow,
-			              isNonSabreTimerReady ? {
+			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
 			              } : {}
@@ -9438,7 +9656,7 @@ export default function RemoteScreen() {
 		            <TouchableOpacity style={[
 			              styles.decorativeCard, 
 			              styles.cardRed,
-			              isNonSabreTimerReady ? {
+			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
 			              } : {}
@@ -9459,7 +9677,7 @@ export default function RemoteScreen() {
                   : hasMatchStarted ? (isInjuryTimer ? '#EF4444' : Colors.purple.primary) : '#6B7280'
               },
 		              // Slightly smaller in timer-ready state to free space
-		              isNonSabreTimerReady ? {
+		              useTimerReadyLayout ? {
 		                paddingHorizontal: width * 0.024,
 		                paddingVertical: timerReadyInjuryPaddingVertical,
 		              } : {},
@@ -9488,14 +9706,14 @@ export default function RemoteScreen() {
           </TouchableOpacity>
 		          <View style={[
 		            styles.decorativeCards,
-		            isNonSabreTimerReady ? {
+		            useTimerReadyLayout ? {
 		              gap: width * 0.02, // Reduce gap between cards
 		            } : {}
 		          ]}>
 		            <TouchableOpacity style={[
 			              styles.decorativeCard, 
 			              styles.cardYellow,
-			              isNonSabreTimerReady ? {
+			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
 			              } : {}
@@ -9509,7 +9727,7 @@ export default function RemoteScreen() {
 		            <TouchableOpacity style={[
 			              styles.decorativeCard, 
 			              styles.cardRed,
-			              isNonSabreTimerReady ? {
+			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
 			              } : {}
@@ -9540,11 +9758,15 @@ export default function RemoteScreen() {
             marginBottom: layout.adjustMargin(height * 0.04, 'bottom') + layout.getPlatformAdjustments().bottomNavOffset,
           },
           // When docked, avoid extra bottom spacing so it doesn't creep upward into the fencer cards
-          isNonSabreTimerReady && {
+          useTimerReadyLayout && {
             marginBottom: 0,
             marginTop: timerReadyPlayBlockMarginTop,
             marginVertical: timerReadyPlayBlockMarginVertical,
             gap: timerReadyPlayBlockGap,
+            transform: [{ translateY: timerReadyPlayBlockOffset }],
+          },
+          (isNonSabreActive && !lockAndroidTimerReadyLayout) && {
+            transform: [{ translateY: inProgressPlayBlockOffset }],
           },
         ]}>
         
@@ -9556,13 +9778,12 @@ export default function RemoteScreen() {
           width: '100%'
         }}>
           {/* Play Button / Skip Button - Hidden for Sabre */}
-          {selectedWeapon !== 'sabre' && (
 		          <TouchableOpacity 
 		            style={{
 		              flex: 1,
 		              ...(hasMatchStarted ? { flex: 1.25 } : {}),
 		              backgroundColor: '#2A2A2A',
-		              paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? timerReadyPlayButtonPadding : height * 0.045, 'bottom'),
+		              paddingVertical: layout.adjustPadding(playButtonPaddingBase + playButtonActiveExtra, 'bottom'),
 		              paddingHorizontal: width * 0.05,
 		              borderRadius: width * 0.02,
 		              alignItems: 'center',
@@ -9571,7 +9792,7 @@ export default function RemoteScreen() {
 		              marginRight: hasMatchStarted ? width * 0.01 : width * 0.025,
 		              borderWidth: width * 0.005,
 		              borderColor: 'white',
-		              minHeight: layout.adjustPadding(isNonSabreTimerReady ? timerReadyPlayButtonMinHeight : height * 0.14, 'bottom'),
+		              minHeight: layout.adjustPadding(playButtonMinHeightBase + playButtonMinHeightExtra, 'bottom'),
 		              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
 		            }} 
 	            onPress={async () => {
@@ -9626,21 +9847,19 @@ export default function RemoteScreen() {
                (!isPlaying && timeRemaining < matchTime && timeRemaining > 0) ? 'Resume' : 'Play'}
             </Text>
           </TouchableOpacity>
-          )}
           
 	          {/* Reset Button - Hidden for Sabre */}
-	          {selectedWeapon !== 'sabre' && (
 		            <TouchableOpacity 
 		              style={{
-		                width: hasMatchStarted ? width * 0.11 : (isNonSabreTimerReady ? timerReadyResetButtonWidth : width * 0.15),
+		                width: hasMatchStarted ? width * 0.11 : (useTimerReadyLayout ? timerReadyResetButtonWidth : width * 0.15),
 		                backgroundColor: '#FB5D5C',
-		                paddingVertical: layout.adjustPadding(isNonSabreTimerReady ? timerReadyResetButtonPadding : height * 0.012, 'bottom'),
+		                paddingVertical: layout.adjustPadding(useTimerReadyLayout ? timerReadyResetButtonPadding : height * 0.012, 'bottom'),
 		                borderRadius: width * 0.05,
 		                alignItems: 'center',
 		                justifyContent: 'center',
                 borderWidth: width * 0.005,
                 borderColor: 'transparent',
-                minHeight: layout.adjustPadding(isNonSabreTimerReady ? timerReadyResetButtonMinHeight : height * 0.055, 'bottom'),
+                minHeight: layout.adjustPadding(useTimerReadyLayout ? timerReadyResetButtonMinHeight : height * 0.055, 'bottom'),
                 shadowColor: '#6C5CE7',
                 shadowOffset: { width: 0, height: height * 0.005 },
                 shadowOpacity: 0.25,
@@ -9651,7 +9870,6 @@ export default function RemoteScreen() {
             >
               <Ionicons name="refresh" size={24} color="white" />
             </TouchableOpacity>
-          )}
         </View>
         </View>
         )}

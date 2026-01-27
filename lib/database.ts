@@ -4058,6 +4058,8 @@ export const matchPeriodService = {
     end_time?: string;
     fencer_1_score?: number;
     fencer_2_score?: number;
+    fencer_a_score?: number;
+    fencer_b_score?: number;
     fencer_1_cards?: number;
     fencer_2_cards?: number;
     priority_assigned?: string;
@@ -4115,6 +4117,8 @@ export const matchPeriodService = {
     end_time?: string;
     fencer_1_score?: number;
     fencer_2_score?: number;
+    fencer_a_score?: number;
+    fencer_b_score?: number;
     fencer_1_cards?: number;
     fencer_2_cards?: number;
     priority_assigned?: string;

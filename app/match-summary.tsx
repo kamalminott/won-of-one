@@ -341,10 +341,12 @@ export default function MatchSummaryScreen() {
               period_number: number | null;
               fencer_1_score: number | null;
               fencer_2_score: number | null;
+              fencer_a_score?: number | null;
+              fencer_b_score?: number | null;
             }>(
               'match_period',
               {
-                select: 'period_number,fencer_1_score,fencer_2_score',
+                select: 'period_number,fencer_1_score,fencer_2_score,fencer_a_score,fencer_b_score',
                 match_id: `eq.${params.matchId as string}`,
                 order: 'period_number.asc',
               },
@@ -380,83 +382,136 @@ export default function MatchSummaryScreen() {
               });
             }
 
-            if (periodsError) {
-              console.error('Error fetching match periods:', periodsError);
-              // Prefer event-based counts to keep identity mapping consistent with score progression
-              setTouchesByPeriod(clampedEventBased);
-            } else if (eventHasMeaningfulData) {
-              // Use event-based counts so swaps don't mis-attribute periods
-              setTouchesByPeriod(clampedEventBased);
-            } else if (matchPeriods && matchPeriods.length > 0) {
-              // Initialize with zeros - chart expects 'user' and 'opponent', but these represent fencer1 and fencer2
-              const touchesByPeriodData = {
-                period1: { user: 0, opponent: 0 }, // user = fencer1 (left), opponent = fencer2 (right)
-                period2: { user: 0, opponent: 0 },
-                period3: { user: 0, opponent: 0 }
-              };
-              
+            const userEntity = isFencer1User
+              ? matchData?.fencer_1_entity
+              : isFencer2User
+              ? matchData?.fencer_2_entity
+              : null;
+            const hasIdentityPeriodScores = !!matchPeriods?.some(
+              period => period.fencer_a_score !== null || period.fencer_b_score !== null
+            );
+            const canUseIdentityPeriods =
+              (userEntity === 'fencerA' || userEntity === 'fencerB') && hasIdentityPeriodScores;
+
+            let periodFallback: { period1: { user: number; opponent: number }; period2: { user: number; opponent: number }; period3: { user: number; opponent: number } } | null = null;
+
+            if (matchPeriods && matchPeriods.length > 0) {
               // Sort periods by period_number to ensure correct order
               const sortedPeriods = matchPeriods.sort((a, b) => (a.period_number || 0) - (b.period_number || 0));
-              
-              // Fill in actual period scores (touches scored PER period, not cumulative)
-              sortedPeriods.forEach((period, index) => {
-                const periodNum = period.period_number || 1;
-                const currentFencer1Score = period.fencer_1_score || 0;
-                const currentFencer2Score = period.fencer_2_score || 0;
-                
-                // Get previous period's cumulative scores (0 if first period)
-                const previousFencer1Score = index > 0 ? (sortedPeriods[index - 1].fencer_1_score || 0) : 0;
-                const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
-                
-                // Calculate touches scored DURING this period
-                const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
-                const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
-                
-                // Map fencer1/fencer2 to user/opponent for chart component (matches header: fencer_1 = left, fencer_2 = right)
-                if (periodNum === 1) {
-                  touchesByPeriodData.period1.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
-                  touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
-                } else if (periodNum === 2) {
-                  touchesByPeriodData.period2.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
-                  touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
-                } else if (periodNum === 3) {
-                  touchesByPeriodData.period3.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
-                  touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
-                }
-              });
-              
-              console.log('📊 [MATCH SUMMARY] Using position-based period scores from database:', {
-                touchesByPeriodData,
-                period1User: touchesByPeriodData.period1.user,
-                period1Opponent: touchesByPeriodData.period1.opponent,
-                period2User: touchesByPeriodData.period2.user,
-                period2Opponent: touchesByPeriodData.period2.opponent,
-                period3User: touchesByPeriodData.period3.user,
-                period3Opponent: touchesByPeriodData.period3.opponent,
-              });
-              // Remap to user/opponent based on which fencer is the user
-              const mappedTouchesByPeriodRaw = isFencer1User ? touchesByPeriodData : {
-                period1: { user: touchesByPeriodData.period1.opponent, opponent: touchesByPeriodData.period1.user },
-                period2: { user: touchesByPeriodData.period2.opponent, opponent: touchesByPeriodData.period2.user },
-                period3: { user: touchesByPeriodData.period3.opponent, opponent: touchesByPeriodData.period3.user },
-              };
-              const mappedTouchesByPeriod = clampTouches(mappedTouchesByPeriodRaw);
 
-              // If period totals don't match progression totals, log for debugging (event data missing)
-              const periodUserTotal = mappedTouchesByPeriod.period1.user + mappedTouchesByPeriod.period2.user + mappedTouchesByPeriod.period3.user;
-              const periodOpponentTotal = mappedTouchesByPeriod.period1.opponent + mappedTouchesByPeriod.period2.opponent + mappedTouchesByPeriod.period3.opponent;
-              const totalsMatch = periodUserTotal === progressionFencer1Total && periodOpponentTotal === progressionFencer2Total;
-              if (!totalsMatch) {
-                console.warn('⚠️ [MATCH SUMMARY] Period totals mismatch progression totals (using period data fallback)', {
-                  periodUserTotal,
-                  periodOpponentTotal,
-                  progressionFencer1Total,
-                  progressionFencer2Total
+              if (canUseIdentityPeriods) {
+                const identityTouches = {
+                  period1: { user: 0, opponent: 0 },
+                  period2: { user: 0, opponent: 0 },
+                  period3: { user: 0, opponent: 0 }
+                };
+
+                sortedPeriods.forEach((period, index) => {
+                  const periodNum = period.period_number || 1;
+                  const currentUserScore = userEntity === 'fencerA'
+                    ? (period.fencer_a_score || 0)
+                    : (period.fencer_b_score || 0);
+                  const currentOpponentScore = userEntity === 'fencerA'
+                    ? (period.fencer_b_score || 0)
+                    : (period.fencer_a_score || 0);
+
+                  const previousUserScore = index > 0
+                    ? (userEntity === 'fencerA'
+                      ? (sortedPeriods[index - 1].fencer_a_score || 0)
+                      : (sortedPeriods[index - 1].fencer_b_score || 0))
+                    : 0;
+                  const previousOpponentScore = index > 0
+                    ? (userEntity === 'fencerA'
+                      ? (sortedPeriods[index - 1].fencer_b_score || 0)
+                      : (sortedPeriods[index - 1].fencer_a_score || 0))
+                    : 0;
+
+                  const userTouchesThisPeriod = Math.max(0, currentUserScore - previousUserScore);
+                  const opponentTouchesThisPeriod = Math.max(0, currentOpponentScore - previousOpponentScore);
+
+                  if (periodNum === 1) {
+                    identityTouches.period1.user = userTouchesThisPeriod;
+                    identityTouches.period1.opponent = opponentTouchesThisPeriod;
+                  } else if (periodNum === 2) {
+                    identityTouches.period2.user = userTouchesThisPeriod;
+                    identityTouches.period2.opponent = opponentTouchesThisPeriod;
+                  } else if (periodNum === 3) {
+                    identityTouches.period3.user = userTouchesThisPeriod;
+                    identityTouches.period3.opponent = opponentTouchesThisPeriod;
+                  }
                 });
+
+                periodFallback = clampTouches(identityTouches);
+
+                console.log('📊 [MATCH SUMMARY] Using identity-based period scores from database:', {
+                  userEntity,
+                  identityTouches
+                });
+              } else {
+                // Initialize with zeros - chart expects 'user' and 'opponent', but these represent fencer1 and fencer2
+                const touchesByPeriodData = {
+                  period1: { user: 0, opponent: 0 }, // user = fencer1 (left), opponent = fencer2 (right)
+                  period2: { user: 0, opponent: 0 },
+                  period3: { user: 0, opponent: 0 }
+                };
+
+                // Fill in actual period scores (touches scored PER period, not cumulative)
+                sortedPeriods.forEach((period, index) => {
+                  const periodNum = period.period_number || 1;
+                  const currentFencer1Score = period.fencer_1_score || 0;
+                  const currentFencer2Score = period.fencer_2_score || 0;
+
+                  // Get previous period's cumulative scores (0 if first period)
+                  const previousFencer1Score = index > 0 ? (sortedPeriods[index - 1].fencer_1_score || 0) : 0;
+                  const previousFencer2Score = index > 0 ? (sortedPeriods[index - 1].fencer_2_score || 0) : 0;
+
+                  // Calculate touches scored DURING this period
+                  const fencer1TouchesThisPeriod = currentFencer1Score - previousFencer1Score;
+                  const fencer2TouchesThisPeriod = currentFencer2Score - previousFencer2Score;
+
+                  // Map fencer1/fencer2 to user/opponent for chart component (matches header: fencer_1 = left, fencer_2 = right)
+                  if (periodNum === 1) {
+                    touchesByPeriodData.period1.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                    touchesByPeriodData.period1.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                  } else if (periodNum === 2) {
+                    touchesByPeriodData.period2.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                    touchesByPeriodData.period2.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                  } else if (periodNum === 3) {
+                    touchesByPeriodData.period3.user = fencer1TouchesThisPeriod; // fencer1 -> user (left)
+                    touchesByPeriodData.period3.opponent = fencer2TouchesThisPeriod; // fencer2 -> opponent (right)
+                  }
+                });
+
+                console.log('📊 [MATCH SUMMARY] Using position-based period scores from database:', {
+                  touchesByPeriodData,
+                  period1User: touchesByPeriodData.period1.user,
+                  period1Opponent: touchesByPeriodData.period1.opponent,
+                  period2User: touchesByPeriodData.period2.user,
+                  period2Opponent: touchesByPeriodData.period2.opponent,
+                  period3User: touchesByPeriodData.period3.user,
+                  period3Opponent: touchesByPeriodData.period3.opponent,
+                });
+                // Remap to user/opponent based on which fencer is the user
+                const mappedTouchesByPeriodRaw = isFencer1User ? touchesByPeriodData : {
+                  period1: { user: touchesByPeriodData.period1.opponent, opponent: touchesByPeriodData.period1.user },
+                  period2: { user: touchesByPeriodData.period2.opponent, opponent: touchesByPeriodData.period2.user },
+                  period3: { user: touchesByPeriodData.period3.opponent, opponent: touchesByPeriodData.period3.user },
+                };
+                periodFallback = clampTouches(mappedTouchesByPeriodRaw);
               }
-              setTouchesByPeriod(mappedTouchesByPeriod);
+            }
+
+            if (periodsError) {
+              console.error('Error fetching match periods:', periodsError);
+              setTouchesByPeriod(clampedEventBased);
+            } else if (eventHasMeaningfulData && eventTotalsMatch) {
+              // Use event-based counts when they match progression totals
+              setTouchesByPeriod(clampedEventBased);
+            } else if (periodFallback) {
+              // Prefer period-based fallback when events are missing or mismatched
+              setTouchesByPeriod(periodFallback);
             } else {
-              // No period data - fallback to entity-based calculation
+              // No period data - fallback to event-based
               setTouchesByPeriod(clampedEventBased);
             }
           }
