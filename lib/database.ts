@@ -1,5 +1,5 @@
 import {
-    AppUser, DiaryEntry, Drill, Equipment,
+    AppUser, Competition, DiaryEntry, Drill, Equipment,
     FencingRemote, Goal, Match, MatchPeriod,
     MatchApproval, MatchEvent,
     SimpleGoal, SimpleMatch
@@ -1053,6 +1053,175 @@ export const goalService: GoalService = {
   },
 };
 
+const normalizeCompetitionName = (value: string) => {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+};
+
+export const competitionService = {
+  async createCompetition(
+    data: {
+      userId: string;
+      name: string;
+      eventDate: string; // YYYY-MM-DD
+      weaponType: 'foil' | 'epee' | 'sabre';
+      type?: 'WorldCup' | 'GrandPrix' | 'National' | 'Open' | 'Other';
+      typeLabel?: string | null;
+      preCompetitionNotes?: string | null;
+      postCompetitionNotes?: string | null;
+      placement?: number | null;
+      fieldSize?: number | null;
+      accessToken?: string | null;
+    }
+  ): Promise<Competition | null> {
+    const token = resolveAccessToken(data.accessToken);
+    if (!token) {
+      console.warn('⚠️ createCompetition blocked - auth session not ready', { userId: data.userId });
+      return null;
+    }
+
+    const normalizedName = normalizeCompetitionName(data.name);
+    const payload = {
+      user_id: data.userId,
+      name: data.name.trim(),
+      normalized_name: normalizedName,
+      event_date: data.eventDate,
+      weapon_type: data.weaponType,
+      type: data.type ?? 'Other',
+      type_label: data.typeLabel ?? null,
+      pre_competition_notes: data.preCompetitionNotes ?? null,
+      post_competition_notes: data.postCompetitionNotes ?? null,
+      placement: data.placement ?? null,
+      field_size: data.fieldSize ?? null,
+    };
+
+    const { data: created, error } = await postgrestInsert<Competition>(
+      'competition',
+      payload,
+      { select: '*' },
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error creating competition:', error);
+      return null;
+    }
+
+    return created?.[0] ?? null;
+  },
+
+  async updateCompetition(
+    competitionId: string,
+    updates: Partial<{
+      name: string;
+      event_date: string;
+      weapon_type: 'foil' | 'epee' | 'sabre';
+      type: 'WorldCup' | 'GrandPrix' | 'National' | 'Open' | 'Other';
+      type_label: string | null;
+      pre_competition_notes: string | null;
+      post_competition_notes: string | null;
+      placement: number | null;
+      field_size: number | null;
+      updated_at: string;
+    }>,
+    accessToken?: string | null
+  ): Promise<Competition | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ updateCompetition blocked - auth session not ready', { competitionId });
+      return null;
+    }
+
+    const payload = { ...updates } as Record<string, unknown>;
+    if (typeof updates.name === 'string') {
+      payload.normalized_name = normalizeCompetitionName(updates.name);
+    }
+
+    const { data, error } = await postgrestUpdate<Competition>(
+      'competition',
+      payload,
+      { competition_id: `eq.${competitionId}` },
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error updating competition:', error);
+      return null;
+    }
+
+    return data?.[0] ?? null;
+  },
+
+  async getCompetitionById(
+    competitionId: string,
+    accessToken?: string | null
+  ): Promise<Competition | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getCompetitionById blocked - auth session not ready', { competitionId });
+      return null;
+    }
+
+    const { data, error } = await postgrestSelectOne<Competition>(
+      'competition',
+      { competition_id: `eq.${competitionId}` },
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error fetching competition:', error);
+      return null;
+    }
+
+    return data ?? null;
+  },
+
+  async searchCompetitions(
+    userId: string,
+    params: {
+      query?: string;
+      eventDate?: string;
+      weaponType?: 'foil' | 'epee' | 'sabre';
+      limit?: number;
+    },
+    accessToken?: string | null
+  ): Promise<Competition[]> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ searchCompetitions blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const query: Record<string, string | number> = {
+      user_id: `eq.${userId}`,
+      order: 'event_date.desc,updated_at.desc',
+      limit: params.limit ?? 10,
+    };
+
+    if (params.eventDate) {
+      query.event_date = `eq.${params.eventDate}`;
+    }
+    if (params.weaponType) {
+      query.weapon_type = `eq.${params.weaponType}`;
+    }
+    if (params.query) {
+      query.name = `ilike.%${params.query}%`;
+    }
+
+    const { data, error } = await postgrestSelect<Competition>(
+      'competition',
+      query,
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error searching competitions:', error);
+      return [];
+    }
+
+    return data ?? [];
+  },
+};
+
 // Match-related functions
 export const matchService = {
   // Get recent matches for a user
@@ -1098,7 +1267,7 @@ export const matchService = {
     const { data, error } = await postgrestSelect<any>(
       'match',
       {
-        select: 'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,match_period(end_time)',
+        select: 'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,competition:competition_id(name,event_date,weapon_type,placement,field_size),match_period(end_time)',
         user_id: `eq.${userId}`,
         order: 'event_date.desc,match_id.desc',
         limit,
@@ -1207,6 +1376,14 @@ export const matchService = {
         }
       }
       
+      const competition = match.competition as {
+        name?: string;
+        event_date?: string;
+        weapon_type?: string;
+        placement?: number | null;
+        field_size?: number | null;
+      } | null;
+
       return {
         id: match.match_id,
         youScore: match.final_score || 0,
@@ -1218,6 +1395,14 @@ export const matchService = {
         matchType: match.match_type || undefined,
         source: match.source || 'unknown', // Include source field
         notes: match.notes || '', // Include notes field
+        competitionId: match.competition_id ?? null,
+        competitionName: competition?.name ?? null,
+        competitionDate: competition?.event_date ?? null,
+        competitionWeaponType: competition?.weapon_type ?? null,
+        competitionPhase: match.phase ?? null,
+        competitionRound: match.de_round ?? null,
+        competitionPlacement: competition?.placement ?? null,
+        competitionFieldSize: competition?.field_size ?? null,
         _completionTimestamp: completionTimestamp, // Internal field for sorting
       };
     }) || [];
@@ -1233,6 +1418,178 @@ export const matchService = {
       // Fallback to date comparison
       return b.date.localeCompare(a.date);
     }).map(({ _completionTimestamp, ...match }) => match); // Remove internal field
+
+    return sortedMatches;
+  },
+
+  async getCompetitionMatches(
+    competitionId: string,
+    userId: string,
+    userDisplayNameOverride?: string,
+    accessToken?: string | null
+  ): Promise<SimpleMatch[]> {
+    const debug = __DEV__;
+    if (debug) {
+      console.log('🔍 getCompetitionMatches', { userId, competitionId });
+    }
+
+    // Helper function to normalize names for comparison
+    const normalizeName = (name?: string | null): string => (name ?? '').trim().toLowerCase();
+
+    let userDisplayName = (userDisplayNameOverride ?? '').trim();
+    if (!userDisplayName) {
+      try {
+        const userProfile = await withTimeout(
+          userService.getUserById(userId),
+          4000,
+          'User profile lookup'
+        );
+        userDisplayName = userProfile?.name || '';
+      } catch (error) {
+        if (debug) {
+          console.warn('User profile lookup timed out or failed:', error);
+        }
+      }
+    }
+
+    const normalizedUserName = normalizeName(userDisplayName);
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getCompetitionMatches blocked - auth session not ready', { userId, competitionId });
+      return [];
+    }
+
+    const { data, error } = await postgrestSelect<any>(
+      'match',
+      {
+        select:
+          'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,match_period(end_time)',
+        user_id: `eq.${userId}`,
+        competition_id: `eq.${competitionId}`,
+        order: 'event_date.desc,match_id.desc',
+      },
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error fetching competition matches:', error);
+      return [];
+    }
+
+    const formatTimeHHMM = (timestampMs: number): string => {
+      const date = new Date(timestampMs);
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    };
+
+    const placeholderNames = new Set([
+      '',
+      'tap to add name',
+      'guest',
+      'guest 1',
+      'guest 2',
+      'unknown',
+      'fencer 1',
+      'fencer 2',
+    ]);
+    const isPlaceholder = (value?: string | null) =>
+      placeholderNames.has(normalizeName(value));
+
+    const filteredData = (data || []).filter((match: any) => {
+      return !isPlaceholder(match.fencer_1_name) && !isPlaceholder(match.fencer_2_name);
+    });
+
+    const matches = filteredData.map((match: any) => {
+      const matchPeriods = match.match_period as any[] | undefined;
+      let completionTime: string | undefined;
+      let completionTimestamp: number | undefined;
+
+      if (matchPeriods && matchPeriods.length > 0) {
+        let latestEndMs: number | undefined;
+        for (const period of matchPeriods) {
+          if (!period?.end_time) continue;
+          const ts = new Date(period.end_time).getTime();
+          if (!Number.isFinite(ts)) continue;
+          if (latestEndMs === undefined || ts > latestEndMs) {
+            latestEndMs = ts;
+          }
+        }
+
+        if (latestEndMs !== undefined) {
+          completionTimestamp = latestEndMs;
+          completionTime = formatTimeHHMM(latestEndMs);
+        }
+      } else {
+        if (match.event_date) {
+          const eventDateTime = new Date(match.event_date);
+          completionTimestamp = eventDateTime.getTime();
+          completionTime = formatTimeHHMM(eventDateTime.getTime());
+        }
+      }
+
+      const fencer1Name = match.fencer_1_name || '';
+      const fencer2Name = match.fencer_2_name || '';
+      const normalizedFencer1 = normalizeName(fencer1Name);
+      const normalizedFencer2 = normalizeName(fencer2Name);
+
+      const isManualMatchWithYou =
+        match.source === 'manual' && (normalizedFencer1 === 'you' || fencer1Name === 'You');
+
+      const isFencer1User =
+        isManualMatchWithYou ||
+        (normalizedUserName && normalizedFencer1
+          ? normalizedFencer1 === normalizedUserName
+          : false);
+      const isFencer2User =
+        normalizedUserName && normalizedFencer2 ? normalizedFencer2 === normalizedUserName : false;
+
+      let opponentName: string;
+      if (isFencer1User) {
+        opponentName = fencer2Name || 'Unknown';
+      } else if (isFencer2User) {
+        opponentName = fencer1Name || 'Unknown';
+      } else {
+        opponentName = fencer2Name || 'Unknown';
+        if (debug) {
+          console.log('⚠️ Could not identify user in match, using fallback', {
+            matchId: match.match_id,
+            userDisplayName,
+            source: match.source,
+          });
+        }
+      }
+
+      return {
+        id: match.match_id,
+        youScore: match.final_score || 0,
+        opponentScore: match.touches_against || 0,
+        date: match.event_date
+          ? new Date(match.event_date).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0],
+        time: completionTime,
+        opponentName: opponentName,
+        isWin: match.is_win || false,
+        matchType: match.match_type || undefined,
+        source: match.source || 'unknown',
+        notes: match.notes || '',
+        competitionId: match.competition_id ?? null,
+        competitionPhase: match.phase ?? null,
+        competitionRound: match.de_round ?? null,
+        _completionTimestamp: completionTimestamp,
+      };
+    }) || [];
+
+    const sortedMatches = matches
+      .sort((a, b) => {
+        if (a._completionTimestamp && b._completionTimestamp) {
+          return b._completionTimestamp - a._completionTimestamp;
+        }
+        if (a._completionTimestamp && !b._completionTimestamp) return -1;
+        if (!a._completionTimestamp && b._completionTimestamp) return 1;
+        return b.date.localeCompare(a.date);
+      })
+      .map(({ _completionTimestamp, ...match }) => match);
 
     return sortedMatches;
   },
@@ -1319,6 +1676,9 @@ export const matchService = {
     time: string;
     notes?: string;
     weaponType?: string;
+    competitionId?: string | null;
+    phase?: 'POULE' | 'DE' | null;
+    deRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
     fencer1Name?: string;
     fencer2Name?: string;
     accessToken?: string | null;
@@ -1406,6 +1766,9 @@ export const matchService = {
       score_diff: yourScore - opponentScore,
       match_type: matchType,
       weapon_type: normalizedWeaponType,
+      competition_id: matchData.competitionId ?? null,
+      phase: matchData.phase ?? null,
+      de_round: matchData.deRound ?? null,
       notes: notes || null,
       source: 'manual',
       is_complete: true,
@@ -2758,6 +3121,9 @@ $$;
     fencer_2_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_2
     event_date?: string; // ISO string for event date/time
     weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
+    competition_id?: string | null;
+    phase?: 'POULE' | 'DE' | null;
+    de_round?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
   },
   accessToken?: string | null
   ): Promise<Match | null> {

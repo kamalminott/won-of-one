@@ -35,7 +35,24 @@ interface Match {
   opponentScore: number;
   source?: string; // Source of the match (manual, remote, etc.)
   notes?: string; // Match notes
+  competitionId?: string | null;
+  competitionName?: string | null;
+  competitionDate?: string | null;
+  competitionWeaponType?: string | null;
+  competitionPhase?: 'POULE' | 'DE' | null;
+  competitionRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
 }
+
+const getInitials = (name: string | undefined): string => {
+  if (!name || name.trim() === '') {
+    return '?';
+  }
+  const trimmedName = name.trim();
+  const words = trimmedName.split(' ').filter(word => word.length > 0);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].charAt(0).toUpperCase();
+  return words[0].charAt(0).toUpperCase() + words[words.length - 1].charAt(0).toUpperCase();
+};
 
 export default function RecentMatchesScreen() {
   const { width, height } = useWindowDimensions();
@@ -54,6 +71,7 @@ export default function RecentMatchesScreen() {
   const [selectedDateRange, setSelectedDateRange] = useState<'All Time' | 'Today' | 'This Week' | 'This Month' | 'Last 3 Months'>('All Time');
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [expandedCompetitions, setExpandedCompetitions] = useState<Record<string, boolean>>({});
   const hasTrackedFilterRef = useRef(false);
 
   // Format date to DD/MM/YYYY
@@ -151,7 +169,33 @@ export default function RecentMatchesScreen() {
     opponentScore: simpleMatch.opponentScore,
     source: simpleMatch.source ?? 'unknown',
     notes: simpleMatch.notes ?? '',
+    competitionId: simpleMatch.competitionId ?? null,
+    competitionName: simpleMatch.competitionName ?? null,
+    competitionDate: simpleMatch.competitionDate
+      ? formatDate(simpleMatch.competitionDate)
+      : null,
+    competitionWeaponType: simpleMatch.competitionWeaponType ?? null,
+    competitionPhase: simpleMatch.competitionPhase ?? null,
+    competitionRound: simpleMatch.competitionRound ?? null,
   });
+
+  type CompetitionGroup = {
+    id: string;
+    name: string;
+    date: string;
+    weapon: string;
+    wins: number;
+    losses: number;
+    pouleMatches: Match[];
+    deMatches: Match[];
+  };
+
+  type DateGroup = {
+    key: string;
+    label: string;
+    competitionGroups: CompetitionGroup[];
+    ungroupedMatches: Match[];
+  };
 
   // --- Grouping helpers ---
   const parseMatchDate = (dateString: string): Date | null => {
@@ -202,6 +246,34 @@ export default function RecentMatchesScreen() {
     return date.toLocaleDateString(undefined, opts);
   };
 
+  const roundOrder: Record<string, number> = {
+    L256: 1,
+    L128: 2,
+    L64: 3,
+    L32: 4,
+    L16: 5,
+    QF: 6,
+    SF: 7,
+    F: 8,
+  };
+
+  const getMatchTimestamp = (match: Match): number => {
+    const dateString = match.competitionDate || match.date;
+    const date = parseMatchDate(dateString);
+    if (!date) return 0;
+
+    if (match.time && match.time.includes(':')) {
+      const [hourStr, minuteStr] = match.time.split(':');
+      const hour = parseInt(hourStr, 10);
+      const minute = parseInt(minuteStr, 10);
+      if (!isNaN(hour) && !isNaN(minute)) {
+        date.setHours(hour, minute, 0, 0);
+      }
+    }
+
+    return date.getTime();
+  };
+
   // Filter matches based on search query, selected type, win/loss, and date range
   const filterMatches = () => {
     let filtered = allMatches;
@@ -232,30 +304,108 @@ export default function RecentMatchesScreen() {
     setMatches(filtered);
   };
 
-  const groupedMatches = useMemo(() => {
+  const groupedMatches: DateGroup[] = useMemo(() => {
     if (!matches || matches.length === 0) return [];
 
-    // Sort newest first by date
-    const sorted = [...matches].sort((a, b) => {
-      const da = parseMatchDate(a.date)?.getTime() ?? 0;
-      const db = parseMatchDate(b.date)?.getTime() ?? 0;
-      return db - da;
-    });
+    const sorted = [...matches].sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a));
 
-    const groups: { key: string; label: string; items: Match[] }[] = [];
+    const dateGroups: { key: string; label: string; items: Match[] }[] = [];
     sorted.forEach((match) => {
-      const dateKey = getDateKey(parseMatchDate(match.date));
+      const groupDate = match.competitionDate || match.date;
+      const dateKey = getDateKey(parseMatchDate(groupDate));
       const label = formatHeaderLabel(dateKey);
-      const existing = groups.find((g) => g.key === dateKey);
+      const existing = dateGroups.find((g) => g.key === dateKey);
       if (existing) {
         existing.items.push(match);
       } else {
-        groups.push({ key: dateKey, label, items: [match] });
+        dateGroups.push({ key: dateKey, label, items: [match] });
       }
     });
 
-    return groups;
+    return dateGroups.map((group) => {
+      const competitionMap = new Map<string, CompetitionGroup>();
+      const ungroupedMatches: Match[] = [];
+
+      group.items.forEach((match) => {
+        if (match.matchType === 'Competition' && match.competitionId) {
+          const existing = competitionMap.get(match.competitionId);
+          if (existing) {
+            const isDE = match.competitionPhase === 'DE' || !!match.competitionRound;
+            if (isDE) {
+              existing.deMatches.push(match);
+            } else {
+              existing.pouleMatches.push(match);
+            }
+            return;
+          }
+
+          const name = match.competitionName || 'Competition';
+          const date = match.competitionDate || match.date;
+          const weapon = match.competitionWeaponType ? match.competitionWeaponType.toUpperCase() : '';
+
+          const isDE = match.competitionPhase === 'DE' || !!match.competitionRound;
+          competitionMap.set(match.competitionId, {
+            id: match.competitionId,
+            name,
+            date,
+            weapon,
+            wins: 0,
+            losses: 0,
+            pouleMatches: isDE ? [] : [match],
+            deMatches: isDE ? [match] : [],
+          });
+        } else {
+          ungroupedMatches.push(match);
+        }
+      });
+
+      const competitionGroups = Array.from(competitionMap.values()).map((group) => {
+        const allMatches = [...group.pouleMatches, ...group.deMatches];
+
+        const wins = allMatches.filter((m) => m.outcome === 'Victory').length;
+        const losses = allMatches.filter((m) => m.outcome === 'Defeat').length;
+
+        const pouleMatches = allMatches
+          .filter((m) => m.competitionPhase === 'POULE' || (!m.competitionPhase && !m.competitionRound))
+          .sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a));
+
+        const deMatches = allMatches
+          .filter((m) => m.competitionPhase === 'DE' || m.competitionRound)
+          .sort((a, b) => {
+            const rankA = roundOrder[a.competitionRound || ''] ?? 999;
+            const rankB = roundOrder[b.competitionRound || ''] ?? 999;
+            if (rankA !== rankB) return rankA - rankB;
+            return getMatchTimestamp(b) - getMatchTimestamp(a);
+          });
+
+        return {
+          ...group,
+          wins,
+          losses,
+          pouleMatches,
+          deMatches,
+        };
+      });
+
+      return {
+        key: group.key,
+        label: group.label,
+        competitionGroups,
+        ungroupedMatches,
+      };
+    });
   }, [matches]);
+
+  useEffect(() => {
+    if (Object.keys(expandedCompetitions).length > 0) {
+      return;
+    }
+    const firstGroup = groupedMatches.find(group => group.competitionGroups.length > 0);
+    const firstCompetition = firstGroup?.competitionGroups[0];
+    if (firstCompetition) {
+      setExpandedCompetitions({ [firstCompetition.id]: true });
+    }
+  }, [groupedMatches, expandedCompetitions]);
 
   // Fetch matches data
   const fetchMatches = async () => {
@@ -353,6 +503,109 @@ export default function RecentMatchesScreen() {
   }, [selectedType, selectedWinLoss, selectedDateRange, searchQuery, allMatches]);
 
   const filters = ['All', 'Type', 'Win/Loss', 'Date'];
+
+  const toggleCompetitionExpanded = (competitionId: string) => {
+    setExpandedCompetitions(prev => ({
+      ...prev,
+      [competitionId]: !prev[competitionId],
+    }));
+  };
+
+  const handleCompetitionPress = (competitionId: string) => {
+    router.push({
+      pathname: '/competition-detail',
+      params: { competitionId },
+    });
+  };
+
+  const handleMatchPress = (match: Match) => {
+    analytics.matchSelected({ match_id: match.id });
+    const isManualMatch = match.source === 'manual';
+    if (isManualMatch) {
+      router.push({
+        pathname: '/manual-match-summary',
+        params: {
+          matchId: match.id,
+          yourScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          opponentName: match.opponentName,
+          matchType: match.matchType,
+          date: match.date,
+          time: match.time || '12:00PM',
+          isWin: (match.outcome === 'Victory').toString(),
+          notes: match.notes || '',
+        },
+      });
+    } else {
+      router.push({
+        pathname: '/match-history-details',
+        params: {
+          matchId: match.id,
+          opponentName: match.opponentName,
+          opponentImage: match.opponentImage,
+          youScore: match.playerScore.toString(),
+          opponentScore: match.opponentScore.toString(),
+          matchType: match.matchType,
+          date: match.date,
+          duration: '02:30',
+          location: 'Metro Field House',
+          isWin: (match.outcome === 'Victory').toString(),
+        },
+      });
+    }
+  };
+
+  const renderCompetitionMatchRow = (match: Match, showRound: boolean) => {
+    const initials = getInitials(match.opponentName);
+    const scoreText = `${match.playerScore} - ${match.opponentScore}`;
+    return (
+      <TouchableOpacity
+        key={match.id}
+        style={styles.competitionMatchRow}
+        onPress={() => !editMode && handleMatchPress(match)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.competitionMatchLeft}>
+          <View style={styles.competitionAvatar}>
+            <Text style={styles.competitionAvatarText}>{initials}</Text>
+          </View>
+          <View style={styles.competitionMatchInfo}>
+            <View style={styles.competitionNameRow}>
+              {showRound && match.competitionRound && (
+                <View style={styles.roundPill}>
+                  <Text style={styles.roundPillText}>{match.competitionRound}</Text>
+                </View>
+              )}
+              <Text style={styles.competitionOpponentName}>{match.opponentName}</Text>
+            </View>
+            <Text style={styles.competitionMatchMeta}>
+              {match.date}{match.time ? ` · ${match.time}` : ''}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.competitionMatchRight}>
+          {editMode ? (
+            <TouchableOpacity
+              onPress={() => handleDeleteMatch(match.id)}
+              style={styles.competitionDelete}
+            >
+              <Ionicons name="trash-outline" size={18} color="#FF7675" />
+            </TouchableOpacity>
+          ) : match.outcome === 'Defeat' ? (
+            <View style={styles.lossPill}>
+              <Ionicons name="close" size={12} color="#FFD6D6" />
+              <Text style={styles.lossPillText}>Loss</Text>
+            </View>
+          ) : (
+            <View style={styles.scoreRow}>
+              <View style={styles.scoreDot} />
+              <Text style={styles.scoreText}>{scoreText}</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -508,6 +761,179 @@ export default function RecentMatchesScreen() {
       color: 'rgba(255, 255, 255, 0.8)',
       marginBottom: height * 0.012,
       letterSpacing: 0.5,
+    },
+    competitionCard: {
+      backgroundColor: '#2A2A2A',
+      borderRadius: width * 0.03,
+      marginBottom: height * 0.02,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    competitionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.02,
+      backgroundColor: 'rgba(45, 45, 48, 0.9)',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    competitionHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      marginRight: width * 0.02,
+    },
+    competitionIcon: {
+      width: width * 0.1,
+      height: width * 0.1,
+      borderRadius: width * 0.05,
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: width * 0.03,
+    },
+    competitionIconText: {
+      fontSize: width * 0.055,
+    },
+    competitionTitle: {
+      fontSize: width * 0.04,
+      fontWeight: '700',
+      color: 'white',
+    },
+    competitionSubtitle: {
+      fontSize: width * 0.032,
+      color: 'rgba(255, 255, 255, 0.6)',
+      marginTop: height * 0.002,
+    },
+    competitionHeaderRight: {
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    competitionRecord: {
+      fontSize: width * 0.035,
+      color: 'rgba(255, 255, 255, 0.8)',
+      fontWeight: '600',
+      marginBottom: height * 0.004,
+    },
+    competitionChevron: {
+      marginTop: height * 0.002,
+    },
+    competitionBody: {
+      paddingHorizontal: width * 0.04,
+      paddingBottom: height * 0.015,
+    },
+    competitionSection: {
+      marginTop: height * 0.012,
+    },
+    competitionSectionLabel: {
+      fontSize: width * 0.034,
+      color: 'rgba(255, 255, 255, 0.7)',
+      fontWeight: '600',
+      marginBottom: height * 0.008,
+    },
+    competitionMatchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: height * 0.012,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    competitionMatchLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      marginRight: width * 0.02,
+    },
+    competitionAvatar: {
+      width: width * 0.1,
+      height: width * 0.1,
+      borderRadius: width * 0.05,
+      backgroundColor: '#3A3A3A',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: width * 0.03,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    competitionAvatarText: {
+      color: 'white',
+      fontSize: width * 0.038,
+      fontWeight: '600',
+    },
+    competitionMatchInfo: {
+      flex: 1,
+    },
+    competitionNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+    },
+    roundPill: {
+      backgroundColor: 'rgba(139, 92, 246, 0.2)',
+      borderRadius: width * 0.03,
+      paddingHorizontal: width * 0.02,
+      paddingVertical: height * 0.004,
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.7)',
+      marginRight: width * 0.015,
+    },
+    roundPillText: {
+      fontSize: width * 0.03,
+      color: '#E9D7FF',
+      fontWeight: '600',
+    },
+    competitionOpponentName: {
+      fontSize: width * 0.038,
+      color: 'white',
+      fontWeight: '600',
+    },
+    competitionMatchMeta: {
+      fontSize: width * 0.03,
+      color: 'rgba(255, 255, 255, 0.55)',
+      marginTop: height * 0.002,
+    },
+    competitionMatchRight: {
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    lossPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255, 107, 107, 0.2)',
+      borderRadius: width * 0.04,
+      paddingHorizontal: width * 0.025,
+      paddingVertical: height * 0.006,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 107, 107, 0.6)',
+    },
+    lossPillText: {
+      marginLeft: width * 0.01,
+      color: '#FFD6D6',
+      fontSize: width * 0.032,
+      fontWeight: '600',
+    },
+    scoreRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    scoreText: {
+      color: 'rgb(179, 241, 229)',
+      fontSize: width * 0.04,
+      fontWeight: '700',
+    },
+    scoreDot: {
+      width: width * 0.02,
+      height: width * 0.02,
+      borderRadius: width * 0.01,
+      backgroundColor: 'rgb(179, 241, 229)',
+      marginRight: width * 0.01,
+    },
+    competitionDelete: {
+      padding: width * 0.01,
     },
     loadingContainer: {
       flex: 1,
@@ -884,10 +1310,68 @@ export default function RecentMatchesScreen() {
           groupedMatches.map((group) => (
             <View key={group.key} style={styles.groupContainer}>
               <Text style={styles.groupHeader}>{group.label.toUpperCase()}</Text>
-              {group.items.map((match) => (
-                <RecentMatchCard 
+              {group.competitionGroups.map((competition) => {
+                const expanded = !!expandedCompetitions[competition.id];
+                const subtitle = `${competition.date}${competition.weapon ? ` · ${competition.weapon}` : ''}`;
+                return (
+                  <View key={competition.id} style={styles.competitionCard}>
+                    <View style={styles.competitionHeaderRow}>
+                      <TouchableOpacity
+                        style={styles.competitionHeaderLeft}
+                        onPress={() => handleCompetitionPress(competition.id)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.competitionIcon}>
+                          <Text style={styles.competitionIconText}>🏆</Text>
+                        </View>
+                        <View>
+                          <Text style={styles.competitionTitle}>{competition.name}</Text>
+                          <Text style={styles.competitionSubtitle}>{subtitle}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.competitionHeaderRight}
+                        onPress={() => toggleCompetitionExpanded(competition.id)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.competitionRecord}>
+                          {competition.wins}W - {competition.losses}L
+                        </Text>
+                        <Ionicons
+                          name={expanded ? 'chevron-up' : 'chevron-down'}
+                          size={18}
+                          color="rgba(255,255,255,0.7)"
+                          style={styles.competitionChevron}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                    {expanded && (
+                      <View style={styles.competitionBody}>
+                        {competition.pouleMatches.length > 0 && (
+                          <View style={styles.competitionSection}>
+                            <Text style={styles.competitionSectionLabel}>Poule</Text>
+                            {competition.pouleMatches.map((match) =>
+                              renderCompetitionMatchRow(match, false)
+                            )}
+                          </View>
+                        )}
+                        {competition.deMatches.length > 0 && (
+                          <View style={styles.competitionSection}>
+                            <Text style={styles.competitionSectionLabel}>Direct Elimination</Text>
+                            {competition.deMatches.map((match) =>
+                              renderCompetitionMatchRow(match, true)
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+              {group.ungroupedMatches.map((match) => (
+                <RecentMatchCard
                   key={match.id}
-                  match={match} 
+                  match={match}
                   onDelete={handleDeleteMatch}
                   editMode={editMode}
                 />

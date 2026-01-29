@@ -3,7 +3,8 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
-import { matchService, userService } from '@/lib/database';
+import { competitionService, matchService, userService } from '@/lib/database';
+import type { Competition } from '@/types/database';
 import { sessionTracker } from '@/lib/sessionTracker';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -113,9 +114,20 @@ export default function AddMatchScreen() {
   const [showEventDropdown, setShowEventDropdown] = useState(false);
   const [weaponType, setWeaponType] = useState('Foil');
   const [showWeaponDropdown, setShowWeaponDropdown] = useState(false);
+  const [competitionName, setCompetitionName] = useState('');
+  const [competitionSuggestions, setCompetitionSuggestions] = useState<Competition[]>([]);
+  const [competitionLoading, setCompetitionLoading] = useState(false);
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState<string | null>(null);
+  const [selectedCompetitionName, setSelectedCompetitionName] = useState('');
+  const [showCompetitionSuggestions, setShowCompetitionSuggestions] = useState(false);
+  const [activeCompetition, setActiveCompetition] = useState<Competition | null>(null);
+  const [competitionPhase, setCompetitionPhase] = useState<'POULE' | 'DE'>('POULE');
+  const [competitionRound, setCompetitionRound] = useState<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'>('L16');
+  const competitionSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notes, setNotes] = useState(params.notes as string || '');
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [tempNotes, setTempNotes] = useState(params.notes as string || '');
+  const [showListFormatMenu, setShowListFormatMenu] = useState(false);
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [editingScore, setEditingScore] = useState<'your' | 'opponent' | null>(null);
   const [tempScore, setTempScore] = useState('');
@@ -141,6 +153,63 @@ export default function AddMatchScreen() {
 
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
+  const deRounds: Array<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
+    'L256',
+    'L128',
+    'L64',
+    'L32',
+    'L16',
+    'QF',
+    'SF',
+    'F',
+  ];
+  const getLocalDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleNotesChange = (value: string) => {
+    if (value.length > tempNotes.length) {
+      const lastChar = value.slice(-1);
+      if (lastChar === '\n') {
+        const lines = value.split('\n');
+        const prevLine = lines[lines.length - 2] ?? '';
+        const bulletMatch = prevLine.match(/^(\s*)([-•])\s+/);
+        if (bulletMatch) {
+          const indent = bulletMatch[1] ?? '';
+          const bullet = bulletMatch[2] ?? '-';
+          const prefix = `${indent}${bullet} `;
+          setTempNotes(value + prefix);
+          return;
+        }
+        const numberMatch = prevLine.match(/^(\s*)(\d+)\.\s+/);
+        if (numberMatch) {
+          const indent = numberMatch[1] ?? '';
+          const number = parseInt(numberMatch[2], 10);
+          if (Number.isFinite(number)) {
+            const nextNumber = number + 1;
+            setTempNotes(value + `${indent}${nextNumber}. `);
+            return;
+          }
+        }
+      }
+    }
+    setTempNotes(value);
+  };
+
+  const insertListPrefix = (type: 'bullet' | 'dash' | 'number') => {
+    const prefix = type === 'number' ? '1. ' : type === 'dash' ? '- ' : '• ';
+    setTempNotes(prev => {
+      if (!prev) return prefix;
+      if (prev.endsWith('\n') || prev.endsWith(' ')) {
+        return prev + prefix;
+      }
+      return `${prev}\n${prefix}`;
+    });
+    setShowListFormatMenu(false);
+  };
 
   // Track screen view
   useFocusEffect(
@@ -196,12 +265,100 @@ export default function AddMatchScreen() {
     };
   }, [hasStartedForm, isSaving, opponentName, event, weaponType, notes, yourScore, opponentScore, isEditMode]);
 
-  // Fetch match data when in edit mode to populate weaponType
+  // Clear competition state when switching back to Training
+  useEffect(() => {
+    if (event !== 'Competition') {
+      setCompetitionName('');
+      setSelectedCompetitionId(null);
+      setSelectedCompetitionName('');
+      setCompetitionSuggestions([]);
+      setShowCompetitionSuggestions(false);
+      setActiveCompetition(null);
+    } else {
+      setShowCompetitionSuggestions(true);
+    }
+  }, [event]);
+
+  // Load active competition suggestion (AsyncStorage) when in Competition mode
+  useEffect(() => {
+    if (event !== 'Competition' || !user?.id) {
+      return;
+    }
+    let cancelled = false;
+    const loadActiveCompetition = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('active_competition');
+        if (!raw) {
+          if (!cancelled) setActiveCompetition(null);
+          return;
+        }
+        const parsed = JSON.parse(raw) as Competition;
+        const currentWeapon = weaponType.toLowerCase();
+        const currentDateKey = getLocalDateKey(matchDate);
+        if (
+          parsed?.competition_id &&
+          parsed.weapon_type === currentWeapon &&
+          parsed.event_date === currentDateKey
+        ) {
+          if (!cancelled) setActiveCompetition(parsed);
+        } else if (!cancelled) {
+          setActiveCompetition(null);
+        }
+      } catch (error) {
+        console.warn('Failed to load active competition', error);
+      }
+    };
+    loadActiveCompetition();
+    return () => {
+      cancelled = true;
+    };
+  }, [event, matchDate, user?.id, weaponType]);
+
+  // Search competitions for selector (by name + date + weapon)
+  useEffect(() => {
+    if (event !== 'Competition' || !user?.id) {
+      return;
+    }
+
+    const query = competitionName.trim();
+    const weaponKey = weaponType.toLowerCase();
+    if (weaponKey !== 'foil' && weaponKey !== 'epee' && weaponKey !== 'sabre') {
+      return;
+    }
+
+    if (competitionSearchTimeoutRef.current) {
+      clearTimeout(competitionSearchTimeoutRef.current);
+    }
+
+    competitionSearchTimeoutRef.current = setTimeout(async () => {
+      setCompetitionLoading(true);
+      const results = await competitionService.searchCompetitions(
+        user.id,
+        {
+          query: query || undefined,
+          eventDate: getLocalDateKey(matchDate),
+          weaponType: weaponKey as 'foil' | 'epee' | 'sabre',
+          limit: 6,
+        },
+        accessToken ?? null
+      );
+      setCompetitionSuggestions(results);
+      setCompetitionLoading(false);
+    }, 250);
+
+    return () => {
+      if (competitionSearchTimeoutRef.current) {
+        clearTimeout(competitionSearchTimeoutRef.current);
+      }
+    };
+  }, [accessToken, competitionName, event, matchDate, user?.id, weaponType]);
+
+  // Fetch match data when in edit mode to populate weaponType and competition fields
   useEffect(() => {
     const fetchMatchData = async () => {
       if (isEditMode && params.matchId) {
         const matchId = params.matchId as string;
-        const match = await matchService.getMatchById(matchId);
+        const match = await matchService.getMatchById(matchId, accessToken ?? null);
         if (match) {
           if (match.weapon_type) {
             // Capitalize first letter to match form format (Foil, Epee, Sabre)
@@ -226,17 +383,58 @@ export default function AddMatchScreen() {
             setNotes(match.notes);
             setTempNotes(match.notes);
           }
-          if ((!params.yourScore || !params.opponentScore) && match.final_score !== undefined && match.score_diff !== undefined) {
+          if ((!params.yourScore || !params.opponentScore) && match.final_score !== undefined && match.score_diff != null) {
             const yourScoreNum = match.final_score;
             const opponentScoreNum = match.final_score - match.score_diff;
             setYourScore(yourScoreNum.toString());
             setOpponentScore(opponentScoreNum.toString());
           }
+
+          if (match.match_type === 'competition' && match.competition_id) {
+            setEvent('Competition');
+            setSelectedCompetitionId(match.competition_id);
+            if (match.phase) {
+              setCompetitionPhase(match.phase);
+            }
+            if (match.de_round) {
+              setCompetitionRound(match.de_round);
+            }
+            setShowCompetitionSuggestions(false);
+          }
         }
       }
     };
     fetchMatchData();
-  }, [isEditMode, params.matchId]);
+  }, [accessToken, isEditMode, params.matchId]);
+
+  // Hydrate competition name when we have an ID but no chip label yet (e.g., edit mode)
+  useEffect(() => {
+    if (!selectedCompetitionId || selectedCompetitionName.trim().length > 0) {
+      return;
+    }
+    let cancelled = false;
+    const hydrateCompetition = async () => {
+      try {
+        const comp = await competitionService.getCompetitionById(
+          selectedCompetitionId,
+          accessToken ?? null
+        );
+        if (!comp || cancelled) {
+          return;
+        }
+        setSelectedCompetitionName(comp.name);
+        setCompetitionName('');
+        setActiveCompetition(comp);
+        await AsyncStorage.setItem('active_competition', JSON.stringify(comp));
+      } catch (error) {
+        console.warn('Failed to hydrate competition name', error);
+      }
+    };
+    hydrateCompetition();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, selectedCompetitionId, selectedCompetitionName]);
 
   // Default weapon type to user's preferred weapon when creating a new manual match
   useEffect(() => {
@@ -344,15 +542,18 @@ export default function AddMatchScreen() {
 
   const openNotesModal = () => {
     setTempNotes(notes);
+    setShowListFormatMenu(false);
     setShowNotesModal(true);
   };
 
   const handleSaveNotesModal = () => {
     setNotes(tempNotes.trim());
+    setShowListFormatMenu(false);
     setShowNotesModal(false);
   };
 
   const handleCancelNotesModal = () => {
+    setShowListFormatMenu(false);
     setShowNotesModal(false);
   };
 
@@ -385,6 +586,41 @@ export default function AddMatchScreen() {
       );
       return;
     }
+
+    if (event === 'Competition') {
+      if (!selectedCompetitionId) {
+        Alert.alert('Competition Required', 'Please select or create a competition.');
+        return;
+      }
+
+      if (!competitionPhase) {
+        Alert.alert('Phase Required', 'Please select Poule or Direct Elimination.');
+        return;
+      }
+
+      if (competitionPhase === 'DE' && !competitionRound) {
+        Alert.alert('Round Required', 'Please select a direct elimination round.');
+        return;
+      }
+
+      if (competitionPhase === 'POULE' && (yourScoreNum > 5 || opponentScoreNum > 5)) {
+        Alert.alert('Invalid Poule Score', 'Poule matches are to 5. Please enter scores between 0 and 5.');
+        return;
+      }
+    }
+
+    const competitionPayload =
+      event === 'Competition' && selectedCompetitionId
+        ? {
+            competition_id: selectedCompetitionId,
+            phase: competitionPhase,
+            de_round: competitionPhase === 'DE' ? competitionRound : null,
+          }
+        : {
+            competition_id: null,
+            phase: null,
+            de_round: null,
+          };
 
     setIsSaving(true);
     try {
@@ -436,6 +672,7 @@ export default function AddMatchScreen() {
           event_date: eventDateTime.toISOString(),
           weapon_type: weaponType.toLowerCase(),
           notes: notes.trim() || undefined,
+          ...competitionPayload,
         }, accessToken);
       } else {
         // Create new match
@@ -453,6 +690,9 @@ export default function AddMatchScreen() {
           }),
           notes: notes.trim() || undefined,
           weaponType: weaponType,
+          competitionId: competitionPayload.competition_id,
+          phase: competitionPayload.phase,
+          deRound: competitionPayload.de_round,
           accessToken,
         });
       }
@@ -633,6 +873,16 @@ export default function AddMatchScreen() {
       color: 'white',
       marginBottom: getDimension(0.012, height),
     },
+    competitionSection: {
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: getDimension(0.03, width),
+      marginBottom: getDimension(0.012, height),
+      overflow: 'hidden',
+    },
+    competitionSectionBody: {
+      padding: getDimension(0.025, width),
+      paddingTop: getDimension(0.02, height),
+    },
     inputGroup: {
       marginBottom: getDimension(0.012, height),
     },
@@ -723,6 +973,183 @@ export default function AddMatchScreen() {
       shadowOpacity: 0.7,
       shadowRadius: 12,
       elevation: 50, // Very high Android elevation
+    },
+    competitionBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderTopLeftRadius: getDimension(0.03, width),
+      borderTopRightRadius: getDimension(0.03, width),
+      paddingHorizontal: getDimension(0.04, width),
+      paddingVertical: getDimension(0.018, height),
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    competitionBannerText: {
+      fontSize: getDimension(0.045, width),
+      fontWeight: '700',
+      color: '#C8A6FF',
+    },
+    competitionSuggestions: {
+      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      overflow: 'hidden',
+      marginTop: getDimension(0.008, height),
+    },
+    phaseToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.25)',
+      borderRadius: getDimension(0.03, width),
+      padding: getDimension(0.006, width),
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      marginBottom: getDimension(0.01, height),
+      marginTop: getDimension(0.004, height),
+    },
+    phaseOption: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: getDimension(0.012, height),
+      borderRadius: getDimension(0.03, width),
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.15)',
+      marginHorizontal: getDimension(0.004, width),
+    },
+    phaseOptionActive: {
+      backgroundColor: 'rgba(139, 92, 246, 0.25)',
+      borderColor: '#C8A6FF',
+      shadowColor: '#8B5CF6',
+      shadowOpacity: 0.35,
+      shadowOffset: { width: 0, height: 2 },
+      shadowRadius: 6,
+      elevation: 3,
+    },
+    phaseOptionText: {
+      fontSize: getDimension(0.038, width),
+      color: 'rgba(255, 255, 255, 0.65)',
+      fontWeight: '600',
+    },
+    phaseOptionTextActive: {
+      color: '#E9D7FF',
+    },
+    roundChipsRow: {
+      flexDirection: 'row',
+      marginTop: getDimension(0.004, height),
+      marginBottom: getDimension(0.012, height),
+    },
+    roundChipsRowContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingRight: getDimension(0.01, width),
+    },
+    roundChipsRowDisabled: {
+      opacity: 0.55,
+    },
+    roundChip: {
+      paddingVertical: getDimension(0.006, height),
+      paddingHorizontal: getDimension(0.018, width),
+      borderRadius: getDimension(0.02, width),
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.18)',
+      marginRight: getDimension(0.01, width),
+      minWidth: getDimension(0.085, width),
+      alignItems: 'center',
+    },
+    roundChipActive: {
+      borderColor: '#C8A6FF',
+      backgroundColor: 'rgba(139, 92, 246, 0.28)',
+      shadowColor: '#8B5CF6',
+      shadowOpacity: 0.35,
+      shadowOffset: { width: 0, height: 2 },
+      shadowRadius: 6,
+      elevation: 2,
+    },
+    roundChipText: {
+      fontSize: getDimension(0.033, width),
+      color: 'rgba(255, 255, 255, 0.6)',
+      fontWeight: '600',
+    },
+    roundChipTextActive: {
+      color: '#E9D7FF',
+    },
+    competitionSuggestionItem: {
+      paddingHorizontal: getDimension(0.03, width),
+      paddingVertical: getDimension(0.012, height),
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    competitionSuggestionItemLast: {
+      borderBottomWidth: 0,
+    },
+    competitionSuggestionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    competitionSuggestionTitle: {
+      fontSize: getDimension(0.04, width),
+      color: 'white',
+      fontWeight: '600',
+    },
+    competitionSuggestionSubtitle: {
+      fontSize: getDimension(0.032, width),
+      color: 'rgba(255, 255, 255, 0.65)',
+      marginTop: getDimension(0.002, height),
+    },
+    competitionInputContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      borderRadius: getDimension(0.02, width),
+      paddingHorizontal: getDimension(0.02, width),
+      paddingVertical: getDimension(0.006, height),
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    competitionInputText: {
+      flex: 1,
+      minWidth: getDimension(0.2, width),
+      fontSize: getDimension(0.04, width),
+      color: 'white',
+      paddingVertical: getDimension(0.006, height),
+    },
+    competitionChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: getDimension(0.006, height),
+      paddingHorizontal: getDimension(0.02, width),
+      borderRadius: getDimension(0.02, width),
+      backgroundColor: 'rgba(139, 92, 246, 0.18)',
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.7)',
+      marginRight: getDimension(0.01, width),
+    },
+    competitionChipText: {
+      marginRight: getDimension(0.01, width),
+      fontSize: getDimension(0.035, width),
+      color: '#E9D7FF',
+      fontWeight: '600',
+    },
+    competitionCreateItem: {
+      paddingHorizontal: getDimension(0.03, width),
+      paddingVertical: getDimension(0.012, height),
+      backgroundColor: 'rgba(123, 92, 255, 0.12)',
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 1,
+      borderColor: 'rgba(123, 92, 255, 0.35)',
+      marginTop: getDimension(0.01, height),
+    },
+    competitionCreateText: {
+      fontSize: getDimension(0.037, width),
+      color: Colors.purple.primary,
+      fontWeight: '600',
     },
     dropdownOption: {
       flexDirection: 'row',
@@ -875,6 +1302,55 @@ export default function AddMatchScreen() {
       justifyContent: 'space-between',
       alignItems: 'center',
       marginBottom: getDimension(0.02, height),
+    },
+    modalHeaderActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: getDimension(0.02, width),
+    },
+    listFormatButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: getDimension(0.01, width),
+      paddingHorizontal: getDimension(0.02, width),
+      paddingVertical: getDimension(0.01, height),
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.6)',
+      backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    },
+    listFormatButtonText: {
+      color: 'white',
+      fontSize: getDimension(0.035, width),
+      fontWeight: '600',
+    },
+    inputContainer: {
+      width: '100%',
+    },
+    listFormatMenu: {
+      backgroundColor: 'rgba(30, 30, 30, 0.95)',
+      borderRadius: getDimension(0.02, width),
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      marginBottom: getDimension(0.02, height),
+      paddingVertical: getDimension(0.01, height),
+    },
+    listFormatOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: getDimension(0.03, width),
+      paddingVertical: getDimension(0.012, height),
+    },
+    listFormatOptionIcon: {
+      color: 'white',
+      fontSize: getDimension(0.04, width),
+      fontWeight: '700',
+      width: getDimension(0.08, width),
+    },
+    listFormatOptionText: {
+      color: 'white',
+      fontSize: getDimension(0.038, width),
+      fontWeight: '600',
     },
     closeButton: {
       padding: getDimension(0.01, width),
@@ -1357,6 +1833,255 @@ export default function AddMatchScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {event === 'Competition' && (
+          <View style={styles.competitionSection}>
+            <LinearGradient
+              colors={['#3B2A48', '#2A2430']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.competitionBanner}
+            >
+              <Text style={styles.competitionBannerText}>Competition Details</Text>
+              <Ionicons name="chevron-up" size={18} color="rgba(255,255,255,0.85)" />
+            </LinearGradient>
+            <View style={styles.competitionSectionBody}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Competition</Text>
+                <View style={styles.competitionInputContainer}>
+                  {selectedCompetitionId && selectedCompetitionName.trim().length > 0 && (
+                    <View style={styles.competitionChip}>
+                      <Text style={styles.competitionChipText}>{selectedCompetitionName.trim()}</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSelectedCompetitionId(null);
+                          setSelectedCompetitionName('');
+                          setCompetitionName('');
+                          setShowCompetitionSuggestions(true);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="close" size={14} color="#E9D7FF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <TextInput
+                    style={styles.competitionInputText}
+                    value={competitionName}
+                    onChangeText={(value) => {
+                      if (selectedCompetitionId) {
+                        setSelectedCompetitionId(null);
+                        setSelectedCompetitionName('');
+                      }
+                      setCompetitionName(value);
+                      setActiveCompetition(null);
+                      setShowCompetitionSuggestions(true);
+                    }}
+                    placeholder={
+                      selectedCompetitionId && !selectedCompetitionName.trim()
+                        ? 'Loading competition...'
+                        : selectedCompetitionId
+                          ? ''
+                          : 'Search or create competition'
+                    }
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    onFocus={() => setShowCompetitionSuggestions(true)}
+                    editable={!selectedCompetitionId || !selectedCompetitionName.trim()}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.phaseToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.phaseOption,
+                    competitionPhase === 'POULE' && styles.phaseOptionActive,
+                  ]}
+                  onPress={() => setCompetitionPhase('POULE')}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.phaseOptionText,
+                      competitionPhase === 'POULE' && styles.phaseOptionTextActive,
+                    ]}
+                  >
+                    Poule
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.phaseOption,
+                    competitionPhase === 'DE' && styles.phaseOptionActive,
+                  ]}
+                  onPress={() => setCompetitionPhase('DE')}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.phaseOptionText,
+                      competitionPhase === 'DE' && styles.phaseOptionTextActive,
+                    ]}
+                  >
+                    Direct Elimination
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={[
+                  styles.roundChipsRow,
+                  competitionPhase !== 'DE' && styles.roundChipsRowDisabled,
+                ]}
+                contentContainerStyle={styles.roundChipsRowContent}
+              >
+                {deRounds.map((round) => {
+                  const isActive = competitionRound === round;
+                  return (
+                    <TouchableOpacity
+                      key={round}
+                      style={[
+                        styles.roundChip,
+                        isActive && styles.roundChipActive,
+                      ]}
+                      onPress={() => setCompetitionRound(round)}
+                      activeOpacity={0.8}
+                      disabled={competitionPhase !== 'DE'}
+                    >
+                      <Text
+                        style={[
+                          styles.roundChipText,
+                          isActive && styles.roundChipTextActive,
+                        ]}
+                      >
+                        {round}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {showCompetitionSuggestions && (
+                <View style={styles.competitionSuggestions}>
+                {activeCompetition && (
+                    <TouchableOpacity
+                      style={styles.competitionSuggestionItem}
+                      onPress={async () => {
+                        setSelectedCompetitionId(activeCompetition.competition_id);
+                        setSelectedCompetitionName(activeCompetition.name);
+                        setCompetitionName('');
+                        await AsyncStorage.setItem('active_competition', JSON.stringify(activeCompetition));
+                        setActiveCompetition(activeCompetition);
+                        setShowCompetitionSuggestions(false);
+                    }}
+                  >
+                      <View style={styles.competitionSuggestionRow}>
+                        <View>
+                          <Text style={styles.competitionSuggestionTitle}>{activeCompetition.name}</Text>
+                          <Text style={styles.competitionSuggestionSubtitle}>Recent competition</Text>
+                        </View>
+                        <Ionicons name="time" size={16} color="rgba(255,255,255,0.6)" />
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {competitionSuggestions
+                    .filter(comp => comp.competition_id !== activeCompetition?.competition_id)
+                    .map((comp, index, arr) => (
+                      <TouchableOpacity
+                        key={comp.competition_id}
+                        style={[
+                          styles.competitionSuggestionItem,
+                          index === arr.length - 1 && styles.competitionSuggestionItemLast,
+                        ]}
+                        onPress={async () => {
+                          setSelectedCompetitionId(comp.competition_id);
+                          setSelectedCompetitionName(comp.name);
+                          setCompetitionName('');
+                          setShowCompetitionSuggestions(false);
+                          await AsyncStorage.setItem('active_competition', JSON.stringify(comp));
+                          setActiveCompetition(comp);
+                        }}
+                      >
+                        <View style={styles.competitionSuggestionRow}>
+                          <View>
+                            <Text style={styles.competitionSuggestionTitle}>{comp.name}</Text>
+                            <Text style={styles.competitionSuggestionSubtitle}>
+                              {comp.event_date} · {comp.weapon_type.toUpperCase()}
+                            </Text>
+                          </View>
+                          {selectedCompetitionId === comp.competition_id && (
+                            <Ionicons name="checkmark" size={16} color={Colors.purple.primary} />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+
+                  {competitionLoading && (
+                    <View style={styles.competitionSuggestionItem}>
+                      <Text style={styles.competitionSuggestionSubtitle}>Searching…</Text>
+                    </View>
+                  )}
+
+                  {!competitionLoading && competitionName.trim().length > 0 && !selectedCompetitionId && (
+                    <TouchableOpacity
+                      style={styles.competitionCreateItem}
+                      onPress={async () => {
+                        if (!user?.id) return;
+                        const weaponKey = weaponType.toLowerCase();
+                        if (weaponKey !== 'foil' && weaponKey !== 'epee' && weaponKey !== 'sabre') return;
+                        const pendingName = competitionName.trim();
+                        if (!pendingName) return;
+                        const created = await competitionService.createCompetition(
+                          {
+                            userId: user.id,
+                            name: pendingName,
+                            eventDate: getLocalDateKey(matchDate),
+                            weaponType: weaponKey as 'foil' | 'epee' | 'sabre',
+                            accessToken: accessToken ?? null,
+                          }
+                        );
+                        if (created) {
+                          setSelectedCompetitionName(created.name);
+                          setSelectedCompetitionId(created.competition_id);
+                          setCompetitionName('');
+                          setShowCompetitionSuggestions(false);
+                          await AsyncStorage.setItem('active_competition', JSON.stringify(created));
+                          setActiveCompetition(created);
+                        } else {
+                          const fallback = await competitionService.searchCompetitions(
+                            user.id,
+                            {
+                              query: pendingName,
+                              eventDate: getLocalDateKey(matchDate),
+                              weaponType: weaponKey as 'foil' | 'epee' | 'sabre',
+                              limit: 1,
+                            },
+                            accessToken ?? null
+                          );
+                          if (fallback[0]) {
+                            setSelectedCompetitionName(fallback[0].name);
+                            setSelectedCompetitionId(fallback[0].competition_id);
+                            setCompetitionName('');
+                            setShowCompetitionSuggestions(false);
+                            await AsyncStorage.setItem('active_competition', JSON.stringify(fallback[0]));
+                            setActiveCompetition(fallback[0]);
+                          }
+                        }
+                      }}
+                    >
+                      <Text style={styles.competitionCreateText}>
+                        + Create new competition: “{competitionName.trim()}”
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Match Outcome Section */}
         <View style={styles.section}>
@@ -1935,16 +2660,56 @@ export default function AddMatchScreen() {
                 >
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>Match Notes</Text>
-                    <TouchableOpacity onPress={handleCancelNotesModal} style={styles.closeButton}>
-                      <Ionicons name="close" size={24} color="white" />
-                    </TouchableOpacity>
+                    <View style={styles.modalHeaderActions}>
+                      <TouchableOpacity
+                        onPress={() => setShowListFormatMenu(prev => !prev)}
+                        style={styles.listFormatButton}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="list" size={18} color="white" />
+                        <Text style={styles.listFormatButtonText}>List</Text>
+                        <Ionicons
+                          name={showListFormatMenu ? 'chevron-up' : 'chevron-down'}
+                          size={16}
+                          color="white"
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleCancelNotesModal} style={styles.closeButton}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
                   <View style={styles.inputContainer}>
+                    {showListFormatMenu && (
+                      <View style={styles.listFormatMenu}>
+                        <TouchableOpacity
+                          style={styles.listFormatOption}
+                          onPress={() => insertListPrefix('bullet')}
+                        >
+                          <Text style={styles.listFormatOptionIcon}>•</Text>
+                          <Text style={styles.listFormatOptionText}>Bullet list</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.listFormatOption}
+                          onPress={() => insertListPrefix('dash')}
+                        >
+                          <Text style={styles.listFormatOptionIcon}>-</Text>
+                          <Text style={styles.listFormatOptionText}>Dash list</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.listFormatOption}
+                          onPress={() => insertListPrefix('number')}
+                        >
+                          <Text style={styles.listFormatOptionIcon}>1.</Text>
+                          <Text style={styles.listFormatOptionText}>Numbered list</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                     <TextInput
                       style={[styles.textInput, { minHeight: 140 }]}
                       value={tempNotes}
-                      onChangeText={setTempNotes}
+                      onChangeText={handleNotesChange}
                       placeholder="Add match notes..."
                       placeholderTextColor="rgba(255, 255, 255, 0.5)"
                       multiline

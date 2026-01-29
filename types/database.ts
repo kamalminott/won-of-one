@@ -7,6 +7,9 @@ export interface Match {
   event_date?: string;
   location?: string;
   match_type?: string;
+  competition_id?: string | null;
+  phase?: 'POULE' | 'DE' | null;
+  de_round?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
   final_score?: number;
   final_period?: number;
   yellow_cards?: number;
@@ -40,6 +43,23 @@ export interface Match {
   is_complete?: boolean; // NEW: Track completion status
   notes?: string; // Match notes
   weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
+}
+
+export interface Competition {
+  competition_id: string;
+  user_id: string;
+  name: string;
+  normalized_name: string;
+  event_date: string; // ISO date string
+  weapon_type: 'foil' | 'epee' | 'sabre';
+  type: 'WorldCup' | 'GrandPrix' | 'National' | 'Open' | 'Other';
+  type_label?: string | null;
+  pre_competition_notes?: string | null;
+  post_competition_notes?: string | null;
+  placement?: number | null;
+  field_size?: number | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface FencingRemote {
@@ -179,6 +199,14 @@ export interface SimpleMatch {
   matchType?: string;
   source?: string;
   notes?: string;
+  competitionId?: string | null;
+  competitionName?: string | null;
+  competitionDate?: string | null;
+  competitionWeaponType?: 'foil' | 'epee' | 'sabre' | null;
+  competitionPhase?: 'POULE' | 'DE' | null;
+  competitionRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+  competitionPlacement?: number | null;
+  competitionFieldSize?: number | null;
 }
 
 export interface SimpleGoal {

@@ -30,25 +30,39 @@ const getInitials = (name: string | undefined): string => {
   }
 };
 
-interface CarouselItem {
-  id: string;
-  date: string;
-  isWin: boolean;
-  youScore: number;
-  opponentScore: number;
-  opponentName: string;
-  source?: string; // Source of the match: 'manual', 'remote', etc.
-  notes?: string; // Match notes
-  matchType?: string; // Match type: 'training' or 'competition'
-}
+export type MatchCarouselItem =
+  | {
+      type: 'match';
+      id: string;
+      date: string;
+      isWin: boolean;
+      youScore: number;
+      opponentScore: number;
+      opponentName: string;
+      source?: string; // Source of the match: 'manual', 'remote', etc.
+      notes?: string; // Match notes
+      matchType?: string; // Match type: 'training' or 'competition'
+    }
+  | {
+      type: 'competition';
+      id: string;
+      date: string;
+      competitionId: string;
+      competitionName: string;
+      competitionWeaponType?: string | null;
+      wins: number;
+      losses: number;
+      placement?: number | null;
+      fieldSize?: number | null;
+    };
 
 interface MatchCarouselProps {
   /** Array of items to display in the carousel */
-  items: CarouselItem[];
+  items: MatchCarouselItem[];
   /** Callback when "View All" button is pressed */
   onViewAll: () => void;
   /** Custom callback when an item is pressed (overrides default navigation) */
-  onItemPress?: (item: CarouselItem) => void;
+  onItemPress?: (item: MatchCarouselItem) => void;
   /** Maximum number of items to display (default: 3) */
   maxItems?: number;
   /** Whether to show dot indicators (default: true) */
@@ -62,7 +76,7 @@ interface MatchCarouselProps {
   /** Icon for empty state (default: "trophy-outline") */
   emptyStateIcon?: keyof typeof Ionicons.glyphMap;
   /** Custom renderer for individual items */
-  customItemRenderer?: (item: CarouselItem, index: number) => React.ReactNode;
+  customItemRenderer?: (item: MatchCarouselItem, index: number) => React.ReactNode;
   /** User's display name */
   userName?: string;
   /** User's profile image */
@@ -179,54 +193,65 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     }
   };
 
-  const handleItemPress = (item: CarouselItem) => {
-    console.log('🎯 Carousel item pressed:', { 
-      id: item.id, 
-      source: item.source, 
-      opponentName: item.opponentName 
-    });
-    
+  const handleItemPress = (item: MatchCarouselItem) => {
     if (onItemPress) {
       onItemPress(item);
+      return;
+    }
+
+    if (item.type === 'competition') {
+      router.push({
+        pathname: '/competition-detail',
+        params: {
+          competitionId: item.competitionId,
+        },
+      });
+      return;
+    }
+
+    console.log('🎯 Carousel item pressed:', {
+      id: item.id,
+      source: item.source,
+      opponentName: item.opponentName,
+    });
+
+    // Check if this is a manual match
+    const isManualMatch = item.source === 'manual';
+    console.log('🔍 Is manual match?', isManualMatch, 'Source:', item.source);
+
+    if (isManualMatch) {
+      // Navigate to manual match summary for manual matches
+      router.push({
+        pathname: '/manual-match-summary',
+        params: {
+          matchId: item.id,
+          yourScore: item.youScore.toString(),
+          opponentScore: item.opponentScore.toString(),
+          opponentName: item.opponentName,
+          matchType: item.matchType || 'Training', // Use actual match type from database
+          date: item.date,
+          time: '12:00PM', // Default time
+          isWin: item.isWin.toString(),
+          notes: item.notes || '', // Pass through notes
+        },
+      });
     } else {
-      // Check if this is a manual match
-      const isManualMatch = item.source === 'manual';
-      console.log('🔍 Is manual match?', isManualMatch, 'Source:', item.source);
-      
-      if (isManualMatch) {
-        // Navigate to manual match summary for manual matches
-        router.push({
-          pathname: '/manual-match-summary',
-          params: {
-            matchId: item.id,
-            yourScore: item.youScore.toString(),
-            opponentScore: item.opponentScore.toString(),
-            opponentName: item.opponentName,
-            matchType: item.matchType || 'Training', // Use actual match type from database
-            date: item.date,
-            time: '12:00PM', // Default time
-            isWin: item.isWin.toString(),
-            notes: item.notes || '', // Pass through notes
-          }
-        });
-      } else {
-        // Navigate to regular match details for remote matches
-        router.push({
-          pathname: '/match-history-details',
-          params: { 
-            matchId: item.id,
-            opponentName: item.opponentName,
-            opponentImage: '', // No default image - will use initials fallback
-            youScore: item.youScore.toString(),
-            opponentScore: item.opponentScore.toString(),
-            matchType: item.matchType || 'Training', // Use actual match type from database
-            date: item.date,
-            duration: '02:30', // Default duration
-            location: 'Metro Field House', // Default location
-            isWin: item.isWin.toString() // Pass the win status from carousel data
-          }
-        });
-      }
+      // Navigate to regular match details for remote matches
+      router.push({
+        pathname: '/match-history-details',
+        params: {
+          matchId: item.id,
+          opponentName: item.opponentName,
+          opponentImage: '', // No default image - will use initials fallback
+          youScore: item.youScore.toString(),
+          opponentScore: item.opponentScore.toString(),
+          matchType: item.matchType || 'Training', // Use actual match type from database
+          date: item.date,
+          duration: '02:30', // Default duration
+          location: 'Metro Field House', // Default location
+          isWin: item.isWin.toString(), // Pass the win status from carousel data
+        },
+      });
     }
   };
 
@@ -236,6 +261,27 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+  };
+
+  const formatWeapon = (weapon?: string | null): string => {
+    if (!weapon) return '';
+    return `${weapon.charAt(0).toUpperCase()}${weapon.slice(1)}`;
+  };
+
+  const formatOrdinal = (value: number): string => {
+    const mod100 = value % 100;
+    const mod10 = value % 10;
+    if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+    if (mod10 === 1) return `${value}st`;
+    if (mod10 === 2) return `${value}nd`;
+    if (mod10 === 3) return `${value}rd`;
+    return `${value}th`;
+  };
+
+  const formatPlacement = (placement?: number | null, fieldSize?: number | null): string | null => {
+    if (!placement || !fieldSize) return null;
+    const percentile = Math.round((placement / fieldSize) * 100);
+    return `${formatOrdinal(placement)} / ${fieldSize} (${percentile}%)`;
   };
 
   const styles = StyleSheet.create({
@@ -275,6 +321,102 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       shadowOpacity: 1,
       shadowRadius: 30,
       elevation: 8,
+    },
+    competitionCard: {
+      width: '100%',
+      height: height * 0.14,
+      backgroundColor: '#2A2A2A',
+      borderRadius: width * 0.05,
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.015,
+      borderWidth: 1,
+      borderColor: 'rgba(153, 128, 255, 0.2)',
+      shadowColor: 'rgba(108, 92, 231, 0.08)',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 1,
+      shadowRadius: 24,
+      elevation: 8,
+    },
+    competitionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: height * 0.012,
+    },
+    competitionHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      marginRight: width * 0.02,
+    },
+    competitionIcon: {
+      width: width * 0.085,
+      height: width * 0.085,
+      borderRadius: width * 0.0425,
+      backgroundColor: 'rgba(139, 92, 246, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: width * 0.03,
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.5)',
+    },
+    competitionIconText: {
+      fontSize: width * 0.05,
+    },
+    competitionTitleBlock: {
+      flex: 1,
+    },
+    competitionName: {
+      color: 'white',
+      fontSize: width * 0.04,
+      fontWeight: '700',
+    },
+    competitionMeta: {
+      color: 'rgba(255, 255, 255, 0.6)',
+      fontSize: width * 0.03,
+      marginTop: height * 0.002,
+    },
+    competitionPill: {
+      backgroundColor: 'rgba(139, 92, 246, 0.25)',
+      borderRadius: width * 0.04,
+      paddingHorizontal: width * 0.03,
+      paddingVertical: height * 0.006,
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.6)',
+    },
+    competitionPillText: {
+      color: '#E9D7FF',
+      fontSize: width * 0.028,
+      fontWeight: '600',
+    },
+    competitionStats: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+      borderRadius: width * 0.04,
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.012,
+    },
+    competitionStatBlock: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    competitionStatValue: {
+      color: 'white',
+      fontSize: width * 0.036,
+      fontWeight: '700',
+    },
+    competitionStatLabel: {
+      color: 'rgba(255, 255, 255, 0.6)',
+      fontSize: width * 0.027,
+      marginTop: height * 0.003,
+    },
+    competitionStatDivider: {
+      width: 1,
+      height: '100%',
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      marginHorizontal: width * 0.03,
     },
     matchHeader: {
       flexDirection: 'row',
@@ -564,6 +706,11 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
     );
   }
 
+  const safeIndex = Math.min(currentIndex, displayItems.length - 1);
+  const currentItem = displayItems[safeIndex];
+  const competitionItem = currentItem && currentItem.type === 'competition' ? currentItem : null;
+  const matchItem = currentItem && currentItem.type === 'match' ? currentItem : null;
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -585,21 +732,72 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
             ]}
           >
             {customItemRenderer ? (
-              customItemRenderer(displayItems[currentIndex], currentIndex)
-            ) : (
+              customItemRenderer(currentItem, safeIndex)
+            ) : competitionItem ? (
               <TouchableOpacity
-                key={displayItems[currentIndex]?.id}
+                key={competitionItem.id}
+                style={styles.competitionCard}
+                onPress={() => handleItemPress(competitionItem)}
+                activeOpacity={0.9}
+              >
+                <View style={styles.competitionHeader}>
+                  <View style={styles.competitionHeaderLeft}>
+                    <View style={styles.competitionIcon}>
+                      <Text style={styles.competitionIconText}>🏆</Text>
+                    </View>
+                    <View style={styles.competitionTitleBlock}>
+                      <Text
+                        style={styles.competitionName}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {competitionItem.competitionName}
+                      </Text>
+                      <Text style={styles.competitionMeta}>
+                        {formatDate(competitionItem.date)}
+                        {competitionItem.competitionWeaponType
+                          ? ` · ${formatWeapon(competitionItem.competitionWeaponType)}`
+                          : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.competitionPill}>
+                    <Text style={styles.competitionPillText}>Competition</Text>
+                  </View>
+                </View>
+                <View style={styles.competitionStats}>
+                  <View style={styles.competitionStatBlock}>
+                    <Text style={styles.competitionStatValue}>
+                      {competitionItem.wins}W - {competitionItem.losses}L
+                    </Text>
+                    <Text style={styles.competitionStatLabel}>Record</Text>
+                  </View>
+                  <View style={styles.competitionStatDivider} />
+                  <View style={styles.competitionStatBlock}>
+                    <Text style={styles.competitionStatValue}>
+                      {formatPlacement(
+                        competitionItem.placement,
+                        competitionItem.fieldSize
+                      ) ?? '—'}
+                    </Text>
+                    <Text style={styles.competitionStatLabel}>Placement</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ) : matchItem ? (
+              <TouchableOpacity
+                key={matchItem.id}
                 style={styles.matchCard}
-                onPress={() => handleItemPress(displayItems[currentIndex])}
+                onPress={() => handleItemPress(matchItem)}
               >
                 {/* Left Profile Container */}
                 <View style={styles.profileContainerLeft}>
                   <View style={styles.profileCircle}>
-                    {userProfileImage && 
-                     userProfileImage !== 'https://via.placeholder.com/60x60' &&
-                     !userProfileImage.includes('example.com') &&
-                     !userProfileImage.includes('placeholder') &&
-                     (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
+                    {userProfileImage &&
+                    userProfileImage !== 'https://via.placeholder.com/60x60' &&
+                    !userProfileImage.includes('example.com') &&
+                    !userProfileImage.includes('placeholder') &&
+                    (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
                       <Image
                         source={{ uri: userProfileImage }}
                         style={{
@@ -619,38 +817,38 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
                     {userName || 'You'}
                   </Text>
                 </View>
-                
+
                 {/* Right Profile Container */}
                 <View style={styles.profileContainerRight}>
                   <View style={styles.profileCircle}>
                     <Text style={styles.profileInitial}>
-                      {getInitials(displayItems[currentIndex]?.opponentName)}
+                      {getInitials(matchItem.opponentName)}
                     </Text>
                   </View>
                   <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                    {displayItems[currentIndex]?.opponentName}
+                    {matchItem.opponentName}
                   </Text>
                 </View>
-                
+
                 {/* Score Group with Equal Spacing */}
                 <View style={styles.scoreGroup}>
                   <View style={styles.scoreContainer}>
                     <View style={styles.scoreDotLeft} />
-                    <Text style={styles.score}>{displayItems[currentIndex]?.youScore}</Text>
+                    <Text style={styles.score}>{matchItem.youScore}</Text>
                   </View>
-                  
+
                   <Text style={styles.dash}>-</Text>
-                  
+
                   <View style={styles.scoreContainer}>
-                    <Text style={styles.score}>{displayItems[currentIndex]?.opponentScore}</Text>
+                    <Text style={styles.score}>{matchItem.opponentScore}</Text>
                     <View style={styles.scoreDotRight} />
                   </View>
                 </View>
-                
+
                 {/* Date */}
-                <Text style={styles.matchDate}>{formatDate(displayItems[currentIndex]?.date)}</Text>
+                <Text style={styles.matchDate}>{formatDate(matchItem.date)}</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </Animated.View>
         </View>
       )}
