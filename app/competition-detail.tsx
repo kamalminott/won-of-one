@@ -562,7 +562,6 @@ export default function CompetitionDetailScreen() {
                   <Text style={styles.sectionLabel}>Direct Elimination</Text>
                   {deMatchesByRound.map(({ round, matches: roundMatches }) => (
                     <View key={round} style={styles.roundGroup}>
-                      <Text style={styles.roundGroupLabel}>{round}</Text>
                       {roundMatches.map(match => renderMatchRow(match, round))}
                     </View>
                   ))}

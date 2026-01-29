@@ -72,6 +72,9 @@ export default function RecentMatchesScreen() {
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [expandedCompetitions, setExpandedCompetitions] = useState<Record<string, boolean>>({});
+  const [expandedCompetitionSections, setExpandedCompetitionSections] = useState<
+    Record<string, { poule: boolean; de: boolean }>
+  >({});
   const hasTrackedFilterRef = useRef(false);
 
   // Format date to DD/MM/YYYY
@@ -186,6 +189,8 @@ export default function RecentMatchesScreen() {
     weapon: string;
     wins: number;
     losses: number;
+    pouleWins: number;
+    pouleLosses: number;
     pouleMatches: Match[];
     deMatches: Match[];
   };
@@ -378,10 +383,15 @@ export default function RecentMatchesScreen() {
             return getMatchTimestamp(b) - getMatchTimestamp(a);
           });
 
+        const pouleWins = pouleMatches.filter((m) => m.outcome === 'Victory').length;
+        const pouleLosses = pouleMatches.filter((m) => m.outcome === 'Defeat').length;
+
         return {
           ...group,
           wins,
           losses,
+          pouleWins,
+          pouleLosses,
           pouleMatches,
           deMatches,
         };
@@ -515,6 +525,23 @@ export default function RecentMatchesScreen() {
     router.push({
       pathname: '/competition-detail',
       params: { competitionId },
+    });
+  };
+
+  const toggleCompetitionSection = (
+    competitionId: string,
+    section: 'poule' | 'de',
+    defaults: { poule: boolean; de: boolean }
+  ) => {
+    setExpandedCompetitionSections(prev => {
+      const current = prev[competitionId] ?? defaults;
+      return {
+        ...prev,
+        [competitionId]: {
+          ...current,
+          [section]: !current[section],
+        },
+      };
     });
   };
 
@@ -827,6 +854,30 @@ export default function RecentMatchesScreen() {
     },
     competitionSection: {
       marginTop: height * 0.012,
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: height * 0.008,
+    },
+    sectionHeaderRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.02,
+    },
+    sectionRecordChip: {
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      borderRadius: width * 0.04,
+      paddingHorizontal: width * 0.03,
+      paddingVertical: height * 0.004,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    sectionRecordText: {
+      color: 'rgba(255, 255, 255, 0.8)',
+      fontSize: width * 0.03,
+      fontWeight: '600',
     },
     competitionSectionLabel: {
       fontSize: width * 0.034,
@@ -1313,6 +1364,14 @@ export default function RecentMatchesScreen() {
               {group.competitionGroups.map((competition) => {
                 const expanded = !!expandedCompetitions[competition.id];
                 const subtitle = `${competition.date}${competition.weapon ? ` · ${competition.weapon}` : ''}`;
+                const sectionDefaults = {
+                  poule: competition.pouleMatches.length > 0,
+                  de: competition.deMatches.length > 0,
+                };
+                const pouleExpanded =
+                  expandedCompetitionSections[competition.id]?.poule ?? sectionDefaults.poule;
+                const deExpanded =
+                  expandedCompetitionSections[competition.id]?.de ?? sectionDefaults.de;
                 return (
                   <View key={competition.id} style={styles.competitionCard}>
                     <View style={styles.competitionHeaderRow}>
@@ -1349,18 +1408,53 @@ export default function RecentMatchesScreen() {
                       <View style={styles.competitionBody}>
                         {competition.pouleMatches.length > 0 && (
                           <View style={styles.competitionSection}>
-                            <Text style={styles.competitionSectionLabel}>Poule</Text>
-                            {competition.pouleMatches.map((match) =>
-                              renderCompetitionMatchRow(match, false)
-                            )}
+                            <TouchableOpacity
+                              style={styles.sectionHeaderRow}
+                              onPress={() =>
+                                toggleCompetitionSection(competition.id, 'poule', sectionDefaults)
+                              }
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.competitionSectionLabel}>Poule</Text>
+                              <View style={styles.sectionHeaderRight}>
+                                <View style={styles.sectionRecordChip}>
+                                  <Text style={styles.sectionRecordText}>
+                                    {competition.pouleWins}W - {competition.pouleLosses}L
+                                  </Text>
+                                </View>
+                                <Ionicons
+                                  name={pouleExpanded ? 'chevron-up' : 'chevron-down'}
+                                  size={16}
+                                  color="rgba(255,255,255,0.6)"
+                                />
+                              </View>
+                            </TouchableOpacity>
+                            {pouleExpanded &&
+                              competition.pouleMatches.map((match) =>
+                                renderCompetitionMatchRow(match, false)
+                              )}
                           </View>
                         )}
                         {competition.deMatches.length > 0 && (
                           <View style={styles.competitionSection}>
-                            <Text style={styles.competitionSectionLabel}>Direct Elimination</Text>
-                            {competition.deMatches.map((match) =>
-                              renderCompetitionMatchRow(match, true)
-                            )}
+                            <TouchableOpacity
+                              style={styles.sectionHeaderRow}
+                              onPress={() =>
+                                toggleCompetitionSection(competition.id, 'de', sectionDefaults)
+                              }
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.competitionSectionLabel}>Direct Elimination</Text>
+                              <Ionicons
+                                name={deExpanded ? 'chevron-up' : 'chevron-down'}
+                                size={16}
+                                color="rgba(255,255,255,0.6)"
+                              />
+                            </TouchableOpacity>
+                            {deExpanded &&
+                              competition.deMatches.map((match) =>
+                                renderCompetitionMatchRow(match, true)
+                              )}
                           </View>
                         )}
                       </View>
