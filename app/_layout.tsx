@@ -87,8 +87,8 @@ function PostHogConnector() {
           console.log('🎥 Session Replay enabled in config:', (POSTHOG_CONFIG as any).enableSessionReplay);
           console.log('🎥 Session Replay Config:', (POSTHOG_CONFIG as any).sessionReplayConfig);
           
-          // Force flush
-          if (posthog.flush) {
+          // Force flush (skip in dev to avoid noisy network errors)
+          if (!__DEV__ && posthog.flush) {
             await posthog.flush();
             console.log('✅ Events flushed to PostHog EU');
             

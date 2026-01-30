@@ -3,6 +3,7 @@ import { PostHog } from 'posthog-react-native';
 let posthogInstance: PostHog | null = null;
 let initialized = false;
 let isAvailable = false;
+const SHOULD_FLUSH = !__DEV__;
 
 const POSTHOG_KEY = process.env.EXPO_PUBLIC_POSTHOG_KEY || 'phc_XLNZ0QN65VPSN1vDlJOXP1j0CS4PVIGmKJXKypHbFWJ';
 // Note: If you used --region eu in the wizard, use: 'https://eu.posthog.com'
@@ -58,8 +59,7 @@ export const analytics = {
     try {
       posthogInstance.screen(name, props);
       __DEV__ && console.log(`📊 PostHog: Screen "${name}"`, props || '');
-      // Immediately flush in development for faster testing
-      if (__DEV__ && posthogInstance.flush) {
+      if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
@@ -72,8 +72,7 @@ export const analytics = {
     try {
       posthogInstance.capture(event, props);
       __DEV__ && console.log(`📊 PostHog: Event "${event}"`, props || '');
-      // Immediately flush in development for faster testing
-      if (__DEV__ && posthogInstance.flush) {
+      if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
@@ -83,6 +82,7 @@ export const analytics = {
 
   flush: () => {
     if (!isAvailable || !posthogInstance) return;
+    if (!SHOULD_FLUSH) return;
     try {
       if (posthogInstance.flush) {
         posthogInstance.flush();
@@ -147,7 +147,7 @@ export const analytics = {
     try {
       posthogInstance.capture('match_start', props);
       __DEV__ && console.log(`📊 PostHog: match_start`, props);
-      if (__DEV__ && posthogInstance.flush) {
+      if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
@@ -692,8 +692,7 @@ export const analytics = {
         timestamp: new Date().toISOString(),
       });
       __DEV__ && console.log('📊 PostHog: bug_report', props);
-      // Flush immediately for bug reports
-      if (posthogInstance.flush) {
+      if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
@@ -709,8 +708,7 @@ export const analytics = {
       if (typeof (posthogInstance as any).captureException === 'function') {
         (posthogInstance as any).captureException(error, props);
         __DEV__ && console.log('📊 PostHog: Exception captured', error.message, props || '');
-        // Flush immediately for exceptions
-        if (posthogInstance.flush) {
+        if (SHOULD_FLUSH && posthogInstance.flush) {
           posthogInstance.flush();
         }
       } else {
@@ -722,8 +720,7 @@ export const analytics = {
           ...props,
         });
         __DEV__ && console.log('📊 PostHog: Exception captured (fallback)', error.message);
-        // Flush immediately for exceptions
-        if (posthogInstance.flush) {
+        if (SHOULD_FLUSH && posthogInstance.flush) {
           posthogInstance.flush();
         }
       }
@@ -742,8 +739,8 @@ export const POSTHOG_CONFIG = {
   captureApplicationLifecycleEvents: true,
   captureDeepLinks: true,
   optOut: false,
-  flushAt: 1, // Flush immediately in development for faster testing
-  flushInterval: 2000, // 2 seconds instead of 10
+  flushAt: 20,
+  flushInterval: 10000, // 10 seconds default
   autocapture: false, // Disable autocapture for more control
   enableSessionReplay: false, // Temporarily disabled - see note below
   // NOTE: Session replay for React Native mobile apps has limited support
