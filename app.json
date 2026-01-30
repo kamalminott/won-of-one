@@ -3,7 +3,7 @@
     "name": "Won Of One",
     "slug": "won-of-one",
     "version": "4.4.7",
-    "runtimeVersion": "4.4.7",
+    "runtimeVersion": "4.4.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wonofone",
