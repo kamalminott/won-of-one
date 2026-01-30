@@ -515,10 +515,19 @@ export default function RecentMatchesScreen() {
   const filters = ['All', 'Type', 'Win/Loss', 'Date'];
 
   const toggleCompetitionExpanded = (competitionId: string) => {
-    setExpandedCompetitions(prev => ({
-      ...prev,
-      [competitionId]: !prev[competitionId],
-    }));
+    setExpandedCompetitions(prev => {
+      const nextExpanded = !prev[competitionId];
+      if (nextExpanded) {
+        analytics.capture('competition_group_expanded', {
+          competition_id: competitionId,
+          source: 'match_history',
+        });
+      }
+      return {
+        ...prev,
+        [competitionId]: nextExpanded,
+      };
+    });
   };
 
   const handleCompetitionPress = (competitionId: string) => {
@@ -535,6 +544,14 @@ export default function RecentMatchesScreen() {
   ) => {
     setExpandedCompetitionSections(prev => {
       const current = prev[competitionId] ?? defaults;
+      const nextExpanded = !current[section];
+      if (nextExpanded) {
+        analytics.capture('competition_group_section_expanded', {
+          competition_id: competitionId,
+          section,
+          source: 'match_history',
+        });
+      }
       return {
         ...prev,
         [competitionId]: {

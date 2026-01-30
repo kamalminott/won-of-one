@@ -124,6 +124,7 @@ export default function AddMatchScreen() {
   const [competitionPhase, setCompetitionPhase] = useState<'POULE' | 'DE'>('POULE');
   const [competitionRound, setCompetitionRound] = useState<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'>('L16');
   const competitionSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCompetitionSearchRef = useRef('');
   const [notes, setNotes] = useState(params.notes as string || '');
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [tempNotes, setTempNotes] = useState(params.notes as string || '');
@@ -242,6 +243,14 @@ export default function AddMatchScreen() {
       setSelectedCompetitionId(created.competition_id);
       setCompetitionName('');
       setShowCompetitionSuggestions(false);
+      analytics.capture('competition_created', {
+        competition_id: created.competition_id,
+        weapon_type: created.weapon_type,
+        event_date: created.event_date,
+        source: 'add_match',
+        name_length: pendingName.length,
+        is_new_competition: true,
+      });
       await AsyncStorage.setItem('active_competition', JSON.stringify(created));
       setActiveCompetition(created);
     } else {
@@ -260,10 +269,39 @@ export default function AddMatchScreen() {
         setSelectedCompetitionId(fallback[0].competition_id);
         setCompetitionName('');
         setShowCompetitionSuggestions(false);
+        analytics.capture('competition_suggestion_selected', {
+          competition_id: fallback[0].competition_id,
+          weapon_type: fallback[0].weapon_type,
+          event_date: fallback[0].event_date,
+          source: 'create_fallback',
+          name_length: pendingName.length,
+        });
         await AsyncStorage.setItem('active_competition', JSON.stringify(fallback[0]));
         setActiveCompetition(fallback[0]);
       }
     }
+  };
+
+  const handleCompetitionPhaseSelect = (phase: 'POULE' | 'DE') => {
+    if (competitionPhase === phase) return;
+    setCompetitionPhase(phase);
+    analytics.capture('competition_phase_selected', {
+      phase,
+      competition_id: selectedCompetitionId ?? undefined,
+      weapon_type: weaponType.toLowerCase(),
+      source: 'add_match',
+    });
+  };
+
+  const handleCompetitionRoundSelect = (round: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F') => {
+    if (competitionRound === round) return;
+    setCompetitionRound(round);
+    analytics.capture('competition_de_round_selected', {
+      de_round: round,
+      competition_id: selectedCompetitionId ?? undefined,
+      weapon_type: weaponType.toLowerCase(),
+      source: 'add_match',
+    });
   };
 
   // Track screen view
@@ -759,6 +797,18 @@ export default function AddMatchScreen() {
           match_type: event === 'Training' ? 'training' : 'competition',
           weapon_type: weaponType
         });
+
+        if (event === 'Competition' && selectedCompetitionId) {
+          analytics.capture('competition_match_saved', {
+            competition_id: selectedCompetitionId,
+            phase: competitionPhase,
+            de_round: competitionPhase === 'DE' ? competitionRound : null,
+            weapon_type: weaponType.toLowerCase(),
+            match_id: savedMatch.match_id,
+            is_edit_mode: isEditing,
+            source: 'add_match',
+          });
+        }
 
         if (!isEditing) {
           const winner =
@@ -1959,6 +2009,20 @@ export default function AddMatchScreen() {
                       setCompetitionName(value);
                       setActiveCompetition(null);
                       setShowCompetitionSuggestions(true);
+                      const trimmed = value.trim();
+                      if (trimmed.length < 2) {
+                        lastCompetitionSearchRef.current = '';
+                        return;
+                      }
+                      if (trimmed !== lastCompetitionSearchRef.current) {
+                        lastCompetitionSearchRef.current = trimmed;
+                        analytics.capture('competition_search_typed', {
+                          query_length: trimmed.length,
+                          weapon_type: weaponType.toLowerCase(),
+                          source: 'add_match',
+                          is_edit_mode: isEditMode,
+                        });
+                      }
                     }}
                     placeholder={
                       selectedCompetitionId && !selectedCompetitionName.trim()
@@ -1968,7 +2032,14 @@ export default function AddMatchScreen() {
                           : 'Search or create competition'
                     }
                     placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                    onFocus={() => setShowCompetitionSuggestions(true)}
+                    onFocus={() => {
+                      setShowCompetitionSuggestions(true);
+                      analytics.capture('competition_selector_opened', {
+                        source: 'add_match',
+                        weapon_type: weaponType.toLowerCase(),
+                        is_edit_mode: isEditMode,
+                      });
+                    }}
                     editable={!selectedCompetitionId || !selectedCompetitionName.trim()}
                   />
                   {!selectedCompetitionId && competitionName.trim().length > 0 && (
@@ -1994,7 +2065,7 @@ export default function AddMatchScreen() {
                     styles.phaseOption,
                     competitionPhase === 'POULE' && styles.phaseOptionActive,
                   ]}
-                  onPress={() => setCompetitionPhase('POULE')}
+                  onPress={() => handleCompetitionPhaseSelect('POULE')}
                   activeOpacity={0.8}
                 >
                   <Text
@@ -2011,7 +2082,7 @@ export default function AddMatchScreen() {
                     styles.phaseOption,
                     competitionPhase === 'DE' && styles.phaseOptionActive,
                   ]}
-                  onPress={() => setCompetitionPhase('DE')}
+                  onPress={() => handleCompetitionPhaseSelect('DE')}
                   activeOpacity={0.8}
                 >
                   <Text
@@ -2043,7 +2114,7 @@ export default function AddMatchScreen() {
                         styles.roundChip,
                         isActive && styles.roundChipActive,
                       ]}
-                      onPress={() => setCompetitionRound(round)}
+                      onPress={() => handleCompetitionRoundSelect(round)}
                       activeOpacity={0.8}
                       disabled={competitionPhase !== 'DE'}
                     >
@@ -2070,6 +2141,12 @@ export default function AddMatchScreen() {
                         setSelectedCompetitionName(activeCompetition.name);
                         setCompetitionName('');
                         setShowCompetitionSuggestions(false);
+                        analytics.capture('competition_suggestion_selected', {
+                          competition_id: activeCompetition.competition_id,
+                          weapon_type: activeCompetition.weapon_type,
+                          event_date: activeCompetition.event_date,
+                          source: 'recent',
+                        });
                     }}
                   >
                       <View style={styles.competitionSuggestionRow}>
@@ -2096,6 +2173,12 @@ export default function AddMatchScreen() {
                           setSelectedCompetitionName(comp.name);
                           setCompetitionName('');
                           setShowCompetitionSuggestions(false);
+                          analytics.capture('competition_suggestion_selected', {
+                            competition_id: comp.competition_id,
+                            weapon_type: comp.weapon_type,
+                            event_date: comp.event_date,
+                            source: 'suggestion',
+                          });
                         }}
                       >
                         <View style={styles.competitionSuggestionRow}>

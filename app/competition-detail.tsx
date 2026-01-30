@@ -1,12 +1,17 @@
 import { BackButton } from '@/components/BackButton';
 import { LossPill } from '@/components/LossPill';
 import { WinPill } from '@/components/WinPill';
+import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { competitionService, matchService } from '@/lib/database';
 import { Competition, SimpleMatch } from '@/types/database';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type CompetitionMatch = SimpleMatch;
@@ -31,6 +36,7 @@ const roundOrder: Record<string, number> = {
 };
 
 export default function CompetitionDetailScreen() {
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { user, session, userName } = useAuth();
   const params = useLocalSearchParams();
@@ -50,8 +56,15 @@ export default function CompetitionDetailScreen() {
   const [draftWeapon, setDraftWeapon] = useState<Competition['weapon_type']>('foil');
   const [draftPlacement, setDraftPlacement] = useState('');
   const [draftFieldSize, setDraftFieldSize] = useState('');
-  const [draftPreNotes, setDraftPreNotes] = useState('');
   const [draftPostNotes, setDraftPostNotes] = useState('');
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [tempNotes, setTempNotes] = useState('');
+  const [showListFormatMenu, setShowListFormatMenu] = useState(false);
+  const [activeListFormat, setActiveListFormat] = useState<'bullet' | 'dash' | 'number' | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerValue, setDatePickerValue] = useState<Date>(new Date());
+  const hasTrackedDetailViewRef = useRef(false);
+  const postNotesEditedRef = useRef(false);
 
   const formatDate = (dateString?: string | null): string => {
     if (!dateString) return '—';
@@ -101,6 +114,31 @@ export default function CompetitionDetailScreen() {
     return `${formatOrdinal(placement)} / ${fieldSize} (${percentile}%)`;
   };
 
+  const formatDateInputValue = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const parseDraftDateToLocal = (value: string): Date | null => {
+    const normalized = normalizeDateInput(value);
+    if (!normalized) return null;
+    const [yearStr, monthStr, dayStr] = normalized.split('-');
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+  };
+
+  const formatDraftDateDisplay = (value: string): string => {
+    const normalized = normalizeDateInput(value);
+    if (!normalized) return value || 'Select date';
+    const [year, month, day] = normalized.split('-');
+    return `${day}/${month}/${year}`;
+  };
+
   const normalizeDateInput = (value: string): string | null => {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -124,8 +162,7 @@ export default function CompetitionDetailScreen() {
     setDraftWeapon(data.weapon_type ?? 'foil');
     setDraftPlacement(data.placement ? String(data.placement) : '');
     setDraftFieldSize(data.field_size ? String(data.field_size) : '');
-    setDraftPreNotes(data.pre_competition_notes ?? '');
-    setDraftPostNotes(data.post_competition_notes ?? '');
+    setDraftPostNotes(data.post_competition_notes ?? data.pre_competition_notes ?? '');
   };
 
   const getMatchTimestamp = (match: CompetitionMatch): number => {
@@ -175,6 +212,17 @@ export default function CompetitionDetailScreen() {
       isMounted = false;
     };
   }, [competitionId, user?.id, session?.access_token, userName]);
+
+  useEffect(() => {
+    if (!competition || hasTrackedDetailViewRef.current) return;
+    analytics.capture('competition_detail_viewed', {
+      competition_id: competition.competition_id,
+      weapon_type: competition.weapon_type,
+      competition_type: competition.type,
+      source: 'competition_detail',
+    });
+    hasTrackedDetailViewRef.current = true;
+  }, [competition]);
 
   useEffect(() => {
     if (competition && !isEditing) {
@@ -288,10 +336,280 @@ export default function CompetitionDetailScreen() {
     );
   };
 
+  const modalStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        modalOverlay: {
+          flex: 1,
+          backgroundColor: 'rgba(0, 0, 0, 0.95)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: width * 0.025,
+        },
+        modalContainer: {
+          width: width * 0.95,
+          maxWidth: width * 0.95,
+        },
+        modalContent: {
+          borderRadius: width * 0.04,
+          padding: width * 0.05,
+          borderWidth: 1,
+          borderColor: 'rgba(153, 128, 255, 0.15)',
+          overflow: 'hidden',
+        },
+        modalHeader: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: height * 0.02,
+        },
+        modalHeaderActions: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: width * 0.02,
+        },
+        modalTitle: {
+          fontSize: Math.round(width * 0.06),
+          fontWeight: '700',
+          color: 'white',
+        },
+        closeButton: {
+          width: width * 0.08,
+          height: width * 0.08,
+          borderRadius: width * 0.04,
+          backgroundColor: '#404040',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        listFormatButton: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: width * 0.01,
+          paddingHorizontal: width * 0.02,
+          paddingVertical: height * 0.008,
+          borderRadius: width * 0.02,
+          borderWidth: 1,
+          borderColor: 'rgba(200, 166, 255, 0.6)',
+          backgroundColor: 'rgba(139, 92, 246, 0.2)',
+        },
+        listFormatButtonActive: {
+          backgroundColor: 'rgba(139, 92, 246, 0.35)',
+          borderColor: 'rgba(200, 166, 255, 0.9)',
+        },
+        listFormatButtonText: {
+          color: 'white',
+          fontSize: width * 0.035,
+          fontWeight: '600',
+        },
+        inputContainer: {
+          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+          borderRadius: width * 0.02,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          minHeight: height * 0.25,
+          marginBottom: height * 0.02,
+        },
+        listFormatMenu: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: width * 0.02,
+          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+          borderRadius: width * 0.02,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 255, 255, 0.12)',
+          marginBottom: height * 0.02,
+          paddingVertical: height * 0.01,
+          paddingHorizontal: width * 0.02,
+          flexWrap: 'nowrap',
+        },
+        listFormatOption: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: width * 0.01,
+          paddingHorizontal: width * 0.025,
+          paddingVertical: height * 0.008,
+          borderRadius: width * 0.02,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          backgroundColor: 'rgba(20, 20, 24, 0.45)',
+        },
+        listFormatOptionActive: {
+          backgroundColor: 'rgba(139, 92, 246, 0.28)',
+          borderColor: 'rgba(200, 166, 255, 0.85)',
+        },
+        listFormatOptionIcon: {
+          color: 'white',
+          fontSize: width * 0.04,
+          fontWeight: '700',
+        },
+        listFormatOptionText: {
+          color: 'white',
+          fontSize: width * 0.034,
+          fontWeight: '600',
+        },
+        listFormatOptionTextActive: {
+          color: '#E9D7FF',
+        },
+        textInput: {
+          color: 'white',
+          fontSize: Math.round(width * 0.04),
+          padding: width * 0.03,
+          textAlignVertical: 'top',
+          minHeight: height * 0.25,
+        },
+        modalFooter: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        },
+        characterCount: {
+          color: 'rgba(255, 255, 255, 0.6)',
+          fontSize: Math.round(width * 0.035),
+        },
+        buttonContainer: {
+          flexDirection: 'row',
+          gap: width * 0.02,
+        },
+        cancelButton: {
+          paddingHorizontal: width * 0.05,
+          paddingVertical: height * 0.012,
+          borderRadius: width * 0.02,
+          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        },
+        cancelButtonText: {
+          color: 'white',
+          fontWeight: '600',
+        },
+        saveButton: {
+          paddingHorizontal: width * 0.05,
+          paddingVertical: height * 0.012,
+          borderRadius: width * 0.02,
+          backgroundColor: Colors.purple.primary,
+        },
+        saveButtonText: {
+          color: 'white',
+          fontWeight: '600',
+        },
+      }),
+    [height, width]
+  );
+
   const handleCancelEdit = () => {
     setIsEditing(false);
     setErrorMessage(null);
     applyCompetitionToDraft(competition);
+    postNotesEditedRef.current = false;
+  };
+
+  const openNotesModal = () => {
+    setTempNotes(draftPostNotes);
+    setShowListFormatMenu(false);
+    setActiveListFormat(null);
+    setShowNotesModal(true);
+  };
+
+  const handleNotesChange = (value: string) => {
+    if (value.length > tempNotes.length) {
+      const lastChar = value.slice(-1);
+      if (lastChar === '\n') {
+        const lines = value.split('\n');
+        const prevLine = lines[lines.length - 2] ?? '';
+        const bulletMatch = prevLine.match(/^(\s*)([-•])\s+/);
+        if (bulletMatch) {
+          const indent = bulletMatch[1] ?? '';
+          const bullet = bulletMatch[2] ?? '-';
+          const prefix = `${indent}${bullet} `;
+          setTempNotes(value + prefix);
+          return;
+        }
+        const numberMatch = prevLine.match(/^(\s*)(\d+)\.\s+/);
+        if (numberMatch) {
+          const indent = numberMatch[1] ?? '';
+          const number = parseInt(numberMatch[2], 10);
+          if (Number.isFinite(number)) {
+            const nextNumber = number + 1;
+            setTempNotes(value + `${indent}${nextNumber}. `);
+            return;
+          }
+        }
+      }
+    }
+    setTempNotes(value);
+    const baseline = (competition?.post_competition_notes ?? competition?.pre_competition_notes ?? '').trim();
+    if (!postNotesEditedRef.current && value.trim() !== baseline) {
+      postNotesEditedRef.current = true;
+      analytics.capture('competition_notes_edited', {
+        competition_id: competitionId,
+        note_type: 'competition',
+        source: 'competition_detail',
+      });
+    }
+  };
+
+  const handleNotesModalSave = () => {
+    setDraftPostNotes(tempNotes);
+    setShowListFormatMenu(false);
+    setActiveListFormat(null);
+    setShowNotesModal(false);
+  };
+
+  const handleNotesModalCancel = () => {
+    setTempNotes(draftPostNotes);
+    setShowListFormatMenu(false);
+    setActiveListFormat(null);
+    setShowNotesModal(false);
+  };
+
+  const insertListPrefix = (type: 'bullet' | 'dash' | 'number') => {
+    const prefix = type === 'number' ? '1. ' : type === 'dash' ? '- ' : '• ';
+    setTempNotes(prev => {
+      if (!prev) return prefix;
+      if (prev.endsWith('\n') || prev.endsWith(' ')) {
+        return prev + prefix;
+      }
+      return `${prev}\n${prefix}`;
+    });
+    setActiveListFormat(type);
+    setShowListFormatMenu(false);
+  };
+
+  const listFormatSuffix =
+    activeListFormat === 'number'
+      ? '1.'
+      : activeListFormat === 'dash'
+        ? '-'
+        : activeListFormat === 'bullet'
+          ? '•'
+          : '';
+
+  const openDatePicker = () => {
+    const parsed = parseDraftDateToLocal(draftDate);
+    const fallback = competition?.event_date ? new Date(competition.event_date) : null;
+    setDatePickerValue(parsed ?? fallback ?? new Date());
+    setShowDatePicker(true);
+  };
+
+  const handleDateChange = (event: { type?: string }, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (event?.type === 'dismissed') {
+      return;
+    }
+    const nextDate = selectedDate ?? datePickerValue;
+    setDatePickerValue(nextDate);
+    if (Platform.OS === 'android') {
+      setDraftDate(formatDateInputValue(nextDate));
+    }
+  };
+
+  const handleDateModalSave = () => {
+    setDraftDate(formatDateInputValue(datePickerValue));
+    setShowDatePicker(false);
+  };
+
+  const handleDateModalCancel = () => {
+    setShowDatePicker(false);
   };
 
   const handleSave = async () => {
@@ -324,6 +642,9 @@ export default function CompetitionDetailScreen() {
       return;
     }
 
+    const baselineNotes = (competition?.post_competition_notes ?? competition?.pre_competition_notes ?? '').trim();
+    const notesChanged = draftPostNotes.trim() !== baselineNotes;
+
     setIsSaving(true);
     try {
       const updated = await competitionService.updateCompetition(
@@ -336,7 +657,6 @@ export default function CompetitionDetailScreen() {
           type_label: draftType === 'Other' ? (draftTypeLabel.trim() || null) : null,
           placement: placementValue,
           field_size: fieldSizeValue,
-          pre_competition_notes: draftPreNotes.trim() || null,
           post_competition_notes: draftPostNotes.trim() || null,
           updated_at: new Date().toISOString(),
         },
@@ -346,6 +666,14 @@ export default function CompetitionDetailScreen() {
       if (!updated) {
         setErrorMessage('Failed to save changes. Please try again.');
         return;
+      }
+
+      if (notesChanged) {
+        analytics.capture('competition_notes_saved', {
+          competition_id: competitionId,
+          post_changed: notesChanged,
+          source: 'competition_detail',
+        });
       }
 
       setCompetition(updated);
@@ -394,7 +722,13 @@ export default function CompetitionDetailScreen() {
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.headerActionButton}>
+            <TouchableOpacity
+              onPress={() => {
+                postNotesEditedRef.current = false;
+                setIsEditing(true);
+              }}
+              style={styles.headerActionButton}
+            >
               <Text style={styles.headerActionText}>Edit</Text>
             </TouchableOpacity>
           )}
@@ -438,13 +772,21 @@ export default function CompetitionDetailScreen() {
                 <View style={styles.editRow}>
                   <View style={styles.editColumn}>
                     <Text style={styles.inputLabel}>Date</Text>
-                    <TextInput
-                      value={draftDate}
-                      onChangeText={setDraftDate}
-                      style={styles.input}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                    />
+                    <TouchableOpacity
+                      style={[styles.input, styles.dateInput]}
+                      activeOpacity={0.8}
+                      onPress={openDatePicker}
+                    >
+                      <Text
+                        style={[
+                          styles.dateInputText,
+                          !draftDate.trim() && styles.dateInputPlaceholder,
+                        ]}
+                      >
+                        {formatDraftDateDisplay(draftDate)}
+                      </Text>
+                      <Ionicons name="calendar" size={16} color="rgba(255,255,255,0.7)" />
+                    </TouchableOpacity>
                   </View>
                   <View style={styles.editColumn}>
                     <Text style={styles.inputLabel}>Type</Text>
@@ -576,38 +918,27 @@ export default function CompetitionDetailScreen() {
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Competition Notes</Text>
               <View style={styles.notesBlock}>
-                <Text style={styles.notesLabel}>Pre-Competition Notes</Text>
                 {isEditing ? (
-                  <TextInput
-                    value={draftPreNotes}
-                    onChangeText={setDraftPreNotes}
-                    style={[styles.input, styles.notesInput]}
-                    placeholder="Add notes..."
-                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                    multiline
-                    textAlignVertical="top"
-                  />
+                  <TouchableOpacity
+                    style={[styles.input, styles.notesInput, styles.notesInputTrigger]}
+                    activeOpacity={0.8}
+                    onPress={openNotesModal}
+                  >
+                    <Text
+                      style={[
+                        styles.notesInputText,
+                        !draftPostNotes.trim() && styles.notesInputPlaceholder,
+                      ]}
+                      numberOfLines={4}
+                    >
+                      {draftPostNotes.trim() ? draftPostNotes : 'Add notes...'}
+                    </Text>
+                  </TouchableOpacity>
                 ) : (
                   <Text style={styles.notesText}>
-                    {competition?.pre_competition_notes?.trim() || 'No notes yet.'}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.notesBlock}>
-                <Text style={styles.notesLabel}>Post-Competition Notes</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={draftPostNotes}
-                    onChangeText={setDraftPostNotes}
-                    style={[styles.input, styles.notesInput]}
-                    placeholder="Add notes..."
-                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                    multiline
-                    textAlignVertical="top"
-                  />
-                ) : (
-                  <Text style={styles.notesText}>
-                    {competition?.post_competition_notes?.trim() || 'No notes yet.'}
+                    {competition?.post_competition_notes?.trim() ||
+                      competition?.pre_competition_notes?.trim() ||
+                      'No notes yet.'}
                   </Text>
                 )}
               </View>
@@ -615,6 +946,195 @@ export default function CompetitionDetailScreen() {
           </>
         )}
       </ScrollView>
+
+      {showDatePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={datePickerValue}
+          mode="date"
+          display="calendar"
+          onChange={handleDateChange}
+        />
+      )}
+
+      <Modal
+        visible={showNotesModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleNotesModalCancel}
+      >
+        <View style={modalStyles.modalOverlay}>
+          <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
+            <View style={modalStyles.modalContainer}>
+                <LinearGradient
+                  colors={['#2A2A2A', '#2A2A2A']}
+                  style={modalStyles.modalContent}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                <View style={modalStyles.modalHeader}>
+                  <Text style={modalStyles.modalTitle}>Competition Notes</Text>
+                  <View style={modalStyles.modalHeaderActions}>
+                    <TouchableOpacity
+                      onPress={() => setShowListFormatMenu(prev => !prev)}
+                      style={[
+                        modalStyles.listFormatButton,
+                        activeListFormat && modalStyles.listFormatButtonActive,
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="list" size={18} color="white" />
+                      <Text style={modalStyles.listFormatButtonText}>
+                        {listFormatSuffix ? `List ${listFormatSuffix}` : 'List'}
+                      </Text>
+                      <Ionicons
+                        name={showListFormatMenu ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color="white"
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleNotesModalCancel} style={modalStyles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {showListFormatMenu && (
+                  <View style={modalStyles.listFormatMenu}>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.listFormatOption,
+                        activeListFormat === 'bullet' && modalStyles.listFormatOptionActive,
+                      ]}
+                      onPress={() => insertListPrefix('bullet')}
+                    >
+                      <Text style={modalStyles.listFormatOptionIcon}>•</Text>
+                      <Text
+                        style={[
+                          modalStyles.listFormatOptionText,
+                          activeListFormat === 'bullet' && modalStyles.listFormatOptionTextActive,
+                        ]}
+                      >
+                        Bullet
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.listFormatOption,
+                        activeListFormat === 'dash' && modalStyles.listFormatOptionActive,
+                      ]}
+                      onPress={() => insertListPrefix('dash')}
+                    >
+                      <Text style={modalStyles.listFormatOptionIcon}>-</Text>
+                      <Text
+                        style={[
+                          modalStyles.listFormatOptionText,
+                          activeListFormat === 'dash' && modalStyles.listFormatOptionTextActive,
+                        ]}
+                      >
+                        Dash
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.listFormatOption,
+                        activeListFormat === 'number' && modalStyles.listFormatOptionActive,
+                      ]}
+                      onPress={() => insertListPrefix('number')}
+                    >
+                      <Text style={modalStyles.listFormatOptionIcon}>1.</Text>
+                      <Text
+                        style={[
+                          modalStyles.listFormatOptionText,
+                          activeListFormat === 'number' && modalStyles.listFormatOptionTextActive,
+                        ]}
+                      >
+                        Numbered
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                <View style={modalStyles.inputContainer}>
+                  <TextInput
+                    style={modalStyles.textInput}
+                    value={tempNotes}
+                    onChangeText={handleNotesChange}
+                    placeholder="Add notes..."
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    multiline
+                    maxLength={500}
+                    autoFocus
+                  />
+                </View>
+
+                <View style={modalStyles.modalFooter}>
+                  <Text style={modalStyles.characterCount}>{tempNotes.length}/500</Text>
+                  <View style={modalStyles.buttonContainer}>
+                    <TouchableOpacity onPress={handleNotesModalCancel} style={modalStyles.cancelButton}>
+                      <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleNotesModalSave} style={modalStyles.saveButton}>
+                      <Text style={modalStyles.saveButtonText}>Save</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </LinearGradient>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={showDatePicker}
+          transparent
+          animationType="slide"
+          onRequestClose={handleDateModalCancel}
+        >
+          <View style={modalStyles.modalOverlay}>
+            <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0}>
+              <View style={modalStyles.modalContainer}>
+                <LinearGradient
+                  colors={['#2A2A2A', '#2A2A2A']}
+                  style={modalStyles.modalContent}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <View style={modalStyles.modalHeader}>
+                    <Text style={modalStyles.modalTitle}>Select Date</Text>
+                    <TouchableOpacity onPress={handleDateModalCancel} style={modalStyles.closeButton}>
+                      <Ionicons name="close" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.datePickerContainer}>
+                    <DateTimePicker
+                      value={datePickerValue}
+                      mode="date"
+                      display="spinner"
+                      onChange={handleDateChange}
+                      themeVariant="dark"
+                      style={styles.datePicker}
+                    />
+                  </View>
+
+                  <View style={modalStyles.modalFooter}>
+                    <View />
+                    <View style={modalStyles.buttonContainer}>
+                      <TouchableOpacity onPress={handleDateModalCancel} style={modalStyles.cancelButton}>
+                        <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleDateModalSave} style={modalStyles.saveButton}>
+                        <Text style={modalStyles.saveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </LinearGradient>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -940,5 +1460,39 @@ const styles = StyleSheet.create({
   },
   notesInput: {
     minHeight: 80,
+  },
+  notesInputTrigger: {
+    justifyContent: 'center',
+  },
+  notesInputText: {
+    color: 'white',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  notesInputPlaceholder: {
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dateInputText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dateInputPlaceholder: {
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  datePickerContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    marginBottom: 16,
+  },
+  datePicker: {
+    width: '100%',
   },
 });

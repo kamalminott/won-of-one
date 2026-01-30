@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
     Animated,
     Dimensions,
@@ -113,6 +113,12 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
 
   // Limit to maxItems maximum
   const displayItems = items.slice(0, maxItems);
+  const itemsKey = displayItems.map(item => item.id).join('|');
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    translateX.setValue(0);
+  }, [itemsKey, translateX]);
 
   const panResponder = PanResponder.create({
     onMoveShouldSetPanResponder: (evt, gestureState) => {

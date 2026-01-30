@@ -44,6 +44,9 @@ export default function MatchSummaryScreen() {
   const [loading, setLoading] = useState(true);
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notes, setNotes] = useState('');
+  const [showListFormatMenu, setShowListFormatMenu] = useState(false);
+  const [activeListFormat, setActiveListFormat] = useState<'bullet' | 'dash' | 'number' | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [userProfileImage, setUserProfileImage] = useState<string | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
   const [completedGoal, setCompletedGoal] = useState<any>(null);
@@ -71,6 +74,15 @@ export default function MatchSummaryScreen() {
   // Load user profile data
   useEffect(() => {
     loadUserProfileData();
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setIsKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
 
@@ -880,6 +892,8 @@ export default function MatchSummaryScreen() {
   };
 
   const handleNotesPress = () => {
+    setActiveListFormat(null);
+    setShowListFormatMenu(false);
     setShowNotesModal(true);
   };
 
@@ -925,8 +939,55 @@ export default function MatchSummaryScreen() {
   };
 
   const handleNotesChange = (text: string) => {
+    if (text.length > notes.length) {
+      const lastChar = text.slice(-1);
+      if (lastChar === '\n') {
+        const lines = text.split('\n');
+        const prevLine = lines[lines.length - 2] ?? '';
+        const bulletMatch = prevLine.match(/^(\s*)([-•])\s+/);
+        if (bulletMatch) {
+          const indent = bulletMatch[1] ?? '';
+          const bullet = bulletMatch[2] ?? '-';
+          const prefix = `${indent}${bullet} `;
+          setNotes(text + prefix);
+          return;
+        }
+        const numberMatch = prevLine.match(/^(\s*)(\d+)\.\s+/);
+        if (numberMatch) {
+          const indent = numberMatch[1] ?? '';
+          const number = parseInt(numberMatch[2], 10);
+          if (Number.isFinite(number)) {
+            const nextNumber = number + 1;
+            setNotes(text + `${indent}${nextNumber}. `);
+            return;
+          }
+        }
+      }
+    }
     setNotes(text);
   };
+
+  const insertListPrefix = (type: 'bullet' | 'dash' | 'number') => {
+    const prefix = type === 'number' ? '1. ' : type === 'dash' ? '- ' : '• ';
+    setNotes(prev => {
+      if (!prev) return prefix;
+      if (prev.endsWith('\n') || prev.endsWith(' ')) {
+        return prev + prefix;
+      }
+      return `${prev}\n${prefix}`;
+    });
+    setActiveListFormat(type);
+    setShowListFormatMenu(false);
+  };
+
+  const listFormatSuffix =
+    activeListFormat === 'number'
+      ? '1.'
+      : activeListFormat === 'dash'
+        ? '-'
+        : activeListFormat === 'bullet'
+          ? '•'
+          : '';
 
   const handleSaveNotes = async () => {
     if (match?.match_id) {
@@ -940,10 +1001,14 @@ export default function MatchSummaryScreen() {
         console.error('❌ Error saving notes:', error);
       }
     }
+    setActiveListFormat(null);
+    setShowListFormatMenu(false);
     setShowNotesModal(false);
   };
 
   const handleCancelNotes = () => {
+    setActiveListFormat(null);
+    setShowListFormatMenu(false);
     setShowNotesModal(false);
   };
 
@@ -1573,6 +1638,11 @@ export default function MatchSummaryScreen() {
       alignItems: 'center',
       marginBottom: height * 0.02,
     },
+    modalHeaderActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.02,
+    },
     modalTitle: {
       fontSize: Math.round(width * 0.06),
       fontWeight: '700',
@@ -1586,6 +1656,26 @@ export default function MatchSummaryScreen() {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    listFormatButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.01,
+      paddingHorizontal: width * 0.02,
+      paddingVertical: height * 0.008,
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(200, 166, 255, 0.6)',
+      backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    },
+    listFormatButtonActive: {
+      backgroundColor: 'rgba(139, 92, 246, 0.35)',
+      borderColor: 'rgba(200, 166, 255, 0.9)',
+    },
+    listFormatButtonText: {
+      color: 'white',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+    },
     inputContainer: {
       backgroundColor: 'rgba(255, 255, 255, 0.1)',
       borderRadius: width * 0.02,
@@ -1593,6 +1683,47 @@ export default function MatchSummaryScreen() {
       borderColor: 'rgba(255, 255, 255, 0.2)',
       minHeight: height * 0.25,
       marginBottom: height * 0.02,
+    },
+    listFormatMenu: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.02,
+      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      marginBottom: height * 0.02,
+      paddingVertical: height * 0.01,
+      paddingHorizontal: width * 0.02,
+      flexWrap: 'nowrap',
+    },
+    listFormatOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.01,
+      paddingHorizontal: width * 0.025,
+      paddingVertical: height * 0.008,
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.2)',
+      backgroundColor: 'rgba(20, 20, 24, 0.45)',
+    },
+    listFormatOptionActive: {
+      backgroundColor: 'rgba(139, 92, 246, 0.28)',
+      borderColor: 'rgba(200, 166, 255, 0.85)',
+    },
+    listFormatOptionIcon: {
+      color: 'white',
+      fontSize: width * 0.04,
+      fontWeight: '700',
+    },
+    listFormatOptionText: {
+      color: 'white',
+      fontSize: width * 0.034,
+      fontWeight: '600',
+    },
+    listFormatOptionTextActive: {
+      color: '#E9D7FF',
     },
     textInput: {
       color: 'white',
@@ -1782,8 +1913,17 @@ export default function MatchSummaryScreen() {
         >
           <KeyboardAvoidingView 
             behavior="padding"
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50}
-            style={{ flex: 1, justifyContent: 'center' }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            style={{
+              flex: 1,
+              justifyContent:
+                Platform.OS === 'android'
+                  ? isKeyboardVisible
+                    ? 'flex-end'
+                    : 'center'
+                  : 'center',
+              paddingBottom: Platform.OS === 'android' && isKeyboardVisible ? height * 0.015 : 0,
+            }}
           >
             <TouchableOpacity activeOpacity={1}>
               <View style={styles.modalContainer}>
@@ -1795,11 +1935,87 @@ export default function MatchSummaryScreen() {
                 >
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>Match Notes</Text>
-                    <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
-                      <Ionicons name="close" size={24} color="white" />
-                    </TouchableOpacity>
+                    <View style={styles.modalHeaderActions}>
+                      <TouchableOpacity
+                        onPress={() => setShowListFormatMenu(prev => !prev)}
+                        style={[
+                          styles.listFormatButton,
+                          activeListFormat && styles.listFormatButtonActive,
+                        ]}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="list" size={18} color="white" />
+                        <Text style={styles.listFormatButtonText}>
+                          {listFormatSuffix ? `List ${listFormatSuffix}` : 'List'}
+                        </Text>
+                        <Ionicons
+                          name={showListFormatMenu ? 'chevron-up' : 'chevron-down'}
+                          size={16}
+                          color="white"
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleCancelNotes} style={styles.closeButton}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   
+                  {showListFormatMenu && (
+                    <View style={styles.listFormatMenu}>
+                      <TouchableOpacity
+                        style={[
+                          styles.listFormatOption,
+                          activeListFormat === 'bullet' && styles.listFormatOptionActive,
+                        ]}
+                        onPress={() => insertListPrefix('bullet')}
+                      >
+                        <Text style={styles.listFormatOptionIcon}>•</Text>
+                        <Text
+                          style={[
+                            styles.listFormatOptionText,
+                            activeListFormat === 'bullet' && styles.listFormatOptionTextActive,
+                          ]}
+                        >
+                          Bullet
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.listFormatOption,
+                          activeListFormat === 'dash' && styles.listFormatOptionActive,
+                        ]}
+                        onPress={() => insertListPrefix('dash')}
+                      >
+                        <Text style={styles.listFormatOptionIcon}>-</Text>
+                        <Text
+                          style={[
+                            styles.listFormatOptionText,
+                            activeListFormat === 'dash' && styles.listFormatOptionTextActive,
+                          ]}
+                        >
+                          Dash
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.listFormatOption,
+                          activeListFormat === 'number' && styles.listFormatOptionActive,
+                        ]}
+                        onPress={() => insertListPrefix('number')}
+                      >
+                        <Text style={styles.listFormatOptionIcon}>1.</Text>
+                        <Text
+                          style={[
+                            styles.listFormatOptionText,
+                            activeListFormat === 'number' && styles.listFormatOptionTextActive,
+                          ]}
+                        >
+                          Numbered
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
                   <View style={styles.inputContainer}>
                     <TextInput
                       style={styles.textInput}
