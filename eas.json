@@ -2,6 +2,7 @@
   "cli": {
     "version": ">= 16.18.0",
     "appVersionSource": "local",
+    "requireCommit": true,
     "promptToConfigurePushNotifications": false
   },
   "build": {
