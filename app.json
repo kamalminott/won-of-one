@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kamalminott.wonofone",
-      "buildNumber": "4.4.6",
+      "buildNumber": "447",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "com.kamalminott.wonofone",
-      "versionCode": 446,
+      "versionCode": 447,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
