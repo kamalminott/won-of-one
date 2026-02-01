@@ -41,6 +41,7 @@ export default function CompetitionDetailScreen() {
   const { user, session, userName } = useAuth();
   const params = useLocalSearchParams();
   const competitionId = typeof params.competitionId === 'string' ? params.competitionId : '';
+  const refreshKey = typeof params.refreshAt === 'string' ? params.refreshAt : '';
 
   const [competition, setCompetition] = useState<Competition | null>(null);
   const [matches, setMatches] = useState<CompetitionMatch[]>([]);
@@ -211,7 +212,7 @@ export default function CompetitionDetailScreen() {
     return () => {
       isMounted = false;
     };
-  }, [competitionId, user?.id, session?.access_token, userName]);
+  }, [competitionId, refreshKey, user?.id, session?.access_token, userName]);
 
   useEffect(() => {
     if (!competition || hasTrackedDetailViewRef.current) return;
@@ -262,6 +263,14 @@ export default function CompetitionDetailScreen() {
       round,
       matches: roundMatches.sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a)),
     }));
+  }, [matches]);
+
+  const latestMatch = useMemo(() => {
+    if (matches.length === 0) return null;
+    return matches.reduce((latest, match) => {
+      if (!latest) return match;
+      return getMatchTimestamp(match) > getMatchTimestamp(latest) ? match : latest;
+    }, null as CompetitionMatch | null);
   }, [matches]);
 
   const renderMatchRow = (match: CompetitionMatch, pillLabel: string) => {
@@ -612,6 +621,26 @@ export default function CompetitionDetailScreen() {
     setShowDatePicker(false);
   };
 
+  const handleAddMatch = () => {
+    if (!competition) return;
+    const phase = latestMatch?.competitionPhase === 'DE' ? 'DE' : 'POULE';
+    const deRound = latestMatch?.competitionRound || undefined;
+    router.push({
+      pathname: '/add-match',
+      params: {
+        eventType: 'Competition',
+        competitionId: competition.competition_id,
+        competitionName: competition.name ?? '',
+        competitionWeaponType: competition.weapon_type ?? '',
+        eventDate: competition.event_date ?? '',
+        lockCompetition: 'true',
+        phase,
+        deRound: deRound ?? '',
+        returnToCompetitionId: competition.competition_id,
+      },
+    });
+  };
+
   const handleSave = async () => {
     if (!competitionId) return;
     setErrorMessage(null);
@@ -890,7 +919,17 @@ export default function CompetitionDetailScreen() {
             </View>
 
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Fight Breakdown</Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Competition Breakdown</Text>
+                <TouchableOpacity
+                  style={styles.addMatchButton}
+                  onPress={handleAddMatch}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="add" size={16} color="#E9D7FF" />
+                  <Text style={styles.addMatchButtonText}>Add Match</Text>
+                </TouchableOpacity>
+              </View>
 
               {pouleMatches.length > 0 && (
                 <View style={styles.sectionBlock}>
@@ -1471,6 +1510,28 @@ const styles = StyleSheet.create({
   },
   notesInputPlaceholder: {
     color: 'rgba(255, 255, 255, 0.5)',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  addMatchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.6)',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  addMatchButtonText: {
+    color: '#E9D7FF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   dateInput: {
     flexDirection: 'row',

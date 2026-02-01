@@ -279,15 +279,58 @@ export default function RecentMatchesScreen() {
     return date.getTime();
   };
 
+  const normalizeQuery = (value: string) => value.trim().toLowerCase();
+
+  const buildHighlightChunks = (text: string, query: string) => {
+    if (!query) return [{ text, highlight: false }];
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'gi');
+    const chunks: { text: string; highlight: boolean }[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (start > lastIndex) {
+        chunks.push({ text: text.slice(lastIndex, start), highlight: false });
+      }
+      chunks.push({ text: text.slice(start, end), highlight: true });
+      lastIndex = end;
+    }
+    if (lastIndex < text.length) {
+      chunks.push({ text: text.slice(lastIndex), highlight: false });
+    }
+    return chunks;
+  };
+
+  const getNotesSnippet = (match: Match, query: string) => {
+    const noteText = (match.notes || '').trim();
+    if (!noteText || !query) return null;
+    const lowerNote = noteText.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const idx = lowerNote.indexOf(lowerQuery);
+    if (idx === -1) return null;
+    const windowRadius = 80;
+    const start = Math.max(0, idx - windowRadius);
+    const end = Math.min(noteText.length, idx + lowerQuery.length + windowRadius);
+    let snippet = noteText.slice(start, end).replace(/\s+/g, ' ').trim();
+    if (start > 0) snippet = `…${snippet}`;
+    if (end < noteText.length) snippet = `${snippet}…`;
+    return buildHighlightChunks(snippet, query);
+  };
+
   // Filter matches based on search query, selected type, win/loss, and date range
   const filterMatches = () => {
     let filtered = allMatches;
 
-    // Filter by search query (opponent name)
-    if (searchQuery.trim() !== '') {
-      filtered = filtered.filter(match => 
-        match.opponentName.toLowerCase().includes(searchQuery.toLowerCase().trim())
-      );
+    // Filter by search query (opponent name + notes)
+    const query = normalizeQuery(searchQuery);
+    if (query !== '') {
+      filtered = filtered.filter(match => {
+        const opponentMatch = match.opponentName.toLowerCase().includes(query);
+        const notesMatch = (match.notes || '').toLowerCase().includes(query);
+        return opponentMatch || notesMatch;
+      });
     }
 
     // Filter by type
@@ -602,6 +645,8 @@ export default function RecentMatchesScreen() {
   const renderCompetitionMatchRow = (match: Match, showRound: boolean) => {
     const initials = getInitials(match.opponentName);
     const scoreText = `${match.playerScore} - ${match.opponentScore}`;
+    const query = normalizeQuery(searchQuery);
+    const notesSnippet = getNotesSnippet(match, query);
     return (
       <TouchableOpacity
         key={match.id}
@@ -625,6 +670,18 @@ export default function RecentMatchesScreen() {
             <Text style={styles.competitionMatchMeta}>
               {match.date}{match.time ? ` · ${match.time}` : ''}
             </Text>
+            {notesSnippet && (
+              <Text style={styles.matchNotesSnippet} numberOfLines={2}>
+                {notesSnippet.map((chunk, index) => (
+                  <Text
+                    key={`${match.id}-note-${index}`}
+                    style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
+                  >
+                    {chunk.text}
+                  </Text>
+                ))}
+              </Text>
+            )}
           </View>
         </View>
         <View style={styles.competitionMatchRight}>
@@ -963,6 +1020,19 @@ export default function RecentMatchesScreen() {
       fontSize: width * 0.03,
       color: 'rgba(255, 255, 255, 0.55)',
       marginTop: height * 0.002,
+    },
+    matchNotesSnippet: {
+      marginTop: height * 0.006,
+      fontSize: width * 0.03,
+      color: 'rgba(255, 255, 255, 0.65)',
+      lineHeight: height * 0.022,
+    },
+    matchNotesText: {
+      color: 'rgba(255, 255, 255, 0.65)',
+    },
+    matchNotesHighlight: {
+      color: '#C9A3FF',
+      fontWeight: '700',
     },
     competitionMatchRight: {
       alignItems: 'flex-end',
@@ -1483,6 +1553,7 @@ export default function RecentMatchesScreen() {
                 <RecentMatchCard
                   key={match.id}
                   match={match}
+                  notesSnippet={getNotesSnippet(match, normalizeQuery(searchQuery))}
                   onDelete={handleDeleteMatch}
                   editMode={editMode}
                 />

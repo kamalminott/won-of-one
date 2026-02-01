@@ -16,6 +16,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, UIManager, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const DE_ROUNDS: Array<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
+  'L256',
+  'L128',
+  'L64',
+  'L32',
+  'L16',
+  'QF',
+  'SF',
+  'F',
+];
+
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
@@ -110,7 +121,7 @@ export default function AddMatchScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [opponentName, setOpponentName] = useState(params.opponentName as string || '');
-  const [event, setEvent] = useState(params.matchType as string || 'Training');
+  const [event, setEvent] = useState((params.eventType as string) || (params.matchType as string) || 'Training');
   const [showEventDropdown, setShowEventDropdown] = useState(false);
   const [weaponType, setWeaponType] = useState('Foil');
   const [showWeaponDropdown, setShowWeaponDropdown] = useState(false);
@@ -137,6 +148,7 @@ export default function AddMatchScreen() {
   const [opponentScore, setOpponentScore] = useState(params.opponentScore as string || '0');
   const [isSaving, setIsSaving] = useState(false);
   const [hasStartedForm, setHasStartedForm] = useState(false);
+  const isCompetitionLocked = params.lockCompetition === 'true';
   
   // Refs and positions for dropdowns (to render outside ScrollView)
   const eventDropdownRef = useRef<View | null>(null);
@@ -155,16 +167,7 @@ export default function AddMatchScreen() {
 
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
-  const deRounds: Array<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
-    'L256',
-    'L128',
-    'L64',
-    'L32',
-    'L16',
-    'QF',
-    'SF',
-    'F',
-  ];
+  const deRounds = DE_ROUNDS;
   const getLocalDateKey = (date: Date) => {
     const year = date.getFullYear();
     const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -367,14 +370,48 @@ export default function AddMatchScreen() {
       setCompetitionSuggestions([]);
       setShowCompetitionSuggestions(false);
       setActiveCompetition(null);
-    } else {
+    } else if (!isCompetitionLocked) {
       setShowCompetitionSuggestions(true);
+    } else {
+      setShowCompetitionSuggestions(false);
     }
-  }, [event]);
+  }, [event, isCompetitionLocked]);
+
+  useEffect(() => {
+    if (!isCompetitionLocked || isEditMode) return;
+    const lockedId = typeof params.competitionId === 'string' ? params.competitionId : '';
+    const lockedName = typeof params.competitionName === 'string' ? params.competitionName : '';
+    const lockedWeapon = typeof params.competitionWeaponType === 'string' ? params.competitionWeaponType : '';
+    const lockedPhase = typeof params.phase === 'string' ? params.phase : '';
+    const lockedRound = typeof params.deRound === 'string' ? params.deRound : '';
+
+    if (lockedId) {
+      setEvent('Competition');
+      setSelectedCompetitionId(lockedId);
+      setSelectedCompetitionName(lockedName);
+      setCompetitionName('');
+      setShowCompetitionSuggestions(false);
+    }
+
+    if (lockedWeapon) {
+      const normalized = lockedWeapon.toLowerCase();
+      if (normalized === 'foil' || normalized === 'epee' || normalized === 'sabre') {
+        setWeaponType(normalized.charAt(0).toUpperCase() + normalized.slice(1));
+      }
+    }
+
+    if (lockedPhase === 'DE' || lockedPhase === 'POULE') {
+      setCompetitionPhase(lockedPhase);
+    }
+
+    if (lockedRound && DE_ROUNDS.includes(lockedRound as any)) {
+      setCompetitionRound(lockedRound as any);
+    }
+  }, [isCompetitionLocked, isEditMode, params.competitionId, params.competitionName, params.competitionWeaponType, params.phase, params.deRound]);
 
   // Load active competition suggestion (AsyncStorage) when in Competition mode
   useEffect(() => {
-    if (event !== 'Competition' || !user?.id) {
+    if (event !== 'Competition' || !user?.id || isCompetitionLocked) {
       return;
     }
     let cancelled = false;
@@ -833,26 +870,38 @@ export default function AddMatchScreen() {
           void trackOnce('first_match_completed', { mode: 'manual' }, user?.id);
         }
         
-        // Navigate to manual match summary page
-        router.push({
-          pathname: '/manual-match-summary',
-          params: {
-            matchId: savedMatch.match_id || matchId,
-            yourScore,
-            opponentScore,
-            opponentName,
-            matchType: event,
-            date: matchDate.toLocaleDateString('en-GB'),
-            time: matchDate.toLocaleTimeString('en-US', { 
-              hour: 'numeric', 
-              minute: '2-digit',
-              hour12: true 
-            }),
-            isWin: (parseInt(yourScore) > parseInt(opponentScore)).toString(),
-            fromAddMatch: 'true', // Flag to show Done button
-            notes,
-          }
-        });
+        const returnCompetitionId =
+          typeof params.returnToCompetitionId === 'string' ? params.returnToCompetitionId : '';
+        if (returnCompetitionId) {
+          router.replace({
+            pathname: '/competition-detail',
+            params: {
+              competitionId: returnCompetitionId,
+              refreshAt: Date.now().toString(),
+            },
+          });
+        } else {
+          // Navigate to manual match summary page
+          router.push({
+            pathname: '/manual-match-summary',
+            params: {
+              matchId: savedMatch.match_id || matchId,
+              yourScore,
+              opponentScore,
+              opponentName,
+              matchType: event,
+              date: matchDate.toLocaleDateString('en-GB'),
+              time: matchDate.toLocaleTimeString('en-US', { 
+                hour: 'numeric', 
+                minute: '2-digit',
+                hour12: true 
+              }),
+              isWin: (parseInt(yourScore) > parseInt(opponentScore)).toString(),
+              fromAddMatch: 'true', // Flag to show Done button
+              notes,
+            }
+          });
+        }
       } else {
         analytics.matchSaveFailure({ error_type: 'database_save_failed' });
         Alert.alert('Error', isEditing ? 'Failed to update match. Please try again.' : 'Failed to save match. Please try again.');
@@ -1048,6 +1097,11 @@ export default function AddMatchScreen() {
       fontSize: getDimension(0.04, width),
       color: 'white',
     },
+    inputRightIcons: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: getDimension(0.015, width),
+    },
     dropdownOptions: {
       position: 'absolute',
       top: getDimension(0.06, height),
@@ -1223,6 +1277,15 @@ export default function AddMatchScreen() {
       fontSize: getDimension(0.04, width),
       color: 'white',
       paddingVertical: getDimension(0.006, height),
+    },
+    competitionInputTextLocked: {
+      paddingRight: getDimension(0.06, width),
+    },
+    competitionLockIcon: {
+      position: 'absolute',
+      right: getDimension(0.02, width),
+      top: '50%',
+      transform: [{ translateY: -7 }],
     },
     competitionChip: {
       flexDirection: 'row',
@@ -1893,17 +1956,24 @@ export default function AddMatchScreen() {
                   }
                 }}
                 onPress={() => {
+                  if (isCompetitionLocked) return;
                   setShowEventDropdown(!showEventDropdown);
                   setShowWeaponDropdown(false); // Close weapon dropdown
                 }}
+                disabled={isCompetitionLocked}
                 activeOpacity={0.7}
               >
                 <Text style={styles.dropdownText}>{event}</Text>
-                <Ionicons 
-                  name={showEventDropdown ? "chevron-up" : "chevron-down"} 
-                  size={18} 
-                  color="rgba(255, 255, 255, 0.7)" 
-                />
+                <View style={styles.inputRightIcons}>
+                  {isCompetitionLocked && (
+                    <Ionicons name="lock-closed" size={14} color="rgba(255, 255, 255, 0.6)" />
+                  )}
+                  <Ionicons 
+                    name={showEventDropdown ? "chevron-up" : "chevron-down"} 
+                    size={18} 
+                    color="rgba(255, 255, 255, 0.7)" 
+                  />
+                </View>
               </TouchableOpacity>
             </View>
           </View>
@@ -1930,17 +2000,24 @@ export default function AddMatchScreen() {
                   }
                 }}
                 onPress={() => {
+                  if (isCompetitionLocked) return;
                   setShowWeaponDropdown(!showWeaponDropdown);
                   setShowEventDropdown(false); // Close event dropdown
                 }}
+                disabled={isCompetitionLocked}
                 activeOpacity={0.7}
               >
                 <Text style={styles.dropdownText}>{weaponType}</Text>
-                <Ionicons 
-                  name={showWeaponDropdown ? "chevron-up" : "chevron-down"} 
-                  size={18} 
-                  color="rgba(255, 255, 255, 0.7)" 
-                />
+                <View style={styles.inputRightIcons}>
+                  {isCompetitionLocked && (
+                    <Ionicons name="lock-closed" size={14} color="rgba(255, 255, 255, 0.6)" />
+                  )}
+                  <Ionicons 
+                    name={showWeaponDropdown ? "chevron-up" : "chevron-down"} 
+                    size={18} 
+                    color="rgba(255, 255, 255, 0.7)" 
+                  />
+                </View>
               </TouchableOpacity>
             </View>
           </View>
@@ -1985,23 +2062,29 @@ export default function AddMatchScreen() {
                   {selectedCompetitionId && selectedCompetitionName.trim().length > 0 && (
                     <View style={styles.competitionChip}>
                       <Text style={styles.competitionChipText}>{selectedCompetitionName.trim()}</Text>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setSelectedCompetitionId(null);
-                          setSelectedCompetitionName('');
-                          setCompetitionName('');
-                          setShowCompetitionSuggestions(true);
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="close" size={14} color="#E9D7FF" />
-                      </TouchableOpacity>
+                      {!isCompetitionLocked && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedCompetitionId(null);
+                            setSelectedCompetitionName('');
+                            setCompetitionName('');
+                            setShowCompetitionSuggestions(true);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="close" size={14} color="#E9D7FF" />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                   <TextInput
-                    style={styles.competitionInputText}
+                    style={[
+                      styles.competitionInputText,
+                      isCompetitionLocked && styles.competitionInputTextLocked,
+                    ]}
                     value={competitionName}
                     onChangeText={(value) => {
+                      if (isCompetitionLocked) return;
                       if (selectedCompetitionId) {
                         setSelectedCompetitionId(null);
                         setSelectedCompetitionName('');
@@ -2033,6 +2116,7 @@ export default function AddMatchScreen() {
                     }
                     placeholderTextColor="rgba(255, 255, 255, 0.5)"
                     onFocus={() => {
+                      if (isCompetitionLocked) return;
                       setShowCompetitionSuggestions(true);
                       analytics.capture('competition_selector_opened', {
                         source: 'add_match',
@@ -2040,9 +2124,14 @@ export default function AddMatchScreen() {
                         is_edit_mode: isEditMode,
                       });
                     }}
-                    editable={!selectedCompetitionId || !selectedCompetitionName.trim()}
+                    editable={!isCompetitionLocked && (!selectedCompetitionId || !selectedCompetitionName.trim())}
                   />
-                  {!selectedCompetitionId && competitionName.trim().length > 0 && (
+                  {isCompetitionLocked && (
+                    <View style={styles.competitionLockIcon} pointerEvents="none">
+                      <Ionicons name="lock-closed" size={14} color="rgba(255, 255, 255, 0.6)" />
+                    </View>
+                  )}
+                  {!isCompetitionLocked && !selectedCompetitionId && competitionName.trim().length > 0 && (
                     <View style={styles.competitionCreateRow}>
                       <TouchableOpacity
                         style={styles.competitionCreateChip}
@@ -2131,7 +2220,7 @@ export default function AddMatchScreen() {
                 })}
               </ScrollView>
 
-              {showCompetitionSuggestions && (
+              {showCompetitionSuggestions && !isCompetitionLocked && (
                 <View style={styles.competitionSuggestions}>
                   {activeCompetition && (
                     <TouchableOpacity

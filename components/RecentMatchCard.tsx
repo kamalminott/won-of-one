@@ -43,13 +43,15 @@ interface RecentMatchCardProps {
   customStyle?: object;
   onDelete?: (matchId: string) => void;
   editMode?: boolean;
+  notesSnippet?: { text: string; highlight: boolean }[] | null;
 }
 
 export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({ 
   match, 
   customStyle = {},
   onDelete,
-  editMode = false
+  editMode = false,
+  notesSnippet = null,
 }) => {
   const { width, height } = useWindowDimensions();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
@@ -204,6 +206,19 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       color: 'rgba(255, 255, 255, 0.5)',
       marginTop: height * 0.002,
     },
+    matchNotesSnippet: {
+      marginTop: height * 0.006,
+      fontSize: width * 0.03,
+      color: 'rgba(255, 255, 255, 0.65)',
+      lineHeight: height * 0.022,
+    },
+    matchNotesText: {
+      color: 'rgba(255, 255, 255, 0.65)',
+    },
+    matchNotesHighlight: {
+      color: '#C9A3FF',
+      fontWeight: '700',
+    },
     outcomeBadgeContainer: {
       alignItems: 'flex-end',
       position: 'relative',
@@ -282,6 +297,18 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
           <Text style={styles.matchDate}>{match.date}</Text>
           {match.time && (
             <Text style={styles.matchTime}>{match.time}</Text>
+          )}
+          {notesSnippet && (
+            <Text style={styles.matchNotesSnippet} numberOfLines={2}>
+              {notesSnippet.map((chunk, index) => (
+                <Text
+                  key={`${match.id}-note-${index}`}
+                  style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
+                >
+                  {chunk.text}
+                </Text>
+              ))}
+            </Text>
           )}
         </View>
         <View style={styles.outcomeBadgeContainer}>
