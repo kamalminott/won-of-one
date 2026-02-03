@@ -38,12 +38,25 @@ interface Match {
   notes?: string; // Match notes
 }
 
+type HighlightChunk = {
+  text: string;
+  highlight: boolean;
+};
+
+type NotesSnippet = {
+  chunks: HighlightChunk[];
+  matchCount: number;
+  canExpand: boolean;
+};
+
 interface RecentMatchCardProps {
   match: Match;
   customStyle?: object;
   onDelete?: (matchId: string) => void;
   editMode?: boolean;
-  notesSnippet?: { text: string; highlight: boolean }[] | null;
+  notesSnippet?: NotesSnippet | null;
+  isNotesExpanded?: boolean;
+  onToggleNotes?: (matchId: string) => void;
 }
 
 export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({ 
@@ -52,6 +65,8 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
   onDelete,
   editMode = false,
   notesSnippet = null,
+  isNotesExpanded = false,
+  onToggleNotes,
 }) => {
   const { width, height } = useWindowDimensions();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());
@@ -219,6 +234,16 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
       color: '#C9A3FF',
       fontWeight: '700',
     },
+    matchNotesMore: {
+      color: 'rgba(255, 255, 255, 0.7)',
+      fontWeight: '600',
+    },
+    matchNotesCollapse: {
+      marginTop: height * 0.004,
+      color: 'rgba(255, 255, 255, 0.5)',
+      fontSize: width * 0.028,
+      fontWeight: '600',
+    },
     outcomeBadgeContainer: {
       alignItems: 'flex-end',
       position: 'relative',
@@ -299,16 +324,32 @@ export const RecentMatchCard: React.FC<RecentMatchCardProps> = ({
             <Text style={styles.matchTime}>{match.time}</Text>
           )}
           {notesSnippet && (
-            <Text style={styles.matchNotesSnippet} numberOfLines={2}>
-              {notesSnippet.map((chunk, index) => (
-                <Text
-                  key={`${match.id}-note-${index}`}
-                  style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
-                >
-                  {chunk.text}
-                </Text>
-              ))}
-            </Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              disabled={!notesSnippet.canExpand || !onToggleNotes}
+              onPress={(e) => {
+                if (!onToggleNotes || !notesSnippet.canExpand) return;
+                e.stopPropagation();
+                onToggleNotes(match.id);
+              }}
+            >
+              <Text style={styles.matchNotesSnippet} numberOfLines={isNotesExpanded ? undefined : 2}>
+                {notesSnippet.chunks.map((chunk, index) => (
+                  <Text
+                    key={`${match.id}-note-${index}`}
+                    style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
+                  >
+                    {chunk.text}
+                  </Text>
+                ))}
+                {!isNotesExpanded && notesSnippet.matchCount > 1 && (
+                  <Text style={styles.matchNotesMore}> +{notesSnippet.matchCount - 1} more</Text>
+                )}
+              </Text>
+              {isNotesExpanded && notesSnippet.canExpand && (
+                <Text style={styles.matchNotesCollapse}>Show less</Text>
+              )}
+            </TouchableOpacity>
           )}
         </View>
         <View style={styles.outcomeBadgeContainer}>

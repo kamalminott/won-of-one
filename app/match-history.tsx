@@ -43,6 +43,17 @@ interface Match {
   competitionRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
 }
 
+type HighlightChunk = {
+  text: string;
+  highlight: boolean;
+};
+
+type NotesSnippet = {
+  chunks: HighlightChunk[];
+  matchCount: number;
+  canExpand: boolean;
+};
+
 const getInitials = (name: string | undefined): string => {
   if (!name || name.trim() === '') {
     return '?';
@@ -75,6 +86,7 @@ export default function RecentMatchesScreen() {
   const [expandedCompetitionSections, setExpandedCompetitionSections] = useState<
     Record<string, { poule: boolean; de: boolean }>
   >({});
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(new Set());
   const hasTrackedFilterRef = useRef(false);
 
   // Format date to DD/MM/YYYY
@@ -281,14 +293,27 @@ export default function RecentMatchesScreen() {
 
   const normalizeQuery = (value: string) => value.trim().toLowerCase();
 
-  const buildHighlightChunks = (text: string, query: string) => {
-    if (!query) return [{ text, highlight: false }];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escaped, 'gi');
-    const chunks: { text: string; highlight: boolean }[] = [];
+  const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const buildQueryRegex = (query: string, global = true) => {
+    const trimmed = query.trim();
+    if (!trimmed) return null;
+    const tokens = trimmed.split(/\s+/).map(escapeRegex);
+    const pattern = tokens.join('\\s+');
+    const flags = global ? 'gi' : 'i';
+    return new RegExp(pattern, flags);
+  };
+
+  const buildHighlightChunks = (text: string, highlightRegex: RegExp) => {
+    const flags = highlightRegex.flags.includes('g')
+      ? highlightRegex.flags
+      : `${highlightRegex.flags}g`;
+    const regex = new RegExp(highlightRegex.source, flags);
+    const chunks: HighlightChunk[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(text)) !== null) {
+      if (match[0].length === 0) break;
       const start = match.index;
       const end = start + match[0].length;
       if (start > lastIndex) {
@@ -303,21 +328,61 @@ export default function RecentMatchesScreen() {
     return chunks;
   };
 
-  const getNotesSnippet = (match: Match, query: string) => {
+  const getNotesSnippet = (match: Match, query: string, expanded: boolean): NotesSnippet | null => {
     const noteText = (match.notes || '').trim();
     if (!noteText || !query) return null;
-    const lowerNote = noteText.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-    const idx = lowerNote.indexOf(lowerQuery);
-    if (idx === -1) return null;
-    const windowRadius = 80;
-    const start = Math.max(0, idx - windowRadius);
-    const end = Math.min(noteText.length, idx + lowerQuery.length + windowRadius);
+    const highlightRegex = buildQueryRegex(query, true);
+    if (!highlightRegex) return null;
+    const matches = noteText.match(highlightRegex);
+    if (!matches || matches.length === 0) return null;
+    const matchCount = matches.length;
+
+    const firstMatchRegex = buildQueryRegex(query, true);
+    const firstMatch = firstMatchRegex?.exec(noteText);
+    if (!firstMatch) return null;
+
+    const matchStart = firstMatch.index;
+    const matchLength = firstMatch[0].length;
+
+    const normalizedQuery = query.replace(/\s+/g, ' ');
+    const minSnippetLength = Math.max(normalizedQuery.length, matchLength) + 40;
+    const maxSnippetLength = Math.max(160, minSnippetLength);
+    const contextBefore = 12;
+    const start = Math.max(0, matchStart - contextBefore);
+    const end = Math.min(noteText.length, start + maxSnippetLength);
+
+    const truncated = start > 0 || end < noteText.length;
+
+    if (expanded) {
+      return {
+        chunks: buildHighlightChunks(noteText, highlightRegex),
+        matchCount,
+        canExpand: truncated,
+      };
+    }
+
     let snippet = noteText.slice(start, end).replace(/\s+/g, ' ').trim();
     if (start > 0) snippet = `…${snippet}`;
     if (end < noteText.length) snippet = `${snippet}…`;
-    return buildHighlightChunks(snippet, query);
+
+    return {
+      chunks: buildHighlightChunks(snippet, highlightRegex),
+      matchCount,
+      canExpand: truncated,
+    };
   };
+
+  const toggleNotesExpanded = useCallback((matchId: string) => {
+    setExpandedNoteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(matchId)) {
+        next.delete(matchId);
+      } else {
+        next.add(matchId);
+      }
+      return next;
+    });
+  }, []);
 
   // Filter matches based on search query, selected type, win/loss, and date range
   const filterMatches = () => {
@@ -325,11 +390,13 @@ export default function RecentMatchesScreen() {
 
     // Filter by search query (opponent name + notes)
     const query = normalizeQuery(searchQuery);
+    const notesRegex = buildQueryRegex(query, false);
     if (query !== '') {
       filtered = filtered.filter(match => {
         const opponentMatch = match.opponentName.toLowerCase().includes(query);
-        const notesMatch = (match.notes || '').toLowerCase().includes(query);
-        return opponentMatch || notesMatch;
+        const competitionMatch = (match.competitionName || '').toLowerCase().includes(query);
+        const notesMatch = notesRegex ? notesRegex.test(match.notes || '') : false;
+        return opponentMatch || competitionMatch || notesMatch;
       });
     }
 
@@ -646,7 +713,8 @@ export default function RecentMatchesScreen() {
     const initials = getInitials(match.opponentName);
     const scoreText = `${match.playerScore} - ${match.opponentScore}`;
     const query = normalizeQuery(searchQuery);
-    const notesSnippet = getNotesSnippet(match, query);
+    const isNotesExpanded = expandedNoteIds.has(match.id);
+    const notesSnippet = getNotesSnippet(match, query, isNotesExpanded);
     return (
       <TouchableOpacity
         key={match.id}
@@ -671,16 +739,32 @@ export default function RecentMatchesScreen() {
               {match.date}{match.time ? ` · ${match.time}` : ''}
             </Text>
             {notesSnippet && (
-              <Text style={styles.matchNotesSnippet} numberOfLines={2}>
-                {notesSnippet.map((chunk, index) => (
-                  <Text
-                    key={`${match.id}-note-${index}`}
-                    style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
-                  >
-                    {chunk.text}
-                  </Text>
-                ))}
-              </Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                disabled={!notesSnippet.canExpand}
+                onPress={(e) => {
+                  if (!notesSnippet.canExpand) return;
+                  e.stopPropagation();
+                  toggleNotesExpanded(match.id);
+                }}
+              >
+                <Text style={styles.matchNotesSnippet} numberOfLines={isNotesExpanded ? undefined : 2}>
+                  {notesSnippet.chunks.map((chunk, index) => (
+                    <Text
+                      key={`${match.id}-note-${index}`}
+                      style={chunk.highlight ? styles.matchNotesHighlight : styles.matchNotesText}
+                    >
+                      {chunk.text}
+                    </Text>
+                  ))}
+                  {!isNotesExpanded && notesSnippet.matchCount > 1 && (
+                    <Text style={styles.matchNotesMore}> +{notesSnippet.matchCount - 1} more</Text>
+                  )}
+                </Text>
+                {isNotesExpanded && notesSnippet.canExpand && (
+                  <Text style={styles.matchNotesCollapse}>Show less</Text>
+                )}
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -1034,6 +1118,16 @@ export default function RecentMatchesScreen() {
       color: '#C9A3FF',
       fontWeight: '700',
     },
+    matchNotesMore: {
+      color: 'rgba(255, 255, 255, 0.7)',
+      fontWeight: '600',
+    },
+    matchNotesCollapse: {
+      marginTop: height * 0.004,
+      color: 'rgba(255, 255, 255, 0.5)',
+      fontSize: width * 0.028,
+      fontWeight: '600',
+    },
     competitionMatchRight: {
       alignItems: 'flex-end',
       justifyContent: 'center',
@@ -1152,7 +1246,7 @@ export default function RecentMatchesScreen() {
           <Ionicons name="search" size={width * 0.05} color="white" style={styles.searchIcon} />
           <TextInput
             style={styles.searchText}
-            placeholder="Search by opponent name..."
+            placeholder="Search opponents, competitions, notes"
             placeholderTextColor={Colors.gray.light}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1549,15 +1643,21 @@ export default function RecentMatchesScreen() {
                   </View>
                 );
               })}
-              {group.ungroupedMatches.map((match) => (
-                <RecentMatchCard
-                  key={match.id}
-                  match={match}
-                  notesSnippet={getNotesSnippet(match, normalizeQuery(searchQuery))}
-                  onDelete={handleDeleteMatch}
-                  editMode={editMode}
-                />
-              ))}
+              {group.ungroupedMatches.map((match) => {
+                const isNotesExpanded = expandedNoteIds.has(match.id);
+                const notesSnippet = getNotesSnippet(match, normalizeQuery(searchQuery), isNotesExpanded);
+                return (
+                  <RecentMatchCard
+                    key={match.id}
+                    match={match}
+                    notesSnippet={notesSnippet}
+                    isNotesExpanded={isNotesExpanded}
+                    onToggleNotes={toggleNotesExpanded}
+                    onDelete={handleDeleteMatch}
+                    editMode={editMode}
+                  />
+                );
+              })}
             </View>
           ))
         )}
