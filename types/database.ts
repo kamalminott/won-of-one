@@ -9,7 +9,7 @@ export interface Match {
   match_type?: string;
   competition_id?: string | null;
   phase?: 'POULE' | 'DE' | null;
-  de_round?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+  de_round?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
   final_score?: number;
   final_period?: number;
   yellow_cards?: number;
@@ -204,7 +204,7 @@ export interface SimpleMatch {
   competitionDate?: string | null;
   competitionWeaponType?: 'foil' | 'epee' | 'sabre' | null;
   competitionPhase?: 'POULE' | 'DE' | null;
-  competitionRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+  competitionRound?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
   competitionPlacement?: number | null;
   competitionFieldSize?: number | null;
 }

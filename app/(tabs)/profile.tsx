@@ -1,4 +1,5 @@
 import { BackButton } from '@/components/BackButton';
+import { ActivityCalendarCard } from '@/components/ActivityCalendarCard';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
@@ -629,6 +630,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      <ActivityCalendarCard />
 
       {/* Achievements Section */}
       <View style={[styles.section, {

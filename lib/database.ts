@@ -55,6 +55,22 @@ const formatFullName = (firstName?: string, lastName?: string, fallbackEmail?: s
   return undefined;
 };
 
+const formatLocalDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeDateKey = (value?: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const datePart = trimmed.includes('T') ? trimmed.split('T')[0] : trimmed;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return null;
+  return datePart;
+};
+
 // Ensure match events always have a usable, monotonic match_time_elapsed value
 const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null; event_time?: string | null }>(events: T[]): T[] => {
   if (!events || events.length === 0) return [];
@@ -1678,7 +1694,7 @@ export const matchService = {
     weaponType?: string;
     competitionId?: string | null;
     phase?: 'POULE' | 'DE' | null;
-    deRound?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+    deRound?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
     fencer1Name?: string;
     fencer2Name?: string;
     accessToken?: string | null;
@@ -3123,7 +3139,7 @@ $$;
     weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
     competition_id?: string | null;
     phase?: 'POULE' | 'DE' | null;
-    de_round?: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+    de_round?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
   },
   accessToken?: string | null
   ): Promise<Match | null> {
@@ -4556,6 +4572,15 @@ export interface WeeklyProgress {
   completion_rate: number; // 0-100
 }
 
+export interface ActivityCalendarDay {
+  activity_date: string; // YYYY-MM-DD
+  total_count: number;
+  competition_match_count: number;
+  training_match_count: number;
+  performance_session_count: number;
+  performance_activity_types: string[];
+}
+
 // Weekly Target Service
 export const weeklyTargetService = {
   
@@ -5169,6 +5194,204 @@ export const weeklySessionLogService = {
       return [];
     }
   }
+};
+
+type ActivityCalendarRpcRow = {
+  activity_date: string;
+  total_count: number | null;
+  competition_match_count: number | null;
+  training_match_count: number | null;
+  performance_session_count: number | null;
+  performance_activity_types: string[] | null;
+};
+
+type ActivityCalendarFallbackMatchRow = {
+  event_date: string | null;
+  competition_id: string | null;
+  match_type: string | null;
+  phase: string | null;
+  de_round: string | null;
+};
+
+type ActivityCalendarFallbackSessionRow = {
+  session_date: string | null;
+  activity_type: string | null;
+};
+
+const normalizeActivityCalendarRow = (row: ActivityCalendarRpcRow): ActivityCalendarDay | null => {
+  const dateKey = normalizeDateKey(row.activity_date);
+  if (!dateKey) return null;
+
+  const competitionMatchCount = Math.max(0, Number(row.competition_match_count ?? 0) || 0);
+  const trainingMatchCount = Math.max(0, Number(row.training_match_count ?? 0) || 0);
+  const performanceSessionCount = Math.max(0, Number(row.performance_session_count ?? 0) || 0);
+  const totalCount = Math.max(
+    0,
+    Number(
+      row.total_count
+      ?? (competitionMatchCount + trainingMatchCount + performanceSessionCount)
+    )
+    || (competitionMatchCount + trainingMatchCount + performanceSessionCount)
+  );
+
+  return {
+    activity_date: dateKey,
+    total_count: totalCount,
+    competition_match_count: competitionMatchCount,
+    training_match_count: trainingMatchCount,
+    performance_session_count: performanceSessionCount,
+    performance_activity_types: (row.performance_activity_types ?? []).filter(Boolean),
+  };
+};
+
+const isCompetitionMatch = (match: ActivityCalendarFallbackMatchRow): boolean => {
+  if (match.competition_id) return true;
+  if (match.phase) return true;
+  if (match.de_round) return true;
+  if (match.match_type && match.match_type.toLowerCase() === 'competition') return true;
+  return false;
+};
+
+export const activityCalendarService = {
+  async getActivityCalendar(
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+    timezone: string,
+    accessToken?: string | null
+  ): Promise<ActivityCalendarDay[]> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ activityCalendarService.getActivityCalendar blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const startKey = formatLocalDateKey(startDate);
+    const endKey = formatLocalDateKey(endDate);
+    const timezoneValue = timezone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    const rpcResult = await postgrestRpc<ActivityCalendarRpcRow[]>(
+      'get_user_activity_calendar',
+      {
+        p_start_date: startKey,
+        p_end_date: endKey,
+        p_timezone: timezoneValue,
+      },
+      { accessToken: token }
+    );
+
+    if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+      return rpcResult.data
+        .map(normalizeActivityCalendarRow)
+        .filter((row): row is ActivityCalendarDay => !!row)
+        .sort((a, b) => a.activity_date.localeCompare(b.activity_date));
+    }
+
+    if (rpcResult.error) {
+      console.warn('⚠️ get_user_activity_calendar RPC unavailable, using client fallback', rpcResult.error);
+    }
+
+    const [matchResult, sessionResult] = await Promise.all([
+      postgrestSelect<ActivityCalendarFallbackMatchRow>(
+        'match',
+        {
+          select: 'event_date,competition_id,match_type,phase,de_round',
+          user_id: `eq.${userId}`,
+          is_complete: 'eq.true',
+          event_date: [
+            `gte.${startKey}T00:00:00`,
+            `lte.${endKey}T23:59:59`,
+          ],
+          order: 'event_date.asc',
+        },
+        { accessToken: token }
+      ),
+      postgrestSelect<ActivityCalendarFallbackSessionRow>(
+        'weekly_session_log',
+        {
+          select: 'session_date,activity_type',
+          user_id: `eq.${userId}`,
+          session_date: [
+            `gte.${startKey}`,
+            `lte.${endKey}`,
+          ],
+          order: 'session_date.asc',
+        },
+        { accessToken: token }
+      ),
+    ]);
+
+    if (matchResult.error) {
+      console.error('Error fetching matches for activity calendar fallback:', matchResult.error);
+    }
+
+    if (sessionResult.error) {
+      console.error('Error fetching session logs for activity calendar fallback:', sessionResult.error);
+    }
+
+    const aggregate = new Map<
+      string,
+      {
+        competition_match_count: number;
+        training_match_count: number;
+        performance_session_count: number;
+        performance_activity_types: Set<string>;
+      }
+    >();
+
+    (matchResult.data || []).forEach(match => {
+      if (!match.event_date) return;
+      const date = new Date(match.event_date);
+      if (Number.isNaN(date.getTime())) return;
+      const key = formatLocalDateKey(date);
+      if (key < startKey || key > endKey) return;
+
+      const existing = aggregate.get(key) || {
+        competition_match_count: 0,
+        training_match_count: 0,
+        performance_session_count: 0,
+        performance_activity_types: new Set<string>(),
+      };
+
+      if (isCompetitionMatch(match)) {
+        existing.competition_match_count += 1;
+      } else {
+        existing.training_match_count += 1;
+      }
+      aggregate.set(key, existing);
+    });
+
+    (sessionResult.data || []).forEach(session => {
+      const key = normalizeDateKey(session.session_date);
+      if (!key || key < startKey || key > endKey) return;
+
+      const existing = aggregate.get(key) || {
+        competition_match_count: 0,
+        training_match_count: 0,
+        performance_session_count: 0,
+        performance_activity_types: new Set<string>(),
+      };
+      existing.performance_session_count += 1;
+      if (session.activity_type) {
+        existing.performance_activity_types.add(session.activity_type);
+      }
+      aggregate.set(key, existing);
+    });
+
+    return Array.from(aggregate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([activity_date, value]) => ({
+        activity_date,
+        competition_match_count: value.competition_match_count,
+        training_match_count: value.training_match_count,
+        performance_session_count: value.performance_session_count,
+        total_count:
+          value.competition_match_count
+          + value.training_match_count
+          + value.performance_session_count,
+        performance_activity_types: Array.from(value.performance_activity_types).sort((a, b) => a.localeCompare(b)),
+      }));
+  },
 };
 
 // Weekly Progress Service

@@ -16,9 +16,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, UIManager, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const DE_ROUNDS: Array<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
+const DE_ROUNDS: Array<'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
   'L256',
   'L128',
+  'L96',
   'L64',
   'L32',
   'L16',
@@ -133,7 +134,7 @@ export default function AddMatchScreen() {
   const [showCompetitionSuggestions, setShowCompetitionSuggestions] = useState(false);
   const [activeCompetition, setActiveCompetition] = useState<Competition | null>(null);
   const [competitionPhase, setCompetitionPhase] = useState<'POULE' | 'DE'>('POULE');
-  const [competitionRound, setCompetitionRound] = useState<'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'>('L16');
+  const [competitionRound, setCompetitionRound] = useState<'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'>('L16');
   const competitionSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCompetitionSearchRef = useRef('');
   const [notes, setNotes] = useState(params.notes as string || '');
@@ -296,7 +297,7 @@ export default function AddMatchScreen() {
     });
   };
 
-  const handleCompetitionRoundSelect = (round: 'L256' | 'L128' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F') => {
+  const handleCompetitionRoundSelect = (round: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F') => {
     if (competitionRound === round) return;
     setCompetitionRound(round);
     analytics.capture('competition_de_round_selected', {

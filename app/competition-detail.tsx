@@ -27,12 +27,13 @@ const getInitials = (name: string | undefined): string => {
 const roundOrder: Record<string, number> = {
   L256: 1,
   L128: 2,
-  L64: 3,
-  L32: 4,
-  L16: 5,
-  QF: 6,
-  SF: 7,
-  F: 8,
+  L96: 3,
+  L64: 4,
+  L32: 5,
+  L16: 6,
+  QF: 7,
+  SF: 8,
+  F: 9,
 };
 
 export default function CompetitionDetailScreen() {
