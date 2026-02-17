@@ -326,44 +326,24 @@ export default function CompetitionDetailScreen() {
   }, [matches]);
 
   const crossMatrixOpponents = useMemo<CrossMatrixOpponent[]>(() => {
-    const fallbackOpponents = [
-      { name: 'Lee Caspian', nation: 'GBR' },
-      { name: 'Djibril Mbaye', nation: 'ITA' },
-      { name: 'Eric Seefeld', nation: 'GER' },
-      { name: 'Eoghan Hanluain', nation: 'IRL' },
-      { name: 'Danielius Juras', nation: 'LTU' },
-      { name: 'Shoaib Farooq', nation: 'GBR' },
-    ];
-
     const opponents = new Map<string, CrossMatrixOpponent>();
 
     pouleMatches.forEach(match => {
       const normalizedName = match.opponentName.trim().toLowerCase();
       if (!normalizedName || opponents.has(normalizedName)) return;
+      const isPendingScore =
+        match.youScore === 0 &&
+        match.opponentScore === 0 &&
+        !match.isWin;
 
       opponents.set(normalizedName, {
         id: `${normalizedName.replace(/\s+/g, '-')}-${match.id}`,
         seed: opponents.size + 2,
         name: match.opponentName.trim(),
-        nation: '—',
-        result: match.isWin ? 'win' : 'loss',
-        scoreLabel: `${match.youScore}-${match.opponentScore}`,
-        reverseScoreLabel: `${match.opponentScore}-${match.youScore}`,
-      });
-    });
-
-    fallbackOpponents.forEach(fencer => {
-      const normalizedName = fencer.name.toLowerCase();
-      if (opponents.size >= 6 || opponents.has(normalizedName)) return;
-
-      opponents.set(normalizedName, {
-        id: `${normalizedName.replace(/\s+/g, '-')}-fallback`,
-        seed: opponents.size + 2,
-        name: fencer.name,
-        nation: fencer.nation,
-        result: 'pending',
-        scoreLabel: '—',
-        reverseScoreLabel: '—',
+        nation: '',
+        result: isPendingScore ? 'pending' : match.isWin ? 'win' : 'loss',
+        scoreLabel: isPendingScore ? '—' : `${match.youScore}-${match.opponentScore}`,
+        reverseScoreLabel: isPendingScore ? '—' : `${match.opponentScore}-${match.youScore}`,
       });
     });
 
@@ -418,29 +398,36 @@ export default function CompetitionDetailScreen() {
   }, [userName]);
 
   const visualTableauRounds = useMemo<VisualTableauRound[]>(() => {
-    if (deMatchesByRound.length === 0) return [];
+    const loggedRoundEntries = deMatchesByRound.filter(({ matches: roundMatches }) => roundMatches.length > 0);
+    if (loggedRoundEntries.length === 0) return [];
+
+    const loggedRoundNames = loggedRoundEntries.map(({ round }) => round);
+    const firstLoggedRound = loggedRoundNames[0];
+    const lastLoggedRound = loggedRoundNames[loggedRoundNames.length - 1];
+    const firstLoggedIndex = deRoundSequence.indexOf(firstLoggedRound);
+    const lastLoggedIndex = deRoundSequence.indexOf(lastLoggedRound);
+
+    const roundsToRender =
+      firstLoggedIndex >= 0 &&
+      lastLoggedIndex >= firstLoggedIndex
+        ? deRoundSequence.slice(firstLoggedIndex, lastLoggedIndex + 1)
+        : loggedRoundNames;
 
     const roundToMatch = new Map<string, CompetitionMatch>();
-    deMatchesByRound.forEach(({ round, matches: roundMatches }) => {
-      if (roundMatches.length > 0) {
-        roundToMatch.set(round, roundMatches[0]);
+    loggedRoundEntries.forEach(({ round, matches: roundMatches }) => {
+      const match = roundMatches[0];
+      if (match) {
+        roundToMatch.set(round, match);
       }
     });
 
-    const firstLoggedRound = deRoundSequence.find(round => roundToMatch.has(round));
-    if (!firstLoggedRound) return [];
-
-    const firstRoundIndex = deRoundSequence.indexOf(firstLoggedRound);
-    if (firstRoundIndex === -1) return [];
-
-    const roundsToRender = deRoundSequence.slice(firstRoundIndex);
     const firstRoundMatchCount = getRoundMatchCount(roundsToRender[0]);
     const firstRoundSlotCount = Math.max(1, Math.min(8, firstRoundMatchCount));
 
     let previousSlotCount = firstRoundSlotCount;
     let previousUserSlotIndex = 0;
 
-    return roundsToRender.map((round, roundIndex) => {
+    return roundsToRender.reduce<VisualTableauRound[]>((acc, round, roundIndex) => {
       const slotCount =
         roundIndex === 0 ? firstRoundSlotCount : Math.max(1, Math.floor(previousSlotCount / 2));
       const userSlotIndex =
@@ -467,13 +454,15 @@ export default function CompetitionDetailScreen() {
       previousSlotCount = slotCount;
       previousUserSlotIndex = userSlotIndex;
 
-      return {
+      acc.push({
         round,
         slotCount,
         userSlotIndex,
         userBout,
-      };
-    });
+      });
+
+      return acc;
+    }, []);
   }, [deMatchesByRound]);
 
   const tableauTreeHeight = useMemo(() => {
@@ -1261,7 +1250,9 @@ export default function CompetitionDetailScreen() {
                                   <Text style={styles.crossNameText} numberOfLines={1}>
                                     {opponent.name}
                                   </Text>
-                                  <Text style={styles.crossNationText}>{opponent.nation}</Text>
+                                  {opponent.nation ? (
+                                    <Text style={styles.crossNationText}>{opponent.nation}</Text>
+                                  ) : null}
                                 </View>
                               </View>
 
@@ -1370,12 +1361,10 @@ export default function CompetitionDetailScreen() {
                             const connectorKneeX = connectorStartXUser + TABLEAU_CONNECTOR_KNEE_OFFSET;
                             const connectorEndX = TABLEAU_ROUND_COLUMN_WIDTH + TABLEAU_ROUND_COLUMN_GAP + 2;
                             const connectorJoinOverlap = TABLEAU_CONNECTOR_JOIN_OVERLAP;
-                            const hasNextUserBout = !!nextRound?.userBout;
                             const shouldRenderMainConnector =
-                              !!userBout &&
-                              hasNextUserBout &&
                               nextCenterY !== null;
-                            const shouldRenderOtherBranch = shouldRenderMainConnector;
+                            const hasNextUserBout = !!nextRound?.userBout;
+                            const shouldRenderOtherBranch = !!userBout && hasNextUserBout && shouldRenderMainConnector;
                             const otherNodeTop =
                               shouldRenderOtherBranch && nextCenterY !== null
                                 ? Math.min(
@@ -1439,7 +1428,7 @@ export default function CompetitionDetailScreen() {
                                         </>
                                       ) : (
                                         <>
-                                          <Text style={styles.tableauPendingText}>Not fenced yet</Text>
+                                          <Text style={styles.tableauPendingText}>Incomplete</Text>
                                           <View style={styles.tableauMetaRow}>
                                             <Text style={styles.tableauScoreText}>—</Text>
                                             <View style={[styles.tableauOutcomePill, styles.tableauOutcomePillPending]}>
@@ -1539,7 +1528,7 @@ export default function CompetitionDetailScreen() {
                         </View>
                       </ScrollView>
                       <Text style={styles.tableauPreviewHint}>
-                        Compressed tree preview showing your DE path and opponent-side branch by round.
+                        Compressed tree preview showing your logged rounds, with missing rounds in between marked as incomplete.
                       </Text>
                     </View>
                   )}
