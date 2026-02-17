@@ -15,6 +15,32 @@ import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, Te
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type CompetitionMatch = SimpleMatch;
+type CrossMatrixResult = 'win' | 'loss' | 'pending';
+type TableauOutcome = 'win' | 'loss' | 'pending';
+
+type CrossMatrixOpponent = {
+  id: string;
+  seed: number;
+  name: string;
+  nation: string;
+  result: CrossMatrixResult;
+  scoreLabel: string;
+  reverseScoreLabel: string;
+};
+
+type VisualTableauBout = {
+  id: string;
+  opponentName: string;
+  outcome: TableauOutcome;
+  scoreLabel: string;
+};
+
+type VisualTableauRound = {
+  round: string;
+  slotCount: number;
+  userSlotIndex: number;
+  userBout: VisualTableauBout | null;
+};
 
 const getInitials = (name: string | undefined): string => {
   if (!name || name.trim() === '') return '?';
@@ -34,6 +60,60 @@ const roundOrder: Record<string, number> = {
   QF: 7,
   SF: 8,
   F: 9,
+};
+
+const deRoundSequence = Object.entries(roundOrder)
+  .sort((a, b) => a[1] - b[1])
+  .map(([round]) => round);
+
+const TABLEAU_SLOT_HEIGHT = 44;
+const TABLEAU_SLOT_GAP = 10;
+const TABLEAU_ROUND_STAIR_STEP = 10;
+const TABLEAU_ROUND_COLUMN_WIDTH = 168;
+const TABLEAU_ROUND_COLUMN_GAP = 10;
+const TABLEAU_CARD_WIDTH = 146;
+const TABLEAU_CARD_HEIGHT = 66;
+const TABLEAU_OTHER_CARD_WIDTH = 116;
+const TABLEAU_OTHER_CARD_HEIGHT = 20;
+const TABLEAU_CONNECTOR_KNEE_OFFSET = 12;
+const TABLEAU_CONNECTOR_JOIN_OVERLAP = 1;
+const TABLEAU_CONNECTOR_STROKE_WIDTH = 2;
+
+const getRoundMatchCount = (round: string): number => {
+  if (round.startsWith('L')) {
+    const tableSize = parseInt(round.slice(1), 10);
+    if (Number.isFinite(tableSize) && tableSize > 1) {
+      return Math.floor(tableSize / 2);
+    }
+  }
+
+  switch (round) {
+    case 'QF':
+      return 4;
+    case 'SF':
+      return 2;
+    case 'F':
+      return 1;
+    default:
+      return 1;
+  }
+};
+
+const formatTableauRoundLabel = (round: string): string => {
+  if (round.startsWith('L')) {
+    return `Table of ${round.slice(1)}`;
+  }
+
+  switch (round) {
+    case 'QF':
+      return 'Quarter-Final';
+    case 'SF':
+      return 'Semi-Final';
+    case 'F':
+      return 'Final';
+    default:
+      return round;
+  }
 };
 
 export default function CompetitionDetailScreen() {
@@ -65,6 +145,8 @@ export default function CompetitionDetailScreen() {
   const [activeListFormat, setActiveListFormat] = useState<'bullet' | 'dash' | 'number' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerValue, setDatePickerValue] = useState<Date>(new Date());
+  const [isPouleVisualExpanded, setIsPouleVisualExpanded] = useState(false);
+  const [isTableauVisualExpanded, setIsTableauVisualExpanded] = useState(false);
   const hasTrackedDetailViewRef = useRef(false);
   const postNotesEditedRef = useRef(false);
 
@@ -243,6 +325,70 @@ export default function CompetitionDetailScreen() {
       .sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a));
   }, [matches]);
 
+  const crossMatrixOpponents = useMemo<CrossMatrixOpponent[]>(() => {
+    const fallbackOpponents = [
+      { name: 'Lee Caspian', nation: 'GBR' },
+      { name: 'Djibril Mbaye', nation: 'ITA' },
+      { name: 'Eric Seefeld', nation: 'GER' },
+      { name: 'Eoghan Hanluain', nation: 'IRL' },
+      { name: 'Danielius Juras', nation: 'LTU' },
+      { name: 'Shoaib Farooq', nation: 'GBR' },
+    ];
+
+    const opponents = new Map<string, CrossMatrixOpponent>();
+
+    pouleMatches.forEach(match => {
+      const normalizedName = match.opponentName.trim().toLowerCase();
+      if (!normalizedName || opponents.has(normalizedName)) return;
+
+      opponents.set(normalizedName, {
+        id: `${normalizedName.replace(/\s+/g, '-')}-${match.id}`,
+        seed: opponents.size + 2,
+        name: match.opponentName.trim(),
+        nation: '—',
+        result: match.isWin ? 'win' : 'loss',
+        scoreLabel: `${match.youScore}-${match.opponentScore}`,
+        reverseScoreLabel: `${match.opponentScore}-${match.youScore}`,
+      });
+    });
+
+    fallbackOpponents.forEach(fencer => {
+      const normalizedName = fencer.name.toLowerCase();
+      if (opponents.size >= 6 || opponents.has(normalizedName)) return;
+
+      opponents.set(normalizedName, {
+        id: `${normalizedName.replace(/\s+/g, '-')}-fallback`,
+        seed: opponents.size + 2,
+        name: fencer.name,
+        nation: fencer.nation,
+        result: 'pending',
+        scoreLabel: '—',
+        reverseScoreLabel: '—',
+      });
+    });
+
+    return Array.from(opponents.values());
+  }, [pouleMatches]);
+
+  const crossMatrixSummary = useMemo(() => {
+    const winsCount = crossMatrixOpponents.filter(opponent => opponent.result === 'win').length;
+    const lossesCount = crossMatrixOpponents.filter(opponent => opponent.result === 'loss').length;
+    const fencedCount = winsCount + lossesCount;
+    const ratio = fencedCount > 0 ? (winsCount / fencedCount).toFixed(2) : '0.00';
+    const indicatorValue = pouleMatches.reduce(
+      (sum, match) => sum + (match.youScore - match.opponentScore),
+      0
+    );
+    const indicator = indicatorValue > 0 ? `+${indicatorValue}` : `${indicatorValue}`;
+
+    return {
+      wins: winsCount,
+      losses: lossesCount,
+      ratio,
+      indicator,
+    };
+  }, [crossMatrixOpponents, pouleMatches]);
+
   const deMatchesByRound = useMemo(() => {
     const deMatches = matches.filter(match => match.competitionPhase === 'DE' || match.competitionRound);
     const map = new Map<string, CompetitionMatch[]>();
@@ -265,6 +411,86 @@ export default function CompetitionDetailScreen() {
       matches: roundMatches.sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a)),
     }));
   }, [matches]);
+
+  const tableauUserLabel = useMemo(() => {
+    const trimmed = userName?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : 'You';
+  }, [userName]);
+
+  const visualTableauRounds = useMemo<VisualTableauRound[]>(() => {
+    if (deMatchesByRound.length === 0) return [];
+
+    const roundToMatch = new Map<string, CompetitionMatch>();
+    deMatchesByRound.forEach(({ round, matches: roundMatches }) => {
+      if (roundMatches.length > 0) {
+        roundToMatch.set(round, roundMatches[0]);
+      }
+    });
+
+    const firstLoggedRound = deRoundSequence.find(round => roundToMatch.has(round));
+    if (!firstLoggedRound) return [];
+
+    const firstRoundIndex = deRoundSequence.indexOf(firstLoggedRound);
+    if (firstRoundIndex === -1) return [];
+
+    const roundsToRender = deRoundSequence.slice(firstRoundIndex);
+    const firstRoundMatchCount = getRoundMatchCount(roundsToRender[0]);
+    const firstRoundSlotCount = Math.max(1, Math.min(8, firstRoundMatchCount));
+
+    let previousSlotCount = firstRoundSlotCount;
+    let previousUserSlotIndex = 0;
+
+    return roundsToRender.map((round, roundIndex) => {
+      const slotCount =
+        roundIndex === 0 ? firstRoundSlotCount : Math.max(1, Math.floor(previousSlotCount / 2));
+      const userSlotIndex =
+        roundIndex === 0
+          ? previousUserSlotIndex
+          : Math.max(0, Math.min(slotCount - 1, Math.floor(previousUserSlotIndex / 2)));
+
+      const match = roundToMatch.get(round);
+      const isPendingScore =
+        !!match &&
+        match.youScore === 0 &&
+        match.opponentScore === 0 &&
+        !match.isWin;
+
+      const userBout: VisualTableauBout | null = match
+        ? {
+            id: match.id,
+            opponentName: match.opponentName,
+            outcome: isPendingScore ? 'pending' : match.isWin ? 'win' : 'loss',
+            scoreLabel: isPendingScore ? '—' : `${match.youScore}-${match.opponentScore}`,
+          }
+        : null;
+
+      previousSlotCount = slotCount;
+      previousUserSlotIndex = userSlotIndex;
+
+      return {
+        round,
+        slotCount,
+        userSlotIndex,
+        userBout,
+      };
+    });
+  }, [deMatchesByRound]);
+
+  const tableauTreeHeight = useMemo(() => {
+    if (visualTableauRounds.length === 0) return 0;
+    const baseSlots = visualTableauRounds[0].slotCount;
+    return baseSlots * TABLEAU_SLOT_HEIGHT + Math.max(0, baseSlots - 1) * TABLEAU_SLOT_GAP;
+  }, [visualTableauRounds]);
+
+  const getTableauNodeTop = (slotCount: number, userSlotIndex: number, roundIndex: number): number => {
+    const slotStep = TABLEAU_SLOT_HEIGHT + TABLEAU_SLOT_GAP;
+    const columnContentHeight =
+      slotCount * TABLEAU_SLOT_HEIGHT + Math.max(0, slotCount - 1) * TABLEAU_SLOT_GAP;
+    const columnTopOffset = Math.max(0, (tableauTreeHeight - columnContentHeight) / 2);
+    const staircaseOffset = roundIndex * TABLEAU_ROUND_STAIR_STEP;
+    const unclampedNodeTop = columnTopOffset + userSlotIndex * slotStep + staircaseOffset;
+    return Math.min(Math.max(0, tableauTreeHeight - TABLEAU_CARD_HEIGHT), unclampedNodeTop);
+  };
 
   const latestMatch = useMemo(() => {
     if (matches.length === 0) return null;
@@ -935,6 +1161,157 @@ export default function CompetitionDetailScreen() {
               {pouleMatches.length > 0 && (
                 <View style={styles.sectionBlock}>
                   <Text style={styles.sectionLabel}>Poule</Text>
+                  <TouchableOpacity
+                    style={styles.breakdownDropdownToggle}
+                    activeOpacity={0.85}
+                    onPress={() => setIsPouleVisualExpanded(prev => !prev)}
+                  >
+                    <View style={styles.breakdownDropdownLeft}>
+                      <Text style={styles.breakdownDropdownText}>Visual Poule</Text>
+                      <View style={styles.previewBadge}>
+                        <Text style={styles.previewBadgeText}>Preview</Text>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name={isPouleVisualExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color="#E9D7FF"
+                    />
+                  </TouchableOpacity>
+
+                  {isPouleVisualExpanded && (
+                    <View style={styles.pouleVisualCard}>
+                      <View style={styles.crossSummaryRow}>
+                        <View style={styles.crossSummaryChip}>
+                          <Text style={styles.crossSummaryChipLabel}>Record</Text>
+                          <Text style={styles.crossSummaryChipValue}>
+                            {crossMatrixSummary.wins}V - {crossMatrixSummary.losses}D
+                          </Text>
+                        </View>
+                        <View style={styles.crossSummaryChip}>
+                          <Text style={styles.crossSummaryChipLabel}>V/M</Text>
+                          <Text style={styles.crossSummaryChipValue}>{crossMatrixSummary.ratio}</Text>
+                        </View>
+                        <View style={styles.crossSummaryChip}>
+                          <Text style={styles.crossSummaryChipLabel}>IND</Text>
+                          <Text style={styles.crossSummaryChipValue}>{crossMatrixSummary.indicator}</Text>
+                        </View>
+                      </View>
+
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.pouleVisualScrollContent}
+                      >
+                        <View>
+                          <View style={styles.crossMatrixHeaderRow}>
+                            <View style={styles.crossNameHeaderCell}>
+                              <Text style={styles.crossHeaderText}>Fencer</Text>
+                            </View>
+                            <View style={[styles.crossHeaderCell, styles.crossHeaderCellSelf]}>
+                              <Text style={styles.crossHeaderText}>1</Text>
+                            </View>
+                            {crossMatrixOpponents.map(opponent => (
+                              <View key={`${opponent.id}-header`} style={styles.crossHeaderCell}>
+                                <Text style={styles.crossHeaderText}>{opponent.seed}</Text>
+                              </View>
+                            ))}
+                          </View>
+
+                          <View style={styles.crossYouRow}>
+                            <View style={styles.crossNameCell}>
+                              <Text style={styles.crossSeedText}>1</Text>
+                              <View style={styles.crossNameTextGroup}>
+                                <Text style={styles.crossNameText}>You</Text>
+                                <Text style={styles.crossNationText}>YOU</Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.crossSelfCell}>
+                              <Text style={styles.crossSelfCellText}>■</Text>
+                            </View>
+
+                            {crossMatrixOpponents.map(opponent => (
+                              <View
+                                key={`${opponent.id}-you-cell`}
+                                style={[
+                                  styles.crossResultCell,
+                                  opponent.result === 'win' && styles.crossResultCellWin,
+                                  opponent.result === 'loss' && styles.crossResultCellLoss,
+                                  opponent.result === 'pending' && styles.crossResultCellPending,
+                                ]}
+                              >
+                                <Text style={styles.crossResultOutcomeText}>
+                                  {opponent.result === 'pending'
+                                    ? '—'
+                                    : opponent.result === 'win'
+                                      ? 'V'
+                                      : 'D'}
+                                </Text>
+                                <Text style={styles.crossResultScoreText}>{opponent.scoreLabel}</Text>
+                              </View>
+                            ))}
+                          </View>
+
+                          {crossMatrixOpponents.map((opponent, index) => (
+                            <View key={`${opponent.id}-row`} style={styles.crossFieldRow}>
+                              <View style={styles.crossNameCell}>
+                                <Text style={styles.crossSeedText}>{opponent.seed}</Text>
+                                <View style={styles.crossNameTextGroup}>
+                                  <Text style={styles.crossNameText} numberOfLines={1}>
+                                    {opponent.name}
+                                  </Text>
+                                  <Text style={styles.crossNationText}>{opponent.nation}</Text>
+                                </View>
+                              </View>
+
+                              <View
+                                style={[
+                                  styles.crossResultCell,
+                                  opponent.result === 'win' && styles.crossResultCellLoss,
+                                  opponent.result === 'loss' && styles.crossResultCellWin,
+                                  opponent.result === 'pending' && styles.crossResultCellPending,
+                                ]}
+                              >
+                                <Text style={styles.crossResultOutcomeText}>
+                                  {opponent.result === 'pending'
+                                    ? '—'
+                                    : opponent.result === 'win'
+                                      ? 'D'
+                                      : 'V'}
+                                </Text>
+                                <Text style={styles.crossResultScoreText}>{opponent.reverseScoreLabel}</Text>
+                              </View>
+
+                              <View
+                                style={[
+                                  styles.crossNotTrackedStrip,
+                                  {
+                                    width: Math.max(0, (crossMatrixOpponents.length - 1) * 52),
+                                  },
+                                ]}
+                              >
+                                {index === 0 ? (
+                                  <Text style={styles.crossNotTrackedText}>Opponent vs opponent bouts are not tracked</Text>
+                                ) : (
+                                  <View style={styles.crossNotTrackedDots}>
+                                    <Text style={styles.crossNotTrackedDot}>·</Text>
+                                    <Text style={styles.crossNotTrackedDot}>·</Text>
+                                    <Text style={styles.crossNotTrackedDot}>·</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      </ScrollView>
+
+                      <Text style={styles.poulePreviewHint}>
+                        Cross-matrix preview: You vs field only. Opponent vs opponent is intentionally hidden.
+                      </Text>
+                    </View>
+                  )}
+
                   {pouleMatches.map(match => renderMatchRow(match, 'Poule'))}
                 </View>
               )}
@@ -942,6 +1319,231 @@ export default function CompetitionDetailScreen() {
               {deMatchesByRound.length > 0 && (
                 <View style={styles.sectionBlock}>
                   <Text style={styles.sectionLabel}>Direct Elimination</Text>
+                  <TouchableOpacity
+                    style={styles.breakdownDropdownToggle}
+                    activeOpacity={0.85}
+                    onPress={() => setIsTableauVisualExpanded(prev => !prev)}
+                  >
+                    <View style={styles.breakdownDropdownLeft}>
+                      <Text style={styles.breakdownDropdownText}>Visual Tableau</Text>
+                      <View style={styles.previewBadge}>
+                        <Text style={styles.previewBadgeText}>Preview</Text>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name={isTableauVisualExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color="#E9D7FF"
+                    />
+                  </TouchableOpacity>
+
+                  {isTableauVisualExpanded && (
+                    <View style={styles.tableauVisualCard}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.tableauScrollContent}
+                      >
+                        <View style={styles.tableauColumnsRow}>
+                          {visualTableauRounds.map((roundColumn, columnIndex) => {
+                            const userBout = roundColumn.userBout;
+                            const isPendingUserSlot = !userBout;
+                            const nodeTop = getTableauNodeTop(
+                              roundColumn.slotCount,
+                              roundColumn.userSlotIndex,
+                              columnIndex
+                            );
+                            const currentCenterY = nodeTop + TABLEAU_CARD_HEIGHT / 2;
+                            const nextRound = visualTableauRounds[columnIndex + 1];
+                            const nextNodeTop = nextRound
+                              ? getTableauNodeTop(
+                                  nextRound.slotCount,
+                                  nextRound.userSlotIndex,
+                                  columnIndex + 1
+                                )
+                              : null;
+                            const nextCenterY =
+                              nextNodeTop !== null ? nextNodeTop + TABLEAU_CARD_HEIGHT / 2 : null;
+
+                            const connectorStartXUser = TABLEAU_CARD_WIDTH - 1;
+                            const connectorStartXOther = TABLEAU_OTHER_CARD_WIDTH - 1;
+                            const connectorKneeX = connectorStartXUser + TABLEAU_CONNECTOR_KNEE_OFFSET;
+                            const connectorEndX = TABLEAU_ROUND_COLUMN_WIDTH + TABLEAU_ROUND_COLUMN_GAP + 2;
+                            const connectorJoinOverlap = TABLEAU_CONNECTOR_JOIN_OVERLAP;
+                            const hasNextUserBout = !!nextRound?.userBout;
+                            const shouldRenderMainConnector =
+                              !!userBout &&
+                              hasNextUserBout &&
+                              nextCenterY !== null;
+                            const shouldRenderOtherBranch = shouldRenderMainConnector;
+                            const otherNodeTop =
+                              shouldRenderOtherBranch && nextCenterY !== null
+                                ? Math.min(
+                                    Math.max(0, tableauTreeHeight - TABLEAU_OTHER_CARD_HEIGHT),
+                                    2 * nextCenterY - currentCenterY - TABLEAU_OTHER_CARD_HEIGHT / 2
+                                  )
+                                : null;
+                            const otherCenterY =
+                              otherNodeTop !== null ? otherNodeTop + TABLEAU_OTHER_CARD_HEIGHT / 2 : null;
+
+                            return (
+                              <View key={roundColumn.round} style={styles.tableauRoundColumn}>
+                                <Text style={styles.tableauRoundTitle}>
+                                  {formatTableauRoundLabel(roundColumn.round)}
+                                </Text>
+
+                                <View style={[styles.tableauSlotsColumn, { height: tableauTreeHeight }]}>
+                                  <View
+                                    style={[
+                                      styles.tableauPathNode,
+                                      {
+                                        top: nodeTop,
+                                      },
+                                    ]}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.tableauSlotCard,
+                                        isPendingUserSlot && styles.tableauSlotCardPending,
+                                        userBout?.outcome === 'win' && styles.tableauSlotCardWin,
+                                        userBout?.outcome === 'loss' && styles.tableauSlotCardLoss,
+                                      ]}
+                                    >
+                                      {userBout ? (
+                                        <>
+                                          <Text style={styles.tableauUserNameText} numberOfLines={1}>
+                                            {userBout.opponentName}
+                                          </Text>
+                                          <Text style={styles.tableauOpponentText} numberOfLines={1}>
+                                            vs {tableauUserLabel}
+                                          </Text>
+                                          <View style={styles.tableauMetaRow}>
+                                            <Text style={styles.tableauScoreText}>{userBout.scoreLabel}</Text>
+                                            <View
+                                              style={[
+                                                styles.tableauOutcomePill,
+                                                userBout.outcome === 'win' && styles.tableauOutcomePillWin,
+                                                userBout.outcome === 'loss' && styles.tableauOutcomePillLoss,
+                                                userBout.outcome === 'pending' && styles.tableauOutcomePillPending,
+                                              ]}
+                                            >
+                                              <Text style={styles.tableauOutcomePillText}>
+                                                {userBout.outcome === 'win'
+                                                  ? 'W'
+                                                  : userBout.outcome === 'loss'
+                                                    ? 'L'
+                                                    : 'P'}
+                                              </Text>
+                                            </View>
+                                          </View>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Text style={styles.tableauPendingText}>Not fenced yet</Text>
+                                          <View style={styles.tableauMetaRow}>
+                                            <Text style={styles.tableauScoreText}>—</Text>
+                                            <View style={[styles.tableauOutcomePill, styles.tableauOutcomePillPending]}>
+                                              <Text style={styles.tableauOutcomePillText}>Pending</Text>
+                                            </View>
+                                          </View>
+                                        </>
+                                      )}
+                                    </View>
+                                  </View>
+
+                                  {shouldRenderOtherBranch && otherNodeTop !== null && (
+                                    <View style={[styles.tableauOtherNode, { top: otherNodeTop }]}>
+                                      <View style={styles.tableauOtherCard}>
+                                        <Text style={styles.tableauOtherText}>Other bout</Text>
+                                      </View>
+                                    </View>
+                                  )}
+
+                                  {shouldRenderMainConnector && nextCenterY !== null && (
+                                    <>
+                                      <View
+                                        style={[
+                                          styles.tableauConnector,
+                                          {
+                                            left: connectorStartXUser,
+                                            top: currentCenterY - TABLEAU_CONNECTOR_STROKE_WIDTH / 2,
+                                            width:
+                                              connectorKneeX - connectorStartXUser + connectorJoinOverlap,
+                                          },
+                                        ]}
+                                      />
+                                      <View
+                                        style={[
+                                          styles.tableauConnector,
+                                          {
+                                            left: connectorKneeX - TABLEAU_CONNECTOR_STROKE_WIDTH / 2,
+                                            top:
+                                              Math.min(currentCenterY, nextCenterY) - connectorJoinOverlap,
+                                            width: TABLEAU_CONNECTOR_STROKE_WIDTH,
+                                            height: Math.max(
+                                              TABLEAU_CONNECTOR_STROKE_WIDTH,
+                                              Math.abs(nextCenterY - currentCenterY) +
+                                                connectorJoinOverlap * 2
+                                            ),
+                                          },
+                                        ]}
+                                      />
+                                      <View
+                                        style={[
+                                          styles.tableauConnector,
+                                          {
+                                            left: connectorKneeX - connectorJoinOverlap,
+                                            top: nextCenterY - TABLEAU_CONNECTOR_STROKE_WIDTH / 2,
+                                            width: connectorEndX - connectorKneeX + connectorJoinOverlap,
+                                          },
+                                        ]}
+                                      />
+                                    </>
+                                  )}
+
+                                  {shouldRenderOtherBranch && otherCenterY !== null && nextCenterY !== null && (
+                                    <>
+                                      <View
+                                        style={[
+                                          styles.tableauConnector,
+                                          {
+                                            left: connectorStartXOther,
+                                            top: otherCenterY - TABLEAU_CONNECTOR_STROKE_WIDTH / 2,
+                                            width:
+                                              connectorKneeX - connectorStartXOther + connectorJoinOverlap,
+                                          },
+                                        ]}
+                                      />
+                                      <View
+                                        style={[
+                                          styles.tableauConnector,
+                                          {
+                                            left: connectorKneeX - TABLEAU_CONNECTOR_STROKE_WIDTH / 2,
+                                            top:
+                                              Math.min(otherCenterY, nextCenterY) - connectorJoinOverlap,
+                                            width: TABLEAU_CONNECTOR_STROKE_WIDTH,
+                                            height: Math.max(
+                                              TABLEAU_CONNECTOR_STROKE_WIDTH,
+                                              Math.abs(nextCenterY - otherCenterY) +
+                                                connectorJoinOverlap * 2
+                                            ),
+                                          },
+                                        ]}
+                                      />
+                                    </>
+                                  )}
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                      <Text style={styles.tableauPreviewHint}>
+                        Compressed tree preview showing your DE path and opponent-side branch by round.
+                      </Text>
+                    </View>
+                  )}
+
                   {deMatchesByRound.map(({ round, matches: roundMatches }) => (
                     <View key={round} style={styles.roundGroup}>
                       {roundMatches.map(match => renderMatchRow(match, round))}
@@ -1219,6 +1821,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  headerSpacer: {
+    width: 32,
+    height: 32,
+  },
   scrollContent: {
     paddingBottom: 24,
     paddingHorizontal: 16,
@@ -1388,9 +1994,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 9,
   },
   roundGroup: {
     marginTop: 8,
@@ -1533,6 +2139,375 @@ const styles = StyleSheet.create({
     color: '#E9D7FF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  breakdownDropdownToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.45)',
+    backgroundColor: 'rgba(139, 92, 246, 0.14)',
+    marginBottom: 10,
+  },
+  breakdownDropdownLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  breakdownDropdownText: {
+    color: '#E9D7FF',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  previewBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(139, 92, 246, 0.24)',
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.7)',
+  },
+  previewBadgeText: {
+    color: '#E9D7FF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  pouleVisualCard: {
+    marginBottom: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.28)',
+    backgroundColor: 'rgba(17, 17, 18, 0.6)',
+    padding: 10,
+  },
+  crossSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  crossSummaryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.42)',
+    backgroundColor: 'rgba(139, 92, 246, 0.16)',
+  },
+  crossSummaryChipLabel: {
+    color: 'rgba(255, 255, 255, 0.62)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  crossSummaryChipValue: {
+    color: '#E9D7FF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pouleVisualScrollContent: {
+    paddingBottom: 4,
+  },
+  crossMatrixHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  crossNameHeaderCell: {
+    width: 168,
+    height: 34,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  crossHeaderCell: {
+    width: 52,
+    height: 34,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+  },
+  crossHeaderCellSelf: {
+    backgroundColor: 'rgba(139, 92, 246, 0.22)',
+  },
+  crossHeaderText: {
+    color: '#E9D7FF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  crossYouRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  crossFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  crossNameCell: {
+    width: 168,
+    minHeight: 46,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  crossSeedText: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 12,
+    fontWeight: '700',
+    width: 16,
+    textAlign: 'center',
+  },
+  crossNameTextGroup: {
+    flex: 1,
+  },
+  crossNameText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  crossNationText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  crossSelfCell: {
+    width: 52,
+    minHeight: 46,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  crossSelfCellText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    letterSpacing: 1,
+  },
+  crossResultCell: {
+    width: 52,
+    minHeight: 46,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    gap: 2,
+  },
+  crossResultCellWin: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  crossResultCellLoss: {
+    backgroundColor: 'rgba(248, 113, 113, 0.17)',
+  },
+  crossResultCellPending: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  crossResultOutcomeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  crossResultScoreText: {
+    color: 'rgba(255, 255, 255, 0.78)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  crossNotTrackedStrip: {
+    minHeight: 46,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  crossNotTrackedText: {
+    color: 'rgba(255, 255, 255, 0.42)',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  crossNotTrackedDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  crossNotTrackedDot: {
+    color: 'rgba(255, 255, 255, 0.35)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  poulePreviewHint: {
+    marginTop: 8,
+    color: 'rgba(255, 255, 255, 0.58)',
+    fontSize: 12,
+  },
+  tableauVisualCard: {
+    marginBottom: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(200, 166, 255, 0.28)',
+    backgroundColor: 'rgba(17, 17, 18, 0.6)',
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  tableauScrollContent: {
+    paddingHorizontal: 10,
+    paddingBottom: 4,
+  },
+  tableauColumnsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: TABLEAU_ROUND_COLUMN_GAP,
+  },
+  tableauRoundColumn: {
+    width: TABLEAU_ROUND_COLUMN_WIDTH,
+  },
+  tableauRoundTitle: {
+    color: '#E9D7FF',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 8,
+    letterSpacing: 0.2,
+  },
+  tableauSlotsColumn: {
+    width: TABLEAU_ROUND_COLUMN_WIDTH,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  tableauPathNode: {
+    position: 'absolute',
+    left: 0,
+    width: TABLEAU_CARD_WIDTH,
+    zIndex: 3,
+  },
+  tableauSlotCard: {
+    width: TABLEAU_CARD_WIDTH,
+    height: TABLEAU_CARD_HEIGHT,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(28, 30, 33, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  tableauSlotCardWin: {
+    borderColor: 'rgba(16, 185, 129, 0.75)',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  tableauSlotCardLoss: {
+    borderColor: 'rgba(248, 113, 113, 0.75)',
+    backgroundColor: 'rgba(248, 113, 113, 0.17)',
+  },
+  tableauSlotCardPending: {
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  tableauUserNameText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tableauOpponentText: {
+    color: 'rgba(255, 255, 255, 0.82)',
+    fontSize: 9,
+    fontWeight: '600',
+    marginTop: -2,
+  },
+  tableauPendingText: {
+    color: 'rgba(255, 255, 255, 0.88)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tableauMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tableauScoreText: {
+    color: 'rgba(255, 255, 255, 0.95)',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  tableauOutcomePill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  tableauOutcomePillWin: {
+    borderColor: 'rgba(16, 185, 129, 0.9)',
+    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+  },
+  tableauOutcomePillLoss: {
+    borderColor: 'rgba(248, 113, 113, 0.9)',
+    backgroundColor: 'rgba(248, 113, 113, 0.2)',
+  },
+  tableauOutcomePillPending: {
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  tableauOutcomePillText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  tableauConnector: {
+    position: 'absolute',
+    backgroundColor: 'rgba(200, 166, 255, 0.92)',
+    height: TABLEAU_CONNECTOR_STROKE_WIDTH,
+    borderRadius: TABLEAU_CONNECTOR_STROKE_WIDTH,
+    zIndex: 4,
+  },
+  tableauOtherNode: {
+    position: 'absolute',
+    left: 0,
+    width: TABLEAU_OTHER_CARD_WIDTH,
+    zIndex: 2,
+  },
+  tableauOtherCard: {
+    width: TABLEAU_OTHER_CARD_WIDTH,
+    height: TABLEAU_OTHER_CARD_HEIGHT,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tableauOtherText: {
+    color: 'rgba(255, 255, 255, 0.64)',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  tableauPreviewHint: {
+    marginTop: 8,
+    paddingHorizontal: 10,
+    color: 'rgba(255, 255, 255, 0.58)',
+    fontSize: 12,
   },
   dateInput: {
     flexDirection: 'row',
