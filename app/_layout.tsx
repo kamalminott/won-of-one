@@ -389,8 +389,13 @@ export default function RootLayout() {
       }
 
       // OAuth callbacks are handled inside the auth flow (AuthSession).
-      // Fallback on cold starts (Android can restart during OAuth) by exchanging the code here.
+      // Fallback only on cold starts (Android can restart during OAuth) by exchanging the code here.
       if (shouldHandleOAuthCode && !isEmailConfirm && !isRecovery) {
+        if (source !== 'initial') {
+          console.log('ℹ️ Skipping OAuth fallback exchange for runtime link event');
+          return true;
+        }
+
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session && code) {
@@ -439,6 +444,7 @@ export default function RootLayout() {
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack>
           <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="auth" options={{ headerShown: false }} />
           <Stack.Screen name="create-account" options={{ headerShown: false }} />
           <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
           <Stack.Screen name="reset-password" options={{ headerShown: false }} />

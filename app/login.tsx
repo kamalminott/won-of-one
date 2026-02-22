@@ -7,6 +7,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert, KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [socialAuthLoading, setSocialAuthLoading] = useState<'google' | 'apple' | null>(null);
   const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   
@@ -163,7 +165,7 @@ export default function LoginScreen() {
             <Text style={[styles.subtitle, { 
               fontSize: width * 0.04,
               marginTop: height * 0.03
-            }]}>Welcome back you've been missed</Text>
+            }]}>Welcome back, you have been missed</Text>
           </View>
 
           {/* Login Form Card */}
@@ -303,21 +305,33 @@ export default function LoginScreen() {
                 style={[styles.socialButton, { 
                   width: width * 0.12, 
                   height: width * 0.12, 
-                  borderRadius: width * 0.06 
+                  borderRadius: width * 0.06,
+                  opacity: socialAuthLoading ? 0.65 : 1,
                 }]}
+                disabled={!!socialAuthLoading}
                 onPress={async () => {
+                  if (socialAuthLoading) return;
+                  setSocialAuthLoading('google');
                   analytics.capture('google_signin_attempt');
-                  const { error } = await signInWithGoogle();
-                  if (error) {
-                    analytics.capture('google_signin_failure', { error: error.message });
-                    Alert.alert('Error', error.message || 'Failed to sign in with Google');
-                  } else {
-                    analytics.capture('google_signin_success');
-                    // Navigation will happen automatically via auth state change
+                  try {
+                    const { error } = await signInWithGoogle();
+                    if (error) {
+                      analytics.capture('google_signin_failure', { error: error.message });
+                      Alert.alert('Error', error.message || 'Failed to sign in with Google');
+                    } else {
+                      analytics.capture('google_signin_success');
+                      // Navigation will happen automatically via auth state change
+                    }
+                  } finally {
+                    setSocialAuthLoading(null);
                   }
                 }}
               >
-                <GoogleIcon size={width * 0.045} />
+                {socialAuthLoading === 'google' ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <GoogleIcon size={width * 0.045} />
+                )}
               </TouchableOpacity>
               
               {Platform.OS === 'ios' && (
@@ -325,23 +339,35 @@ export default function LoginScreen() {
                   style={[styles.socialButton, { 
                     width: width * 0.12, 
                     height: width * 0.12, 
-                    borderRadius: width * 0.06 
+                    borderRadius: width * 0.06,
+                    opacity: socialAuthLoading ? 0.65 : 1,
                   }]}
+                  disabled={!!socialAuthLoading}
                   onPress={async () => {
+                    if (socialAuthLoading) return;
+                    setSocialAuthLoading('apple');
                     analytics.capture('apple_signin_attempt');
-                    const { error } = await signInWithApple();
-                    if (error) {
-                      if (error.message !== 'Sign in was canceled') {
-                        analytics.capture('apple_signin_failure', { error: error.message });
-                        Alert.alert('Error', error.message || 'Failed to sign in with Apple');
+                    try {
+                      const { error } = await signInWithApple();
+                      if (error) {
+                        if (error.message !== 'Sign in was canceled') {
+                          analytics.capture('apple_signin_failure', { error: error.message });
+                          Alert.alert('Error', error.message || 'Failed to sign in with Apple');
+                        }
+                      } else {
+                        analytics.capture('apple_signin_success');
+                        router.push('/(tabs)');
                       }
-                    } else {
-                      analytics.capture('apple_signin_success');
-                      router.push('/(tabs)');
+                    } finally {
+                      setSocialAuthLoading(null);
                     }
                   }}
                 >
-                  <Ionicons name="logo-apple" size={width * 0.06} color="white" />
+                  {socialAuthLoading === 'apple' ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="logo-apple" size={width * 0.06} color="white" />
+                  )}
                 </TouchableOpacity>
               )}
             </View>
@@ -360,7 +386,7 @@ export default function LoginScreen() {
             }}
           >
             <Text style={[styles.signUpText, { fontSize: width * 0.04 }]}>
-              Don't have an account? <Text style={styles.signUpLink}>Sign Up</Text>
+              Do not have an account? <Text style={styles.signUpLink}>Sign Up</Text>
             </Text>
           </TouchableOpacity>
         </ScrollView>

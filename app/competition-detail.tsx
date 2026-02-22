@@ -550,7 +550,7 @@ export default function CompetitionDetailScreen() {
           </View>
         </View>
         <View style={styles.matchRight}>
-          <Text style={styles.scoreText}>{scoreText}</Text>
+          <Text style={[styles.scoreText, !match.isWin && styles.scoreTextLoss]}>{scoreText}</Text>
           {match.isWin ? (
             <WinPill customStyle={styles.resultPill} textStyle={styles.resultPillText} />
           ) : (
@@ -1104,11 +1104,15 @@ export default function CompetitionDetailScreen() {
                 <View style={styles.summaryDivider} />
                 <View style={styles.summaryStat}>
                   {isEditing ? (
-                    <View style={styles.placementRow}>
+                    <View style={[styles.placementRow, Platform.OS === 'android' && styles.placementRowAndroid]}>
                       <TextInput
                         value={draftPlacement}
                         onChangeText={setDraftPlacement}
-                        style={[styles.input, styles.inputSmall]}
+                        style={[
+                          styles.input,
+                          styles.inputSmall,
+                          Platform.OS === 'android' && styles.inputSmallAndroid,
+                        ]}
                         placeholder="Place"
                         placeholderTextColor="rgba(255, 255, 255, 0.4)"
                         keyboardType="number-pad"
@@ -1117,7 +1121,11 @@ export default function CompetitionDetailScreen() {
                       <TextInput
                         value={draftFieldSize}
                         onChangeText={setDraftFieldSize}
-                        style={[styles.input, styles.inputSmall]}
+                        style={[
+                          styles.input,
+                          styles.inputSmall,
+                          Platform.OS === 'android' && styles.inputSmallAndroid,
+                        ]}
                         placeholder="Field"
                         placeholderTextColor="rgba(255, 255, 255, 0.4)"
                         keyboardType="number-pad"
@@ -1283,7 +1291,9 @@ export default function CompetitionDetailScreen() {
                                 ]}
                               >
                                 {index === 0 ? (
-                                  <Text style={styles.crossNotTrackedText}>Opponent vs opponent bouts are not tracked</Text>
+                                  <Text style={styles.crossNotTrackedText} numberOfLines={1} ellipsizeMode="tail">
+                                    Opponent vs opponent bouts are not tracked
+                                  </Text>
                                 ) : (
                                   <View style={styles.crossNotTrackedDots}>
                                     <Text style={styles.crossNotTrackedDot}>·</Text>
@@ -1866,6 +1876,9 @@ const styles = StyleSheet.create({
     width: 70,
     textAlign: 'center',
   },
+  inputSmallAndroid: {
+    width: 66,
+  },
   inputLabel: {
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
@@ -1907,6 +1920,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  placementRowAndroid: {
+    paddingLeft: 8,
   },
   placementDivider: {
     color: 'rgba(255, 255, 255, 0.6)',
@@ -2067,6 +2083,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 6,
+  },
+  scoreTextLoss: {
+    color: 'rgb(250, 178, 178)',
   },
   resultPill: {
     paddingHorizontal: 10,
@@ -2434,6 +2453,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: Platform.OS === 'android' ? 2 : 0,
   },
   tableauScoreText: {
     color: 'rgba(255, 255, 255, 0.95)',
@@ -2444,7 +2464,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: Platform.OS === 'android' ? 0 : 2,
   },
   tableauOutcomePillWin: {
     borderColor: 'rgba(16, 185, 129, 0.9)',
@@ -2461,6 +2481,7 @@ const styles = StyleSheet.create({
   tableauOutcomePillText: {
     color: 'white',
     fontSize: 10,
+    includeFontPadding: false,
     fontWeight: '700',
     letterSpacing: 0.2,
   },

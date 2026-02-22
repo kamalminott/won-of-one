@@ -12,11 +12,11 @@ import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, UIManager, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const DE_ROUNDS: Array<'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'> = [
+const DE_ROUNDS = [
   'L256',
   'L128',
   'L96',
@@ -26,7 +26,9 @@ const DE_ROUNDS: Array<'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 
   'QF',
   'SF',
   'F',
-];
+] as const;
+
+type DeRound = (typeof DE_ROUNDS)[number];
 
 export default function AddMatchScreen() {
   const { width, height } = useWindowDimensions();
@@ -50,6 +52,7 @@ export default function AddMatchScreen() {
   
   // Check if we're in edit mode
   const isEditMode = params.editMode === 'true';
+  const currentMatchId = typeof params.matchId === 'string' ? params.matchId : null;
   
   // Parse date/time from params with fallbacks
   const parseInitialDateTime = () => {
@@ -134,7 +137,8 @@ export default function AddMatchScreen() {
   const [showCompetitionSuggestions, setShowCompetitionSuggestions] = useState(false);
   const [activeCompetition, setActiveCompetition] = useState<Competition | null>(null);
   const [competitionPhase, setCompetitionPhase] = useState<'POULE' | 'DE'>('POULE');
-  const [competitionRound, setCompetitionRound] = useState<'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F'>('L16');
+  const [competitionRound, setCompetitionRound] = useState<DeRound>('L16');
+  const [usedDeRounds, setUsedDeRounds] = useState<DeRound[]>([]);
   const competitionSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCompetitionSearchRef = useRef('');
   const [notes, setNotes] = useState(params.notes as string || '');
@@ -169,6 +173,7 @@ export default function AddMatchScreen() {
   const pointDifferential = parseInt(yourScore) - parseInt(opponentScore);
   const isWinner = pointDifferential > 0;
   const deRounds = DE_ROUNDS;
+  const usedDeRoundsSet = useMemo(() => new Set(usedDeRounds), [usedDeRounds]);
   const getLocalDateKey = (date: Date) => {
     const year = date.getFullYear();
     const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -297,7 +302,9 @@ export default function AddMatchScreen() {
     });
   };
 
-  const handleCompetitionRoundSelect = (round: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F') => {
+  const handleCompetitionRoundSelect = (round: DeRound) => {
+    if (competitionPhase !== 'DE') return;
+    if (usedDeRoundsSet.has(round)) return;
     if (competitionRound === round) return;
     setCompetitionRound(round);
     analytics.capture('competition_de_round_selected', {
@@ -405,8 +412,8 @@ export default function AddMatchScreen() {
       setCompetitionPhase(lockedPhase);
     }
 
-    if (lockedRound && DE_ROUNDS.includes(lockedRound as any)) {
-      setCompetitionRound(lockedRound as any);
+    if (lockedRound && DE_ROUNDS.includes(lockedRound as DeRound)) {
+      setCompetitionRound(lockedRound as DeRound);
     }
   }, [isCompetitionLocked, isEditMode, params.competitionId, params.competitionName, params.competitionWeaponType, params.phase, params.deRound]);
 
@@ -481,6 +488,74 @@ export default function AddMatchScreen() {
       }
     };
   }, [accessToken, competitionName, event, matchDate, user?.id, weaponType]);
+
+  // Prevent duplicate DE round logs per competition by tracking already-used rounds
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadUsedDeRounds = async () => {
+      if (
+        event !== 'Competition' ||
+        competitionPhase !== 'DE' ||
+        !selectedCompetitionId ||
+        !user?.id
+      ) {
+        setUsedDeRounds([]);
+        return;
+      }
+
+      try {
+        const competitionMatches = await matchService.getCompetitionMatches(
+          selectedCompetitionId,
+          user.id,
+          userName,
+          accessToken ?? null
+        );
+
+        if (cancelled) return;
+
+        const usedRounds = new Set<DeRound>();
+        for (const match of competitionMatches) {
+          if (currentMatchId && match.id === currentMatchId) continue;
+          if (match.competitionPhase !== 'DE') continue;
+          if (!match.competitionRound || !DE_ROUNDS.includes(match.competitionRound as DeRound)) continue;
+          usedRounds.add(match.competitionRound as DeRound);
+        }
+
+        setUsedDeRounds(DE_ROUNDS.filter((round) => usedRounds.has(round)));
+      } catch (error) {
+        console.warn('Failed to load used DE rounds', error);
+        if (!cancelled) {
+          setUsedDeRounds([]);
+        }
+      }
+    };
+
+    loadUsedDeRounds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    competitionPhase,
+    currentMatchId,
+    event,
+    selectedCompetitionId,
+    user?.id,
+    userName,
+  ]);
+
+  // If the currently selected DE round is already used, move to the next available round
+  useEffect(() => {
+    if (competitionPhase !== 'DE') return;
+    if (!usedDeRoundsSet.has(competitionRound)) return;
+
+    const nextAvailableRound = DE_ROUNDS.find((round) => !usedDeRoundsSet.has(round));
+    if (nextAvailableRound) {
+      setCompetitionRound(nextAvailableRound);
+    }
+  }, [competitionPhase, competitionRound, usedDeRoundsSet]);
 
   // Fetch match data when in edit mode to populate weaponType and competition fields
   useEffect(() => {
@@ -730,6 +805,14 @@ export default function AddMatchScreen() {
 
       if (competitionPhase === 'DE' && !competitionRound) {
         Alert.alert('Round Required', 'Please select a direct elimination round.');
+        return;
+      }
+
+      if (competitionPhase === 'DE' && usedDeRoundsSet.has(competitionRound)) {
+        Alert.alert(
+          'Round Already Logged',
+          'This direct elimination round has already been added for this competition. Please choose another round.'
+        );
         return;
       }
 
@@ -1229,6 +1312,11 @@ export default function AddMatchScreen() {
       shadowRadius: 6,
       elevation: 2,
     },
+    roundChipUsed: {
+      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      opacity: 0.5,
+    },
     roundChipText: {
       fontSize: getDimension(0.033, width),
       color: 'rgba(255, 255, 255, 0.6)',
@@ -1236,6 +1324,9 @@ export default function AddMatchScreen() {
     },
     roundChipTextActive: {
       color: '#E9D7FF',
+    },
+    roundChipTextUsed: {
+      color: 'rgba(255, 255, 255, 0.35)',
     },
     competitionSuggestionItem: {
       paddingHorizontal: getDimension(0.03, width),
@@ -2196,21 +2287,25 @@ export default function AddMatchScreen() {
                 contentContainerStyle={styles.roundChipsRowContent}
               >
                 {deRounds.map((round) => {
-                  const isActive = competitionRound === round;
+                  const isUsedRound = usedDeRoundsSet.has(round);
+                  const isActive = competitionPhase === 'DE' && competitionRound === round && !isUsedRound;
+                  const isDisabled = competitionPhase !== 'DE' || isUsedRound;
                   return (
                     <TouchableOpacity
                       key={round}
                       style={[
                         styles.roundChip,
+                        isUsedRound && styles.roundChipUsed,
                         isActive && styles.roundChipActive,
                       ]}
                       onPress={() => handleCompetitionRoundSelect(round)}
-                      activeOpacity={0.8}
-                      disabled={competitionPhase !== 'DE'}
+                      activeOpacity={isDisabled ? 1 : 0.8}
+                      disabled={isDisabled}
                     >
                       <Text
                         style={[
                           styles.roundChipText,
+                          isUsedRound && styles.roundChipTextUsed,
                           isActive && styles.roundChipTextActive,
                         ]}
                       >
