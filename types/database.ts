@@ -5,6 +5,9 @@ export interface Match {
   user_id: string;
   event_id?: string; // UUID reference to fencing_event table (if applicable)
   event_date?: string;
+  event_timezone?: string | null;
+  event_local_date?: string | null;
+  event_local_time?: string | null;
   location?: string;
   match_type?: string;
   competition_id?: string | null;
@@ -194,6 +197,9 @@ export interface SimpleMatch {
   opponentScore: number;
   date: string;
   time?: string; // Time when match was completed
+  eventTimezone?: string | null;
+  eventLocalDate?: string | null;
+  eventLocalTime?: string | null;
   opponentName: string;
   isWin: boolean;
   matchType?: string;
@@ -216,6 +222,7 @@ export interface SimpleGoal {
   targetValue: number;
   currentValue: number;
   deadline: string;
+  startDate?: string;                // Goal tracking start timestamp (goal created_at)
   isCompleted: boolean;
   isFailed?: boolean;                 // New: Goal became impossible to achieve
   progress: number;

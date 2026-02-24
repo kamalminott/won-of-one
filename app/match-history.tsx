@@ -89,12 +89,54 @@ export default function RecentMatchesScreen() {
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(new Set());
   const hasTrackedFilterRef = useRef(false);
 
+  const isDisplayDate = (value: string): boolean => /^\d{2}\/\d{2}\/\d{4}$/.test(value);
+  const isIsoDateOnly = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+  const parseDateOnly = (dateString: string): Date | null => {
+    const trimmed = dateString.trim();
+    if (!trimmed) return null;
+
+    if (isDisplayDate(trimmed)) {
+      const [dayStr, monthStr, yearStr] = trimmed.split('/');
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const year = parseInt(yearStr, 10);
+      const parsed = new Date(year, month, day);
+      if (isNaN(parsed.getTime())) return null;
+      if (parsed.getFullYear() !== year || parsed.getMonth() !== month || parsed.getDate() !== day) {
+        return null;
+      }
+      return parsed;
+    }
+
+    if (isIsoDateOnly(trimmed)) {
+      const [yearStr, monthStr, dayStr] = trimmed.split('-');
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const year = parseInt(yearStr, 10);
+      const parsed = new Date(year, month, day);
+      if (isNaN(parsed.getTime())) return null;
+      if (parsed.getFullYear() !== year || parsed.getMonth() !== month || parsed.getDate() !== day) {
+        return null;
+      }
+      return parsed;
+    }
+
+    return null;
+  };
+
   // Format date to DD/MM/YYYY
   const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
+    if (!dateString || dateString.trim() === '') return '';
+    if (isDisplayDate(dateString.trim())) return dateString.trim();
+
+    const dateOnly = parseDateOnly(dateString);
+    const parsed = dateOnly ?? new Date(dateString);
+    if (isNaN(parsed.getTime())) return dateString;
+
+    const day = parsed.getDate().toString().padStart(2, '0');
+    const month = (parsed.getMonth() + 1).toString().padStart(2, '0');
+    const year = parsed.getFullYear();
     return `${day}/${month}/${year}`;
   };
 
@@ -217,16 +259,8 @@ export default function RecentMatchesScreen() {
   // --- Grouping helpers ---
   const parseMatchDate = (dateString: string): Date | null => {
     if (!dateString || dateString.trim() === '') return null;
-
-    // DD/MM/YYYY support
-    if (dateString.includes('/') && dateString.split('/').length === 3) {
-      const [dayStr, monthStr, yearStr] = dateString.split('/');
-      const day = parseInt(dayStr, 10);
-      const month = parseInt(monthStr, 10) - 1;
-      const year = parseInt(yearStr, 10);
-      const parsed = new Date(year, month, day);
-      return isNaN(parsed.getTime()) ? null : parsed;
-    }
+    const dateOnly = parseDateOnly(dateString);
+    if (dateOnly) return dateOnly;
 
     const parsed = new Date(dateString);
     return isNaN(parsed.getTime()) ? null : parsed;
@@ -234,7 +268,10 @@ export default function RecentMatchesScreen() {
 
   const getDateKey = (date: Date | null): string => {
     if (!date) return 'unknown';
-    return date.toISOString().slice(0, 10); // YYYY-MM-DD
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   const formatHeaderLabel = (dateKey: string): string => {

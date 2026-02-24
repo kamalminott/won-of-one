@@ -94,6 +94,24 @@ const getAuthMetadataName = (authUser?: { user_metadata?: Record<string, any> } 
   );
 };
 
+const getMatchTimestamp = (match: SimpleMatch): number => {
+  const date = new Date(match.date);
+  if (Number.isNaN(date.getTime())) {
+    return Number.NaN;
+  }
+
+  if (match.time && match.time.includes(':')) {
+    const [hourStr, minuteStr] = match.time.split(':');
+    const hour = parseInt(hourStr, 10);
+    const minute = parseInt(minuteStr, 10);
+    if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
+      date.setHours(hour, minute, 0, 0);
+    }
+  }
+
+  return date.getTime();
+};
+
 const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
 
 export default function HomeScreen() {
@@ -1055,20 +1073,24 @@ export default function HomeScreen() {
               (() => {
                 // Calculate window matches for insights
                 const goal = goals[0];
-                let windowMatches = matches;
+                const goalStartTimestamp = goal.startDate ? new Date(goal.startDate).getTime() : Number.NaN;
+                const hasGoalStartTimestamp = Number.isFinite(goalStartTimestamp);
 
-                let matchesSinceGoalCreation: number | undefined;
-                if (goal.match_window && goal.starting_match_count !== undefined && matchCounts) {
-                  matchesSinceGoalCreation = Math.max(0, matchCounts.totalMatches - goal.starting_match_count);
+                let matchesSinceGoalCreation = hasGoalStartTimestamp
+                  ? matches.filter(match => {
+                      const matchTimestamp = getMatchTimestamp(match);
+                      return Number.isFinite(matchTimestamp) && matchTimestamp >= goalStartTimestamp;
+                    })
+                  : matches;
+
+                if (!hasGoalStartTimestamp && goal.starting_match_count !== undefined && matchCounts) {
+                  const fallbackMatchesSinceGoal = Math.max(0, matchCounts.totalMatches - goal.starting_match_count);
+                  matchesSinceGoalCreation = matches.slice(0, fallbackMatchesSinceGoal);
                 }
 
-                if (goal.match_window) {
-                  const matchesToConsider =
-                    matchesSinceGoalCreation === undefined
-                      ? goal.match_window
-                      : Math.min(goal.match_window, matchesSinceGoalCreation);
-                  windowMatches = matches.slice(0, matchesToConsider);
-                }
+                let windowMatches = goal.match_window
+                  ? matchesSinceGoalCreation.slice(0, goal.match_window)
+                  : matchesSinceGoalCreation;
                 
                 const windowWins = windowMatches.filter(m => m.isWin).length;
                 const windowLosses = windowMatches.filter(m => !m.isWin).length;
@@ -1104,7 +1126,7 @@ export default function HomeScreen() {
                     targetValue={goal.targetValue}
                     currentValue={goal.currentValue}
                     matchWindow={goal.match_window}
-                    totalMatches={matchesSinceGoalCreation ?? windowMatches.length}
+                    totalMatches={matchesSinceGoalCreation.length}
                     currentRecord={{
                       wins: windowWins,
                       losses: windowLosses

@@ -3,7 +3,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
-import { competitionService, matchService, userService } from '@/lib/database';
+import { competitionService, goalService, matchService, userService } from '@/lib/database';
 import type { Competition } from '@/types/database';
 import { sessionTracker } from '@/lib/sessionTracker';
 import { Ionicons } from '@expo/vector-icons';
@@ -872,6 +872,17 @@ export default function AddMatchScreen() {
     if (!isPM && hour24 === 12) hour24 = 0;
     
     const eventDateTime = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), hour24, parseInt(minute, 10));
+    const eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const eventLocalDate = [
+      eventDateTime.getFullYear(),
+      `${eventDateTime.getMonth() + 1}`.padStart(2, '0'),
+      `${eventDateTime.getDate()}`.padStart(2, '0'),
+    ].join('-');
+    const eventLocalTime = [
+      `${eventDateTime.getHours()}`.padStart(2, '0'),
+      `${eventDateTime.getMinutes()}`.padStart(2, '0'),
+      `${eventDateTime.getSeconds()}`.padStart(2, '0'),
+    ].join(':');
         
         const userDisplayName = userName || 'You';
         
@@ -883,6 +894,9 @@ export default function AddMatchScreen() {
           fencer_1_name: userDisplayName,
           fencer_2_name: opponentName.trim(),
           event_date: eventDateTime.toISOString(),
+          event_timezone: eventTimezone,
+          event_local_date: eventLocalDate,
+          event_local_time: eventLocalTime,
           weapon_type: weaponType.toLowerCase(),
           notes: notes.trim() || undefined,
           ...competitionPayload,
@@ -912,6 +926,14 @@ export default function AddMatchScreen() {
 
       if (savedMatch) {
         console.log(isEditing ? '✅ Match updated successfully:' : '✅ Match saved successfully:', savedMatch);
+
+        if (isEditing) {
+          try {
+            await goalService.recalculateActiveGoalsForUser(user.id, accessToken ?? null);
+          } catch (goalError) {
+            console.warn('Failed to recalculate goals after manual match edit', goalError);
+          }
+        }
         
         // Track match save/update success
         analytics.matchSave({ 

@@ -71,6 +71,83 @@ const normalizeDateKey = (value?: string | null): string | null => {
   return datePart;
 };
 
+const formatLocalTimeKey = (date: Date): string => {
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  const seconds = `${date.getSeconds()}`.padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
+
+const formatDateKeyInTimezone = (date: Date, timezone?: string | null): string | null => {
+  const tz = timezone?.trim();
+  if (!tz) return null;
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    if (!year || !month || !day) return null;
+    return `${year}-${month}-${day}`;
+  } catch {
+    return null;
+  }
+};
+
+const resolveDeviceTimezone = (): string => {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return timezone?.trim() || 'UTC';
+};
+
+const resolveMatchEventDateKey = (match: {
+  event_local_date?: string | null;
+  event_date?: string | null;
+  event_timezone?: string | null;
+}): string => {
+  const explicitLocalDate = normalizeDateKey(match.event_local_date);
+  if (explicitLocalDate) return explicitLocalDate;
+
+  if (match.event_date) {
+    const eventDate = new Date(match.event_date);
+    if (!Number.isNaN(eventDate.getTime())) {
+      const timezoneDate = formatDateKeyInTimezone(eventDate, match.event_timezone);
+      if (timezoneDate) return timezoneDate;
+      return formatLocalDateKey(eventDate);
+    }
+  }
+
+  return formatLocalDateKey(new Date());
+};
+
+const EVENT_LOCAL_FIELD_NAMES = ['event_timezone', 'event_local_date', 'event_local_time'] as const;
+
+const hasMissingEventLocalFieldError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as {
+    code?: string;
+    message?: string;
+    details?: string;
+    hint?: string;
+  };
+  const haystack = [err.code, err.message, err.details, err.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (!haystack) return false;
+  return EVENT_LOCAL_FIELD_NAMES.some((fieldName) => haystack.includes(fieldName));
+};
+
+const stripEventLocalFields = <T extends Record<string, any>>(payload: T) => {
+  const { event_timezone, event_local_date, event_local_time, ...legacyPayload } = payload;
+  return legacyPayload;
+};
+
 // Ensure match events always have a usable, monotonic match_time_elapsed value
 const normalizeEventsForProgression = <T extends { match_time_elapsed?: number | null; timestamp?: string | null; event_time?: string | null }>(events: T[]): T[] => {
   if (!events || events.length === 0) return [];
@@ -457,6 +534,7 @@ interface GoalService {
   deactivateAllCompletedGoals(userId: string, accessToken?: string | null): Promise<number>;
   deactivateExpiredGoals(userId: string, accessToken?: string | null): Promise<number>;
   recalculateGoalProgress(goalId: string, userId: string, accessToken?: string | null): Promise<SimpleGoal | null>;
+  recalculateActiveGoalsForUser(userId: string, accessToken?: string | null): Promise<SimpleGoal[]>;
   updateGoalsAfterMatch(
     userId: string,
     matchResult: 'win' | 'loss' | null,
@@ -478,6 +556,7 @@ const normalizeGoalRecord = (goal: GoalRecord): SimpleGoal => {
   const targetValue = goal.target_value ?? 0;
   const currentValue = goal.current_value ?? 0;
   const deadlineIso = goal.deadline ? new Date(goal.deadline).toISOString().split('T')[0] : '';
+  const startDateIso = goal.created_at ? new Date(goal.created_at).toISOString() : undefined;
 
   return {
     id: goal.goal_id,
@@ -486,6 +565,7 @@ const normalizeGoalRecord = (goal: GoalRecord): SimpleGoal => {
     targetValue,
     currentValue,
     deadline: deadlineIso,
+    startDate: startDateIso,
     isCompleted: !!goal.is_completed,
     isFailed: goal.is_failed ?? false,
     progress: calculateProgressPercentage(currentValue, targetValue),
@@ -555,6 +635,7 @@ const updateGoalRecord = async (
 interface SimplifiedMatch {
   isWin: boolean;
   margin: number;
+  eventDateTimestamp: number | null;
 }
 
 const fetchUserMatchesForGoal = async (
@@ -601,16 +682,26 @@ const fetchUserMatchesForGoal = async (
     const opponentScore = match.touches_against ?? 0;
     const result = (match.result || '').toString().toLowerCase();
     const isWin = result === 'win' || result === 'victory' || finalScore > opponentScore;
+    const eventDateTimestamp = match.event_date ? new Date(match.event_date).getTime() : null;
     return {
       isWin,
       margin: finalScore - opponentScore,
+      eventDateTimestamp: Number.isFinite(eventDateTimestamp) ? eventDateTimestamp : null,
     };
   });
 };
 
 const computeGoalValueFromMatches = (goal: GoalRecord, matches: SimplifiedMatch[]): number => {
-  const startingCount = goal.starting_match_count ?? 0;
-  const matchesSinceGoal = matches.slice(0, Math.max(0, matches.length - startingCount));
+  const goalStartTimestamp = goal.created_at ? new Date(goal.created_at).getTime() : null;
+  const hasValidGoalStart = goalStartTimestamp !== null && Number.isFinite(goalStartTimestamp);
+  const matchesSinceGoal = hasValidGoalStart
+    ? matches.filter(match => {
+        if (match.eventDateTimestamp === null) {
+          return true;
+        }
+        return match.eventDateTimestamp >= (goalStartTimestamp as number);
+      })
+    : matches;
   const category = goal.category || '';
 
   switch (category) {
@@ -986,6 +1077,59 @@ export const goalService: GoalService = {
     return normalizeGoalRecord(finalRecord);
   },
 
+  async recalculateActiveGoalsForUser(
+    userId: string,
+    accessToken?: string | null
+  ): Promise<SimpleGoal[]> {
+    if (!isValidUuid(userId)) {
+      console.warn('Skipping active-goal recalculation due to invalid userId', { userId });
+      return [];
+    }
+
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ recalculateActiveGoalsForUser blocked - auth session not ready', { userId });
+      return [];
+    }
+
+    const { data: activeGoals, error } = await postgrestSelect<GoalRecord>(
+      'goal',
+      {
+        select: '*',
+        user_id: `eq.${userId}`,
+        is_active: 'eq.true',
+      },
+      { accessToken: token }
+    );
+
+    if (error) {
+      console.error('Error fetching active goals for recalculation:', error);
+      return [];
+    }
+
+    if (!activeGoals || activeGoals.length === 0) {
+      return [];
+    }
+
+    const matches = await fetchUserMatchesForGoal(userId, token);
+    const recalculatedGoals: SimpleGoal[] = [];
+
+    for (const rawGoal of activeGoals) {
+      const goalRecord = rawGoal as GoalRecord;
+      const recomputedValue = computeGoalValueFromMatches(goalRecord, matches);
+      const updatedRecord = await updateGoalProgressInternal(goalRecord, recomputedValue, token);
+      if (!updatedRecord) {
+        continue;
+      }
+
+      const deadlineCheck = await handleDeadlineStatus(updatedRecord, token);
+      const finalRecord = deadlineCheck.updatedGoal ?? updatedRecord;
+      recalculatedGoals.push(normalizeGoalRecord(finalRecord));
+    }
+
+    return recalculatedGoals;
+  },
+
   async updateGoalsAfterMatch(
     userId: string,
     matchResult: 'win' | 'loss' | null,
@@ -1280,17 +1424,33 @@ export const matchService = {
       return [];
     }
 
-    const { data, error } = await postgrestSelect<any>(
+    const baseQuery = {
+      user_id: `eq.${userId}`,
+      order: 'event_date.desc,match_id.desc',
+      limit,
+    };
+
+    let recentMatchesResult = await postgrestSelect<any>(
       'match',
       {
-        select: 'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,competition:competition_id(name,event_date,weapon_type,placement,field_size),match_period(end_time)',
-        user_id: `eq.${userId}`,
-        order: 'event_date.desc,match_id.desc',
-        limit,
+        ...baseQuery,
+        select: 'match_id,event_date,event_timezone,event_local_date,event_local_time,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,competition:competition_id(name,event_date,weapon_type,placement,field_size),match_period(end_time)',
       },
       { accessToken: token }
     );
 
+    if (recentMatchesResult.error && hasMissingEventLocalFieldError(recentMatchesResult.error)) {
+      recentMatchesResult = await postgrestSelect<any>(
+        'match',
+        {
+          ...baseQuery,
+          select: 'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,competition:competition_id(name,event_date,weapon_type,placement,field_size),match_period(end_time)',
+        },
+        { accessToken: token }
+      );
+    }
+
+    const { data, error } = recentMatchesResult;
     if (error) {
       console.error('Error fetching matches:', error);
       return [];
@@ -1395,22 +1555,27 @@ export const matchService = {
       const competition = match.competition as {
         name?: string;
         event_date?: string;
-        weapon_type?: string;
+        weapon_type?: 'foil' | 'epee' | 'sabre';
         placement?: number | null;
         field_size?: number | null;
       } | null;
+
+      const eventDateKey = resolveMatchEventDateKey(match);
 
       return {
         id: match.match_id,
         youScore: match.final_score || 0,
         opponentScore: match.touches_against || 0,
-        date: match.event_date ? new Date(match.event_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        date: eventDateKey,
         time: completionTime,
         opponentName: opponentName, // Use the calculated opponent name (handles swaps correctly)
         isWin: match.is_win || false,
         matchType: match.match_type || undefined,
         source: match.source || 'unknown', // Include source field
         notes: match.notes || '', // Include notes field
+        eventTimezone: match.event_timezone ?? null,
+        eventLocalDate: normalizeDateKey(match.event_local_date),
+        eventLocalTime: match.event_local_time ?? null,
         competitionId: match.competition_id ?? null,
         competitionName: competition?.name ?? null,
         competitionDate: competition?.event_date ?? null,
@@ -1475,18 +1640,35 @@ export const matchService = {
       return [];
     }
 
-    const { data, error } = await postgrestSelect<any>(
+    const baseCompetitionQuery = {
+      user_id: `eq.${userId}`,
+      competition_id: `eq.${competitionId}`,
+      order: 'event_date.desc,match_id.desc',
+    };
+
+    let competitionMatchesResult = await postgrestSelect<any>(
       'match',
       {
+        ...baseCompetitionQuery,
         select:
-          'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,match_period(end_time)',
-        user_id: `eq.${userId}`,
-        competition_id: `eq.${competitionId}`,
-        order: 'event_date.desc,match_id.desc',
+          'match_id,event_date,event_timezone,event_local_date,event_local_time,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,match_period(end_time)',
       },
       { accessToken: token }
     );
 
+    if (competitionMatchesResult.error && hasMissingEventLocalFieldError(competitionMatchesResult.error)) {
+      competitionMatchesResult = await postgrestSelect<any>(
+        'match',
+        {
+          ...baseCompetitionQuery,
+          select:
+            'match_id,event_date,final_score,touches_against,is_win,match_type,source,notes,fencer_1_name,fencer_2_name,weapon_type,competition_id,phase,de_round,match_period(end_time)',
+        },
+        { accessToken: token }
+      );
+    }
+
+    const { data, error } = competitionMatchesResult;
     if (error) {
       console.error('Error fetching competition matches:', error);
       return [];
@@ -1580,15 +1762,16 @@ export const matchService = {
         id: match.match_id,
         youScore: match.final_score || 0,
         opponentScore: match.touches_against || 0,
-        date: match.event_date
-          ? new Date(match.event_date).toISOString().split('T')[0]
-          : new Date().toISOString().split('T')[0],
+        date: resolveMatchEventDateKey(match),
         time: completionTime,
         opponentName: opponentName,
         isWin: match.is_win || false,
         matchType: match.match_type || undefined,
         source: match.source || 'unknown',
         notes: match.notes || '',
+        eventTimezone: match.event_timezone ?? null,
+        eventLocalDate: normalizeDateKey(match.event_local_date),
+        eventLocalTime: match.event_local_time ?? null,
         competitionId: match.competition_id ?? null,
         competitionPhase: match.phase ?? null,
         competitionRound: match.de_round ?? null,
@@ -1767,6 +1950,9 @@ export const matchService = {
     
     // Normalize weapon type to lowercase
     const normalizedWeaponType = weaponType ? weaponType.toLowerCase() : 'foil';
+    const eventTimezone = resolveDeviceTimezone();
+    const eventLocalDate = formatLocalDateKey(eventDateTime);
+    const eventLocalTime = formatLocalTimeKey(eventDateTime);
     
     const trimmedFencer1Name = matchData.fencer1Name?.trim() || '';
     const trimmedFencer2Name = matchData.fencer2Name?.trim() || '';
@@ -1778,6 +1964,9 @@ export const matchService = {
       final_score: yourScore,
       // touches_against: opponentScore, // This is a generated column - will be calculated automatically
       event_date: eventDateTime.toISOString(),
+      event_timezone: eventTimezone,
+      event_local_date: eventLocalDate,
+      event_local_time: eventLocalTime,
       result: yourScore > opponentScore ? 'win' : 'loss',
       score_diff: yourScore - opponentScore,
       match_type: matchType,
@@ -1789,37 +1978,43 @@ export const matchService = {
       source: 'manual',
       is_complete: true,
     };
+    const legacyInsertData = stripEventLocalFields(insertData);
 
     console.log('🔄 Creating manual match with data:', insertData);
 
-    let result;
-    try {
-      result = await postgrestInsert<Match>(
-        'match',
-        insertData,
-        { select: '*' },
-        { accessToken: token }
-      );
-    } catch (requestError: any) {
-      console.error('❌ Request error creating manual match:', requestError);
-      return null;
-    }
+    const insertManualMatchRecord = async () => {
+      try {
+        let insertResult = await postgrestInsert<Match>(
+          'match',
+          insertData,
+          { select: '*' },
+          { accessToken: token }
+        );
+        if (insertResult.error && hasMissingEventLocalFieldError(insertResult.error)) {
+          insertResult = await postgrestInsert<Match>(
+            'match',
+            legacyInsertData,
+            { select: '*' },
+            { accessToken: token }
+          );
+        }
+        return insertResult;
+      } catch (requestError: any) {
+        console.error('❌ Request error creating manual match:', requestError);
+        return {
+          data: null,
+          error: requestError,
+        };
+      }
+    };
+
+    let result = await insertManualMatchRecord();
 
     if (result.error) {
       if (result.error.code === '23503') {
         console.warn('⚠️ Manual match insert failed due to missing user record; retrying once');
         await userService.ensureUserById(userId, undefined, token);
-        try {
-          result = await postgrestInsert<Match>(
-            'match',
-            insertData,
-            { select: '*' },
-            { accessToken: token }
-          );
-        } catch (requestError: any) {
-          console.error('❌ Request error creating manual match after retry:', requestError);
-          return null;
-        }
+        result = await insertManualMatchRecord();
 
         if (result.error) {
           console.error('❌ Error creating manual match after retry:', result.error);
@@ -1840,6 +2035,13 @@ export const matchService = {
 
     const row = Array.isArray(result.data) ? result.data[0] ?? null : null;
     console.log('✅ Manual match created successfully:', row);
+    if (row?.match_id) {
+      try {
+        await goalService.recalculateActiveGoalsForUser(userId, token);
+      } catch (goalError) {
+        console.error('❌ Error recalculating goals after manual match creation:', goalError);
+      }
+    }
     return row;
   },
 
@@ -1858,13 +2060,20 @@ export const matchService = {
       }
       await userService.ensureUserById(userId, undefined, token);
     }
+    const now = new Date();
+    const eventTimezone = resolveDeviceTimezone();
+    const eventLocalDate = formatLocalDateKey(now);
+    const eventLocalTime = formatLocalTimeKey(now);
     const matchData = {
       user_id: userId, // Can be null if user toggle is off
       fencer_1_name: remoteData.fencer_1_name,
       fencer_2_name: remoteData.fencer_2_name,
       final_score: remoteData.score_1 || 0,
       // touches_against is a generated column - removed from insert
-      event_date: new Date().toISOString(),
+      event_date: now.toISOString(),
+      event_timezone: eventTimezone,
+      event_local_date: eventLocalDate,
+      event_local_time: eventLocalTime,
       result: userId ? ((remoteData.score_1 || 0) > (remoteData.score_2 || 0) ? 'win' : 'loss') : null, // Only set result if user is present
       // is_win is a generated column - removed from insert
       score_diff: (remoteData.score_1 || 0) - (remoteData.score_2 || 0),
@@ -1943,24 +2152,33 @@ $$;
       }
     }
 
+    const legacyMatchData = stripEventLocalFields(matchData);
+    const insertRemoteMatchRecord = async () => {
+      let insertResult = await postgrestInsert<Match>(
+        'match',
+        matchData,
+        { select: '*' },
+        { accessToken: token }
+      );
+      if (insertResult.error && hasMissingEventLocalFieldError(insertResult.error)) {
+        insertResult = await postgrestInsert<Match>(
+          'match',
+          legacyMatchData,
+          { select: '*' },
+          { accessToken: token }
+        );
+      }
+      return insertResult;
+    };
+
     // Regular match creation (for authenticated users)
-    let result = await postgrestInsert<Match>(
-      'match',
-      matchData,
-      { select: '*' },
-      { accessToken: token }
-    );
+    let result = await insertRemoteMatchRecord();
 
     if (result.error) {
       if (result.error.code === '23503' && userId && token) {
         console.warn('⚠️ Match insert failed due to missing user record; retrying once');
         await userService.ensureUserById(userId, undefined, token);
-        result = await postgrestInsert<Match>(
-          'match',
-          matchData,
-          { select: '*' },
-          { accessToken: token }
-        );
+        result = await insertRemoteMatchRecord();
       }
     }
 
@@ -3136,6 +3354,9 @@ $$;
     fencer_1_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_1
     fencer_2_entity?: string | null; // Stable entity (fencerA/fencerB) for fencer_2
     event_date?: string; // ISO string for event date/time
+    event_timezone?: string | null;
+    event_local_date?: string | null;
+    event_local_time?: string | null;
     weapon_type?: string; // Weapon type: 'foil', 'epee', 'sabre'
     competition_id?: string | null;
     phase?: 'POULE' | 'DE' | null;
@@ -3191,8 +3412,10 @@ $$;
       console.warn('⚠️ RPC update failed, trying direct update for anonymous match');
     }
 
+    const legacyUpdates = stripEventLocalFields(updates);
+
     // Regular match update (or fallback for anonymous)
-    const { data, error } = await postgrestUpdate<Match>(
+    let updateResult = await postgrestUpdate<Match>(
       'match',
       updates,
       {
@@ -3201,6 +3424,20 @@ $$;
       },
       { accessToken: token }
     );
+
+    if (updateResult.error && hasMissingEventLocalFieldError(updateResult.error)) {
+      updateResult = await postgrestUpdate<Match>(
+        'match',
+        legacyUpdates,
+        {
+          match_id: `eq.${matchId}`,
+          select: '*',
+        },
+        { accessToken: token }
+      );
+    }
+
+    const { data, error } = updateResult;
 
     if (error) {
       console.error('Error updating match:', error);
@@ -3354,13 +3591,11 @@ $$;
       // Get match data before deletion for goal recalculation
       const { data: matchData, error: matchFetchError } = await postgrestSelectOne<{
         user_id: string | null;
-        is_win: boolean | null;
-        final_score: number | null;
-        touches_against: number | null;
+        is_complete: boolean | null;
       }>(
         'match',
         {
-          select: 'user_id, is_win, final_score, touches_against',
+          select: 'user_id, is_complete',
           match_id: `eq.${matchId}`,
           limit: 1,
         },
@@ -3373,9 +3608,7 @@ $$;
       }
 
       const userId = matchData?.user_id;
-      const wasWin = matchData?.is_win;
-      const finalScore = matchData?.final_score;
-      const opponentScore = matchData?.touches_against;
+      const wasComplete = matchData?.is_complete === true;
       
       // Delete in order: events -> periods -> match
       // 1. Delete all match events (by match_id OR fencing_remote_id)
@@ -3458,24 +3691,11 @@ $$;
         console.log('✅ Match deleted successfully:', deletedMatchData);
       }
 
-      // 4. Recalculate goals after deletion (reverse the match impact)
-      if (
-        userId &&
-        typeof wasWin === 'boolean' &&
-        typeof finalScore === 'number' &&
-        typeof opponentScore === 'number'
-      ) {
+      // 4. Recalculate goals after deletion using the actual remaining history
+      if (userId && wasComplete) {
         console.log('🔄 Recalculating goals after match deletion...');
         try {
-          // Reverse the match result for goal recalculation
-          const reverseResult = wasWin ? 'loss' : 'win';
-          await goalService.updateGoalsAfterMatch(
-            userId,
-            reverseResult as 'win' | 'loss',
-            opponentScore,
-            finalScore,
-            accessToken
-          );
+          await goalService.recalculateActiveGoalsForUser(userId, token);
           console.log('✅ Goals recalculated after match deletion');
         } catch (goalError) {
           console.error('❌ Error recalculating goals after deletion:', goalError);
