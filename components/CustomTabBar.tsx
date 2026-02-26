@@ -10,26 +10,11 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { analytics } from '@/lib/analytics';
 
-const iconMap = {
-  'home': Entypo,
-  'settings-remote': MaterialIcons,
-  'shield-sword': MaterialCommunityIcons,
-  'brain': MaterialCommunityIcons,
-  'person': Ionicons,
-};
-
-const iconNames = {
-  'home': 'home',
-  'settings-remote': 'settings-remote',
-  'shield-sword': 'shield-sword',
-  'brain': 'brain',
-  'person': 'person',
-};
-
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const currentTab = state.routes[state.index]?.name;
+  const hiddenTabs = new Set(['diary', 'training']);
 
   return (
     <View style={[styles.tabBar, { 
@@ -37,10 +22,14 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
       paddingBottom: insets.bottom,
     }]}>
       {state.routes
-        .filter((route) => route.name !== 'diary') // Hide diary tab
-        .map((route, index) => {
+        .filter(
+          (route) =>
+            !hiddenTabs.has(route.name) &&
+            descriptors[route.key]?.options?.href !== null
+        )
+        .map((route) => {
         const { options } = descriptors[route.key];
-        const isFocused = state.index === index;
+        const isFocused = state.routes[state.index]?.key === route.key;
 
         const onPress = () => {
           const event = navigation.emit({
@@ -70,6 +59,8 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
               return { Component: MaterialIcons, name: 'settings-remote' };
             case 'training':
               return { Component: MaterialCommunityIcons, name: 'shield-sword' };
+            case 'competitions':
+              return { Component: MaterialCommunityIcons, name: 'trophy-outline' };
             case 'mindset':
               return { Component: MaterialCommunityIcons, name: 'brain' };
             case 'profile':

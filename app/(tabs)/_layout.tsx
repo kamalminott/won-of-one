@@ -1,14 +1,9 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { useWindowDimensions } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomTabBar } from '@/components/CustomTabBar';
 
 export default function TabLayout() {
-  const { height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-
   return (
     <Tabs
       screenOptions={{
@@ -30,7 +25,13 @@ export default function TabLayout() {
       <Tabs.Screen
         name="training"
         options={{
-          title: 'Training',
+          href: null, // Hidden from tab bar for now
+        }}
+      />
+      <Tabs.Screen
+        name="competitions"
+        options={{
+          title: 'Competition',
         }}
       />
       <Tabs.Screen
