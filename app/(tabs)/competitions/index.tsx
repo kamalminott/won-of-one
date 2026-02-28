@@ -21,6 +21,23 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const COMPETITION_HUB_LOAD_TIMEOUT_MS = 12000;
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timerId = setTimeout(() => {
+      reject(new Error('competition_hub_load_timeout'));
+    }, timeoutMs);
+  });
+
+  return await Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timerId) {
+      clearTimeout(timerId);
+    }
+  });
+};
+
 export default function CompetitionsHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -30,19 +47,33 @@ export default function CompetitionsHubScreen() {
   const [pastCompetitions, setPastCompetitions] = useState<CompetitionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
   const loadCompetitions = useCallback(async () => {
     if (!user?.id) {
       setActiveCompetitions([]);
       setPastCompetitions([]);
+      setErrorText(null);
       setLoading(false);
       return;
     }
 
-    const summaries = await listCompetitionSummariesForUser(user.id);
-    setActiveCompetitions(summaries.active);
-    setPastCompetitions(summaries.past);
-    setLoading(false);
+    try {
+      setErrorText(null);
+      const summaries = await withTimeout(
+        listCompetitionSummariesForUser(user.id),
+        COMPETITION_HUB_LOAD_TIMEOUT_MS
+      );
+      setActiveCompetitions(summaries.active);
+      setPastCompetitions(summaries.past);
+    } catch (error) {
+      console.warn('Competition hub load failed:', error);
+      setActiveCompetitions([]);
+      setPastCompetitions([]);
+      setErrorText('Could not load competitions. Pull to refresh and try again.');
+    } finally {
+      setLoading(false);
+    }
   }, [user?.id]);
 
   useFocusEffect(
@@ -97,6 +128,8 @@ export default function CompetitionsHubScreen() {
             <Text style={styles.secondaryButtonText}>Join</Text>
           </Pressable>
         </View>
+
+        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
         {loading ? (
           <View style={styles.loadingContainer}>
@@ -308,5 +341,10 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#9D9D9D',
     fontSize: 14,
+  },
+  errorText: {
+    color: '#FF7675',
+    fontSize: 13,
+    marginBottom: 12,
   },
 });

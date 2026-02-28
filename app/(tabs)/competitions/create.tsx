@@ -7,6 +7,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { createClubCompetition } from '@/lib/clubCompetitionService';
+import { resolveCompetitionDisplayName } from '@/lib/competitionDisplayName';
 import type { CompetitionFormat, CompetitionWeapon } from '@/types/competition';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -37,6 +38,15 @@ export default function CreateCompetitionScreen() {
 
   const nameLength = useMemo(() => name.trim().length, [name]);
   const canSubmit = nameLength >= 2 && !submitting;
+  const competitionDisplayName = useMemo(
+    () =>
+      resolveCompetitionDisplayName({
+        preferredName: userName,
+        user,
+        fallback: 'Fencer',
+      }),
+    [user, userName]
+  );
 
   const onCreateCompetition = async () => {
     if (!user?.id) {
@@ -55,7 +65,7 @@ export default function CreateCompetitionScreen() {
 
     const result = await createClubCompetition({
       userId: user.id,
-      displayName: userName || 'Organiser',
+      displayName: competitionDisplayName,
       name: cleanedName,
       weapon,
       format,

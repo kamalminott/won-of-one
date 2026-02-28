@@ -86,3 +86,6 @@ export const COMPETITION_WITHDRAWAL_EDITABLE_STATUSES: CompetitionStatus[] = [
   'rankings_locked',
   'de_generated',
 ];
+
+// Phase 5 staging: keep agreement flow disabled in V1 while preserving an opt-in path.
+export const COMPETITION_ENABLE_RESULT_AGREEMENT = false;

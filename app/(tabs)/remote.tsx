@@ -3,13 +3,22 @@ import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { analytics } from '@/lib/analytics';
 import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
+import {
+  completeCompetitionMatchScore,
+  getCompetitionMatchScoringData,
+  prepareCompetitionMatchScoring,
+  setCompetitionMatchLiveScore,
+  takeOverCompetitionMatchRemoteScoring,
+} from '@/lib/clubCompetitionService';
 import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService, userService } from '@/lib/database';
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
 import { sessionTracker } from '@/lib/sessionTracker';
+import { supabase } from '@/lib/supabase';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
+import type { CompetitionMatchScoringData } from '@/types/competition';
 import type { MatchPeriod } from '@/types/database';
 import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +33,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, AppState, Image, InteractionManager, Keyboard, KeyboardAvoidingView, LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, InteractionManager, Keyboard, KeyboardAvoidingView, LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 // Native module not working after rebuild - using View fallback
@@ -76,6 +85,36 @@ const loadWeaponSvg = async (source: number): Promise<string> => {
   return readAsStringAsync(uri);
 };
 
+type CompetitionRealtimeSnapshot = {
+  actorUserId: string;
+  emittedAt: number;
+  scores: { fencerA: number; fencerB: number };
+  cards: { fencerA: { yellow: 0 | 1; red: number }; fencerB: { yellow: 0 | 1; red: number } };
+  fencerPositions: { fencerA: 'left' | 'right'; fencerB: 'left' | 'right' };
+  toggleCardPosition: 'left' | 'right';
+  currentPeriod: number;
+  matchTime: number;
+  timeRemaining: number;
+  isPlaying: boolean;
+  hasMatchStarted: boolean;
+  isBreakTime: boolean;
+  breakTimeRemaining: number;
+  isInjuryTimer: boolean;
+  injuryTimeRemaining: number;
+  isPriorityRound: boolean;
+  isAssigningPriority: boolean;
+  priorityFencer: 'fencerA' | 'fencerB' | null;
+  priorityLightPosition: 'left' | 'right' | null;
+  breakTriggered: boolean;
+  matchStatus: string;
+  authoritativeScorerUserId: string | null;
+};
+
+type CompetitionRealtimeSnapshotState = Omit<
+  CompetitionRealtimeSnapshot,
+  'actorUserId' | 'emittedAt'
+>;
+
 export default function RemoteScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -84,6 +123,15 @@ export default function RemoteScreen() {
   const params = useLocalSearchParams();
   const { user, userName, session } = useAuth();
   const accessToken = session?.access_token ?? null;
+  const competitionMode = params.competitionMode === 'true';
+  const competitionIdParam =
+    typeof params.competitionId === 'string' ? params.competitionId : null;
+  const competitionMatchIdParam =
+    typeof params.matchId === 'string' ? params.matchId : null;
+  const competitionFromParam =
+    typeof params.competitionFrom === 'string' ? params.competitionFrom : 'poules';
+  const isCompetitionRemoteMode =
+    competitionMode && !!competitionIdParam && !!competitionMatchIdParam;
   
   // Responsive breakpoints for small screens - simplified for consistency across devices
   
@@ -399,6 +447,10 @@ export default function RemoteScreen() {
 
   // If coming from neutral summary with resetAll flag, fully reset state/persistence once per focus, then apply incoming name params
   useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     const needsReset = params.resetAll === 'true';
     if (!needsReset || resetAllFromParamsHandledRef.current) return;
 
@@ -489,10 +541,24 @@ export default function RemoteScreen() {
         clearIncomingMatchParams();
       }
     })();
-  }, [params.resetAll, params.isAnonymous, params.fencer1Name, params.fencer2Name, params.resetNames, params.changeOneFencer, autoToggleOff, clearIncomingMatchParams]);
+  }, [
+    isCompetitionRemoteMode,
+    params.resetAll,
+    params.isAnonymous,
+    params.fencer1Name,
+    params.fencer2Name,
+    params.resetNames,
+    params.changeOneFencer,
+    autoToggleOff,
+    clearIncomingMatchParams,
+  ]);
 
   // Check for fencer names from params (e.g., when coming from neutral match summary)
   useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     if (params.resetAll === 'true') {
       return;
     }
@@ -644,11 +710,25 @@ export default function RemoteScreen() {
         });
       }
     }
-  }, [params.fencer1Name, params.fencer2Name, params.isAnonymous, params.resetNames, params.keepToggleOff, params.changeOneFencer, showUserProfile, autoToggleOff]);
+  }, [
+    isCompetitionRemoteMode,
+    params.fencer1Name,
+    params.fencer2Name,
+    params.isAnonymous,
+    params.resetNames,
+    params.keepToggleOff,
+    params.changeOneFencer,
+    showUserProfile,
+    autoToggleOff,
+  ]);
 
   // Set fencer names and toggle state synchronously for anonymous matches (before paint)
   // This ensures both are set before the first render, eliminating race conditions
   useLayoutEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     if (params.resetAll === 'true') {
       return;
     }
@@ -700,10 +780,21 @@ export default function RemoteScreen() {
       });
       console.log('✅ [useLayoutEffect] Fencer names set from pending ref');
     }
-  }, [params.isAnonymous, params.fencer1Name, params.fencer2Name, params.resetNames, autoToggleOff]);
+  }, [
+    isCompetitionRemoteMode,
+    params.isAnonymous,
+    params.fencer1Name,
+    params.fencer2Name,
+    params.resetNames,
+    autoToggleOff,
+  ]);
 
   // Backup: ensure anonymous params are applied if names are still placeholders/mismatched
   useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     if (params.resetAll === 'true') {
       return;
     }
@@ -736,10 +827,22 @@ export default function RemoteScreen() {
     }
 
     appliedAnonThisFocusRef.current = true;
-  }, [params.isAnonymous, params.fencer1Name, params.fencer2Name, fencerNames.fencerA, fencerNames.fencerB, showUserProfile]);
+  }, [
+    isCompetitionRemoteMode,
+    params.isAnonymous,
+    params.fencer1Name,
+    params.fencer2Name,
+    fencerNames.fencerA,
+    fencerNames.fencerB,
+    showUserProfile,
+  ]);
 
   // Also check with useEffect as a backup
   useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     // Only set names if we have pending names AND we're not in a reset names flow
     if (!showUserProfile && pendingFencerNamesRef.current && params.resetNames !== 'true') {
       // console.log('📝 [useEffect] Setting fencer names after toggle is off (backup):', pendingFencerNamesRef.current);
@@ -759,7 +862,7 @@ export default function RemoteScreen() {
       //   showUserProfile: showUserProfile
       // });
     }
-  }, [showUserProfile, params.resetNames]);
+  }, [isCompetitionRemoteMode, showUserProfile, params.resetNames]);
 
   // Monitor network status and pending data
   useEffect(() => {
@@ -1000,6 +1103,10 @@ export default function RemoteScreen() {
   // Handle focus-based param syncing and resume prompt
   useFocusEffect(
     useCallback(() => {
+      if (isCompetitionRemoteMode) {
+        return () => {};
+      }
+
       if (params.resetAll !== 'true') {
         // Check for reset names request first (e.g., "Different Fencers" from neutral match summary)
         if (params.resetNames === 'true' && params.keepToggleOff === 'true') {
@@ -1175,7 +1282,7 @@ export default function RemoteScreen() {
       return () => {
         cancelled = true;
       };
-    }, [params.fencer1Name, params.fencer2Name, params.isAnonymous, autoToggleOff]) // Include params for anonymous match handling
+    }, [isCompetitionRemoteMode, params.fencer1Name, params.fencer2Name, params.isAnonymous, autoToggleOff]) // Include params for anonymous match handling
   );
 
   const loadStoredImages = async () => {
@@ -1265,6 +1372,10 @@ export default function RemoteScreen() {
 
   // Match state persistence functions
   const saveMatchState = async () => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     try {
       // Only save if there's an active match or match has started
       const hasMatchStarted = scores.fencerA > 0 || scores.fencerB > 0 || currentPeriod > 1 || 
@@ -1323,6 +1434,10 @@ export default function RemoteScreen() {
   }, [saveMatchState]);
 
   const loadPersistedMatchState = async (opts?: { forcePrompt?: boolean }) => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     const forcePrompt = !!opts?.forcePrompt;
     try {
       const savedState = await AsyncStorage.getItem('ongoing_match_state');
@@ -1677,6 +1792,34 @@ export default function RemoteScreen() {
   
   // Remote session state
   const [remoteSession, setRemoteSession] = useState<any>(null);
+  const [competitionScoringData, setCompetitionScoringData] =
+    useState<CompetitionMatchScoringData | null>(null);
+  const [competitionInfoText, setCompetitionInfoText] = useState<string | null>(null);
+  const [competitionErrorText, setCompetitionErrorText] = useState<string | null>(null);
+  const lastCompetitionSyncedScoresRef = useRef<{
+    fencerA: number;
+    fencerB: number;
+  } | null>(null);
+  const competitionRealtimeChannelRef = useRef<any>(null);
+  const competitionRealtimeSubscribedRef = useRef(false);
+  const lastCompetitionSnapshotSignatureRef = useRef<string | null>(null);
+  const lastCompetitionAppliedSnapshotAtRef = useRef(0);
+  const applyCompetitionRealtimeSnapshotRef =
+    useRef<(snapshot: CompetitionRealtimeSnapshot) => void>(() => {});
+  const sendCompetitionRealtimeSnapshotRef =
+    useRef<(force: boolean) => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+    setCompetitionScoringData(null);
+    setCompetitionInfoText(null);
+    setCompetitionErrorText(null);
+    lastCompetitionSyncedScoresRef.current = null;
+    lastCompetitionSnapshotSignatureRef.current = null;
+    lastCompetitionAppliedSnapshotAtRef.current = 0;
+  }, [isCompetitionRemoteMode]);
   
   // Match period state
   const [currentMatchPeriod, setCurrentMatchPeriod] = useState<any>(null);
@@ -1781,6 +1924,491 @@ export default function RemoteScreen() {
       ...details,
     });
   };
+
+  const competitionCanTakeOverRemote =
+    isCompetitionRemoteMode && !!competitionScoringData?.canTakeOverRemote;
+  const competitionIsAuthoritativeScorer =
+    isCompetitionRemoteMode && !!competitionScoringData?.isAuthoritativeScorer;
+  const competitionIsCompleted =
+    isCompetitionRemoteMode && competitionScoringData?.match.status === 'completed';
+  const competitionIsReadOnly =
+    isCompetitionRemoteMode &&
+    (competitionIsCompleted || !competitionIsAuthoritativeScorer);
+
+  const buildCompetitionRealtimeSnapshotState = useCallback(
+    (): CompetitionRealtimeSnapshotState | null => {
+      if (!competitionScoringData) {
+        return null;
+      }
+
+      return {
+        scores: {
+          fencerA: scoresRef.current.fencerA,
+          fencerB: scoresRef.current.fencerB,
+        },
+        cards,
+        fencerPositions,
+        toggleCardPosition,
+        currentPeriod,
+        matchTime,
+        timeRemaining,
+        isPlaying,
+        hasMatchStarted,
+        isBreakTime,
+        breakTimeRemaining,
+        isInjuryTimer,
+        injuryTimeRemaining,
+        isPriorityRound,
+        isAssigningPriority,
+        priorityFencer,
+        priorityLightPosition,
+        breakTriggered,
+        matchStatus: competitionScoringData.match.status,
+        authoritativeScorerUserId:
+          competitionScoringData.match.authoritative_scorer_user_id ?? null,
+      };
+    },
+    [
+      breakTimeRemaining,
+      breakTriggered,
+      cards,
+      competitionScoringData,
+      currentPeriod,
+      fencerPositions,
+      hasMatchStarted,
+      injuryTimeRemaining,
+      isAssigningPriority,
+      isBreakTime,
+      isInjuryTimer,
+      isPlaying,
+      isPriorityRound,
+      matchTime,
+      priorityFencer,
+      priorityLightPosition,
+      timeRemaining,
+      toggleCardPosition,
+    ]
+  );
+
+  const applyCompetitionRealtimeSnapshot = useCallback(
+    (snapshot: CompetitionRealtimeSnapshot) => {
+      if (!isCompetitionRemoteMode || competitionIsAuthoritativeScorer) {
+        return;
+      }
+
+      if (!snapshot?.emittedAt) {
+        return;
+      }
+
+      if (snapshot.emittedAt <= lastCompetitionAppliedSnapshotAtRef.current) {
+        return;
+      }
+      lastCompetitionAppliedSnapshotAtRef.current = snapshot.emittedAt;
+
+      setScores(snapshot.scores);
+      scoresRef.current = snapshot.scores;
+      setCards(snapshot.cards);
+      setFencerPositions(snapshot.fencerPositions);
+      setToggleCardPosition(snapshot.toggleCardPosition);
+      setCurrentPeriod(snapshot.currentPeriod);
+      currentPeriodRef.current = snapshot.currentPeriod;
+      setMatchTime(snapshot.matchTime);
+      setTimeRemaining(snapshot.timeRemaining);
+      const shouldPlay = snapshot.matchStatus === 'completed' ? false : snapshot.isPlaying;
+      setIsPlaying(shouldPlay);
+      isPlayingRef.current = shouldPlay;
+      setHasMatchStarted(snapshot.hasMatchStarted);
+      setIsBreakTime(snapshot.isBreakTime);
+      setBreakTimeRemaining(snapshot.breakTimeRemaining);
+      setIsInjuryTimer(snapshot.isInjuryTimer);
+      setInjuryTimeRemaining(snapshot.injuryTimeRemaining);
+      setIsPriorityRound(snapshot.isPriorityRound);
+      setIsAssigningPriority(snapshot.isAssigningPriority);
+      setPriorityFencer(snapshot.priorityFencer);
+      setPriorityLightPosition(snapshot.priorityLightPosition);
+      setBreakTriggered(snapshot.breakTriggered);
+      setIsCompletingMatch(snapshot.matchStatus === 'completed');
+
+      setCompetitionScoringData((prev) => {
+        if (!prev) return prev;
+
+        const nextMatch = {
+          ...prev.match,
+          score_a: snapshot.scores.fencerA,
+          score_b: snapshot.scores.fencerB,
+          status: snapshot.matchStatus as typeof prev.match.status,
+          authoritative_scorer_user_id: snapshot.authoritativeScorerUserId,
+        };
+        const isAuthoritative = nextMatch.authoritative_scorer_user_id === user?.id;
+
+        return {
+          ...prev,
+          match: nextMatch,
+          isAuthoritativeScorer: isAuthoritative,
+          canTakeOverRemote:
+            prev.currentUserRole === 'organiser' &&
+            nextMatch.scoring_mode === 'remote' &&
+            nextMatch.status === 'live' &&
+            !!nextMatch.authoritative_scorer_user_id &&
+            nextMatch.authoritative_scorer_user_id !== user?.id,
+        };
+      });
+    },
+    [competitionIsAuthoritativeScorer, isCompetitionRemoteMode, user?.id]
+  );
+
+  const sendCompetitionRealtimeSnapshot = useCallback(
+    async (force: boolean) => {
+      if (
+        !isCompetitionRemoteMode ||
+        !competitionIsAuthoritativeScorer ||
+        !competitionScoringData ||
+        !user?.id
+      ) {
+        return;
+      }
+
+      const channel = competitionRealtimeChannelRef.current;
+      if (!channel || !competitionRealtimeSubscribedRef.current) {
+        return;
+      }
+
+      const snapshotState = buildCompetitionRealtimeSnapshotState();
+      if (!snapshotState) {
+        return;
+      }
+
+      const signature = JSON.stringify(snapshotState);
+      if (!force && lastCompetitionSnapshotSignatureRef.current === signature) {
+        return;
+      }
+      lastCompetitionSnapshotSignatureRef.current = signature;
+
+      try {
+        await channel.send({
+          type: 'broadcast',
+          event: 'competition_remote_snapshot',
+          payload: {
+            ...snapshotState,
+            actorUserId: user.id,
+            emittedAt: Date.now(),
+          } satisfies CompetitionRealtimeSnapshot,
+        });
+      } catch (error) {
+        console.error('Error broadcasting competition realtime snapshot:', error);
+      }
+    },
+    [
+      buildCompetitionRealtimeSnapshotState,
+      competitionIsAuthoritativeScorer,
+      competitionScoringData,
+      isCompetitionRemoteMode,
+      user?.id,
+    ]
+  );
+
+  useEffect(() => {
+    applyCompetitionRealtimeSnapshotRef.current = applyCompetitionRealtimeSnapshot;
+  }, [applyCompetitionRealtimeSnapshot]);
+
+  useEffect(() => {
+    sendCompetitionRealtimeSnapshotRef.current = sendCompetitionRealtimeSnapshot;
+  }, [sendCompetitionRealtimeSnapshot]);
+
+  useEffect(() => {
+    if (!isCompetitionRemoteMode || !competitionMatchIdParam || !user?.id) {
+      return;
+    }
+
+    const channel = supabase.channel(`competition_remote_${competitionMatchIdParam}`, {
+      config: {
+        broadcast: {
+          self: false,
+        },
+      },
+    });
+
+    competitionRealtimeChannelRef.current = channel;
+    competitionRealtimeSubscribedRef.current = false;
+
+    channel.on('broadcast', { event: 'competition_remote_snapshot' }, (message: any) => {
+      const payload = message?.payload as CompetitionRealtimeSnapshot | undefined;
+      if (!payload || payload.actorUserId === user.id) {
+        return;
+      }
+      applyCompetitionRealtimeSnapshotRef.current(payload);
+    });
+
+    channel.subscribe((status: string) => {
+      const isSubscribed = status === 'SUBSCRIBED';
+      competitionRealtimeSubscribedRef.current = isSubscribed;
+      if (isSubscribed) {
+        void sendCompetitionRealtimeSnapshotRef.current(true);
+      }
+    });
+
+    return () => {
+      competitionRealtimeSubscribedRef.current = false;
+      if (competitionRealtimeChannelRef.current === channel) {
+        competitionRealtimeChannelRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [
+    competitionMatchIdParam,
+    isCompetitionRemoteMode,
+    user?.id,
+  ]);
+
+  // Broadcast immediately after local authoritative changes.
+  useEffect(() => {
+    if (!isCompetitionRemoteMode || !competitionIsAuthoritativeScorer) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      void sendCompetitionRealtimeSnapshot(false);
+    }, 120);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [competitionIsAuthoritativeScorer, isCompetitionRemoteMode, sendCompetitionRealtimeSnapshot]);
+
+  // While authoritative timer is running, push countdown updates continuously
+  // so spectators see the timer decreasing in real time.
+  useEffect(() => {
+    if (
+      !isCompetitionRemoteMode ||
+      !competitionIsAuthoritativeScorer ||
+      !isPlaying
+    ) {
+      return;
+    }
+
+    void sendCompetitionRealtimeSnapshot(false);
+  }, [
+    competitionIsAuthoritativeScorer,
+    isCompetitionRemoteMode,
+    isPlaying,
+    sendCompetitionRealtimeSnapshot,
+    timeRemaining,
+  ]);
+
+  // Heartbeat ensures late-joining spectators receive current state quickly.
+  useEffect(() => {
+    if (!isCompetitionRemoteMode || !competitionIsAuthoritativeScorer) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      void sendCompetitionRealtimeSnapshot(true);
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [competitionIsAuthoritativeScorer, isCompetitionRemoteMode, sendCompetitionRealtimeSnapshot]);
+
+  const navigateBackToCompetitionSource = useCallback(() => {
+    if (!competitionIdParam) {
+      router.replace('/(tabs)/competitions');
+      return;
+    }
+
+    if (competitionFromParam === 'de') {
+      router.replace({
+        pathname: '/(tabs)/competitions/de-tableau',
+        params: { competitionId: competitionIdParam },
+      });
+      return;
+    }
+
+    if (competitionFromParam === 'overview') {
+      router.replace({
+        pathname: '/(tabs)/competitions/overview',
+        params: { competitionId: competitionIdParam },
+      });
+      return;
+    }
+
+    router.replace({
+      pathname: '/(tabs)/competitions/poules',
+      params: { competitionId: competitionIdParam },
+    });
+  }, [competitionFromParam, competitionIdParam, router]);
+
+  const updateCompetitionScoringState = useCallback(
+    (data: CompetitionMatchScoringData) => {
+      const fencerAName = data.fencerA?.display_name ?? 'Fencer A';
+      const fencerBName = data.fencerB?.display_name ?? 'Fencer B';
+
+      keepToggleOffLockedRef.current = true;
+      keepToggleOffLockedNamesRef.current = {
+        fencerA: fencerAName,
+        fencerB: fencerBName,
+      };
+      anonBaselineNamesRef.current = {
+        fencerA: fencerAName,
+        fencerB: fencerBName,
+      };
+      pendingFencerNamesRef.current = null;
+      setCompetitionScoringData(data);
+      setSelectedWeapon(data.competition.weapon);
+      weaponSelectionLockedRef.current = true;
+      userHasToggledProfileRef.current = true;
+      setShowUserProfile(false);
+      setFencerPositions({ fencerA: 'left', fencerB: 'right' });
+      setToggleCardPosition('left');
+      setFencerNames({ fencerA: fencerAName, fencerB: fencerBName });
+      const scoreA = data.match.score_a ?? 0;
+      const scoreB = data.match.score_b ?? 0;
+      setScores({ fencerA: scoreA, fencerB: scoreB });
+      scoresRef.current = { fencerA: scoreA, fencerB: scoreB };
+      lastCompetitionSyncedScoresRef.current = { fencerA: scoreA, fencerB: scoreB };
+      setIsCompletingMatch(data.match.status === 'completed');
+      setHasMatchStarted(
+        data.match.status === 'live' ||
+          data.match.status === 'completed' ||
+          scoreA > 0 ||
+          scoreB > 0
+      );
+      const syntheticMatchId = `competition_${data.match.id}`;
+      setMatchId(syntheticMatchId);
+      const syntheticPeriod = {
+        match_period_id: `competition_period_${data.match.id}`,
+        match_id: syntheticMatchId,
+        period_number: 1,
+      };
+      setCurrentMatchPeriod(syntheticPeriod);
+      currentMatchPeriodRef.current = syntheticPeriod;
+      setRemoteSession((prev: any) =>
+        prev ?? {
+          remote_id: `competition_remote_${data.match.id}`,
+          status: data.match.status,
+        }
+      );
+    },
+    []
+  );
+
+  // Competition mode should always display immutable participant names from match context.
+  // This guards against any late legacy param timeout/state restore overwriting names.
+  useEffect(() => {
+    if (!isCompetitionRemoteMode || !competitionScoringData) {
+      return;
+    }
+
+    const fencerAName = competitionScoringData.fencerA?.display_name ?? 'Fencer A';
+    const fencerBName = competitionScoringData.fencerB?.display_name ?? 'Fencer B';
+
+    keepToggleOffLockedRef.current = true;
+    keepToggleOffLockedNamesRef.current = { fencerA: fencerAName, fencerB: fencerBName };
+
+    setShowUserProfile(false);
+    setFencerPositions((prev) =>
+      prev.fencerA === 'left' && prev.fencerB === 'right'
+        ? prev
+        : { fencerA: 'left', fencerB: 'right' }
+    );
+    if (toggleCardPosition !== 'left') {
+      setToggleCardPosition('left');
+    }
+    setFencerNames((prev) =>
+      prev.fencerA === fencerAName && prev.fencerB === fencerBName
+        ? prev
+        : { fencerA: fencerAName, fencerB: fencerBName }
+    );
+  }, [
+    competitionScoringData,
+    isCompetitionRemoteMode,
+    toggleCardPosition,
+  ]);
+
+  const syncCompetitionLiveScore = useCallback(
+    async (nextScores: { fencerA: number; fencerB: number }) => {
+      if (!isCompetitionRemoteMode || !competitionMatchIdParam) {
+        return true;
+      }
+      const lastSynced = lastCompetitionSyncedScoresRef.current;
+      if (
+        lastSynced &&
+        lastSynced.fencerA === nextScores.fencerA &&
+        lastSynced.fencerB === nextScores.fencerB
+      ) {
+        return true;
+      }
+
+      const result = await setCompetitionMatchLiveScore({
+        matchId: competitionMatchIdParam,
+        scoreA: nextScores.fencerA,
+        scoreB: nextScores.fencerB,
+      });
+
+      if (!result.ok) {
+        setCompetitionErrorText(result.message);
+        return false;
+      }
+
+      setCompetitionScoringData((prev) => {
+        if (!prev) return prev;
+        const isAuthoritative = result.data.authoritative_scorer_user_id === user?.id;
+        return {
+          ...prev,
+          match: result.data,
+          isAuthoritativeScorer: isAuthoritative,
+          canTakeOverRemote:
+            prev.currentUserRole === 'organiser' &&
+            result.data.scoring_mode === 'remote' &&
+            result.data.status === 'live' &&
+            !!result.data.authoritative_scorer_user_id &&
+            result.data.authoritative_scorer_user_id !== user?.id,
+        };
+      });
+      lastCompetitionSyncedScoresRef.current = nextScores;
+      setCompetitionErrorText(null);
+      return true;
+    },
+    [competitionMatchIdParam, isCompetitionRemoteMode, user?.id]
+  );
+
+  const ensureCompetitionCanEdit = useCallback(() => {
+    if (!competitionIsReadOnly) return true;
+    if (competitionIsCompleted) {
+      Alert.alert('Match Completed', 'This competition match is already completed.');
+      return false;
+    }
+    Alert.alert(
+      'View Only',
+      'Another scorer is controlling this match. Ask an organiser to take over if needed.'
+    );
+    return false;
+  }, [competitionIsCompleted, competitionIsReadOnly]);
+
+  useEffect(() => {
+    if (
+      !isCompetitionRemoteMode ||
+      !competitionScoringData ||
+      competitionIsReadOnly
+    ) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      void syncCompetitionLiveScore(scoresRef.current);
+    }, 120);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [
+    competitionIsReadOnly,
+    competitionScoringData,
+    isCompetitionRemoteMode,
+    scores.fencerA,
+    scores.fencerB,
+    syncCompetitionLiveScore,
+  ]);
   
   // We'll use null for opponent scoring and store opponent name in meta field
 
@@ -1884,6 +2512,111 @@ export default function RemoteScreen() {
     currentMatchPeriodRef.current = currentMatchPeriod;
   }, [currentMatchPeriod]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!isCompetitionRemoteMode || !user?.id || !competitionIdParam || !competitionMatchIdParam) {
+        return;
+      }
+
+      let cancelled = false;
+
+      const loadCompetitionRemoteContext = async () => {
+        setCompetitionErrorText(null);
+        setCompetitionInfoText(null);
+
+        const initialData = await getCompetitionMatchScoringData({
+          userId: user.id,
+          competitionId: competitionIdParam,
+          matchId: competitionMatchIdParam,
+        });
+
+        if (!initialData) {
+          if (!cancelled) {
+            setCompetitionErrorText('Competition match context could not be loaded.');
+          }
+          return;
+        }
+
+        if (initialData.match.status !== 'completed') {
+          const prepareResult = await prepareCompetitionMatchScoring({
+            matchId: competitionMatchIdParam,
+            mode: 'remote',
+          });
+
+          if (!prepareResult.ok) {
+            if (prepareResult.reason !== 'remote_scorer_already_assigned') {
+              if (!cancelled) {
+                setCompetitionErrorText(prepareResult.message);
+              }
+            } else if (!cancelled) {
+              const scorerName =
+                initialData.authoritativeScorer?.display_name ?? 'another scorer';
+              setCompetitionInfoText(`Live scoring is currently controlled by ${scorerName}.`);
+            }
+          }
+        }
+
+        const refreshedData = await getCompetitionMatchScoringData({
+          userId: user.id,
+          competitionId: competitionIdParam,
+          matchId: competitionMatchIdParam,
+        });
+
+        if (!refreshedData) {
+          if (!cancelled) {
+            setCompetitionErrorText('Could not refresh competition scoring state.');
+          }
+          return;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        updateCompetitionScoringState(refreshedData);
+      };
+
+      void loadCompetitionRemoteContext();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      competitionIdParam,
+      competitionMatchIdParam,
+      isCompetitionRemoteMode,
+      updateCompetitionScoringState,
+      user?.id,
+    ])
+  );
+
+  const takeOverCompetitionRemoteScoring = useCallback(async () => {
+    if (!competitionCanTakeOverRemote || !competitionMatchIdParam) {
+      return;
+    }
+
+    const result = await takeOverCompetitionMatchRemoteScoring({
+      matchId: competitionMatchIdParam,
+    });
+
+    if (!result.ok) {
+      setCompetitionErrorText(result.message);
+      return;
+    }
+
+    setCompetitionScoringData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        match: result.data,
+        isAuthoritativeScorer: result.data.authoritative_scorer_user_id === user?.id,
+        canTakeOverRemote: false,
+      };
+    });
+    setCompetitionInfoText('You are now the authoritative scorer for this match.');
+    setCompetitionErrorText(null);
+  }, [competitionCanTakeOverRemote, competitionMatchIdParam, user?.id]);
+
   // Helper function to create match events with all required fields (now offline-capable)
   // Refactored to use entity-based parameters
   const createMatchEvent = async (
@@ -1910,6 +2643,22 @@ export default function RemoteScreen() {
         debug_id: eventDebugId,
         reason: 'reset_in_progress',
       });
+      return;
+    }
+
+    if (isCompetitionRemoteMode) {
+      if (scoringEntity) {
+        const syntheticEventId = `competition_event_${Date.now()}_${scoringEntity}`;
+        setRecentScoringEventIds((prev) => ({
+          ...prev,
+          [scoringEntity]: syntheticEventId,
+        }));
+        recentScoringEventUuidsRef.current = {
+          ...recentScoringEventUuidsRef.current,
+          [scoringEntity]: syntheticEventId,
+        };
+      }
+      setLastEventTime(new Date());
       return;
     }
     
@@ -2347,6 +3096,15 @@ export default function RemoteScreen() {
   // Create remote session if it doesn't exist (now uses offline service)
   const ensureRemoteSession = async (overrideNames?: { fencerA?: string; fencerB?: string }) => {
     if (remoteSession) return remoteSession;
+
+    if (isCompetitionRemoteMode && competitionMatchIdParam) {
+      const competitionSession = {
+        remote_id: `competition_remote_${competitionMatchIdParam}`,
+        status: competitionScoringData?.match.status ?? 'live',
+      };
+      setRemoteSession(competitionSession);
+      return competitionSession;
+    }
     
     if (!user) {
       console.log('❌ No user - cannot create remote session');
@@ -2409,6 +3167,19 @@ export default function RemoteScreen() {
     if (!activeSession) {
       console.log('❌ No remote session - cannot create match period');
       return null;
+    }
+
+    if (isCompetitionRemoteMode && competitionMatchIdParam) {
+      const syntheticPeriod = {
+        match_period_id: `competition_period_${competitionMatchIdParam}`,
+        match_id: `competition_${competitionMatchIdParam}`,
+        period_number: currentPeriod,
+        start_time: playClickTime || new Date().toISOString(),
+      };
+      setCurrentMatchPeriod(syntheticPeriod);
+      currentMatchPeriodRef.current = syntheticPeriod;
+      setMatchId(syntheticPeriod.match_id);
+      return syntheticPeriod;
     }
 
     try {
@@ -2841,6 +3612,14 @@ export default function RemoteScreen() {
 
   // Complete the current match
   const completeMatch = async () => {
+    if (isCompetitionRemoteMode) {
+      if (!ensureCompetitionCanEdit()) {
+        return;
+      }
+      await proceedWithMatchCompletion();
+      return;
+    }
+
     // Ensure we have a remote session and match period before completing
     let session = remoteSession;
     if (!session) {
@@ -2881,6 +3660,64 @@ export default function RemoteScreen() {
   };
 
   const proceedWithMatchCompletion = async (finalFencerAScore?: number, finalFencerBScore?: number) => {
+    if (isCompetitionRemoteMode && competitionMatchIdParam) {
+      try {
+        setIsCompletingMatch(true);
+        const scoreA =
+          finalFencerAScore !== undefined ? finalFencerAScore : scoresRef.current.fencerA;
+        const scoreB =
+          finalFencerBScore !== undefined ? finalFencerBScore : scoresRef.current.fencerB;
+        const touchLimit = competitionScoringData?.match.touch_limit ?? 5;
+
+        if (scoreA < 0 || scoreB < 0) {
+          Alert.alert('Invalid Score', 'Scores cannot be negative.');
+          setIsCompletingMatch(false);
+          return;
+        }
+        if (scoreA === scoreB) {
+          Alert.alert('Invalid Score', 'Competition matches cannot end in a tie.');
+          setIsCompletingMatch(false);
+          return;
+        }
+        if (scoreA > touchLimit || scoreB > touchLimit) {
+          Alert.alert('Invalid Score', `Score cannot exceed ${touchLimit}.`);
+          setIsCompletingMatch(false);
+          return;
+        }
+
+        const completionResult = await completeCompetitionMatchScore({
+          matchId: competitionMatchIdParam,
+          scoreA,
+          scoreB,
+          mode: 'remote',
+        });
+
+        if (!completionResult.ok) {
+          setCompetitionErrorText(completionResult.message);
+          Alert.alert('Could Not Save Match', completionResult.message);
+          setIsCompletingMatch(false);
+          return;
+        }
+
+        setCompetitionScoringData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            match: completionResult.data,
+            isAuthoritativeScorer:
+              completionResult.data.authoritative_scorer_user_id === user?.id,
+            canTakeOverRemote: false,
+          };
+        });
+        setCompetitionErrorText(null);
+        setCompetitionInfoText('Match score saved. Returning to competition.');
+        navigateBackToCompetitionSource();
+        return;
+      } finally {
+        setIsCompletingMatch(false);
+      }
+    }
+
     if (!matchId || !remoteSession) {
       console.error('Cannot complete match: missing match ID or session');
       return;
@@ -3793,6 +4630,10 @@ export default function RemoteScreen() {
 
   // Initialize fencer names based on user profile toggle
   useEffect(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     // For keep-toggle-off flows, never auto-adjust names based on toggle once locked
     if (keepToggleOffLockedRef.current) {
       return;
@@ -3843,9 +4684,13 @@ export default function RemoteScreen() {
 	        );
 	      }
 	    }
-	  }, [showUserProfile, userDisplayName, userEntity, params?.isAnonymous, params?.fencer1Name, params?.fencer2Name, params?.keepToggleOff]);
+	  }, [isCompetitionRemoteMode, showUserProfile, userDisplayName, userEntity, params?.isAnonymous, params?.fencer1Name, params?.fencer2Name, params?.keepToggleOff]);
 
   const resolveGuestNamesIfNeeded = useCallback((): { fencerA: string; fencerB: string } | null => {
+    if (isCompetitionRemoteMode) {
+      return null;
+    }
+
     const isMissing = (name: string) => name === 'Tap to add name' || !name.trim();
     const fencerAName = getNameByEntity('fencerA');
     const fencerBName = getNameByEntity('fencerB');
@@ -3900,7 +4745,7 @@ export default function RemoteScreen() {
     });
 
     return { fencerA: nextFencerA, fencerB: nextFencerB };
-  }, [showUserProfile, toggleCardPosition, getEntityAtPosition, getNameByEntity]);
+  }, [getEntityAtPosition, getNameByEntity, isCompetitionRemoteMode, showUserProfile, toggleCardPosition]);
 
   // Validate that fencer names are filled before starting a match
   const validateFencerNames = useCallback((): { isValid: boolean; message?: string } => {
@@ -4028,7 +4873,7 @@ export default function RemoteScreen() {
     }
     
     // End current period and create new one
-    if (currentMatchPeriod) {
+    if (currentMatchPeriod && !isCompetitionRemoteMode) {
       await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
         end_time: new Date().toISOString(),
         fencer_1_score: scores.fencerA,
@@ -4086,7 +4931,7 @@ export default function RemoteScreen() {
       const newPeriod = currentPeriod + 1;
       
       // End the current period if it exists
-      if (currentMatchPeriod) {
+      if (currentMatchPeriod && !isCompetitionRemoteMode) {
         console.log('🏁 Ending current period:', currentPeriod);
         await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
           end_time: new Date().toISOString(),
@@ -4194,6 +5039,11 @@ export default function RemoteScreen() {
         setIsChangingScore(false);
         return;
       }
+
+      if (isCompetitionRemoteMode && !ensureCompetitionCanEdit()) {
+        setIsChangingScore(false);
+        return;
+      }
       
       // Ensure remote session exists (create if first score)
       const resolvedGuestNames = resolveGuestNamesIfNeeded();
@@ -4212,6 +5062,13 @@ export default function RemoteScreen() {
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
     const newScore = currentScore + 1;
+    const scoreLimit = isCompetitionRemoteMode
+      ? (competitionScoringData?.match.touch_limit ?? 15)
+      : 15;
+    const nextScores =
+      entity === 'fencerA'
+        ? { fencerA: newScore, fencerB: scoresRef.current.fencerB }
+        : { fencerA: scoresRef.current.fencerA, fencerB: newScore };
     const otherEntity = entity === 'fencerA' ? 'fencerB' : 'fencerA';
     const otherScore = getScoreByEntity(otherEntity);
     captureMatchDebug('score_tap', {
@@ -4224,7 +5081,7 @@ export default function RemoteScreen() {
       is_active_match: hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0)),
     });
     // Keep the ref in sync immediately so completion uses the latest values even before React updates state
-    scoresRef.current = { ...scoresRef.current, [entity]: newScore };
+    scoresRef.current = nextScores;
     
     // Check if this is an active match (timer has been started and is either running or paused)
     if (hasMatchStarted && (isPlaying || (timeRemaining < matchTime && timeRemaining > 0))) {
@@ -4243,6 +5100,9 @@ export default function RemoteScreen() {
         });
         setPendingScoreAction(() => async () => {
           setScores(prev => ({ ...prev, [entity]: newScore }));
+          if (isCompetitionRemoteMode) {
+            void syncCompetitionLiveScore(nextScores);
+          }
           analytics.scoreIncrement({
             side: getScoreSideForAnalytics(entity),
             new_score: newScore,
@@ -4263,8 +5123,8 @@ export default function RemoteScreen() {
           }
           
           // Check if entity reached 15 points (match should end)
-          if (newScore >= 15) {
-            console.log(`🏁 ${entity} reached 15 points - match should end`);
+          if (newScore >= scoreLimit) {
+            console.log(`🏁 ${entity} reached ${scoreLimit} points - match should end`);
             setIsCompletingMatch(true);
           }
           
@@ -4279,6 +5139,9 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      if (isCompetitionRemoteMode) {
+        void syncCompetitionLiveScore(nextScores);
+      }
       analytics.scoreIncrement({
         side: getScoreSideForAnalytics(entity),
         new_score: newScore,
@@ -4298,7 +5161,7 @@ export default function RemoteScreen() {
       }
       
       // Fire async operations in background (events are already queued locally, so safe to fire-and-forget)
-      if (remoteSession) {
+      if (remoteSession && !isCompetitionRemoteMode) {
         const leftEntity = getEntityAtPosition('left');
         const leftScore = leftEntity === entity ? newScore : (leftEntity === 'fencerA' ? scores.fencerA : scores.fencerB);
         const rightEntity = getEntityAtPosition('right');
@@ -4312,8 +5175,8 @@ export default function RemoteScreen() {
       logMatchEvent('score', entity, 'increase'); // Log the score increase
       
       // Check if entity reached 15 points (match should end)
-      if (newScore >= 15) {
-        console.log(`🏁 ${entity} reached 15 points - match should end`);
+      if (newScore >= scoreLimit) {
+        console.log(`🏁 ${entity} reached ${scoreLimit} points - match should end`);
         setIsCompletingMatch(true);
       }
       
@@ -4417,6 +5280,9 @@ export default function RemoteScreen() {
 
       // Not an active match - no warning needed, just update score
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      if (isCompetitionRemoteMode) {
+        void syncCompetitionLiveScore(nextScores);
+      }
       analytics.scoreIncrement({
         side: getScoreSideForAnalytics(entity),
         new_score: newScore,
@@ -4448,7 +5314,7 @@ export default function RemoteScreen() {
       }
       
       // Update remote session scores (offline-capable) - map entities to left/right positions
-      if (remoteSession) {
+      if (remoteSession && !isCompetitionRemoteMode) {
         const leftEntity = getEntityAtPosition('left');
         const leftScore = leftEntity === entity ? newScore : (leftEntity === 'fencerA' ? scores.fencerA : scores.fencerB);
         const rightEntity = getEntityAtPosition('right');
@@ -4475,7 +5341,7 @@ export default function RemoteScreen() {
                 style: 'cancel',
                 onPress: async () => {
                   // Period 2 starts immediately
-                  if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+                  if (!isCompetitionRemoteMode && currentMatchPeriod && currentMatchPeriod.period_number === 1) {
                     await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
                       end_time: new Date().toISOString(),
                       fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
@@ -4508,7 +5374,7 @@ export default function RemoteScreen() {
                 text: 'Take Break',
                 onPress: async () => {
                   // Period 1 ends immediately
-                  if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+                  if (!isCompetitionRemoteMode && currentMatchPeriod && currentMatchPeriod.period_number === 1) {
                     await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
                       end_time: new Date().toISOString(),
                       fencer_1_score: entity === 'fencerA' ? newScore : scores.fencerA,
@@ -4527,8 +5393,8 @@ export default function RemoteScreen() {
       }
       
       // Check if entity reached 15 points (match should end) - only for Foil/Epee
-      if (selectedWeapon !== 'sabre' && newScore >= 15) {
-        console.log(`🏁 ${entity} reached 15 points - match should end`);
+      if (selectedWeapon !== 'sabre' && newScore >= scoreLimit) {
+        console.log(`🏁 ${entity} reached ${scoreLimit} points - match should end`);
         setIsCompletingMatch(true);
       }
       
@@ -4561,6 +5427,10 @@ export default function RemoteScreen() {
     cancelledEventId?: string | null,
     cancelledEventUuid?: string | null
   ) => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
+
     if (!remoteSession || !currentMatchPeriod?.match_id) {
       console.log('⚠️ Cannot create cancellation event - no remote session or match period');
       return;
@@ -4765,10 +5635,20 @@ export default function RemoteScreen() {
       setHasNavigatedAway(false); // Reset navigation flag when changing scores
       isActivelyUsingAppRef.current = true; // Mark that user is actively using the app
       const tapDebugId = nextDebugId();
+
+      if (isCompetitionRemoteMode && !ensureCompetitionCanEdit()) {
+        setIsChangingScore(false);
+        return;
+      }
     
     // Get current score and calculate new score
     const currentScore = getScoreByEntity(entity);
     const newScore = Math.max(0, currentScore - 1);
+    const nextScores =
+      entity === 'fencerA'
+        ? { fencerA: newScore, fencerB: scoresRef.current.fencerB }
+        : { fencerA: scoresRef.current.fencerA, fencerB: newScore };
+    scoresRef.current = nextScores;
     
     // Get the most recent scoring event ID for this entity to cancel
     const eventIdToCancel = recentScoringEventIds[entity];
@@ -4801,6 +5681,9 @@ export default function RemoteScreen() {
         });
         setPendingScoreAction(() => async () => {
           setScores(prev => ({ ...prev, [entity]: newScore }));
+          if (isCompetitionRemoteMode) {
+            void syncCompetitionLiveScore(nextScores);
+          }
           setScoreChangeCount(0); // Reset counter
           setIsChangingScore(false);
           
@@ -4832,6 +5715,9 @@ export default function RemoteScreen() {
       
       // First score change during active match - proceed normally
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      if (isCompetitionRemoteMode) {
+        void syncCompetitionLiveScore(nextScores);
+      }
       
       // For Sabre: Reset breakTriggered if score goes below 8
       if (selectedWeapon === 'sabre' && breakTriggered) {
@@ -4870,6 +5756,9 @@ export default function RemoteScreen() {
     } else {
       // Not an active match - no warning needed, just update score
       setScores(prev => ({ ...prev, [entity]: newScore }));
+      if (isCompetitionRemoteMode) {
+        void syncCompetitionLiveScore(nextScores);
+      }
       
       // For Sabre: Reset breakTriggered if score goes below 8
       if (selectedWeapon === 'sabre' && breakTriggered) {
@@ -4916,6 +5805,14 @@ export default function RemoteScreen() {
 
 
   const openEditNamesPopup = useCallback(() => {
+    if (isCompetitionRemoteMode) {
+      Alert.alert(
+        'Names Locked',
+        'Competition match names come from the participant list and cannot be edited here.'
+      );
+      return;
+    }
+
     // Helper function to get name value - return empty string if it's the placeholder
     const getNameValue = (name: string): string => {
       return name === 'Tap to add name' ? '' : name;
@@ -4931,9 +5828,20 @@ export default function RemoteScreen() {
     setEditFencerBName(rightIsUser ? userDisplayName : getNameValue(getNameByEntity(rightEntity))); // Right card
     setShowEditNamesPopup(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [getEntityAtPosition, getNameByEntity, showUserProfile, toggleCardPosition, userDisplayName]);
+  }, [
+    getEntityAtPosition,
+    getNameByEntity,
+    isCompetitionRemoteMode,
+    showUserProfile,
+    toggleCardPosition,
+    userDisplayName,
+  ]);
 
   const togglePlay = useCallback(async () => {
+    if (isCompetitionRemoteMode && !ensureCompetitionCanEdit()) {
+      return;
+    }
+
     if (isPlaying) {
       pauseTimer();
     } else {
@@ -5034,7 +5942,23 @@ export default function RemoteScreen() {
         }
       })();
     }
-  }, [isPlaying, timeRemaining, matchTime, ensureRemoteSession, createMatchPeriod, currentMatchPeriod, matchStartTime, resolveGuestNamesIfNeeded, validateFencerNames, openEditNamesPopup, selectedWeapon, getOpponentNameForAnalytics, user?.id]);
+  }, [
+    createMatchPeriod,
+    currentMatchPeriod,
+    ensureCompetitionCanEdit,
+    ensureRemoteSession,
+    getOpponentNameForAnalytics,
+    isCompetitionRemoteMode,
+    isPlaying,
+    matchStartTime,
+    matchTime,
+    openEditNamesPopup,
+    resolveGuestNamesIfNeeded,
+    selectedWeapon,
+    timeRemaining,
+    user?.id,
+    validateFencerNames,
+  ]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -5548,6 +6472,14 @@ export default function RemoteScreen() {
   
   // Main resetAll function that checks opponent name and shows prompt
   const resetAll = useCallback(async () => {
+    if (isCompetitionRemoteMode) {
+      Alert.alert(
+        'Reset All Disabled',
+        'Use score/time reset options instead of full reset during competition matches.'
+      );
+      return;
+    }
+
     if (resetAllInFlightRef.current || isResetting) {
       console.log('⏭️ Reset All ignored - reset already in progress');
       return;
@@ -5614,7 +6546,15 @@ export default function RemoteScreen() {
         }
       ]
     );
-  }, [fencerNames, isResetting, showUserProfile, userDisplayName, toggleCardPosition, performResetAll]);
+  }, [
+    fencerNames,
+    isCompetitionRemoteMode,
+    isResetting,
+    performResetAll,
+    showUserProfile,
+    toggleCardPosition,
+    userDisplayName,
+  ]);
 
   const swapFencers = useCallback(() => {
     if (isSwapping) return; // Prevent multiple swaps during animation
@@ -5669,6 +6609,9 @@ export default function RemoteScreen() {
   }, [isSwapping, scores, fencerNames, cards, profileEmojis, toggleCardPosition, showUserProfile]);
 
   const toggleUserProfile = useCallback(() => {
+    if (isCompetitionRemoteMode) {
+      return;
+    }
     if (hasMatchStarted) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       Alert.alert('Toggle Locked', 'You can only change this before the match starts.');
@@ -5677,7 +6620,7 @@ export default function RemoteScreen() {
     userHasToggledProfileRef.current = true;
     setShowUserProfile(prev => !prev);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [hasMatchStarted]);
+  }, [hasMatchStarted, isCompetitionRemoteMode]);
 
   const handleFencerNameClick = useCallback((entity: 'fencerA' | 'fencerB') => {
     // Don't allow editing if user profile is shown and this is the user's position
@@ -6513,7 +7456,7 @@ export default function RemoteScreen() {
 
     // For Sabre: Start Period 2 when break completes
     if (selectedWeapon === 'sabre') {
-      if (currentMatchPeriod && currentMatchPeriod.period_number === 1) {
+      if (!isCompetitionRemoteMode && currentMatchPeriod && currentMatchPeriod.period_number === 1) {
         (async () => {
           const periodData = {
             match_id: currentMatchPeriod.match_id,
@@ -6544,7 +7487,7 @@ export default function RemoteScreen() {
     // For Foil/Epee: Increment period and create new period record
     const nextPeriod = Math.min(currentPeriodRef.current + 1, 3);
 
-    if (currentMatchPeriod && nextPeriod > currentPeriodRef.current) {
+    if (!isCompetitionRemoteMode && currentMatchPeriod && nextPeriod > currentPeriodRef.current) {
       (async () => {
         await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
           end_time: new Date().toISOString(),
@@ -6604,6 +7547,7 @@ export default function RemoteScreen() {
     currentMatchPeriod,
     fencerNames.fencerA,
     fencerNames.fencerB,
+    isCompetitionRemoteMode,
     matchTime,
     priorityFencer,
     scores.fencerA,
@@ -6745,7 +7689,7 @@ export default function RemoteScreen() {
     const nextPeriod = Math.min(currentPeriod + 1, 3);
     
     // End current period and create new one
-    if (currentMatchPeriod && nextPeriod > currentPeriod) {
+    if (!isCompetitionRemoteMode && currentMatchPeriod && nextPeriod > currentPeriod) {
       (async () => {
         await matchPeriodService.updateMatchPeriod(currentMatchPeriod.match_period_id, {
           end_time: new Date().toISOString(),
@@ -7063,53 +8007,69 @@ export default function RemoteScreen() {
     setBottomControlsHeight(prev => (prev === nextHeight ? prev : nextHeight));
   }, []);
   const isAndroid = Platform.OS === 'android';
-  const decorativeCardWidth = width * (isAndroid ? 0.065 : 0.08);
-  const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12);
-  const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015);
-  const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03);
+  const competitionCompactScale = isCompetitionRemoteMode ? (isAndroid ? 0.86 : 0.9) : 1;
+  const competitionTextScale = isCompetitionRemoteMode ? 0.9 : 1;
+  const decorativeCardWidth = width * (isAndroid ? 0.065 : 0.08) * competitionCompactScale;
+  const decorativeCardHeight = width * (isAndroid ? 0.1 : 0.12) * competitionCompactScale;
+  const decorativeCardRadius = width * (isAndroid ? 0.012 : 0.015) * competitionCompactScale;
+  const decorativeCardCountSize = width * (isAndroid ? 0.026 : 0.03) * competitionTextScale;
   const tabBarHeight = height * (isAndroid ? 0.05 : 0.08) + insets.bottom;
+  const competitionIosBottomDrop =
+    isCompetitionRemoteMode && !isAndroid ? height * 0.02 : 0;
   const timerReadyDockGap = height * (isAndroid ? 0 : 0.01);
-  const bottomDockOffset = isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08;
+  const bottomDockOffset = (
+    isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08
+  ) - competitionIosBottomDrop;
   const bottomControlsReserveMin =
-    height * (selectedWeapon === 'sabre' ? (isAndroid ? 0.14 : 0.12) : (isAndroid ? 0.22 : 0.2));
+    height *
+    (selectedWeapon === 'sabre' ? (isAndroid ? 0.14 : 0.12) : (isAndroid ? 0.22 : 0.2)) *
+    competitionCompactScale;
   const bottomControlsReserve = Math.max(bottomControlsHeight, bottomControlsReserveMin);
-  const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015);
-  const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005);
-  const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04);
-  const fencerCardCompactPadding = width * (isAndroid ? 0.028 : 0.03);
-  const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25);
-  const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32);
+  const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015) * competitionCompactScale;
+  const fencersContainerTightBottom = height * (isAndroid ? 0.02 : 0.005) * competitionCompactScale;
+  const fencerCardPadding = width * (isAndroid ? 0.035 : 0.04) * competitionCompactScale;
+  const fencerCardCompactPadding = width * (isAndroid ? 0.028 : 0.03) * competitionCompactScale;
+  const fencerCardMinHeight = height * (isAndroid ? 0.22 : 0.25) * competitionCompactScale;
+  const fencerCardMinHeightExtended = height * (isAndroid ? 0.28 : 0.32) * competitionCompactScale;
   const fencerCardMinHeightInProgress = isAndroid ? fencerCardMinHeight : fencerCardMinHeightExtended;
   const fencerCardPaddingInProgress = isAndroid ? fencerCardCompactPadding : fencerCardPadding;
-  const fencerCardMinHeightTimerReady = height * (isAndroid ? 0.17 : 0.22);
-  const sabreFencerCardHeight = height * (isAndroid ? 0.325 : 0.35);
-  const sabreFencerCardHeightReady = height * (isAndroid ? 0.355 : 0.375);
-  const sabreFencerCardHeightWithCards = height * (isAndroid ? 0.315 : 0.335);
-  const sabreFencersContainerBottom = height * (isAndroid ? 0.012 : 0.01);
-  const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03);
-  const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006);
-  const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015);
-  const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018);
+  const fencerCardMinHeightTimerReady = height * (isAndroid ? 0.17 : 0.22) * competitionCompactScale;
+  const sabreFencerCardHeight = height * (isAndroid ? 0.325 : 0.35) * competitionCompactScale;
+  const sabreFencerCardHeightReady = height * (isAndroid ? 0.355 : 0.375) * competitionCompactScale;
+  const sabreFencerCardHeightWithCards = height * (isAndroid ? 0.315 : 0.335) * competitionCompactScale;
+  const sabreFencersContainerBottom = height * (isAndroid ? 0.012 : 0.01) * competitionCompactScale;
+  const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03) * competitionCompactScale;
+  const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006) * competitionCompactScale;
+  const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015) * competitionCompactScale;
+  const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018) * competitionCompactScale;
   const timerReadyBottomControlsGapNoCards = timerReadyBottomControlsGap + height * (isAndroid ? 0.006 : 0.008);
   const timerReadyCardsLowering = height * (isAndroid ? 0.006 : 0);
-  const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012);
-  const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006);
-  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0 : 0.012);
-  const timerReadyPlayBlockOffset = height * (isAndroid ? 0.014 : -0.012);
+  const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012) * competitionCompactScale;
+  const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006) * competitionCompactScale;
+  const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0 : 0.012) * competitionCompactScale;
+  const timerReadyPlayBlockOffset =
+    height * (isAndroid ? 0.014 : -0.012) +
+    (isCompetitionRemoteMode && !isAndroid ? height * 0.01 : 0);
   const inProgressCardsLowering = height * (isAndroid ? 0.016 : 0.012);
   const inProgressPlayBlockOffset = height * (isAndroid ? 0.018 : 0.014);
-  const penaltyBadgeRowMarginTop = height * (isAndroid ? 0.004 : 0.005);
-  const penaltyBadgeRowMarginBottom = height * (isAndroid ? 0.002 : 0.003);
-  const fencerNameMarginBottomWithCards = height * (isAndroid ? 0.002 : 0.003);
-  const fencerScoreMarginBottomWithCards = height * (isAndroid ? 0.004 : 0.008);
-  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.038 : 0.038);
-  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.13 : 0.12);
+  const penaltyBadgeRowMarginTop = height * (isAndroid ? 0.004 : 0.005) * competitionCompactScale;
+  const penaltyBadgeRowMarginBottom = height * (isAndroid ? 0.002 : 0.003) * competitionCompactScale;
+  const fencerNameMarginBottomWithCards = height * (isAndroid ? 0.002 : 0.003) * competitionCompactScale;
+  const fencerScoreMarginBottomWithCards = height * (isAndroid ? 0.004 : 0.008) * competitionCompactScale;
+  const timerReadyPlayButtonPadding = height * (isAndroid ? 0.038 : 0.038) * competitionCompactScale;
+  const timerReadyPlayButtonMinHeight = height * (isAndroid ? 0.13 : 0.12) * competitionCompactScale;
   const playButtonActivePaddingExtra = height * (isAndroid ? 0.01 : 0);
   const playButtonActiveMinHeightExtra = height * (isAndroid ? 0.02 : 0);
-  const timerReadyResetButtonPadding = height * (isAndroid ? 0.006 : 0.012);
-  const timerReadyResetButtonMinHeight = height * (isAndroid ? 0.04 : 0.055);
-  const timerReadyResetButtonWidth = width * (isAndroid ? 0.12 : 0.15);
-  const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012);
+  const timerReadyResetButtonPadding = height * (isAndroid ? 0.006 : 0.012) * competitionCompactScale;
+  const timerReadyResetButtonMinHeight = height * (isAndroid ? 0.04 : 0.055) * competitionCompactScale;
+  const timerReadyResetButtonWidth = width * (isAndroid ? 0.12 : 0.15) * competitionCompactScale;
+  const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012) * competitionCompactScale;
+  const competitionTimerPushDown =
+    isCompetitionRemoteMode ? height * (isAndroid ? 0.016 : 0.014) : 0;
+  const competitionAndroidHeaderDrop =
+    isCompetitionRemoteMode && isAndroid ? height * 0.012 : 0;
+  const competitionAndroidCardsDrop =
+    isCompetitionRemoteMode && isAndroid ? height * 0.012 : 0;
 
 
   const styles = StyleSheet.create({
@@ -7147,8 +8107,8 @@ export default function RemoteScreen() {
       borderWidth: width * 0.005,
       borderColor: Colors.timerBackground.borderColors[0],
       borderRadius: width * 0.03,
-      padding: width * 0.008,
-      marginTop: layout.adjustMargin(-height * 0.015, 'top'), // Reverted back from -0.035
+      padding: width * 0.008 * competitionCompactScale,
+      marginTop: layout.adjustMargin(-height * 0.015 + competitionTimerPushDown, 'top'),
       marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
       position: 'relative',
       overflow: 'hidden', // Force iOS to respect borderRadius
@@ -7161,19 +8121,19 @@ export default function RemoteScreen() {
     },
     timerLabel: {
       position: 'absolute',
-      width: width * 0.20, // Reduced from 0.24 to make smaller
-      height: height * 0.025, // Reduced from 0.03 to make smaller
+      width: width * 0.20 * competitionCompactScale, // Reduced from 0.24 to make smaller
+      height: height * 0.025 * competitionCompactScale, // Reduced from 0.03 to make smaller
       left: '50%', // Center horizontally
-      marginLeft: -(width * 0.20) / 2, // Half of new width to center properly
-      top: -height * 0.028, // Moved pill higher up, more outside card
+      marginLeft: -(width * 0.20 * competitionCompactScale) / 2, // Half of new width to center properly
+      top: -(height * 0.025 * competitionCompactScale) / 2, // Half outside / half inside the timer card
       backgroundColor: Colors.yellow.accent,
-      borderRadius: width * 0.035, // Reduced from 0.04 to match smaller size
+      borderRadius: width * 0.035 * competitionCompactScale, // Reduced from 0.04 to match smaller size
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 10,
     },
     timerLabelText: {
-      fontSize: width * 0.022, // Reduced from 0.025 to match smaller pill
+      fontSize: width * 0.022 * competitionTextScale, // Reduced from 0.025 to match smaller pill
       fontWeight: '600',
       color: Colors.gray.dark,
     },
@@ -7223,7 +8183,7 @@ export default function RemoteScreen() {
       borderRadius: width * 0.02,
     },
     countdownText: {
-      fontSize: width * 0.085, // Slightly reduced from 0.09 when warning text shows
+      fontSize: width * 0.085 * competitionTextScale, // Slightly reduced from 0.09 when warning text shows
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
@@ -7233,7 +8193,7 @@ export default function RemoteScreen() {
       marginTop: -(height * 0.03), // Moved up from -0.008
     },
     countdownTextLarge: {
-      fontSize: width * 0.12, // Larger font size when match hasn't started
+      fontSize: width * 0.12 * competitionTextScale, // Larger font size when match hasn't started
       color: 'white',
       fontWeight: '700',
       textAlign: 'center',
@@ -7243,7 +8203,7 @@ export default function RemoteScreen() {
       marginTop: -(height * 0.03), // Moved up from -0.008
     },
     countdownTextWarning: {
-      fontSize: width * 0.085, // Slightly reduced from 0.09 when warning text shows
+      fontSize: width * 0.085 * competitionTextScale, // Slightly reduced from 0.09 when warning text shows
       color: Colors.yellow.accent,
       fontWeight: '700',
       textAlign: 'center',
@@ -7253,7 +8213,7 @@ export default function RemoteScreen() {
       marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDanger: {
-      fontSize: width * 0.105, // Slightly reduced from 0.11 when warning text shows
+      fontSize: width * 0.105 * competitionTextScale, // Slightly reduced from 0.11 when warning text shows
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
@@ -7263,7 +8223,7 @@ export default function RemoteScreen() {
       marginTop: -(height * 0.03), // Moved up from -0.015
     },
     countdownTextDangerPulse: {
-      fontSize: width * 0.105, // Slightly reduced from 0.11 when warning text shows
+      fontSize: width * 0.105 * competitionTextScale, // Slightly reduced from 0.11 when warning text shows
       color: Colors.red.accent,
       fontWeight: '700',
       textAlign: 'center',
@@ -7334,6 +8294,72 @@ export default function RemoteScreen() {
       fontSize: width * 0.035,
       fontWeight: '600',
     },
+    competitionModeBanner: {
+      // Lift competition banner higher on both platforms.
+      marginTop: height * (isAndroid ? -0.018 : -0.015),
+      marginBottom: layout.adjustMargin(height * 0.008, 'bottom'),
+      borderRadius: width * 0.02,
+      borderWidth: 1,
+      borderColor: 'rgba(139, 92, 246, 0.4)',
+      backgroundColor: 'rgba(23, 23, 23, 0.95)',
+      paddingVertical: height * 0.008,
+      paddingHorizontal: width * 0.028,
+      gap: height * 0.003,
+    },
+    competitionModeHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    competitionModeTitle: {
+      color: '#E9D7FF',
+      fontSize: width * 0.032,
+      fontWeight: '700',
+    },
+    competitionModeSubtitle: {
+      color: 'white',
+      fontSize: width * 0.028,
+      fontWeight: '600',
+    },
+    competitionModeMetaText: {
+      color: '#9D9D9D',
+      fontSize: width * 0.025,
+      fontWeight: '500',
+    },
+    competitionModeInfoText: {
+      color: '#E9D7FF',
+      fontSize: width * 0.03,
+      fontWeight: '500',
+    },
+    competitionModeErrorText: {
+      color: '#FF7675',
+      fontSize: width * 0.03,
+      fontWeight: '600',
+    },
+    competitionModeBackButton: {
+      borderRadius: width * 0.04,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.22)',
+      paddingHorizontal: width * 0.024,
+      paddingVertical: height * 0.004,
+    },
+    competitionModeBackText: {
+      color: 'white',
+      fontSize: width * 0.025,
+      fontWeight: '600',
+    },
+    competitionModeTakeoverButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: '#8B5CF6',
+      borderRadius: width * 0.03,
+      paddingHorizontal: width * 0.03,
+      paddingVertical: height * 0.006,
+    },
+    competitionModeTakeoverText: {
+      color: 'white',
+      fontSize: width * 0.03,
+      fontWeight: '700',
+    },
     periodControl: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -7387,19 +8413,19 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     periodText: {
-      fontSize: width * 0.03,
+      fontSize: width * 0.03 * competitionTextScale,
       color: Colors.gray.dark,
       fontWeight: '500',
     },
     periodNumber: {
-      fontSize: width * 0.04,
+      fontSize: width * 0.04 * competitionTextScale,
       color: Colors.gray.dark,
       fontWeight: '700',
     },
 
     // Fencers Section
     fencersHeading: {
-      fontSize: width * 0.05, // Smaller font on Nexus S, minimum 16px
+      fontSize: width * 0.05 * competitionTextScale, // Smaller font on Nexus S, minimum 16px
       fontWeight: '700',
       color: 'white',
       marginBottom: height * 0.005, // Smaller margin on Nexus S
@@ -7411,6 +8437,26 @@ export default function RemoteScreen() {
       alignItems: 'center',
       marginBottom: height * 0.005, // Smaller margin on Nexus S
       marginLeft: width * 0.05, // Smaller margin on Nexus S
+    },
+    fencersHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: width * 0.04,
+      flex: 1,
+      minWidth: 0,
+    },
+    fencersHeaderStatus: {
+      fontSize: width * 0.04,
+      fontWeight: '600',
+      color: 'white',
+      textAlign: 'left',
+      marginTop: 0,
+      marginBottom: 0,
+      flexShrink: 1,
+    },
+    fencersHeadingInline: {
+      marginTop: 0,
+      marginBottom: 0,
     },
     editNamesButton: {
       width: width * 0.06, // Smaller button on Nexus S
@@ -7452,38 +8498,38 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     profilePicture: {
-      width: width * 0.16, // Smaller profile on Nexus S
-      height: width * 0.16, // Smaller profile on Nexus S
-      borderRadius: width * 0.08,
+      width: width * 0.16 * competitionCompactScale, // Smaller profile on Nexus S
+      height: width * 0.16 * competitionCompactScale, // Smaller profile on Nexus S
+      borderRadius: width * 0.08 * competitionCompactScale,
       backgroundColor: Colors.gray.medium,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
     },
     profileInitial: {
-      fontSize: width * 0.075, // Smaller font on Nexus S, minimum 20px
+      fontSize: width * 0.075 * competitionTextScale, // Smaller font on Nexus S, minimum 20px
       fontWeight: '700',
       color: 'white',
     },
     profileImage: {
       width: '100%',
       height: '100%',
-      borderRadius: width * 0.08,
+      borderRadius: width * 0.08 * competitionCompactScale,
       backgroundColor: 'transparent',
     },
     cameraIcon: {
       position: 'absolute',
       bottom: -width * 0.008,
       right: -width * 0.008,
-      width: width * 0.07,
-      height: width * 0.07,
-      borderRadius: width * 0.035,
+      width: width * 0.07 * competitionCompactScale,
+      height: width * 0.07 * competitionCompactScale,
+      borderRadius: width * 0.035 * competitionCompactScale,
       backgroundColor: Colors.blue.light,
       alignItems: 'center',
       justifyContent: 'center',
     },
     cameraIconText: {
-      fontSize: width * 0.035,
+      fontSize: width * 0.035 * competitionTextScale,
     },
     priorityStar: {
       width: width * 0.09,
@@ -7497,7 +8543,7 @@ export default function RemoteScreen() {
       fontSize: width * 0.045,
     },
     fencerName: {
-      fontSize: width * 0.055, // Smaller font on Nexus S, minimum 14px
+      fontSize: width * 0.055 * competitionTextScale, // Smaller font on Nexus S, minimum 14px
       fontWeight: '600',
       color: 'white',
       marginBottom: height * 0.006, // Smaller margin on Nexus S
@@ -7514,7 +8560,7 @@ export default function RemoteScreen() {
       alignItems: 'center',
     },
     fencerScore: {
-      fontSize: width * 0.13,
+      fontSize: width * 0.13 * competitionTextScale,
       fontWeight: '700',
       color: 'white',
       marginBottom: height * 0.015,
@@ -7524,9 +8570,9 @@ export default function RemoteScreen() {
       gap: width * 0.035,
     },
     scoreButton: {
-      width: width * 0.145,
-      height: width * 0.145,
-      borderRadius: width * 0.0725,
+      width: width * 0.145 * competitionCompactScale,
+      height: width * 0.145 * competitionCompactScale,
+      borderRadius: width * 0.0725 * competitionCompactScale,
       backgroundColor: 'rgba(255, 255, 255, 0.2)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -7539,9 +8585,9 @@ export default function RemoteScreen() {
       color: 'white',
     },
     swapButton: {
-      width: width * 0.13, // Smaller button on Nexus S
-      height: width * 0.13, // Smaller button on Nexus S
-      borderRadius: width * 0.065,
+      width: width * 0.13 * competitionCompactScale, // Smaller button on Nexus S
+      height: width * 0.13 * competitionCompactScale, // Smaller button on Nexus S
+      borderRadius: width * 0.065 * competitionCompactScale,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
@@ -8559,11 +9605,27 @@ export default function RemoteScreen() {
     hasMatchStarted &&
     !isBreakTime &&
     (isPlaying || timeRemaining < matchTime);
-  const fencersHeaderMarginTop = selectedWeapon === 'sabre'
+  const inlineMatchStatusText = selectedWeapon === 'sabre'
+    ? (!hasMatchStarted
+      ? '⚪ Match Ready'
+      : (isBreakTime ? '🍃 Break Time' : '🟢 Match in Progress'))
+    : (isBreakTime
+      ? '🍃 Break Time'
+      : (isPlaying
+        ? '🟢 Match in Progress'
+        : (timeRemaining === 0
+          ? '🔴 Match Ended'
+          : (timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'))));
+  const baseFencersHeaderMarginTop = selectedWeapon === 'sabre'
     ? height * 0.012
     : (lockAndroidTimerReadyLayout
       ? -(height * 0.035)
       : (hasMatchStarted ? -(height * 0.02) : -(height * 0.035)));
+  // Preserve the old visual gap that existed when status was on its own line.
+  const fencersHeaderMarginTop =
+    selectedWeapon === 'sabre'
+      ? baseFencersHeaderMarginTop + competitionAndroidHeaderDrop
+      : baseFencersHeaderMarginTop + height * 0.024 + competitionAndroidHeaderDrop;
   const playButtonPaddingBase = useTimerReadyLayout ? timerReadyPlayButtonPadding : height * 0.045;
   const playButtonMinHeightBase = useTimerReadyLayout ? timerReadyPlayButtonMinHeight : height * 0.14;
   const playButtonActiveExtra = isNonSabreActive ? playButtonActivePaddingExtra : 0;
@@ -8594,6 +9656,35 @@ export default function RemoteScreen() {
   const sabreNameMarginBottom = sabreHasIssuedCards ? height * 0.004 : undefined;
   const sabreScoreControlsGap = sabreHasIssuedCards ? width * 0.028 : undefined;
   const sabreSwitchTranslateX = showUserProfile ? (sabreHasIssuedCards ? width * 0.058 : width * 0.065) : 0;
+
+  if (isCompetitionRemoteMode && !competitionScoringData && !competitionErrorText) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center' }]}>
+          <ActivityIndicator color={Colors.purple.primary} />
+          <Text style={{ color: 'white', marginTop: 12 }}>Loading competition match...</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (isCompetitionRemoteMode && !competitionScoringData && competitionErrorText) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }]}>
+          <Text style={{ color: '#FF7675', textAlign: 'center', marginBottom: 16 }}>
+            {competitionErrorText}
+          </Text>
+          <TouchableOpacity
+            onPress={navigateBackToCompetitionSource}
+            style={styles.competitionModeTakeoverButton}
+          >
+            <Text style={styles.competitionModeTakeoverText}>Back to Competition</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -8632,6 +9723,45 @@ export default function RemoteScreen() {
               </View>
             </View>
           )}
+
+          {isCompetitionRemoteMode && competitionScoringData && (
+            <View style={styles.competitionModeBanner}>
+              <View style={styles.competitionModeHeaderRow}>
+                <Text style={styles.competitionModeTitle}>
+                  Competition Remote
+                </Text>
+                <TouchableOpacity
+                  onPress={navigateBackToCompetitionSource}
+                  style={styles.competitionModeBackButton}
+                >
+                  <Text style={styles.competitionModeBackText}>Back</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.competitionModeMetaText} numberOfLines={1}>
+                {competitionScoringData.fencerA?.display_name ?? 'Fencer A'} vs{' '}
+                {competitionScoringData.fencerB?.display_name ?? 'Fencer B'}
+                {' • '}Stage:{' '}
+                {competitionScoringData.match.stage === 'de'
+                  ? `DE${competitionScoringData.match.round_label ? ` ${competitionScoringData.match.round_label}` : ''}`
+                  : 'Poule'}
+                {' • '}Source: {competitionFromParam}
+              </Text>
+              {competitionInfoText ? (
+                <Text style={styles.competitionModeInfoText}>{competitionInfoText}</Text>
+              ) : null}
+              {competitionErrorText ? (
+                <Text style={styles.competitionModeErrorText}>{competitionErrorText}</Text>
+              ) : null}
+              {competitionCanTakeOverRemote ? (
+                <TouchableOpacity
+                  onPress={takeOverCompetitionRemoteScoring}
+                  style={styles.competitionModeTakeoverButton}
+                >
+                  <Text style={styles.competitionModeTakeoverText}>Take Over Scoring</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
           
           {/* Match Timer Section */}
       <View style={{ overflow: 'visible', position: 'relative' }}>
@@ -8647,7 +9777,7 @@ export default function RemoteScreen() {
           end={Colors.timerBackground.end}
         >
           {/* Weapon Selection UI - Only visible before match starts */}
-          {!hasMatchStarted && !isPlaying && (
+          {!isCompetitionRemoteMode && !hasMatchStarted && !isPlaying && (
             <View style={styles.weaponSelectionContainer}>
               <View style={styles.weaponButtonsRow}>
                 <TouchableOpacity
@@ -8758,7 +9888,10 @@ export default function RemoteScreen() {
               <Ionicons name="pencil" size={16} color="white" />
             </TouchableOpacity>
           )}
-          {hasMatchStarted && scores.fencerA + scores.fencerB > 0 && !isInjuryTimer && (
+          {hasMatchStarted &&
+            scores.fencerA + scores.fencerB > 0 &&
+            !isInjuryTimer &&
+            !competitionIsReadOnly && (
             <TouchableOpacity 
               style={styles.completeMatchCircle} 
               onPress={() => setShowFinishMatchConfirm(true)}
@@ -9028,50 +10161,18 @@ export default function RemoteScreen() {
       </LinearGradient>
       </View>
 
-		      {/* Match Status Display - Show for Foil/Epee always, hidden for Sabre (shown inline with Fencers instead) */}
-		      {selectedWeapon !== 'sabre' && (
-		        <View style={styles.matchStatusContainer}>
-		          <Text style={styles.matchStatusText}>
-		            {isBreakTime ? '🍃 Break Time' : isPlaying ? '🟢 Match in Progress' : timeRemaining === 0 ? '🔴 Match Ended' : timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'}
-		          </Text>
-		          {isBreakTime && (
-		            <Text style={styles.matchStatusSubtext}>
-		              Break in progress
-		            </Text>
-		          )}
-		        </View>
-		      )}
-
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
             marginTop: fencersHeaderMarginTop,  // Keep Android locked to timer-ready layout
             marginBottom: selectedWeapon === 'sabre' ? height * 0.002 : undefined
           }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: width * 0.04 }}>
-          <Text style={[styles.fencersHeading, selectedWeapon === 'sabre' && !isBreakTime && { marginTop: 0, marginBottom: 0 }]}>Fencers</Text>
-          {/* Match status for Sabre - on same line as Fencers, matches matchStatusText style exactly */}
-          {selectedWeapon === 'sabre' && !isBreakTime && (
-            <Text style={[styles.matchStatusText, { 
-              textAlign: 'left', 
-              marginTop: 0, 
-              marginBottom: 0
-            }]}>
-              {!hasMatchStarted ? '⚪ Match Ready' : '🟢 Match in Progress'}
-            </Text>
-          )}
+        <View style={styles.fencersHeaderLeft}>
+          <Text style={[styles.fencersHeading, styles.fencersHeadingInline]}>Fencers</Text>
+          <Text style={styles.fencersHeaderStatus} numberOfLines={1} ellipsizeMode="tail">
+            {inlineMatchStatusText}
+          </Text>
         </View>
-        {selectedWeapon === 'sabre' ? (
-          <TouchableOpacity 
-            style={[styles.editNamesButton, { 
-              backgroundColor: '#FB5D5C',
-              width: width * 0.09,
-              height: width * 0.09,
-            }]}
-            onPress={() => setShowResetPopup(true)}
-          >
-            <Ionicons name="refresh" size={22} color="white" />
-          </TouchableOpacity>
-        ) : (
+        {!(selectedWeapon === 'sabre' || isCompetitionRemoteMode) && (
           <TouchableOpacity 
             style={styles.editNamesButton}
             onPress={openEditNamesPopup}
@@ -9091,6 +10192,9 @@ export default function RemoteScreen() {
         selectedWeapon === 'sabre' ? {
           marginTop: height * 0.006, // Reduced margin to bring cards closer to "Fencers" text
           marginBottom: sabreFencersContainerBottom, // Keep controls visible when cards are issued
+        } : {},
+        (isCompetitionRemoteMode && isAndroid) ? {
+          marginTop: (selectedWeapon === 'sabre' ? height * 0.006 : 0) + competitionAndroidCardsDrop,
         } : {}
       ]}>
         {/* Alice's Card */}
@@ -9120,7 +10224,7 @@ export default function RemoteScreen() {
           } : {}
         ]}>
         {/* Sliding Switch - Top Left - Only show when toggle is on left card */}
-          {toggleCardPosition === 'left' && (
+          {!isCompetitionRemoteMode && toggleCardPosition === 'left' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
               top: sabreHasIssuedCards ? width * 0.015 : width * 0.02, 
@@ -9172,6 +10276,9 @@ export default function RemoteScreen() {
                 },
               ]}
               onPress={() => {
+                if (isCompetitionRemoteMode) {
+                  return;
+                }
                 if (toggleCardPosition === 'left' && showUserProfile) {
                   // User profile - no image selection, just show profile image
                   return;
@@ -9188,7 +10295,7 @@ export default function RemoteScreen() {
                 // Opponent profile - show opponent image or initials
                 renderProfileImage(opponentImages[getEntityAtPosition('left')] || null, getNameByPosition('left'), false)
               )}
-              {!(toggleCardPosition === 'left' && showUserProfile) && (
+              {!isCompetitionRemoteMode && !(toggleCardPosition === 'left' && showUserProfile) && (
               <View style={[
                 styles.cameraIcon,
                 sabreHasIssuedCards && {
@@ -9239,7 +10346,11 @@ export default function RemoteScreen() {
           )}
           
           <TouchableOpacity
-            onPress={() => handleFencerNameClick(getEntityAtPosition('left'))}
+            onPress={
+              isCompetitionRemoteMode
+                ? undefined
+                : () => handleFencerNameClick(getEntityAtPosition('left'))
+            }
             activeOpacity={0.7}
             style={styles.fencerNameContainer}
           >
@@ -9291,7 +10402,9 @@ export default function RemoteScreen() {
               width: sabreScoreButtonSize,
               height: sabreScoreButtonSize,
               borderRadius: sabreScoreButtonRadius,
-            }]} onPress={() => decrementScore(getEntityAtPosition('left'))}>
+            }, competitionIsReadOnly && {
+              opacity: 0.45,
+            }]} onPress={() => decrementScore(getEntityAtPosition('left'))} disabled={competitionIsReadOnly}>
               <Ionicons name="remove" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -9307,7 +10420,9 @@ export default function RemoteScreen() {
               width: sabreScoreButtonSize,
               height: sabreScoreButtonSize,
               borderRadius: sabreScoreButtonRadius,
-            }]} onPress={() => incrementScore(getEntityAtPosition('left'))}>
+            }, competitionIsReadOnly && {
+              opacity: 0.45,
+            }]} onPress={() => incrementScore(getEntityAtPosition('left'))} disabled={competitionIsReadOnly}>
               <Ionicons name="add" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
           </View>
@@ -9330,6 +10445,9 @@ export default function RemoteScreen() {
                 : selectedWeapon === 'sabre'
                   ? height * 0.14
                   : height * 0.08
+            },
+            competitionIsReadOnly && {
+              opacity: 0.45,
             }
           ]}
         >
@@ -9341,6 +10459,7 @@ export default function RemoteScreen() {
               justifyContent: 'center' 
             }} 
             onPress={swapFencers}
+            disabled={competitionIsReadOnly}
           >
             <Ionicons name="swap-horizontal" size={28} color="white" />
           </TouchableOpacity>
@@ -9373,6 +10492,7 @@ export default function RemoteScreen() {
                 justifyContent: 'center' 
               }} 
               onPress={handleDoubleHit}
+              disabled={competitionIsReadOnly}
             >
               <Ionicons name="add-circle" size={28} color="white" />
               <Text style={styles.doubleHitButtonText}>Double</Text>
@@ -9407,7 +10527,7 @@ export default function RemoteScreen() {
           } : {}
         ]}>
         {/* Sliding Switch - Top Right - Only show when toggle is on right card */}
-          {toggleCardPosition === 'right' && (
+          {!isCompetitionRemoteMode && toggleCardPosition === 'right' && (
             <View style={[styles.slidingSwitch, { 
               position: 'absolute', 
               top: sabreHasIssuedCards ? width * 0.015 : width * 0.02, 
@@ -9459,6 +10579,9 @@ export default function RemoteScreen() {
                 },
               ]}
               onPress={() => {
+                if (isCompetitionRemoteMode) {
+                  return;
+                }
                 if (toggleCardPosition === 'right' && showUserProfile) {
                   // User profile - no image selection, just show profile image
                   return;
@@ -9475,7 +10598,7 @@ export default function RemoteScreen() {
                 // Opponent profile - show opponent image or initials
                 renderProfileImage(opponentImages[getEntityAtPosition('right')] || null, getNameByPosition('right'), false)
               )}
-              {!(toggleCardPosition === 'right' && showUserProfile) && (
+              {!isCompetitionRemoteMode && !(toggleCardPosition === 'right' && showUserProfile) && (
               <View style={[
                 styles.cameraIcon,
                 sabreHasIssuedCards && {
@@ -9526,7 +10649,11 @@ export default function RemoteScreen() {
           )}
           
           <TouchableOpacity
-            onPress={() => handleFencerNameClick(getEntityAtPosition('right'))}
+            onPress={
+              isCompetitionRemoteMode
+                ? undefined
+                : () => handleFencerNameClick(getEntityAtPosition('right'))
+            }
             activeOpacity={0.7}
             style={styles.fencerNameContainer}
           >
@@ -9578,7 +10705,9 @@ export default function RemoteScreen() {
               width: sabreScoreButtonSize,
               height: sabreScoreButtonSize,
               borderRadius: sabreScoreButtonRadius,
-            }]} onPress={() => decrementScore(getEntityAtPosition('right'))}>
+            }, competitionIsReadOnly && {
+              opacity: 0.45,
+            }]} onPress={() => decrementScore(getEntityAtPosition('right'))} disabled={competitionIsReadOnly}>
               <Ionicons name="remove" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.scoreButton, {
@@ -9594,7 +10723,9 @@ export default function RemoteScreen() {
               width: sabreScoreButtonSize,
               height: sabreScoreButtonSize,
               borderRadius: sabreScoreButtonRadius,
-            }]} onPress={() => incrementScore(getEntityAtPosition('right'))}>
+            }, competitionIsReadOnly && {
+              opacity: 0.45,
+            }]} onPress={() => incrementScore(getEntityAtPosition('right'))} disabled={competitionIsReadOnly}>
               <Ionicons name="add" size={sabreScoreIconSize} color="black" />
             </TouchableOpacity>
           </View>
@@ -9645,8 +10776,9 @@ export default function RemoteScreen() {
 			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
-			              } : {}
-			            ]} onPress={addYellowCardToAlice}>
+			              } : {},
+                    competitionIsReadOnly && { opacity: 0.45 }
+			            ]} onPress={addYellowCardToAlice} disabled={competitionIsReadOnly}>
 		              {leftYellowCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
 		                  {leftYellowCards.length}
@@ -9659,8 +10791,9 @@ export default function RemoteScreen() {
 			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
-			              } : {}
-			            ]} onPress={addRedCardToAlice}>
+			              } : {},
+                    competitionIsReadOnly && { opacity: 0.45 }
+			            ]} onPress={addRedCardToAlice} disabled={competitionIsReadOnly}>
 		              {leftRedCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
 		                  {leftRedCards[0]}
@@ -9684,7 +10817,10 @@ export default function RemoteScreen() {
 		              // Grey out when match hasn't started
 		              !hasMatchStarted && {
 		                opacity: 0.6
-		              }
+		              },
+                  competitionIsReadOnly && {
+                    opacity: 0.45
+                  }
             ]}
             onPress={
               hasMatchStarted ? (
@@ -9693,7 +10829,7 @@ export default function RemoteScreen() {
                   : (isInjuryTimer ? skipInjuryTimer : startInjuryTimer)
               ) : undefined
             }
-            disabled={!hasMatchStarted}
+            disabled={!hasMatchStarted || competitionIsReadOnly}
           >
             <Text style={styles.assignPriorityIcon}>
               {canAssignPriority ? '🎲' : '🏥'}
@@ -9716,8 +10852,9 @@ export default function RemoteScreen() {
 			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
-			              } : {}
-			            ]} onPress={addYellowCardToBob}>
+			              } : {},
+                    competitionIsReadOnly && { opacity: 0.45 }
+			            ]} onPress={addYellowCardToBob} disabled={competitionIsReadOnly}>
 		              {rightYellowCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.yellow.accent }]}>
 		                  {rightYellowCards.length}
@@ -9730,8 +10867,9 @@ export default function RemoteScreen() {
 			              useTimerReadyLayout ? {
 			                width: decorativeCardWidth,
 			                height: decorativeCardHeight,
-			              } : {}
-			            ]} onPress={addRedCardToBob}>
+			              } : {},
+                    competitionIsReadOnly && { opacity: 0.45 }
+			            ]} onPress={addRedCardToBob} disabled={competitionIsReadOnly}>
 		              {rightRedCards.length > 0 && (
 		                <Text style={[styles.decorativeCardCount, { color: Colors.red.accent }]}>
 		                  {rightRedCards[0]}
@@ -9793,7 +10931,9 @@ export default function RemoteScreen() {
 		              borderWidth: width * 0.005,
 		              borderColor: 'white',
 		              minHeight: layout.adjustPadding(playButtonMinHeightBase + playButtonMinHeightExtra, 'bottom'),
-		              opacity: (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
+		              opacity: competitionIsReadOnly
+                    ? 0.45
+                    : (timeRemaining === 0 && !isBreakTime && !isInjuryTimer) ? 0.6 : 1
 		            }} 
 	            onPress={async () => {
               console.log('Play button onPress started - isInjuryTimer:', isInjuryTimer, 'isBreakTime:', isBreakTime, 'timeRemaining:', timeRemaining);
@@ -9828,6 +10968,7 @@ export default function RemoteScreen() {
                 console.error('Error in togglePlay:', error);
               }
             }}
+            disabled={competitionIsReadOnly}
           >
             <Ionicons 
               name={
@@ -9864,9 +11005,11 @@ export default function RemoteScreen() {
                 shadowOffset: { width: 0, height: height * 0.005 },
                 shadowOpacity: 0.25,
                 shadowRadius: width * 0.035,
-                elevation: 8
+                elevation: 8,
+                opacity: competitionIsReadOnly ? 0.45 : 1,
               }} 
               onPress={resetTimer}
+              disabled={competitionIsReadOnly}
             >
               <Ionicons name="refresh" size={24} color="white" />
             </TouchableOpacity>
@@ -9986,12 +11129,14 @@ export default function RemoteScreen() {
               }}>
                 <Text style={styles.saveButtonText}>Reset Cards</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
-                await resetAll();
-                setShowResetPopup(false);
-              }}>
-                <Text style={styles.saveButtonText}>Reset All</Text>
-              </TouchableOpacity>
+              {!isCompetitionRemoteMode && (
+                <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
+                  await resetAll();
+                  setShowResetPopup(false);
+                }}>
+                  <Text style={styles.saveButtonText}>Reset All</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowResetPopup(false)}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>

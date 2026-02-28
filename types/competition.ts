@@ -16,6 +16,7 @@ export type CompetitionRole = 'organiser' | 'participant';
 export type CompetitionParticipantStatus = 'active' | 'withdrawn' | 'dns';
 
 export type CompetitionStage = 'poule' | 'de';
+export type CompetitionScoringMode = 'remote' | 'manual';
 
 export type CompetitionMatchStatus =
   | 'pending'
@@ -95,12 +96,16 @@ export interface ClubCompetitionMatchRecord {
   competition_id: string;
   stage: CompetitionStage;
   round_label?: string | null;
+  de_round_index?: number | null;
+  de_match_number?: number | null;
+  advances_to_match_id?: string | null;
+  advances_to_slot?: 'a' | 'b' | null;
   pool_id?: string | null;
-  fencer_a_participant_id: string;
-  fencer_b_participant_id: string;
+  fencer_a_participant_id?: string | null;
+  fencer_b_participant_id?: string | null;
   touch_limit: 5 | 10 | 15;
   status: CompetitionMatchStatus;
-  scoring_mode?: 'remote' | 'manual' | null;
+  scoring_mode?: CompetitionScoringMode | null;
   authoritative_scorer_user_id?: string | null;
   score_a?: number | null;
   score_b?: number | null;
@@ -110,6 +115,17 @@ export interface ClubCompetitionMatchRecord {
   completed_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CompetitionMatchScoringData {
+  competition: ClubCompetitionRecord;
+  currentUserRole: CompetitionRole;
+  match: ClubCompetitionMatchRecord;
+  fencerA: CompetitionParticipantView | null;
+  fencerB: CompetitionParticipantView | null;
+  authoritativeScorer: CompetitionParticipantView | null;
+  canTakeOverRemote: boolean;
+  isAuthoritativeScorer: boolean;
 }
 
 export interface PouleParticipantStats {
@@ -150,6 +166,60 @@ export interface CompetitionOverviewData {
   role: CompetitionRole;
   participantCount: number;
   isReadOnly: boolean;
+}
+
+export interface ClubCompetitionRankingRecord {
+  id: string;
+  competition_id: string;
+  participant_id: string;
+  rank: number;
+  wins: number;
+  losses: number;
+  bout_count: number;
+  win_pct: number;
+  indicator: number;
+  hits_scored: number;
+  hits_received: number;
+  is_withdrawn: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompetitionRankingEntry {
+  ranking: Omit<ClubCompetitionRankingRecord, 'id' | 'created_at' | 'updated_at'>;
+  participant: CompetitionParticipantView;
+}
+
+export interface CompetitionRankingsData {
+  competition: ClubCompetitionRecord;
+  currentUserRole: CompetitionRole;
+  rankings: CompetitionRankingEntry[];
+  tieBreakCaption: string;
+  hasWithdrawalAdjustments: boolean;
+  canLockRankings: boolean;
+  canGenerateDe: boolean;
+}
+
+export interface CompetitionDeMatchView {
+  match: ClubCompetitionMatchRecord;
+  fencerA: CompetitionParticipantView | null;
+  fencerB: CompetitionParticipantView | null;
+  canScore: boolean;
+  canOverride: boolean;
+  canReset: boolean;
+}
+
+export interface CompetitionDeRoundView {
+  roundIndex: number;
+  roundLabel: string;
+  matches: CompetitionDeMatchView[];
+}
+
+export interface CompetitionDeTableauData {
+  competition: ClubCompetitionRecord;
+  currentUserRole: CompetitionRole;
+  rounds: CompetitionDeRoundView[];
+  canGenerateDe: boolean;
 }
 
 export interface JoinCompetitionQrPayload {

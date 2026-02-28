@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { resolveCompetitionDisplayName } from '@/lib/competitionDisplayName';
 import {
   joinCompetitionByCode,
   joinCompetitionByQr,
@@ -57,6 +58,15 @@ export default function JoinCompetitionScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [infoText, setInfoText] = useState<string | null>(null);
   const deepLinkAttemptedRef = useRef<string | null>(null);
+  const competitionDisplayName = useMemo(
+    () =>
+      resolveCompetitionDisplayName({
+        preferredName: userName,
+        user,
+        fallback: 'Fencer',
+      }),
+    [user, userName]
+  );
 
   const deepLinkCompetitionId = useMemo(() => {
     const value =
@@ -172,7 +182,7 @@ export default function JoinCompetitionScreen() {
 
     const result = await joinCompetitionByQr({
       userId: user.id,
-      displayName: userName || 'Participant',
+      displayName: competitionDisplayName,
       rawPayload: payload,
     });
 
@@ -212,7 +222,7 @@ export default function JoinCompetitionScreen() {
       already_joined: result.alreadyJoined,
     });
     navigateToOverview(result.competition.id);
-  }, [checkCooldown, navigateToOverview, user?.id, userName]);
+  }, [checkCooldown, competitionDisplayName, navigateToOverview, user?.id]);
 
   const submitCodeValue = useCallback(async (
     normalizedCode: string,
@@ -242,7 +252,7 @@ export default function JoinCompetitionScreen() {
 
     const result = await joinCompetitionByCode({
       userId: user.id,
-      displayName: userName || 'Participant',
+      displayName: competitionDisplayName,
       joinCode: normalizedCode,
     });
 
@@ -282,7 +292,7 @@ export default function JoinCompetitionScreen() {
       already_joined: result.alreadyJoined,
     });
     navigateToOverview(result.competition.id);
-  }, [checkCooldown, navigateToOverview, user?.id, userName]);
+  }, [checkCooldown, competitionDisplayName, navigateToOverview, user?.id]);
 
   const onJoinByCode = async () => {
     const normalizedCode = sanitizeCode(code);

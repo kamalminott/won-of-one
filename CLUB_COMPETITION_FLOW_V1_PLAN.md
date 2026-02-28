@@ -1,8 +1,8 @@
 # Won Of One — Club Competition Flow (V1) Planning Tracker
 
 ## Document Control
-- Status: Implementation in progress (Phase 1-4 complete)
-- Last updated: 2026-02-26
+- Status: Implementation in progress (Phase 1-5 complete)
+- Last updated: 2026-02-27
 - Product area: Competitions pillar
 - Working rule: Any scope/behavior change must be logged in `Change Log` and, if architectural, in `Decision Log`
 
@@ -566,6 +566,11 @@ Analytics policy (V1 locked):
 - Hook `Use Remote` into Remote flow with competition context
 - Manual score entry screen
 
+### Phase 5B: Remote unification
+- Reuse the same full Remote surface for competition scoring
+- Add competition-mode adapter/guardrails on shared Remote surface
+- Route completion back into competition journey (not global match summary)
+
 ### Phase 6: Rankings + DE
 - Ranking computation from poule results
 - Rankings screen
@@ -642,6 +647,11 @@ Analytics policy (V1 locked):
 | D-20 | Manual score entry behavior | Locked (V1) | Strict score validation, save de-bounce UX, organiser-only post-submit edits via override, offline save blocked, agreement disabled by default, post-save return + toast |
 | D-21 | Agreement modal rollout | Locked (V1) | Feature-flag only; disabled by default in V1, ready for post-V1 activation |
 | D-22 | Match-system integration behavior | Locked (V1) | Competition-only visibility in V1, excluded from training/global surfaces, Match Details reusable with read-only competition banner, and stage metadata persisted now (`competition_id`, `stage`, `round_label`) |
+| D-23 | Competition remote surface | Locked (V1) | Use the same full Remote experience as the Remote tab via shared UI/component architecture (no separate reduced remote UI for competitions) |
+| D-24 | Competition remote controls scope | Locked (V1) | Keep officiating controls in competition mode (score +/- , timer/play-pause, period controls, cards, injury, priority, side swap, finish match, guarded edit-time); hide non-competition personalization/training flows (profile toggle, images, name-edit, reset-all variants, training summary routing) |
+| D-25 | Competition remote completion routing | Locked (V1) | Completing a competition match returns to competition source screen (`Poules`/`DE`/`Overview`), not global match summary routes |
+| D-26 | Competition remote data persistence scope | Locked (V1) | Do not map competition remote flow into training/global match-history pipeline in this increment; keep competition scoring authoritative in competition tables/RPCs |
+| D-27 | Competition correction tools policy | Locked (V1) | Corrections happen via score +/- and guarded exact-score/time edit paths for authoritative scorer (or organiser after takeover); destructive reset shortcuts are disabled in competition mode |
 
 ## 12) Deep-Dive Backlog (Needs More Work)
 | Area | Why it needs deeper work | Proposed output | Target phase |
@@ -676,6 +686,11 @@ Analytics policy (V1 locked):
 | 2026-02-24 | D-22 | Match-system integration locked including immediate stage metadata persistence | Preserves a clean migration path by storing competition context now while keeping V1 surfaces intentionally scoped |
 | 2026-02-24 | D-09 | Realtime conflict model fully locked including scoped subscriptions and bounded backoff retry UX | Completes deterministic live-state handling and operational safety without excessive channel load or silent failure loops |
 | 2026-02-24 | D-10 | Analytics scope locked to core + critical failures with non-blocking delivery and no pre-launch dashboard dependency | Keeps V1 shipping focus on feature reliability while ensuring useful telemetry is still captured from day one |
+| 2026-02-27 | D-23 | Competition remote uses the same full Remote experience (shared surface) | Preserves UX consistency and avoids user confusion from two different remote scoring experiences |
+| 2026-02-27 | D-24 | Competition mode keeps officiating controls and hides only non-competition personalization/training flows | Preserves real competition refereeing capability while removing training-only behavior that can break event integrity |
+| 2026-02-27 | D-25 | Competition remote completion returns to competition flow source | Keeps users in tournament context and avoids breaking progression through poules/DE |
+| 2026-02-27 | D-26 | Competition remote persistence remains competition-scoped in this increment | Avoids training/history contamination and lowers integration risk while completing competition flow |
+| 2026-02-27 | D-27 | Competition correction tools use guarded edit paths; destructive resets disabled | Supports real officiator correction needs without exposing high-risk reset shortcuts during live competition scoring |
 
 ## 14) Change Log
 | Date | Change | Reason | Updated by |
@@ -716,6 +731,14 @@ Analytics policy (V1 locked):
 | 2026-02-26 | Fixed participant membership trigger RLS by making competition `updated_at` bump trigger `SECURITY DEFINER` | Prevent join/leave/participant mutations from failing when non-organisers cannot update `club_competition` directly | Codex |
 | 2026-02-26 | Updated join insert flow to avoid `INSERT ... RETURNING` on participant creation | Prevent RLS read-policy edge case from blocking otherwise valid join inserts | Codex |
 | 2026-02-26 | Updated Competition Overview scroll bottom padding to account for custom tab-bar overlay height | Prevent `Rankings` and `DE Tableau` navigation cards from being clipped behind the tab bar on small/tall-screen Android and iOS devices | Codex |
+| 2026-02-26 | Hardened Competition Hub loading with timeout + try/finally fallback and user-visible retry message | Prevent indefinite spinner when hub fetch stalls or throws unexpectedly in unstable dev-network sessions | Codex |
+| 2026-02-26 | Improved competition participant display-name resolution (profile/email fallback) and generic-name auto-upgrade on rejoin | Prevent participant rows from persisting placeholder labels like `Participant`/`Organiser` when user profile name is unavailable at join time | Codex |
+| 2026-02-27 | Implemented Phase 5 scoring flows (mode sheet, remote authority/takeover, manual validation/offline guard, completion routing, staged agreement flag) | Complete `COMP-040` to `COMP-044` and unlock Rankings + DE implementation with stable scoring foundations | Codex |
+| 2026-02-27 | Locked competition remote unification decisions (D-23 to D-26) | Confirmed sign-off to use shared full Remote surface in competition context with competition-safe constraints and routing | Codex |
+| 2026-02-27 | Added implementation backlog for Phase 5B shared Remote unification (`COMP-045` to `COMP-049`) plus phase gate and verification checklist | Convert approved remote unification decisions into execution-ready tickets before implementation | Codex |
+| 2026-02-27 | Refined competition remote control policy (added D-27 and expanded D-24) | Lock that officiating tools remain available in competition mode while destructive/personalization training flows are removed | Codex |
+| 2026-02-27 | Implemented shared remote competition mode routing + RPC scoring integration + source-return navigation | Complete `COMP-045` to `COMP-048` implementation path and route competition remote flow through the full existing Remote surface | Codex |
+| 2026-02-27 | Implemented Phase 6 rankings + DE core (rankings RPC/UI, rankings lock, seeded DE generation/byes, DE tableau scoring navigation, DE override/reset/walkover audit controls) | Complete `COMP-050` to `COMP-054` and unblock end-to-end elimination-stage progression | Codex |
 
 ## 15) Weekly Planning Checklist (Living)
 - [ ] All open decisions reviewed this week
@@ -724,7 +747,7 @@ Analytics policy (V1 locked):
 - [ ] Change log updated for every product/technical decision change
 
 ## 16) Implementation Ticket Breakdown (Phase-by-Phase)
-Use this as the execution backlog for V1. All tickets below inherit locked decisions `D-01` to `D-22`.
+Use this as the execution backlog for V1. All tickets below inherit locked decisions `D-01` to `D-26`.
 Status key: `[x]` complete, `[ ]` pending.
 
 ### Phase 1: Foundations
@@ -765,20 +788,29 @@ Status key: `[x]` complete, `[ ]` pending.
 ### Phase 5: Scoring Choices
 | Ticket | Scope | Depends On | Done Criteria |
 |---|---|---|---|
-| [ ] COMP-040 | Scoring Method Bottom Sheet behavior | COMP-032 | Explicit mode choice, pre-set mode deep-link, no default selection |
-| [ ] COMP-041 | Authoritative scorer control + confirmed organiser takeover | COMP-040 | Non-authoritative users read-only; takeover requires confirmation |
-| [ ] COMP-042 | Manual Score Entry validation + save safety + offline block | COMP-040 | Validation rules enforced, save de-bounced, offline save blocked |
-| [ ] COMP-043 | Manual save cascade + return navigation + success toast | COMP-042 | Save updates match state and returns user to correct source screen |
-| [ ] COMP-044 | Agreement modal feature-flag staging (off by default) | COMP-042 | Flag exists, modal path disabled by default, no effect on V1 flows |
+| [x] COMP-040 | Scoring Method Bottom Sheet behavior | COMP-032 | Explicit mode choice, pre-set mode deep-link, no default selection |
+| [x] COMP-041 | Authoritative scorer control + confirmed organiser takeover | COMP-040 | Non-authoritative users read-only; takeover requires confirmation |
+| [x] COMP-042 | Manual Score Entry validation + save safety + offline block | COMP-040 | Validation rules enforced, save de-bounced, offline save blocked |
+| [x] COMP-043 | Manual save cascade + return navigation + success toast | COMP-042 | Save updates match state and returns user to correct source screen |
+| [x] COMP-044 | Agreement modal feature-flag staging (off by default) | COMP-042 | Flag exists, modal path disabled by default, no effect on V1 flows |
+
+### Phase 5B: Shared Remote Unification (Competition Context)
+| Ticket | Scope | Depends On | Done Criteria |
+|---|---|---|---|
+| [x] COMP-045 | Shared Remote surface extraction (single reusable UI for training + competition) | COMP-044 | Remote tab and competition flow render from shared Remote surface/component without visual regression |
+| [x] COMP-046 | Competition-mode adapter + control matrix on shared Remote | COMP-045 | Competition mode keeps officiating controls (including cards and guarded time edit), hides non-competition personalization/training flows, and applies competition context fields as source of truth |
+| [x] COMP-047 | Competition scoring transport integration inside shared Remote | COMP-046, COMP-041 | Competition mode uses competition scoring RPC flow (prepare/live/takeover/complete), supports guarded correction paths, and does not write training-match records |
+| [x] COMP-048 | Competition navigation integration for shared Remote route | COMP-046 | `Use Remote` from poules/DE opens shared Remote in competition mode; back/complete returns user to source competition screen |
+| [ ] COMP-049 | Unified remote analytics + guardrail telemetry | COMP-047, COMP-048 | Events include surface context (`training|competition`) and key authority transitions/errors are tracked non-blocking |
 
 ### Phase 6: Rankings + DE
 | Ticket | Scope | Depends On | Done Criteria |
 |---|---|---|---|
-| [ ] COMP-050 | Rankings engine (tie-break stack + withdrawal adjustments) | COMP-034, COMP-042 | Ranking order matches locked tie-break and withdrawal rules |
-| [ ] COMP-051 | Rankings screen + lock rankings behavior | COMP-050 | Rankings render correctly; lock blocks further poule score edits |
-| [ ] COMP-052 | DE bracket generation from locked rankings with auto-byes | COMP-051 | Deterministic seeding and bye placement works for non-power-of-two counts |
-| [ ] COMP-053 | DE Tableau UI + round navigation | COMP-052 | Round columns/cards render and match states update correctly |
-| [ ] COMP-054 | DE control rules (override reason+audit, reset dependency guard, withdrawal walkover) | COMP-053 | Override writes audit record; reset blocked if downstream started; walkover auto-advance works |
+| [x] COMP-050 | Rankings engine (tie-break stack + withdrawal adjustments) | COMP-034, COMP-042 | Ranking order matches locked tie-break and withdrawal rules |
+| [x] COMP-051 | Rankings screen + lock rankings behavior | COMP-050 | Rankings render correctly; lock blocks further poule score edits |
+| [x] COMP-052 | DE bracket generation from locked rankings with auto-byes | COMP-051 | Deterministic seeding and bye placement works for non-power-of-two counts |
+| [x] COMP-053 | DE Tableau UI + round navigation | COMP-052 | Round columns/cards render and match states update correctly |
+| [x] COMP-054 | DE control rules (override reason+audit, reset dependency guard, withdrawal walkover) | COMP-053 | Override writes audit record; reset blocked if downstream started; walkover auto-advance works |
 | [ ] COMP-055 | Match integration mapping (`competition_id`, `stage`, `round_label`) with V1 visibility constraints | COMP-042, COMP-052 | Metadata persisted; competition matches hidden from global history/search/training stats |
 
 ### Phase 7: Finalisation
@@ -805,7 +837,8 @@ Status key: `[x]` complete, `[ ]` pending.
 | [x] 2 | Create/join usable end-to-end with QR and code guards |
 | [x] 3 | Role and registration controls enforce all guardrails |
 | [x] 4 | Poules generation/edit/lock and withdrawal behavior validated |
-| [ ] 5 | Scoring flows stable for remote/manual with authority controls |
+| [x] 5 | Scoring flows stable for remote/manual with authority controls |
+| [ ] 5B | Competition flow uses shared full Remote surface with competition-safe constraints and routing |
 | [ ] 6 | Rankings + DE generation/advancement behavior correct |
 | [ ] 7 | Finalise and read-only behavior verified on all surfaces |
 | [ ] 8 | Realtime consistency + analytics instrumentation + scenario pass complete |
@@ -879,5 +912,39 @@ Run on both iOS and Android where possible.
 | Lock poules | Lock action moves status to `poules_locked` and blocks further assignment edits | [ ] |
 | Withdrawal poule behavior | Pending/live matches with withdrawn fencer become `canceled_withdrawal`; completed become `annulled_withdrawal` | [ ] |
 
-### Phase 5-8 Verification
+### Phase 5 Verification (Scoring Choices)
+Run on both iOS and Android where possible.
+
+| Check | Expected Result | Pass/Fail |
+|---|---|---|
+| Scoring sheet appears for unconfigured match | Tapping a `pending` poule match with no scoring mode opens bottom sheet with `Use Remote`, `Enter Score Manually`, `Cancel` | [ ] |
+| Existing mode deep-link bypasses sheet | Tapping a match that already has `scoring_mode` navigates directly to score entry screen | [ ] |
+| Manual validation: tie blocked | Entering equal scores (e.g. `5-5`) shows error and blocks save | [ ] |
+| Manual validation: touch limit required | Entering scores where neither side reaches touch limit is blocked with clear message | [ ] |
+| Manual validation: max limit enforced | Entering score above touch limit is blocked | [ ] |
+| Offline save blocked | With internet disabled, save attempt shows offline error and does not complete match | [ ] |
+| Manual completion success path | Valid manual score completes match, updates row status/score, shows success toast/alert, and returns to source screen | [ ] |
+| Remote authoritative assignment | First user choosing remote becomes authoritative scorer and can adjust live score | [ ] |
+| Remote view-only protection | Second user opening same live remote match sees view-only state and cannot change score | [ ] |
+| Organiser takeover confirmation | Organiser in view-only state can take over via confirmation and then edit live score | [ ] |
+| Remote completion success path | Authoritative scorer can complete match with valid final score and match transitions to `completed` | [ ] |
+| Agreement flag default-off behavior | With current config, no agreement modal blocks normal scoring flow | [ ] |
+
+### Phase 5B Verification (Shared Remote Unification)
+Run on both iOS and Android where possible.
+
+| Check | Expected Result | Pass/Fail |
+|---|---|---|
+| Competition remote launches shared full surface | Choosing `Use Remote` from competition match opens the same full Remote experience used by Remote tab | [ ] |
+| Competition context header/metadata | Shared Remote in competition mode shows competition-context metadata (stage/source) and match-scoped participants correctly | [ ] |
+| Competition-safe control matrix | Non-competition controls (profile toggle/image edit/reset-all and other non-competition mutation controls) are hidden/locked in competition mode | [ ] |
+| Officiating controls retained | Cards, timer/play-pause, period controls, side swap, and finish actions remain available per authority rules in competition mode | [ ] |
+| Guarded correction paths | Authoritative scorer (or organiser after takeover) can perform guarded score/time correction without exposing destructive reset shortcuts | [ ] |
+| Authoritative scorer lock still enforced | First scorer gets authority; second user is read-only until organiser takeover | [ ] |
+| Organiser takeover in shared remote | Organiser can take over scoring in shared Remote competition mode with confirmation | [ ] |
+| Competition persistence isolation | Completing competition remote score does not create/update training/global match-history entries in this increment | [ ] |
+| Competition return routing | Complete/back returns to source competition screen (`Poules`/`DE`/`Overview`) with refreshed match state | [ ] |
+| Remote tab regression check | Training Remote tab behavior remains unchanged after shared-surface refactor | [ ] |
+
+### Phase 6-8 Verification
 Add checklist blocks here as each phase is implemented and reviewed.

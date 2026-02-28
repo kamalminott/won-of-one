@@ -13,12 +13,18 @@ import {
   lockCompetitionPoules,
   moveCompetitionPoolAssignment,
 } from '@/lib/clubCompetitionService';
-import type { CompetitionPouleParticipant, CompetitionPoulesData } from '@/types/competition';
+import type {
+  ClubCompetitionMatchRecord,
+  CompetitionPouleParticipant,
+  CompetitionPoulesData,
+  CompetitionScoringMode,
+} from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -56,6 +62,7 @@ export default function PoulesScreen() {
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const [selectedPoolId, setSelectedPoolId] = useState<string | null>(null);
   const [assignmentEditMode, setAssignmentEditMode] = useState(false);
+  const [sheetMatch, setSheetMatch] = useState<ClubCompetitionMatchRecord | null>(null);
 
   const loadData = useCallback(
     async (showSpinner = true) => {
@@ -279,6 +286,66 @@ export default function PoulesScreen() {
       targetPosition: null,
       actionKey: `move-pool-${direction}:${participant.participant.id}`,
     });
+  };
+
+  const navigateToScoring = (
+    match: ClubCompetitionMatchRecord,
+    mode: CompetitionScoringMode,
+    selectedCompetitionId: string
+  ) => {
+    if (mode === 'remote') {
+      router.push({
+        pathname: '/(tabs)/remote',
+        params: {
+          competitionMode: 'true',
+          competitionId: selectedCompetitionId,
+          matchId: match.id,
+          competitionFrom: 'poules',
+        },
+      });
+      return;
+    }
+
+    router.push({
+      pathname: '/(tabs)/competitions/manual-score-entry',
+      params: {
+        competitionId: selectedCompetitionId,
+        matchId: match.id,
+        mode,
+        from: 'poules',
+      },
+    });
+  };
+
+  const onPressMatch = (match: ClubCompetitionMatchRecord) => {
+    if (!data) return;
+
+    if (match.scoring_mode === 'remote' || match.scoring_mode === 'manual') {
+      navigateToScoring(match, match.scoring_mode, data.competition.id);
+      return;
+    }
+
+    analytics.capture('scoring_method_sheet_opened', {
+      competition_id: data.competition.id,
+      match_id: match.id,
+      stage: match.stage,
+    });
+    setSheetMatch(match);
+  };
+
+  const onSelectScoringMode = (mode: CompetitionScoringMode) => {
+    if (!sheetMatch || !data) return;
+
+    analytics.capture('scoring_method_selected', {
+      competition_id: data.competition.id,
+      match_id: sheetMatch.id,
+      stage: sheetMatch.stage,
+      scoring_mode: mode,
+    });
+
+    const match = sheetMatch;
+    setSheetMatch(null);
+    navigateToScoring(match, mode, data.competition.id);
   };
 
   if (loading) {
@@ -510,9 +577,13 @@ export default function PoulesScreen() {
                   ) : (
                     selectedPool.matches.map((match) => {
                       const fencerA =
-                        participantNameById.get(match.fencer_a_participant_id) ?? 'Unknown';
+                        (match.fencer_a_participant_id
+                          ? participantNameById.get(match.fencer_a_participant_id)
+                          : null) ?? 'Unknown';
                       const fencerB =
-                        participantNameById.get(match.fencer_b_participant_id) ?? 'Unknown';
+                        (match.fencer_b_participant_id
+                          ? participantNameById.get(match.fencer_b_participant_id)
+                          : null) ?? 'Unknown';
                       const statusLabel = COMPETITION_MATCH_STATUS_LABELS[match.status];
                       const scoreText =
                         match.status === 'completed' &&
@@ -524,16 +595,7 @@ export default function PoulesScreen() {
                       return (
                         <Pressable
                           key={match.id}
-                          onPress={() =>
-                            router.push({
-                              pathname: '/(tabs)/competitions/manual-score-entry',
-                              params: {
-                                competitionId: data.competition.id,
-                                matchId: match.id,
-                                from: 'poules',
-                              },
-                            })
-                          }
+                          onPress={() => onPressMatch(match)}
                           style={styles.matchRow}
                         >
                           <View style={styles.matchInfo}>
@@ -565,6 +627,45 @@ export default function PoulesScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={!!sheetMatch}
+        onRequestClose={() => setSheetMatch(null)}
+      >
+        <View style={styles.sheetOverlay}>
+          <Pressable
+            style={styles.sheetBackdrop}
+            onPress={() => setSheetMatch(null)}
+          />
+          <View style={styles.sheetCard}>
+            <Text style={styles.sheetTitle}>Choose Scoring Method</Text>
+            <Text style={styles.sheetSubtitle}>How do you want to score this match?</Text>
+
+            <Pressable
+              onPress={() => onSelectScoringMode('remote')}
+              style={[styles.sheetButton, styles.sheetPrimaryButton]}
+            >
+              <Text style={styles.sheetPrimaryButtonText}>Use Remote (Live)</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => onSelectScoringMode('manual')}
+              style={[styles.sheetButton, styles.sheetSecondaryButton]}
+            >
+              <Text style={styles.sheetSecondaryButtonText}>Enter Score Manually</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setSheetMatch(null)}
+              style={[styles.sheetButton, styles.sheetCancelButton]}
+            >
+              <Text style={styles.sheetCancelButtonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -905,5 +1006,68 @@ const styles = StyleSheet.create({
     color: '#D8D8D8',
     fontSize: 14,
     fontWeight: '600',
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheetBackdrop: {
+    flex: 1,
+  },
+  sheetCard: {
+    backgroundColor: '#212121',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.24)',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
+    gap: 10,
+  },
+  sheetTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sheetSubtitle: {
+    color: '#9D9D9D',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  sheetButton: {
+    minHeight: 46,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetPrimaryButton: {
+    backgroundColor: Colors.purple.primary,
+  },
+  sheetSecondaryButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.5)',
+    backgroundColor: '#1A1A1A',
+  },
+  sheetCancelButton: {
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#171717',
+  },
+  sheetPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sheetSecondaryButtonText: {
+    color: '#E9D7FF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sheetCancelButtonText: {
+    color: '#CFCFCF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
