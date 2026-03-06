@@ -11,7 +11,6 @@ import {
   Alert, KeyboardAvoidingView,
   Linking,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,7 +19,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();

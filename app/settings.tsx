@@ -73,7 +73,7 @@ export default function SettingsScreen() {
   );
 
   // Load token information
-  const loadTokenInfo = async (sessionOverride?: Session | null) => {
+  async function loadTokenInfo(sessionOverride?: Session | null) {
     try {
       let activeSession = sessionOverride ?? null;
       if (!activeSession) {
@@ -113,7 +113,7 @@ export default function SettingsScreen() {
     } catch (error) {
       console.error('Error loading token info:', error);
     }
-  };
+  }
 
   useEffect(() => {
     if (!showDiagnostics) {
@@ -140,7 +140,7 @@ export default function SettingsScreen() {
   }, [showDiagnostics, user]);
 
   // Load update information
-  const loadUpdateInfo = async () => {
+  async function loadUpdateInfo() {
     try {
       if (!Updates) {
         setUpdateInfo({
@@ -165,15 +165,33 @@ export default function SettingsScreen() {
       }
 
       // Get update information from Updates API
-      const manifest = Updates.manifest;
+      const manifest = Updates.manifest as
+        | {
+            id?: string;
+            createdAt?: string | number | Date;
+            runtimeVersion?: string;
+            extra?: {
+              expoConfig?: {
+                updates?: {
+                  requestHeaders?: Record<string, string | undefined>;
+                };
+              };
+            };
+          }
+        | undefined;
+      const manifestCreatedAt = manifest?.createdAt
+        ? new Date(manifest.createdAt).toLocaleString()
+        : 'Unknown';
+      const manifestChannel =
+        manifest?.extra?.expoConfig?.updates?.requestHeaders?.['expo-channel-name'] ||
+        'unknown';
+      const manifestRuntimeVersion = manifest?.runtimeVersion || 'unknown';
       
       setUpdateInfo({
         updateId: Updates.updateId || manifest?.id || 'Embedded',
-        createdAt: manifest?.createdAt 
-          ? new Date(manifest.createdAt).toLocaleString() 
-          : 'Unknown',
-        channel: Updates.channel || manifest?.extra?.expoConfig?.updates?.requestHeaders?.['expo-channel-name'] || 'unknown',
-        runtimeVersion: Updates.runtimeVersion || manifest?.runtimeVersion || 'unknown',
+        createdAt: manifestCreatedAt,
+        channel: Updates.channel || manifestChannel,
+        runtimeVersion: Updates.runtimeVersion || manifestRuntimeVersion,
         isChecking: false,
       });
     } catch (error) {
@@ -186,7 +204,7 @@ export default function SettingsScreen() {
         isChecking: false,
       });
     }
-  };
+  }
 
   // Check for updates manually
   const checkForUpdates = async () => {
@@ -665,7 +683,9 @@ export default function SettingsScreen() {
               
               <TouchableOpacity 
                 style={[styles.settingRow, styles.settingRowLast]} 
-                onPress={loadTokenInfo}
+                onPress={() => {
+                  void loadTokenInfo();
+                }}
               >
                 <View style={styles.iconContainer}>
                   <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />

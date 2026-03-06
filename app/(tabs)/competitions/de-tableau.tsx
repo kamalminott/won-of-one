@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_MATCH_STATUS_COLORS,
@@ -13,9 +14,11 @@ import {
   overrideCompetitionDeMatchResult,
   resetCompetitionDeMatch,
 } from '@/lib/clubCompetitionService';
+import { runCompetitionWriteWithRetry } from '@/lib/competitionRetry';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { ClubCompetitionMatchRecord, CompetitionScoringMode } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -53,14 +56,16 @@ export default function DeTableauScreen() {
   const [sheetMatch, setSheetMatch] = useState<ClubCompetitionMatchRecord | null>(null);
   const [overrideState, setOverrideState] = useState<OverrideState | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof getCompetitionDeTableauData>>>(null);
+  const deVersionRef = useRef('');
 
   const loadData = useCallback(
-    async (showSpinner = true) => {
+    async (showSpinner = true): Promise<string | null> => {
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
         setErrorText('Competition was not found.');
-        return;
+        deVersionRef.current = '';
+        return null;
       }
 
       if (showSpinner) {
@@ -78,15 +83,47 @@ export default function DeTableauScreen() {
         setLoading(false);
         setRefreshing(false);
         setErrorText('You do not have access to this competition.');
-        return;
+        deVersionRef.current = '';
+        return null;
       }
 
       setData(payload);
+      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rounds
+        .map((round) =>
+          round.matches
+            .map(
+              (matchView) =>
+                `${matchView.match.id}:${matchView.match.status}:${matchView.match.score_a ?? ''}:${matchView.match.score_b ?? ''}:${matchView.match.updated_at}`
+            )
+            .join('|')
+        )
+        .join(';')}`;
+      deVersionRef.current = version;
       setLoading(false);
       setRefreshing(false);
+      return version;
     },
     [competitionId, user?.id]
   );
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    enabled: Boolean(user?.id && competitionId),
+    surface: 'de',
+    onCompetitionEvent: () => {
+      void loadData(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = deVersionRef.current;
+      const after = await loadData(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -198,12 +235,28 @@ export default function DeTableauScreen() {
           text: 'Generate DE',
           onPress: async () => {
             setActionKey('generate');
-            const result = await generateCompetitionDeTableau({
-              competitionId: data.competition.id,
-            });
+            const execution = await runCompetitionWriteWithRetry(() =>
+              generateCompetitionDeTableau({
+                competitionId: data.competition.id,
+              })
+            );
+            const result = execution.result;
             setActionKey(null);
             if (!result.ok) {
+              if (execution.exhausted) {
+                analytics.capture('competition_write_retry_exhausted', {
+                  competition_id: data.competition.id,
+                  match_id: null,
+                  stage: 'de',
+                  operation: 'generate_de',
+                  attempts: execution.attempts,
+                });
+              }
               setErrorText(result.message);
+              analytics.capture('competition_de_generate_failed', {
+                competition_id: data.competition.id,
+                source: 'de_tableau',
+              });
               return;
             }
 
@@ -244,16 +297,34 @@ export default function DeTableauScreen() {
     }
 
     setActionKey(`override:${overrideState.match.id}`);
-    const result = await overrideCompetitionDeMatchResult({
-      matchId: overrideState.match.id,
-      scoreA: parsedA,
-      scoreB: parsedB,
-      reason: overrideState.reason.trim(),
-    });
+    const execution = await runCompetitionWriteWithRetry(() =>
+      overrideCompetitionDeMatchResult({
+        matchId: overrideState.match.id,
+        scoreA: parsedA,
+        scoreB: parsedB,
+        reason: overrideState.reason.trim(),
+      })
+    );
+    const result = execution.result;
     setActionKey(null);
 
     if (!result.ok) {
+      if (execution.exhausted) {
+        analytics.capture('competition_write_retry_exhausted', {
+          competition_id: data?.competition.id ?? competitionId,
+          match_id: overrideState.match.id,
+          stage: 'de',
+          operation: 'override_de_result',
+          attempts: execution.attempts,
+        });
+      }
       setErrorText(result.message);
+      analytics.capture('competition_override_failed', {
+        competition_id: data?.competition.id ?? competitionId,
+        match_id: overrideState.match.id,
+        stage: 'de',
+        source: 'de_tableau',
+      });
       return;
     }
 
@@ -277,13 +348,31 @@ export default function DeTableauScreen() {
           style: 'destructive',
           onPress: async () => {
             setActionKey(`reset:${match.id}`);
-            const result = await resetCompetitionDeMatch({
-              matchId: match.id,
-              reason: 'organiser_reset_before_downstream_start',
-            });
+            const execution = await runCompetitionWriteWithRetry(() =>
+              resetCompetitionDeMatch({
+                matchId: match.id,
+                reason: 'organiser_reset_before_downstream_start',
+              })
+            );
+            const result = execution.result;
             setActionKey(null);
             if (!result.ok) {
+              if (execution.exhausted) {
+                analytics.capture('competition_write_retry_exhausted', {
+                  competition_id: data?.competition.id ?? competitionId,
+                  match_id: match.id,
+                  stage: 'de',
+                  operation: 'reset_de_match',
+                  attempts: execution.attempts,
+                });
+              }
               setErrorText(result.message);
+              analytics.capture('competition_reset_failed', {
+                competition_id: data?.competition.id ?? competitionId,
+                match_id: match.id,
+                stage: 'de',
+                source: 'de_tableau',
+              });
               return;
             }
 
@@ -341,6 +430,12 @@ export default function DeTableauScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>DE Tableau</Text>
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          correctionNotice={realtimeCorrectionNotice}
+          onRetry={retryRealtime}
+          onDismissCorrection={clearCorrectionNotice}
+        />
         <Text style={styles.subtitle}>
           {data.competition.name} • {COMPETITION_STATUS_LABELS[data.competition.status]}
         </Text>
@@ -424,7 +519,13 @@ export default function DeTableauScreen() {
 
                       {scoreText ? <Text style={styles.scoreText}>{scoreText}</Text> : null}
                       <Text style={styles.tapHint}>
-                        {canOpen ? 'Tap to score' : scoreText ? 'Result saved' : 'Waiting for fencers'}
+                        {canOpen
+                          ? 'Tap to score'
+                          : data.competition.status === 'finalised'
+                            ? 'Read-only'
+                            : scoreText
+                              ? 'Result saved'
+                              : 'Waiting for fencers'}
                       </Text>
 
                       {hasAdminActions ? (

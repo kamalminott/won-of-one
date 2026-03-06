@@ -1,3 +1,5 @@
+import { resolveAuthMetadataDisplayName } from '@/lib/displayName';
+
 type UserLike = {
   email?: string | null;
   user_metadata?: Record<string, unknown> | null;
@@ -10,27 +12,8 @@ const normalize = (value: string): string => value.trim().replace(/\s+/g, ' ');
 const isGenericName = (value: string): boolean => GENERIC_NAMES.has(value.trim().toLowerCase());
 
 const fromMetadata = (user: UserLike | null | undefined): string | null => {
-  if (!user?.user_metadata) return null;
-  const metadata = user.user_metadata;
-
-  const fullName = metadata.full_name;
-  if (typeof fullName === 'string' && normalize(fullName).length > 0) {
-    return normalize(fullName);
-  }
-
-  const name = metadata.name;
-  if (typeof name === 'string' && normalize(name).length > 0) {
-    return normalize(name);
-  }
-
-  const firstName = typeof metadata.first_name === 'string' ? normalize(metadata.first_name) : '';
-  const lastName = typeof metadata.last_name === 'string' ? normalize(metadata.last_name) : '';
-  const joined = `${firstName} ${lastName}`.trim();
-  if (joined.length > 0) {
-    return joined;
-  }
-
-  return null;
+  const resolved = resolveAuthMetadataDisplayName(user);
+  return resolved || null;
 };
 
 const fromEmail = (email: string | null | undefined): string | null => {

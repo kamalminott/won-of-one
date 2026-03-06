@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ROLE_LABELS,
@@ -7,9 +8,10 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { listCompetitionSummariesForUser } from '@/lib/clubCompetitionService';
+import { supabase } from '@/lib/supabase';
 import type { CompetitionSummary } from '@/types/competition';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -21,21 +23,23 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const COMPETITION_HUB_LOAD_TIMEOUT_MS = 12000;
+const HUB_LOAD_TIMEOUT_MS = 12000;
 
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
-  let timerId: ReturnType<typeof setTimeout> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<T>((_, reject) => {
-    timerId = setTimeout(() => {
+    timer = setTimeout(() => {
       reject(new Error('competition_hub_load_timeout'));
     }, timeoutMs);
   });
 
-  return await Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timerId) {
-      clearTimeout(timerId);
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
     }
-  });
+  }
 };
 
 export default function CompetitionsHubScreen() {
@@ -48,6 +52,14 @@ export default function CompetitionsHubScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [realtimeBannerText, setRealtimeBannerText] = useState<string | null>(null);
+  const hasLoadedCompetitionsSuccessfullyRef = useRef(false);
+  const realtimeRetryAttemptRef = useRef(0);
+  const realtimeRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeLastEventMsRef = useRef(0);
+  const realtimeReconnectRef = useRef(false);
+  const realtimeDisconnectHandledRef = useRef(false);
+  const [realtimeNonce, setRealtimeNonce] = useState(0);
 
   const loadCompetitions = useCallback(async () => {
     if (!user?.id) {
@@ -62,14 +74,18 @@ export default function CompetitionsHubScreen() {
       setErrorText(null);
       const summaries = await withTimeout(
         listCompetitionSummariesForUser(user.id),
-        COMPETITION_HUB_LOAD_TIMEOUT_MS
+        HUB_LOAD_TIMEOUT_MS
       );
+
       setActiveCompetitions(summaries.active);
       setPastCompetitions(summaries.past);
+      hasLoadedCompetitionsSuccessfullyRef.current = true;
     } catch (error) {
       console.warn('Competition hub load failed:', error);
-      setActiveCompetitions([]);
-      setPastCompetitions([]);
+      if (!hasLoadedCompetitionsSuccessfullyRef.current) {
+        setActiveCompetitions([]);
+        setPastCompetitions([]);
+      }
       setErrorText('Could not load competitions. Pull to refresh and try again.');
     } finally {
       setLoading(false);
@@ -78,13 +94,162 @@ export default function CompetitionsHubScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!user?.id) {
+        setActiveCompetitions([]);
+        setPastCompetitions([]);
+        setErrorText(null);
+        setLoading(false);
+        return;
+      }
+
       analytics.capture('competition_hub_viewed');
       setLoading(true);
       void loadCompetitions();
-    }, [loadCompetitions])
+    }, [loadCompetitions, user?.id])
   );
 
+  useEffect(() => {
+    if (!user?.id) {
+      if (realtimeRetryTimerRef.current) {
+        clearTimeout(realtimeRetryTimerRef.current);
+        realtimeRetryTimerRef.current = null;
+      }
+      realtimeRetryAttemptRef.current = 0;
+      realtimeDisconnectHandledRef.current = false;
+      setRealtimeBannerText(null);
+      return;
+    }
+
+    let disposed = false;
+    const channel = supabase.channel(`competition-hub:${user.id}:${realtimeNonce}`);
+
+    const onHubChange = (payload: { commit_timestamp?: string }) => {
+      const parsed = payload.commit_timestamp ? Date.parse(payload.commit_timestamp) : Date.now();
+      const eventMs = Number.isFinite(parsed) ? parsed : Date.now();
+      if (eventMs <= realtimeLastEventMsRef.current) {
+        return;
+      }
+      realtimeLastEventMsRef.current = eventMs;
+      void loadCompetitions();
+    };
+
+    const scheduleReconnect = (status: string) => {
+      if (disposed || realtimeDisconnectHandledRef.current) {
+        return;
+      }
+
+      realtimeDisconnectHandledRef.current = true;
+      realtimeReconnectRef.current = true;
+      const nextAttempt = realtimeRetryAttemptRef.current + 1;
+      realtimeRetryAttemptRef.current = nextAttempt;
+
+      analytics.capture('competition_realtime_disconnected', {
+        competition_id: null,
+        match_id: null,
+        surface: 'hub',
+        channel_scope: 'competition',
+        attempt: nextAttempt,
+        status,
+      });
+
+      if (nextAttempt > 5) {
+        setRealtimeBannerText('Live updates paused. Tap Retry to reconnect.');
+        analytics.capture('competition_realtime_retry_exhausted', {
+          competition_id: null,
+          match_id: null,
+          surface: 'hub',
+          max_retries: 5,
+        });
+        return;
+      }
+
+      const delayMs = Math.min(10000, 600 * 2 ** Math.max(0, nextAttempt - 1));
+      setRealtimeBannerText(`Reconnecting live updates (${nextAttempt}/5)...`);
+      if (realtimeRetryTimerRef.current) {
+        clearTimeout(realtimeRetryTimerRef.current);
+      }
+      realtimeRetryTimerRef.current = setTimeout(() => {
+        if (disposed) return;
+        realtimeDisconnectHandledRef.current = false;
+        setRealtimeNonce((previous) => previous + 1);
+      }, delayMs);
+    };
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'club_competition_participant',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => onHubChange(payload as { commit_timestamp?: string })
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'club_competition',
+        },
+        (payload) => onHubChange(payload as { commit_timestamp?: string })
+      );
+
+    channel.subscribe((status) => {
+      if (disposed) return;
+      if (status === 'SUBSCRIBED') {
+        realtimeDisconnectHandledRef.current = false;
+        if (realtimeRetryTimerRef.current) {
+          clearTimeout(realtimeRetryTimerRef.current);
+          realtimeRetryTimerRef.current = null;
+        }
+        if (realtimeReconnectRef.current) {
+          analytics.capture('competition_realtime_reconnected', {
+            competition_id: null,
+            match_id: null,
+            surface: 'hub',
+            attempts: realtimeRetryAttemptRef.current,
+          });
+          realtimeReconnectRef.current = false;
+          void loadCompetitions();
+        }
+        realtimeRetryAttemptRef.current = 0;
+        setRealtimeBannerText(null);
+        return;
+      }
+
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        void supabase.removeChannel(channel);
+        scheduleReconnect(status);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      if (realtimeRetryTimerRef.current) {
+        clearTimeout(realtimeRetryTimerRef.current);
+        realtimeRetryTimerRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [loadCompetitions, realtimeNonce, user?.id]);
+
+  const onRetryRealtime = () => {
+    realtimeRetryAttemptRef.current = 0;
+    realtimeDisconnectHandledRef.current = false;
+    if (realtimeRetryTimerRef.current) {
+      clearTimeout(realtimeRetryTimerRef.current);
+      realtimeRetryTimerRef.current = null;
+    }
+    setRealtimeBannerText(null);
+    setRealtimeNonce((previous) => previous + 1);
+  };
+
   const onRefresh = async () => {
+    if (!user?.id) {
+      return;
+    }
     setRefreshing(true);
     await loadCompetitions();
     setRefreshing(false);
@@ -130,6 +295,10 @@ export default function CompetitionsHubScreen() {
         </View>
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          onRetry={onRetryRealtime}
+        />
 
         {loading ? (
           <View style={styles.loadingContainer}>

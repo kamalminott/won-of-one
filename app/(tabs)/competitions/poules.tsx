@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_MATCH_STATUS_COLORS,
@@ -13,6 +14,7 @@ import {
   lockCompetitionPoules,
   moveCompetitionPoolAssignment,
 } from '@/lib/clubCompetitionService';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type {
   ClubCompetitionMatchRecord,
   CompetitionPouleParticipant,
@@ -20,7 +22,7 @@ import type {
   CompetitionScoringMode,
 } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -63,14 +65,16 @@ export default function PoulesScreen() {
   const [selectedPoolId, setSelectedPoolId] = useState<string | null>(null);
   const [assignmentEditMode, setAssignmentEditMode] = useState(false);
   const [sheetMatch, setSheetMatch] = useState<ClubCompetitionMatchRecord | null>(null);
+  const dataVersionRef = useRef('');
 
   const loadData = useCallback(
-    async (showSpinner = true) => {
+    async (showSpinner = true): Promise<string | null> => {
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
         setErrorText('Competition was not found.');
-        return;
+        dataVersionRef.current = '';
+        return null;
       }
 
       if (showSpinner) {
@@ -88,10 +92,26 @@ export default function PoulesScreen() {
         setLoading(false);
         setRefreshing(false);
         setErrorText('You do not have access to this competition.');
-        return;
+        dataVersionRef.current = '';
+        return null;
       }
 
       setData(payload);
+      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.pools
+        .map((pool) => {
+          const participantsKey = pool.participants
+            .map((entry) => `${entry.participant.id}:${entry.assignment.position}`)
+            .join(',');
+          const matchesKey = pool.matches
+            .map(
+              (match) =>
+                `${match.id}:${match.status}:${match.score_a ?? ''}:${match.score_b ?? ''}:${match.updated_at}`
+            )
+            .join(',');
+          return `${pool.pool.id}|${participantsKey}|${matchesKey}`;
+        })
+        .join(';')}`;
+      dataVersionRef.current = version;
       setSelectedPoolId((previous) => {
         if (payload.pools.length === 0) return null;
         if (previous && payload.pools.some((pool) => pool.pool.id === previous)) {
@@ -104,9 +124,29 @@ export default function PoulesScreen() {
       }
       setLoading(false);
       setRefreshing(false);
+      return version;
     },
     [competitionId, user?.id]
   );
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    enabled: Boolean(user?.id && competitionId),
+    surface: 'poules',
+    onCompetitionEvent: () => {
+      void loadData(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = dataVersionRef.current;
+      const after = await loadData(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -319,6 +359,13 @@ export default function PoulesScreen() {
 
   const onPressMatch = (match: ClubCompetitionMatchRecord) => {
     if (!data) return;
+    if (data.competition.status === 'finalised') {
+      setErrorText('Competition is finalised. Matches are read-only.');
+      return;
+    }
+    if (match.status !== 'pending' && match.status !== 'live') {
+      return;
+    }
 
     if (match.scoring_mode === 'remote' || match.scoring_mode === 'manual') {
       navigateToScoring(match, match.scoring_mode, data.competition.id);
@@ -393,6 +440,12 @@ export default function PoulesScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Poules</Text>
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          correctionNotice={realtimeCorrectionNotice}
+          onRetry={retryRealtime}
+          onDismissCorrection={clearCorrectionNotice}
+        />
         <Text style={styles.subtitle}>
           {data.competition.name} • {COMPETITION_STATUS_LABELS[data.competition.status]}
         </Text>
@@ -591,12 +644,16 @@ export default function PoulesScreen() {
                         match.score_b != null
                           ? `${match.score_a}-${match.score_b}`
                           : null;
+                      const canOpenMatch =
+                        data.competition.status !== 'finalised' &&
+                        (match.status === 'pending' || match.status === 'live');
 
                       return (
                         <Pressable
                           key={match.id}
                           onPress={() => onPressMatch(match)}
-                          style={styles.matchRow}
+                          disabled={!canOpenMatch}
+                          style={[styles.matchRow, !canOpenMatch && styles.matchRowDisabled]}
                         >
                           <View style={styles.matchInfo}>
                             <Text style={styles.matchText}>
@@ -615,7 +672,15 @@ export default function PoulesScreen() {
                           </View>
                           <View style={styles.matchScoreWrap}>
                             {scoreText ? <Text style={styles.scoreText}>{scoreText}</Text> : null}
-                            <Text style={styles.tapHint}>Tap to score</Text>
+                            <Text style={styles.tapHint}>
+                              {canOpenMatch
+                                ? 'Tap to score'
+                                : data.competition.status === 'finalised'
+                                  ? 'Read-only'
+                                  : scoreText
+                                    ? 'Result saved'
+                                    : 'Waiting for fencers'}
+                            </Text>
                           </View>
                         </Pressable>
                       );
@@ -952,6 +1017,9 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
     gap: 8,
+  },
+  matchRowDisabled: {
+    opacity: 0.72,
   },
   matchInfo: {
     flexDirection: 'row',

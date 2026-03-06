@@ -746,12 +746,67 @@ export const getCompetitionOverviewData = async (input: {
 
   const participantCount = count ?? 0;
   const competitionRow = competition as ClubCompetitionRecord;
+  const isReadOnly = competitionRow.status === 'finalised';
+  const canFinalise =
+    membership.role === 'organiser' &&
+    !isReadOnly &&
+    ((competitionRow.format === 'poules_only' && competitionRow.status === 'rankings_locked') ||
+      (competitionRow.format !== 'poules_only' && competitionRow.status === 'de_generated'));
 
   return {
     competition: competitionRow,
     role: membership.role,
     participantCount,
-    isReadOnly: competitionRow.status === 'finalised',
+    isReadOnly,
+    canFinalise,
+  };
+};
+
+export const finaliseCompetition = async (input: {
+  competitionId: string;
+}): Promise<CompetitionActionResult<ClubCompetitionRecord>> => {
+  const { data, error } = await supabase.rpc('finalise_club_competition', {
+    p_competition_id: input.competitionId,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('not_allowed')) {
+      return { ok: false, message: 'Only organisers can finalise competitions.' };
+    }
+    if (message.includes('competition_not_ready_for_finalise')) {
+      return {
+        ok: false,
+        message: 'Competition is not ready to finalise yet.',
+      };
+    }
+    if (message.includes('poule_matches_incomplete')) {
+      return {
+        ok: false,
+        message: 'Complete or resolve all poule matches before finalising.',
+      };
+    }
+    if (message.includes('de_matches_incomplete')) {
+      return {
+        ok: false,
+        message: 'Complete or resolve all DE matches before finalising.',
+      };
+    }
+    return { ok: false, message: 'Could not finalise competition right now.' };
+  }
+
+  const competition =
+    Array.isArray(data) && data.length > 0
+      ? (data[0] as ClubCompetitionRecord)
+      : (data as ClubCompetitionRecord);
+
+  if (!competition) {
+    return { ok: false, message: 'Updated competition was not returned.' };
+  }
+
+  return {
+    ok: true,
+    data: competition,
   };
 };
 
@@ -1371,12 +1426,6 @@ export const overrideCompetitionDeMatchResult = async (input: {
     if (message.includes('ties_not_allowed')) {
       return { ok: false, message: 'Ties are not allowed.' };
     }
-    if (message.includes('winning_score_must_hit_touch_limit')) {
-      return { ok: false, message: 'One fencer must reach touch limit to win.' };
-    }
-    if (message.includes('losing_score_must_be_below_touch_limit')) {
-      return { ok: false, message: 'The losing score must be below touch limit.' };
-    }
     if (message.includes('score_exceeds_touch_limit')) {
       return { ok: false, message: 'Score cannot exceed touch limit.' };
     }
@@ -1508,6 +1557,7 @@ export const getCompetitionMatchScoringData = async (input: {
       : null,
     authoritativeScorer,
     canTakeOverRemote:
+      !overview.isReadOnly &&
       overview.role === 'organiser' &&
       matchRow.scoring_mode === 'remote' &&
       matchRow.status === 'live' &&
@@ -1734,20 +1784,6 @@ export const completeCompetitionMatchScore = async (input: {
     if (message.includes('ties_not_allowed')) {
       return { ok: false, reason: 'ties_not_allowed', message: 'Ties are not allowed.' };
     }
-    if (message.includes('winning_score_must_hit_touch_limit')) {
-      return {
-        ok: false,
-        reason: 'winning_score_must_hit_touch_limit',
-        message: 'One fencer must reach the touch limit to win.',
-      };
-    }
-    if (message.includes('losing_score_must_be_below_touch_limit')) {
-      return {
-        ok: false,
-        reason: 'losing_score_must_be_below_touch_limit',
-        message: 'The losing score must be below touch limit.',
-      };
-    }
     if (message.includes('score_exceeds_touch_limit')) {
       return {
         ok: false,
@@ -1873,6 +1909,9 @@ export const updateCompetitionParticipantRole = async (input: {
 
   if (error) {
     const message = getSupabaseErrorMessage(error);
+    if (message.includes('competition_finalised')) {
+      return { ok: false, message: 'Competition is finalised and cannot be edited.' };
+    }
     if (message.includes('cannot_demote_last_organiser')) {
       return { ok: false, message: 'You cannot demote the last organiser.' };
     }

@@ -16,11 +16,11 @@ import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
 import { sessionTracker } from '@/lib/sessionTracker';
-import { supabase } from '@/lib/supabase';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
+import { supabase } from '@/lib/supabase';
+import { setupAutoSync } from '@/lib/syncManager';
 import type { CompetitionMatchScoringData } from '@/types/competition';
 import type { MatchPeriod } from '@/types/database';
-import { setupAutoSync } from '@/lib/syncManager';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -142,6 +142,16 @@ export default function RemoteScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasMatchStarted, setHasMatchStarted] = useState(false); // Track if match has been started
   const [matchTime, setMatchTime] = useState(180); // 3 minutes in seconds
+  const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
+  const BREAK_DURATION_SECONDS = 60;
+  const [isBreakTime, setIsBreakTime] = useState(false); // For break timer
+  const [breakTimeRemaining, setBreakTimeRemaining] = useState(BREAK_DURATION_SECONDS); // 1 minute break
+  const [isAssigningPriority, setIsAssigningPriority] = useState(false); // Track if priority is being assigned
+  const [priorityLightPosition, setPriorityLightPosition] = useState<'left' | 'right' | null>(null); // Track where priority light is
+  const [priorityFencer, setPriorityFencer] = useState<'fencerA' | 'fencerB' | null>(null); // Track which entity has priority
+  const [isPriorityRound, setIsPriorityRound] = useState(false); // Track if currently in priority round
+  const [isInjuryTimer, setIsInjuryTimer] = useState(false); // Track if injury timer is active
+  const [injuryTimeRemaining, setInjuryTimeRemaining] = useState(300); // 5 minutes in seconds
   const [period1Time, setPeriod1Time] = useState(0); // in seconds
   const [period2Time, setPeriod2Time] = useState(0); // in seconds
   const [period3Time, setPeriod3Time] = useState(0); // in seconds
@@ -150,6 +160,11 @@ export default function RemoteScreen() {
   const [showResetPopup, setShowResetPopup] = useState(false);
   const [showResetAllModal, setShowResetAllModal] = useState(false);
   const [showFinishMatchConfirm, setShowFinishMatchConfirm] = useState(false);
+  const [toggleCardPosition, setToggleCardPosition] = useState<'left' | 'right'>('left'); // Track which card has the toggle
+  const [cards, setCards] = useState<{ fencerA: { yellow: 0 | 1; red: number }, fencerB: { yellow: 0 | 1; red: number } }>({
+    fencerA: { yellow: 0, red: 0 },
+    fencerB: { yellow: 0, red: 0 }
+  });
   // Entity-based position mapping (tracks which entity is on left/right)
   const [fencerPositions, setFencerPositions] = useState({ fencerA: 'left' as 'left' | 'right', fencerB: 'right' as 'left' | 'right' });
   const [isSwapping, setIsSwapping] = useState(false);
@@ -4433,21 +4448,13 @@ export default function RemoteScreen() {
   const [scoreChangeCount, setScoreChangeCount] = useState(0);
   const [showScoreWarning, setShowScoreWarning] = useState(false);
   const [pendingScoreAction, setPendingScoreAction] = useState<(() => void) | null>(null);
- 
-  const [timeRemaining, setTimeRemaining] = useState(180); // 3 minutes in seconds
 
   const [pulseOpacity, setPulseOpacity] = useState(1); // For pulsing animation
-  const BREAK_DURATION_SECONDS = 60;
-  const [isBreakTime, setIsBreakTime] = useState(false); // For break timer
-  const [breakTimeRemaining, setBreakTimeRemaining] = useState(BREAK_DURATION_SECONDS); // 1 minute break
   const [breakTimerRef, setBreakTimerRef] = useState<number | null>(null); // Break timer reference
   const [hasShownBreakPopup, setHasShownBreakPopup] = useState(false); // Flag to prevent multiple break popups
   const [isManualReset, setIsManualReset] = useState(false); // Flag to prevent auto-sync during manual reset
-  const [isAssigningPriority, setIsAssigningPriority] = useState(false); // Track if priority is being assigned
   const [isChangingScore, setIsChangingScore] = useState(false); // Flag to prevent state restoration during score changes
   const [hasNavigatedAway, setHasNavigatedAway] = useState(false); // Flag to track if user has navigated away
-  const [priorityLightPosition, setPriorityLightPosition] = useState<'left' | 'right' | null>(null); // Track where priority light is
-  const [priorityFencer, setPriorityFencer] = useState<'fencerA' | 'fencerB' | null>(null); // Track which entity has priority
 
   // Mirror hasNavigatedAway into a ref to avoid stale closures
   const hasNavigatedAwayRef = useRef(hasNavigatedAway);
@@ -4462,26 +4469,17 @@ export default function RemoteScreen() {
   // Track if user is actively using the app (to prevent resume prompts during normal interaction)
   const isActivelyUsingAppRef = useRef(false);
   const [showPriorityPopup, setShowPriorityPopup] = useState(false); // Track if priority popup should be shown
-  const [isPriorityRound, setIsPriorityRound] = useState(false); // Track if currently in priority round
   const [hasShownPriorityScorePopup, setHasShownPriorityScorePopup] = useState(false); // Track if priority score popup has been shown
   const [priorityRoundPeriod, setPriorityRoundPeriod] = useState<number | null>(null); // Track which period priority round was assigned in
   // Entity-based card state (position-agnostic)
   const [yellowCards, setYellowCards] = useState<{ fencerA: number[], fencerB: number[] }>({ fencerA: [], fencerB: [] });
   const [redCards, setRedCards] = useState<{ fencerA: number[], fencerB: number[] }>({ fencerA: [], fencerB: [] });
-  const [isInjuryTimer, setIsInjuryTimer] = useState(false); // Track if injury timer is active
-  const [injuryTimeRemaining, setInjuryTimeRemaining] = useState(300); // 5 minutes in seconds
   const [injuryTimerRef, setInjuryTimerRef] = useState<number | null>(null); // Injury timer reference
   const [bottomControlsHeight, setBottomControlsHeight] = useState(0);
   const [previousMatchState, setPreviousMatchState] = useState<{
     timeRemaining: number;
     wasPlaying: boolean;
   } | null>(null);
-
-  // NEW CLEAN CARD SYSTEM - Entity-based structure
-  const [cards, setCards] = useState<{ fencerA: { yellow: 0 | 1; red: number }, fencerB: { yellow: 0 | 1; red: number } }>({ 
-    fencerA: { yellow: 0, red: 0 }, 
-    fencerB: { yellow: 0, red: 0 } 
-  });
 
   // Use useRef for timer to ensure proper cleanup
   const timerRef = useRef<number | null>(null);
@@ -4506,8 +4504,6 @@ export default function RemoteScreen() {
 
   // Profile emojis for fencer cards (entity-based)
   const [profileEmojis, setProfileEmojis] = useState<{ fencerA: string, fencerB: string }>({ fencerA: '👩', fencerB: '👨' });
-
-  const [toggleCardPosition, setToggleCardPosition] = useState<'left' | 'right'>('left'); // Track which card has the toggle
 
   // Helper functions for entity/position mapping
   // Get which entity is at a position
@@ -8066,6 +8062,9 @@ export default function RemoteScreen() {
   const timerReadyInjuryPaddingVertical = height * (isAndroid ? 0.01 : 0.012) * competitionCompactScale;
   const competitionTimerPushDown =
     isCompetitionRemoteMode ? height * (isAndroid ? 0.016 : 0.014) : 0;
+  // Lift the timer card slightly in normal remote while preserving downstream layout flow.
+  const normalRemoteTimerLift =
+    !isCompetitionRemoteMode ? height * (isAndroid ? 0.011 : 0.009) : 0;
   const competitionAndroidHeaderDrop =
     isCompetitionRemoteMode && isAndroid ? height * 0.012 : 0;
   const competitionAndroidCardsDrop =
@@ -8108,8 +8107,11 @@ export default function RemoteScreen() {
       borderColor: Colors.timerBackground.borderColors[0],
       borderRadius: width * 0.03,
       padding: width * 0.008 * competitionCompactScale,
-      marginTop: layout.adjustMargin(-height * 0.015 + competitionTimerPushDown, 'top'),
-      marginBottom: layout.adjustMargin(height * 0.001, 'bottom'),
+      marginTop: layout.adjustMargin(
+        -height * 0.015 + competitionTimerPushDown - normalRemoteTimerLift,
+        'top'
+      ),
+      marginBottom: layout.adjustMargin(height * 0.001 + normalRemoteTimerLift, 'bottom'),
       position: 'relative',
       overflow: 'hidden', // Force iOS to respect borderRadius
       // Shadow effects
@@ -8125,7 +8127,9 @@ export default function RemoteScreen() {
       height: height * 0.025 * competitionCompactScale, // Reduced from 0.03 to make smaller
       left: '50%', // Center horizontally
       marginLeft: -(width * 0.20 * competitionCompactScale) / 2, // Half of new width to center properly
-      top: -(height * 0.025 * competitionCompactScale) / 2, // Half outside / half inside the timer card
+      top: isCompetitionRemoteMode
+        ? -(height * 0.025 * competitionCompactScale) / 2 // Keep competition as half in/out
+        : -(height * 0.035), // Raise normal remote pill higher
       backgroundColor: Colors.yellow.accent,
       borderRadius: width * 0.035 * competitionCompactScale, // Reduced from 0.04 to match smaller size
       alignItems: 'center',
@@ -9605,17 +9609,20 @@ export default function RemoteScreen() {
     hasMatchStarted &&
     !isBreakTime &&
     (isPlaying || timeRemaining < matchTime);
+  const standardNonSabreMatchStatusText = isBreakTime
+    ? '🍃 Break Time'
+    : (isPlaying
+      ? '🟢 Match in Progress'
+      : (timeRemaining === 0
+        ? '🔴 Match Ended'
+        : (timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready')));
   const inlineMatchStatusText = selectedWeapon === 'sabre'
     ? (!hasMatchStarted
       ? '⚪ Match Ready'
       : (isBreakTime ? '🍃 Break Time' : '🟢 Match in Progress'))
-    : (isBreakTime
-      ? '🍃 Break Time'
-      : (isPlaying
-        ? '🟢 Match in Progress'
-        : (timeRemaining === 0
-          ? '🔴 Match Ended'
-          : (timeRemaining < matchTime ? '⏸️ Match Paused' : '⚪ Timer Ready'))));
+    : standardNonSabreMatchStatusText;
+  const shouldInlineMatchStatus = true;
+  const shouldShowStandaloneMatchStatus = false;
   const baseFencersHeaderMarginTop = selectedWeapon === 'sabre'
     ? height * 0.012
     : (lockAndroidTimerReadyLayout
@@ -9625,7 +9632,11 @@ export default function RemoteScreen() {
   const fencersHeaderMarginTop =
     selectedWeapon === 'sabre'
       ? baseFencersHeaderMarginTop + competitionAndroidHeaderDrop
-      : baseFencersHeaderMarginTop + height * 0.024 + competitionAndroidHeaderDrop;
+      : (
+          isCompetitionRemoteMode
+            ? baseFencersHeaderMarginTop + height * 0.024 + competitionAndroidHeaderDrop
+            : baseFencersHeaderMarginTop + height * 0.028
+        );
   const playButtonPaddingBase = useTimerReadyLayout ? timerReadyPlayButtonPadding : height * 0.045;
   const playButtonMinHeightBase = useTimerReadyLayout ? timerReadyPlayButtonMinHeight : height * 0.14;
   const playButtonActiveExtra = isNonSabreActive ? playButtonActivePaddingExtra : 0;
@@ -10161,6 +10172,20 @@ export default function RemoteScreen() {
       </LinearGradient>
       </View>
 
+      {/* Match Status Display */}
+      {shouldShowStandaloneMatchStatus && (
+        <View style={styles.matchStatusContainer}>
+          <Text style={styles.matchStatusText}>
+            {standardNonSabreMatchStatusText}
+          </Text>
+          {isBreakTime && (
+            <Text style={styles.matchStatusSubtext}>
+              Break in progress
+            </Text>
+          )}
+        </View>
+      )}
+
       {/* Fencers Section */}
       <View style={[styles.fencersHeader, { 
             marginTop: fencersHeaderMarginTop,  // Keep Android locked to timer-ready layout
@@ -10168,9 +10193,11 @@ export default function RemoteScreen() {
           }]}>
         <View style={styles.fencersHeaderLeft}>
           <Text style={[styles.fencersHeading, styles.fencersHeadingInline]}>Fencers</Text>
-          <Text style={styles.fencersHeaderStatus} numberOfLines={1} ellipsizeMode="tail">
-            {inlineMatchStatusText}
-          </Text>
+          {shouldInlineMatchStatus ? (
+            <Text style={styles.fencersHeaderStatus} numberOfLines={1} ellipsizeMode="tail">
+              {inlineMatchStatusText}
+            </Text>
+          ) : null}
         </View>
         {!(selectedWeapon === 'sabre' || isCompetitionRemoteMode) && (
           <TouchableOpacity 

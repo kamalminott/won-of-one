@@ -166,6 +166,7 @@ export interface CompetitionOverviewData {
   role: CompetitionRole;
   participantCount: number;
   isReadOnly: boolean;
+  canFinalise: boolean;
 }
 
 export interface ClubCompetitionRankingRecord {

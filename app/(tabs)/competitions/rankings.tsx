@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ROLE_LABELS,
@@ -10,8 +11,9 @@ import {
   getCompetitionRankingsData,
   lockCompetitionRankings,
 } from '@/lib/clubCompetitionService';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -36,14 +38,16 @@ export default function RankingsScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [actionKey, setActionKey] = useState<'lock' | 'generate' | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof getCompetitionRankingsData>>>(null);
+  const rankingsVersionRef = useRef('');
 
   const loadData = useCallback(
-    async (showSpinner = true) => {
+    async (showSpinner = true): Promise<string | null> => {
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
         setErrorText('Competition was not found.');
-        return;
+        rankingsVersionRef.current = '';
+        return null;
       }
 
       if (showSpinner) {
@@ -61,15 +65,43 @@ export default function RankingsScreen() {
         setLoading(false);
         setRefreshing(false);
         setErrorText('You do not have access to this competition.');
-        return;
+        rankingsVersionRef.current = '';
+        return null;
       }
 
       setData(payload);
+      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rankings
+        .map(
+          (entry) =>
+            `${entry.participant.id}:${entry.ranking.rank}:${entry.ranking.wins}:${entry.ranking.losses}:${entry.ranking.indicator}:${entry.ranking.hits_scored}:${entry.ranking.hits_received}`
+        )
+        .join('|')}`;
+      rankingsVersionRef.current = version;
       setLoading(false);
       setRefreshing(false);
+      return version;
     },
     [competitionId, user?.id]
   );
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    enabled: Boolean(user?.id && competitionId),
+    surface: 'rankings',
+    onCompetitionEvent: () => {
+      void loadData(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = rankingsVersionRef.current;
+      const after = await loadData(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -196,6 +228,12 @@ export default function RankingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Rankings</Text>
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          correctionNotice={realtimeCorrectionNotice}
+          onRetry={retryRealtime}
+          onDismissCorrection={clearCorrectionNotice}
+        />
         <Text style={styles.subtitle}>
           {data.competition.name} • {COMPETITION_STATUS_LABELS[data.competition.status]}
         </Text>

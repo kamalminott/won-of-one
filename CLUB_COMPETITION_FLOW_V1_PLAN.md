@@ -1,8 +1,8 @@
 # Won Of One — Club Competition Flow (V1) Planning Tracker
 
 ## Document Control
-- Status: Implementation in progress (Phase 1-5 complete)
-- Last updated: 2026-02-27
+- Status: Implementation in progress (Phase 1-8 core complete, Phase 8 validation pending)
+- Last updated: 2026-03-01
 - Product area: Competitions pillar
 - Working rule: Any scope/behavior change must be logged in `Change Log` and, if architectural, in `Decision Log`
 
@@ -739,6 +739,9 @@ Analytics policy (V1 locked):
 | 2026-02-27 | Refined competition remote control policy (added D-27 and expanded D-24) | Lock that officiating tools remain available in competition mode while destructive/personalization training flows are removed | Codex |
 | 2026-02-27 | Implemented shared remote competition mode routing + RPC scoring integration + source-return navigation | Complete `COMP-045` to `COMP-048` implementation path and route competition remote flow through the full existing Remote surface | Codex |
 | 2026-02-27 | Implemented Phase 6 rankings + DE core (rankings RPC/UI, rankings lock, seeded DE generation/byes, DE tableau scoring navigation, DE override/reset/walkover audit controls) | Complete `COMP-050` to `COMP-054` and unblock end-to-end elimination-stage progression | Codex |
+| 2026-02-28 | Implemented Phase 6 match integration mapping (`COMP-055`) via core-match linkage table + sync triggers | Persist `competition_id/stage/round_label` metadata for club competition matches while keeping V1 visibility constrained to competition surfaces | Codex |
+| 2026-02-28 | Implemented Phase 7 finalisation flow and read-only freeze pass (`COMP-060` to `COMP-062`) | Added finalise RPC + overview action, enforced server-side role-edit freeze after finalisation, and tightened read-only scoring entry behavior across competition screens | Codex |
+| 2026-03-01 | Implemented Phase 8 realtime orchestration and resilience pass (`COMP-070` to `COMP-074`) | Added scoped competition/match subscriptions, stale-event rejection, reconnect refetch + correction notice, bounded backoff with retry banner, and critical failure telemetry for realtime/scoring failure paths | Codex |
 
 ## 15) Weekly Planning Checklist (Living)
 - [ ] All open decisions reviewed this week
@@ -811,23 +814,23 @@ Status key: `[x]` complete, `[ ]` pending.
 | [x] COMP-052 | DE bracket generation from locked rankings with auto-byes | COMP-051 | Deterministic seeding and bye placement works for non-power-of-two counts |
 | [x] COMP-053 | DE Tableau UI + round navigation | COMP-052 | Round columns/cards render and match states update correctly |
 | [x] COMP-054 | DE control rules (override reason+audit, reset dependency guard, withdrawal walkover) | COMP-053 | Override writes audit record; reset blocked if downstream started; walkover auto-advance works |
-| [ ] COMP-055 | Match integration mapping (`competition_id`, `stage`, `round_label`) with V1 visibility constraints | COMP-042, COMP-052 | Metadata persisted; competition matches hidden from global history/search/training stats |
+| [x] COMP-055 | Match integration mapping (`competition_id`, `stage`, `round_label`) with V1 visibility constraints | COMP-042, COMP-052 | Metadata persisted; competition matches hidden from global history/search/training stats |
 
 ### Phase 7: Finalisation
 | Ticket | Scope | Depends On | Done Criteria |
 |---|---|---|---|
-| [ ] COMP-060 | Finalise competition action + irreversible freeze rules | COMP-051, COMP-054 | Finalise transitions state and blocks edit actions |
-| [ ] COMP-061 | Read-only behavior pass across all screens | COMP-060 | Finalised competitions show view-only UX consistently |
-| [ ] COMP-062 | Active/Past movement + sort semantics (`updated_at`, `finalised_at`) | COMP-060, COMP-003 | Hub lists move/sort competitions per locked rules |
+| [x] COMP-060 | Finalise competition action + irreversible freeze rules | COMP-051, COMP-054 | Finalise transitions state and blocks edit actions |
+| [x] COMP-061 | Read-only behavior pass across all screens | COMP-060 | Finalised competitions show view-only UX consistently |
+| [x] COMP-062 | Active/Past movement + sort semantics (`updated_at`, `finalised_at`) | COMP-060, COMP-003 | Hub lists move/sort competitions per locked rules |
 
 ### Phase 8: Realtime + Analytics Polish
 | Ticket | Scope | Depends On | Done Criteria |
 |---|---|---|---|
-| [ ] COMP-070 | Realtime subscription orchestration (`competition` always + active `match`) | COMP-040, COMP-053 | Correct channels subscribe/unsubscribe by screen context |
-| [ ] COMP-071 | Server-authoritative reconciliation + stale-event rejection | COMP-070 | Out-of-order events do not regress UI state |
-| [ ] COMP-072 | Reconnect refetch workflow + optimistic correction notice | COMP-071 | Reconnect recovers canonical state; correction notice appears when needed |
-| [ ] COMP-073 | Retry policy with bounded exponential backoff + retry banner | COMP-071 | Failed realtime/write paths surface actionable retry UI after budget exhaustion |
-| [ ] COMP-074 | Analytics implementation (core + critical failures, non-blocking) | COMP-013, COMP-040, COMP-042, COMP-070 | Required events emit with ID/status payloads; failures never block user actions |
+| [x] COMP-070 | Realtime subscription orchestration (`competition` always + active `match`) | COMP-040, COMP-053 | Correct channels subscribe/unsubscribe by screen context |
+| [x] COMP-071 | Server-authoritative reconciliation + stale-event rejection | COMP-070 | Out-of-order events do not regress UI state |
+| [x] COMP-072 | Reconnect refetch workflow + optimistic correction notice | COMP-071 | Reconnect recovers canonical state; correction notice appears when needed |
+| [x] COMP-073 | Retry policy with bounded exponential backoff + retry banner | COMP-071 | Failed realtime/write paths surface actionable retry UI after budget exhaustion |
+| [x] COMP-074 | Analytics implementation (core + critical failures, non-blocking) | COMP-013, COMP-040, COMP-042, COMP-070 | Required events emit with ID/status payloads; failures never block user actions |
 | [ ] COMP-075 | Scenario validation suite (A-D) + regression checklist | All prior phase tickets | Must-pass scenarios A-D verified and signed off |
 
 ### Phase Exit Gates
@@ -946,5 +949,35 @@ Run on both iOS and Android where possible.
 | Competition return routing | Complete/back returns to source competition screen (`Poules`/`DE`/`Overview`) with refreshed match state | [ ] |
 | Remote tab regression check | Training Remote tab behavior remains unchanged after shared-surface refactor | [ ] |
 
-### Phase 6-8 Verification
-Add checklist blocks here as each phase is implemented and reviewed.
+### Phase 7 Verification (Finalisation)
+Run on both iOS and Android where possible.
+
+| Check | Expected Result | Pass/Fail |
+|---|---|---|
+| Finalise button visibility (organiser) | Organiser sees `Finalise Competition` on Overview only when competition is finalisation-ready | [ ] |
+| Finalise blocked when not ready | Attempting finalise before ready state shows clear error message and does not change status | [ ] |
+| Finalise success state | Status transitions to `finalised`, `finalised_at` is set, and finalise action becomes unavailable | [ ] |
+| Overview read-only banner | Finalised competition shows read-only banner and no editable organiser actions | [ ] |
+| Poules read-only enforcement | Poule match rows do not open scoring when finalised; UI indicates read-only | [ ] |
+| DE read-only enforcement | DE cards show read-only hint and scoring/override/reset actions remain unavailable | [ ] |
+| Manual scoring read-only enforcement | Manual/remote score entry screen shows read-only info and save/complete controls are disabled | [ ] |
+| Participant role freeze | Promote/demote attempts after finalisation are blocked server-side with finalised error | [ ] |
+| Hub movement semantics | Finalised competition is removed from `Active`, appears in `Past`, and `Past` sort follows `finalised_at DESC` | [ ] |
+
+### Phase 8 Verification (Realtime + Analytics Polish)
+Run on both iOS and Android where possible.
+
+| Check | Expected Result | Pass/Fail |
+|---|---|---|
+| Competition screen scoped realtime | Overview/Participants/Poules/Rankings/DE auto-refresh when another device updates same competition | [ ] |
+| Active match scoped realtime | Manual Score Entry live match updates from other scorer actions without manual refresh | [ ] |
+| Stale-event rejection | Rapid out-of-order updates do not revert score/status backwards on UI | [ ] |
+| Reconnect canonical recovery | After network drop + reconnect, screen refetches canonical state and remains in sync | [ ] |
+| Correction notice UX | If local optimistic view differs after reconnect, subtle `Score updated` notice is shown | [ ] |
+| Backoff retry banner | On forced realtime disconnect, reconnect attempts are bounded and banner communicates retry progress | [ ] |
+| Retry exhausted CTA | After retry budget exhaustion, user sees actionable retry button and manual retry re-subscribes | [ ] |
+| Critical failure analytics | Realtime disconnect/reconnect/exhausted and score save/takeover/override/reset failures emit analytics without blocking user flow | [ ] |
+| Scenario A | 12 fencers flow completes end-to-end with live poule/ranking/DE propagation | [ ] |
+| Scenario B | Two remote scorers conflict resolves by authority lock + organiser takeover + spectator live updates | [ ] |
+| Scenario C | Withdrawal mid-event propagates to poules/DE/walkovers and live views without stale state | [ ] |
+| Scenario D | Role transfer guardrails (promote/demote/last organiser block) hold under realtime updates | [ ] |

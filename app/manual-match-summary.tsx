@@ -1,6 +1,7 @@
 import { MatchSummaryStats } from '@/components/MatchSummaryStats';
 import { useAuth } from '@/contexts/AuthContext';
 import { matchService } from '@/lib/database';
+import type { ManualMatchSaveError } from '@/lib/database';
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -80,6 +81,55 @@ export default function ManualMatchSummaryScreen() {
       analytics.screen('ManualMatchSummary');
     }, [])
   );
+
+  const getManualSaveAlertConfig = (error: ManualMatchSaveError | null): { title: string; message: string } => {
+    if (!error) {
+      return {
+        title: 'Error',
+        message: 'Failed to save match. Please try again.',
+      };
+    }
+
+    switch (error.type) {
+      case 'auth_session_missing':
+        return {
+          title: 'Session Not Ready',
+          message: 'Your sign-in session is still syncing. Please wait a few seconds and try again.',
+        };
+      case 'timeout':
+        return {
+          title: 'Network Timeout',
+          message: 'Saving took too long. Please check your connection and try again.',
+        };
+      case 'network_error':
+        return {
+          title: 'Network Error',
+          message: 'Unable to reach the server right now. Please check your internet connection and try again.',
+        };
+      case 'fk_user_missing':
+        return {
+          title: 'Profile Syncing',
+          message: 'Your account is still syncing. Please try saving this match again in a moment.',
+        };
+      case 'db_constraint_violation':
+        return {
+          title: 'Invalid Match Data',
+          message: 'Some match details are not valid. Please review the form and try again.',
+        };
+      case 'validation_error':
+        return {
+          title: 'Missing Details',
+          message: error.message || 'Please complete the required fields before saving.',
+        };
+      case 'db_error':
+      case 'unknown_error':
+      default:
+        return {
+          title: 'Error',
+          message: 'Failed to save match. Please try again.',
+        };
+    }
+  };
 
   const handleDelete = () => {
     const matchId = params.matchId as string;
@@ -164,6 +214,15 @@ export default function ManualMatchSummaryScreen() {
         return;
       }
 
+      if (!session?.access_token) {
+        analytics.matchSaveFailure({ error_type: 'auth_session_missing' });
+        Alert.alert(
+          'Session Not Ready',
+          'Your sign-in session is still syncing. Please wait a few seconds and try again.'
+        );
+        return;
+      }
+
       const normalizedMatchType = matchType === 'Training' ? 'training' : 'competition';
       const fallbackDate = new Date().toLocaleDateString('en-GB');
       const fallbackTime = new Date().toLocaleTimeString('en-US', {
@@ -173,7 +232,7 @@ export default function ManualMatchSummaryScreen() {
       });
 
       try {
-        const created = await matchService.createManualMatch({
+        const createResult = await matchService.createManualMatchWithResult({
           userId: user.id,
           opponentName: (opponentName as string) || 'Opponent',
           yourScore: yourScoreNum,
@@ -185,12 +244,28 @@ export default function ManualMatchSummaryScreen() {
           accessToken: session?.access_token,
         });
 
-        if (!created) {
-          Alert.alert('Error', 'Failed to save match. Please try again.');
+        if (!createResult.match) {
+          const manualSaveError = createResult.error;
+          const failureType = manualSaveError?.type || 'database_save_failed';
+          analytics.matchSaveFailure({ error_type: failureType });
+          if (manualSaveError) {
+            analytics.capture('manual_match_save_error', {
+              error_type: manualSaveError.type,
+              error_code: manualSaveError.code,
+              error_status: manualSaveError.status,
+              retryable: manualSaveError.retryable,
+              source: 'manual_match_summary',
+            });
+          }
+          const alertConfig = getManualSaveAlertConfig(manualSaveError);
+          Alert.alert(alertConfig.title, alertConfig.message);
           return;
         }
+
+        analytics.matchSave({ match_type: normalizedMatchType });
       } catch (error) {
         console.error('❌ Error saving match on done:', error);
+        analytics.matchSaveFailure({ error_type: 'unexpected_error' });
         Alert.alert('Error', 'Failed to save match. Please try again.');
         return;
       }

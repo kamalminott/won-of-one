@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_PARTICIPANT_STATUS_COLORS,
@@ -15,9 +16,10 @@ import {
   updateCompetitionParticipantRole,
   updateCompetitionParticipantWithdrawn,
 } from '@/lib/clubCompetitionService';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { CompetitionParticipantView, CompetitionParticipantsData } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -62,15 +64,19 @@ export default function ParticipantsAndRolesScreen() {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
+  const participantsVersionRef = useRef('');
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showSpinner = true): Promise<string | null> => {
     if (!user?.id || !competitionId) {
       setLoading(false);
       setErrorText('Competition was not found.');
-      return;
+      participantsVersionRef.current = '';
+      return null;
     }
 
-    setLoading(true);
+    if (showSpinner) {
+      setLoading(true);
+    }
     setErrorText(null);
     const payload = await getCompetitionParticipantsData({
       userId: user.id,
@@ -81,16 +87,41 @@ export default function ParticipantsAndRolesScreen() {
       setErrorText('You do not have access to this competition.');
       setData(null);
       setLoading(false);
-      return;
+      participantsVersionRef.current = '';
+      return null;
     }
 
     setData(payload);
+    const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.participants
+      .map((participant) => `${participant.user_id}:${participant.role}:${participant.status}`)
+      .join('|')}`;
+    participantsVersionRef.current = version;
     setLoading(false);
+    return version;
   }, [competitionId, user?.id]);
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    enabled: Boolean(user?.id && competitionId),
+    surface: 'participants',
+    onCompetitionEvent: () => {
+      void loadData(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = participantsVersionRef.current;
+      const after = await loadData(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadData();
+      void loadData(true);
     }, [loadData])
   );
 
@@ -146,6 +177,11 @@ export default function ParticipantsAndRolesScreen() {
         participant_user_id: participant.user_id,
       });
       await loadData();
+      setActiveActionKey(null);
+      return;
+    }
+
+    if (rowAction.type !== 'withdraw') {
       setActiveActionKey(null);
       return;
     }
@@ -206,6 +242,10 @@ export default function ParticipantsAndRolesScreen() {
           { text: 'Remove', style: 'destructive', onPress: () => void runAction(rowAction) },
         ]
       );
+      return;
+    }
+
+    if (rowAction.type !== 'withdraw') {
       return;
     }
 
@@ -286,6 +326,12 @@ export default function ParticipantsAndRolesScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Participants & Roles</Text>
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          correctionNotice={realtimeCorrectionNotice}
+          onRetry={retryRealtime}
+          onDismissCorrection={clearCorrectionNotice}
+        />
         <Text style={styles.subtitle}>
           {data.competition.name} • {COMPETITION_STATUS_LABELS[data.competition.status]}
         </Text>
@@ -664,4 +710,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

@@ -504,6 +504,8 @@ export default function RecentMatchesScreen() {
             weapon,
             wins: 0,
             losses: 0,
+            pouleWins: 0,
+            pouleLosses: 0,
             pouleMatches: isDE ? [] : [match],
             deMatches: isDE ? [match] : [],
           });

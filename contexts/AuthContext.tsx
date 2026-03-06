@@ -1,6 +1,11 @@
 import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { analytics } from '@/lib/analytics';
+import {
+  isFallbackDisplayName,
+  isOpaqueIdentifierName,
+  resolveAuthMetadataDisplayName,
+} from '@/lib/displayName';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
 import type { AppUser } from '@/types/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -257,17 +262,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const getMetadataName = (authUser?: User | null) => {
-    if (!authUser) return '';
-    const metadata = authUser.user_metadata || {};
-    return (
-      metadata.full_name ||
-      metadata.name ||
-      metadata.display_name ||
-      [metadata.given_name, metadata.family_name].filter(Boolean).join(' ')
-    );
-  };
-
   const updateAppleMetadata = async (
     credential: AppleAuthentication.AppleAuthenticationCredential,
     authUser?: User | null
@@ -285,6 +279,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     const metadata = authUser.user_metadata || {};
     const updateData: Record<string, string> = {};
+    const existingFullName = typeof metadata.full_name === 'string' ? metadata.full_name : '';
+    const existingDisplayName = typeof metadata.display_name === 'string' ? metadata.display_name : '';
+    const existingName = typeof metadata.name === 'string' ? metadata.name : '';
 
     if (givenName && !metadata.given_name) {
       updateData.given_name = givenName;
@@ -293,13 +290,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       updateData.family_name = familyName;
     }
     if (fullNameValue) {
-      if (!metadata.full_name) {
+      if (!metadata.full_name || isOpaqueIdentifierName(existingFullName)) {
         updateData.full_name = fullNameValue;
       }
-      if (!metadata.display_name) {
+      if (!metadata.display_name || isOpaqueIdentifierName(existingDisplayName)) {
         updateData.display_name = fullNameValue;
       }
-      if (!metadata.name) {
+      if (!metadata.name || isOpaqueIdentifierName(existingName)) {
         updateData.name = fullNameValue;
       }
     }
@@ -622,9 +619,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const cachedName =
         (await AsyncStorage.getItem(userNameStorageKey(user.id))) ||
         (await AsyncStorage.getItem('user_name'));
-      const hasCachedName = !!cachedName && cachedName !== 'Guest User';
+      const normalizedCachedName = (cachedName || '').trim();
+      const hasCachedName =
+        !!normalizedCachedName &&
+        !isFallbackDisplayName(normalizedCachedName) &&
+        !isOpaqueIdentifierName(normalizedCachedName);
       if (hasCachedName) {
-        setUserNameState(cachedName);
+        setUserNameState(normalizedCachedName);
       }
 
       // First, try to load from database (retry briefly to allow profile creation to finish)
@@ -633,16 +634,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         await wait(300);
         dbUser = await userService.getUserById(user.id, session?.access_token);
       }
-      if (dbUser?.name) {
-        console.log('✅ Loaded name from database:', dbUser.name);
-        setUserNameState(dbUser.name);
+      const dbName = dbUser?.name?.trim() || '';
+      const hasUsableDbName =
+        !!dbName && !isFallbackDisplayName(dbName) && !isOpaqueIdentifierName(dbName);
+      if (hasUsableDbName) {
+        console.log('✅ Loaded name from database:', dbName);
+        setUserNameState(dbName);
         // Also save to AsyncStorage for offline access
-        await AsyncStorage.setItem(userNameStorageKey(user.id), dbUser.name);
-        await AsyncStorage.setItem('user_name', dbUser.name);
+        await AsyncStorage.setItem(userNameStorageKey(user.id), dbName);
+        await AsyncStorage.setItem('user_name', dbName);
         return;
       }
 
-      const metadataName = getMetadataName(user);
+      const metadataName = resolveAuthMetadataDisplayName(user);
       const provider = user?.app_metadata?.provider;
       const providers = Array.isArray(user?.app_metadata?.providers)
         ? user?.app_metadata?.providers
@@ -651,7 +655,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const emailPrefix = user?.email ? user.email.split('@')[0] : '';
       const fallbackName = metadataName || (allowEmailFallback ? emailPrefix : '');
 
-      if (dbUser && !dbUser.name && fallbackName) {
+      if (dbUser && (!dbName || !hasUsableDbName) && fallbackName) {
         try {
           const updatedUser = await userService.updateUser(
             user.id,
@@ -718,9 +722,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const cachedName =
         (await AsyncStorage.getItem(userNameStorageKey(user?.id))) ||
         (await AsyncStorage.getItem('user_name'));
-      const hasCachedName = !!cachedName && cachedName !== 'Guest User';
+      const normalizedCachedName = (cachedName || '').trim();
+      const hasCachedName =
+        !!normalizedCachedName &&
+        !isFallbackDisplayName(normalizedCachedName) &&
+        !isOpaqueIdentifierName(normalizedCachedName);
       if (hasCachedName) {
-        setUserNameState(cachedName);
+        setUserNameState(normalizedCachedName);
         return;
       }
       // Fallback to AsyncStorage or email prefix
@@ -728,8 +736,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const savedName =
           (await AsyncStorage.getItem(userNameStorageKey(user?.id))) ||
           (await AsyncStorage.getItem('user_name'));
-        if (savedName && savedName !== 'Guest User') {
-          setUserNameState(savedName);
+        const normalizedSavedName = (savedName || '').trim();
+        if (
+          normalizedSavedName &&
+          !isFallbackDisplayName(normalizedSavedName) &&
+          !isOpaqueIdentifierName(normalizedSavedName)
+        ) {
+          setUserNameState(normalizedSavedName);
         } else if (user?.email && (user?.app_metadata?.provider === 'email' || !user?.app_metadata?.provider)) {
           setUserNameState(user.email.split('@')[0]);
         } else {
@@ -1209,10 +1222,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                   const email = session.user.email || '';
                   
                   // Try to extract name from user metadata (Google provides full_name, Apple provides givenName/familyName)
-                  const fullName = session.user.user_metadata?.full_name || 
-                                 session.user.user_metadata?.name ||
-                                 session.user.user_metadata?.display_name ||
-                                 '';
+                  const fullName = resolveAuthMetadataDisplayName(session.user);
                   
                   let firstName = '';
                   let lastName = '';
@@ -1223,13 +1233,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                     lastName = nameParts.slice(1).join(' ') || '';
                   }
                   
-                  // If we have both first and last name, create user
-                  if (firstName && lastName) {
+                  // If we have any usable name parts, create user
+                  if (firstName || lastName) {
                     const createdUser = await userService.createUser(
                       session.user.id,
                       email,
-                      firstName,
-                      lastName,
+                      firstName || undefined,
+                      lastName || undefined,
                       undefined,
                       session.access_token
                     );
@@ -1327,10 +1337,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!user?.id) return;
     let cancelled = false;
     const trimmedName = (userName || '').trim();
+    const metadataName = resolveAuthMetadataDisplayName(user);
     const name =
-      trimmedName && trimmedName !== 'User' && trimmedName !== 'Guest User'
+      trimmedName && !isFallbackDisplayName(trimmedName) && !isOpaqueIdentifierName(trimmedName)
         ? trimmedName
-        : undefined;
+        : metadataName || undefined;
     const email = user.email || undefined;
     const baseProps = {
       ...(name ? { name } : {}),
@@ -1412,14 +1423,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!existingUser) {
         console.log('⚠️ User not found in app_user table');
         // Try to get display_name from auth metadata as fallback
-        const metadata = data.user.user_metadata || {};
-        const metadataName =
-          metadata.display_name ||
-          metadata.full_name ||
-          metadata.name ||
-          [metadata.given_name, metadata.family_name]
-            .filter(Boolean)
-            .join(' ');
+        const metadataName = resolveAuthMetadataDisplayName(data.user);
         let first = '';
         let last = '';
 
@@ -1781,22 +1785,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (!existingUser) {
           // Extract name from Apple credential or user metadata
-          const firstName = credential.fullName?.givenName || 
-                           data.user.user_metadata?.full_name?.split(' ')[0] || 
-                           '';
-          const lastName = credential.fullName?.familyName || 
-                          data.user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || 
-                          '';
+          const metadataName = resolveAuthMetadataDisplayName(data.user);
+          const metadataNameParts = metadataName.split(' ').filter(Boolean);
+          const firstName = credential.fullName?.givenName?.trim() || metadataNameParts[0] || '';
+          const lastName =
+            credential.fullName?.familyName?.trim() || metadataNameParts.slice(1).join(' ') || '';
           const email = credential.email || data.user.email || '';
           
           console.log('🔍 Extracted user info:', { firstName, lastName, email });
           
-          if (firstName && lastName) {
+          if (firstName || lastName) {
             const createdUser = await userService.createUser(
               data.user.id,
               email,
-              firstName,
-              lastName,
+              firstName || undefined,
+              lastName || undefined,
               undefined,
               accessToken
             );
@@ -1913,22 +1916,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (!existingUser) {
           // Extract name from Apple credential or user metadata
-          const firstName = credential.fullName?.givenName || 
-                           data.user.user_metadata?.full_name?.split(' ')[0] || 
-                           '';
-          const lastName = credential.fullName?.familyName || 
-                          data.user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || 
-                          '';
+          const metadataName = resolveAuthMetadataDisplayName(data.user);
+          const metadataNameParts = metadataName.split(' ').filter(Boolean);
+          const firstName = credential.fullName?.givenName?.trim() || metadataNameParts[0] || '';
+          const lastName =
+            credential.fullName?.familyName?.trim() || metadataNameParts.slice(1).join(' ') || '';
           const email = credential.email || data.user.email || '';
           
           console.log('🔍 Extracted user info for sign up:', { firstName, lastName, email });
           
-          if (firstName && lastName) {
+          if (firstName || lastName) {
             const createdUser = await userService.createUser(
               data.user.id,
               email,
-              firstName,
-              lastName,
+              firstName || undefined,
+              lastName || undefined,
               undefined,
               accessToken
             );

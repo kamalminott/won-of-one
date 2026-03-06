@@ -1,4 +1,5 @@
 import { CompetitionQrCode } from '@/components/CompetitionQrCode';
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ROLE_LABELS,
@@ -9,11 +10,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import {
   buildCompetitionJoinQrPayload,
+  finaliseCompetition,
   getCompetitionOverviewData,
   updateCompetitionRegistrationLock,
 } from '@/lib/clubCompetitionService';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +28,17 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+type JourneyStepState = 'completed' | 'active' | 'locked';
+
+type JourneyStep = {
+  key: string;
+  title: string;
+  subtitle: string;
+  state: JourneyStepState;
+  lockReason?: string;
+  onPress?: () => void;
+};
 
 export default function CompetitionOverviewScreen() {
   const router = useRouter();
@@ -40,15 +54,20 @@ export default function CompetitionOverviewScreen() {
     ReturnType<typeof getCompetitionOverviewData>
   >>(null);
   const [updatingRegistration, setUpdatingRegistration] = useState(false);
+  const [finalising, setFinalising] = useState(false);
+  const overviewVersionRef = useRef('');
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (showSpinner = true): Promise<string | null> => {
     if (!user?.id || !competitionId) {
       setLoading(false);
       setErrorText('Competition not found.');
-      return;
+      overviewVersionRef.current = '';
+      return null;
     }
 
-    setLoading(true);
+    if (showSpinner) {
+      setLoading(true);
+    }
     setErrorText(null);
     const data = await getCompetitionOverviewData({
       userId: user.id,
@@ -56,14 +75,39 @@ export default function CompetitionOverviewScreen() {
     });
     if (!data) {
       setErrorText('You do not have access to this competition.');
+      overviewVersionRef.current = '';
     }
     setOverview(data);
+    const version = data
+      ? `${data.competition.updated_at}:${data.competition.status}:${data.participantCount}`
+      : '';
+    overviewVersionRef.current = version;
     setLoading(false);
+    return version || null;
   }, [competitionId, user?.id]);
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    enabled: Boolean(user?.id && competitionId),
+    surface: 'overview',
+    onCompetitionEvent: () => {
+      void loadOverview(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = overviewVersionRef.current;
+      const after = await loadOverview(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadOverview();
+      void loadOverview(true);
     }, [loadOverview])
   );
 
@@ -74,6 +118,143 @@ export default function CompetitionOverviewScreen() {
       overview.competition.join_code
     );
   }, [overview]);
+
+  const journeySteps: JourneyStep[] = useMemo(() => {
+    if (!overview) {
+      return [];
+    }
+
+    const competition = overview.competition;
+    const hasPoulesStage = competition.format !== 'de_only';
+    const hasDeStage = competition.format !== 'poules_only';
+    const competitionStatus = competition.status;
+
+    const participantsState: JourneyStepState =
+      competitionStatus === 'registration_open' || competitionStatus === 'registration_locked'
+        ? 'active'
+        : 'completed';
+
+    const steps: JourneyStep[] = [
+      {
+        key: 'participants',
+        title: 'Participants & Roles',
+        subtitle: 'Set organisers, participants, and registration readiness.',
+        state: participantsState,
+        onPress: () =>
+          router.push({
+            pathname: '/(tabs)/competitions/participants-roles',
+            params: { competitionId: competition.id },
+          }),
+      },
+    ];
+
+    if (hasPoulesStage) {
+      const poulesState: JourneyStepState =
+        competitionStatus === 'registration_open'
+          ? 'locked'
+          : competitionStatus === 'rankings_locked' ||
+              competitionStatus === 'de_generated' ||
+              competitionStatus === 'finalised'
+            ? 'completed'
+            : 'active';
+
+      steps.push({
+        key: 'poules',
+        title: 'Poules',
+        subtitle: 'Generate pools, score bouts, and lock the poule phase.',
+        state: poulesState,
+        lockReason:
+          competitionStatus === 'registration_open'
+            ? 'Lock registration to start poules.'
+            : undefined,
+        onPress: () =>
+          router.push({
+            pathname: '/(tabs)/competitions/poules',
+            params: { competitionId: competition.id },
+          }),
+      });
+    }
+
+    const rankingsLockedByState = hasPoulesStage
+      ? competitionStatus === 'registration_open' || competitionStatus === 'registration_locked'
+      : competitionStatus === 'registration_open';
+
+    const rankingsState: JourneyStepState = rankingsLockedByState
+      ? 'locked'
+      : competitionStatus === 'de_generated' || competitionStatus === 'finalised'
+        ? 'completed'
+        : competitionStatus === 'rankings_locked'
+          ? 'completed'
+          : 'active';
+
+    steps.push({
+      key: 'rankings',
+      title: 'Rankings',
+      subtitle: 'Track standings and lock rankings for seeding.',
+      state: rankingsState,
+      lockReason: rankingsLockedByState
+        ? hasPoulesStage
+          ? 'Generate poules first to unlock rankings.'
+          : 'Lock registration first to unlock rankings.'
+        : undefined,
+      onPress: () =>
+        router.push({
+          pathname: '/(tabs)/competitions/rankings',
+          params: { competitionId: competition.id },
+        }),
+    });
+
+    if (hasDeStage) {
+      const deLockedByState =
+        competitionStatus === 'registration_open' ||
+        competitionStatus === 'registration_locked' ||
+        competitionStatus === 'poules_generated' ||
+        competitionStatus === 'poules_locked';
+
+      const deState: JourneyStepState =
+        competitionStatus === 'finalised'
+          ? 'completed'
+          : deLockedByState
+            ? 'locked'
+            : 'active';
+
+      steps.push({
+        key: 'de',
+        title: 'DE Tableau',
+        subtitle: 'Run elimination rounds through to the final.',
+        state: deState,
+        lockReason: deLockedByState
+          ? 'Lock rankings to unlock DE generation.'
+          : undefined,
+        onPress: () =>
+          router.push({
+            pathname: '/(tabs)/competitions/de-tableau',
+            params: { competitionId: competition.id },
+          }),
+      });
+    }
+
+    const finalisationState: JourneyStepState = overview.isReadOnly
+      ? 'completed'
+      : overview.canFinalise
+        ? 'active'
+        : 'locked';
+
+    steps.push({
+      key: 'finalisation',
+      title: 'Finalisation',
+      subtitle: 'Freeze the competition and move it to Past.',
+      state: finalisationState,
+      lockReason:
+        finalisationState === 'locked'
+          ? hasDeStage
+            ? 'Complete DE progression to unlock finalisation.'
+            : 'Lock rankings to unlock finalisation.'
+          : undefined,
+    });
+
+    return steps;
+  }, [overview, router]);
 
   if (loading) {
     return (
@@ -139,6 +320,57 @@ export default function CompetitionOverviewScreen() {
                     ...previous,
                     competition: result.data,
                     isReadOnly: result.data.status === 'finalised',
+                    canFinalise:
+                      result.data.status !== 'finalised' &&
+                      ((result.data.format === 'poules_only' &&
+                        result.data.status === 'rankings_locked') ||
+                        (result.data.format !== 'poules_only' &&
+                          result.data.status === 'de_generated')),
+                  }
+                : previous
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const onFinaliseCompetition = () => {
+    if (!overview || overview.role !== 'organiser' || !overview.canFinalise || finalising) {
+      return;
+    }
+
+    Alert.alert(
+      'Finalise competition?',
+      'This will freeze all competition edits and move it to Past. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Finalise',
+          style: 'destructive',
+          onPress: async () => {
+            setFinalising(true);
+            const result = await finaliseCompetition({
+              competitionId: overview.competition.id,
+            });
+            setFinalising(false);
+
+            if (!result.ok) {
+              setErrorText(result.message);
+              return;
+            }
+
+            analytics.capture('competition_finalised', {
+              competition_id: overview.competition.id,
+            });
+
+            setOverview((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    competition: result.data,
+                    isReadOnly: true,
+                    canFinalise: false,
                   }
                 : previous
             );
@@ -161,6 +393,12 @@ export default function CompetitionOverviewScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Competition Overview</Text>
+        <CompetitionRealtimeBanner
+          bannerText={realtimeBannerText}
+          correctionNotice={realtimeCorrectionNotice}
+          onRetry={retryRealtime}
+          onDismissCorrection={clearCorrectionNotice}
+        />
 
         <View style={styles.card}>
           <View style={styles.headerRow}>
@@ -241,57 +479,92 @@ export default function CompetitionOverviewScreen() {
           </View>
         ) : null}
 
-        <View style={styles.navGrid}>
-          <NavCard
-            title="Participants & Roles"
-            onPress={() =>
-              router.push({
-                pathname: '/(tabs)/competitions/participants-roles',
-                params: { competitionId: competition.id },
-              })
-            }
-          />
-          <NavCard
-            title="Poules"
-            onPress={() =>
-              router.push({
-                pathname: '/(tabs)/competitions/poules',
-                params: { competitionId: competition.id },
-              })
-            }
-          />
-          <NavCard
-            title="Rankings"
-            onPress={() =>
-              router.push({
-                pathname: '/(tabs)/competitions/rankings',
-                params: { competitionId: competition.id },
-              })
-            }
-          />
-          <NavCard
-            title="DE Tableau"
-            onPress={() =>
-              router.push({
-                pathname: '/(tabs)/competitions/de-tableau',
-                params: { competitionId: competition.id },
-              })
-            }
-          />
+        {overview.role === 'organiser' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Finalisation</Text>
+            <Text style={styles.progressText}>
+              Finalise freezes results and makes the competition read-only.
+            </Text>
+            <Pressable
+              onPress={onFinaliseCompetition}
+              disabled={!overview.canFinalise || finalising}
+              style={[
+                styles.finaliseButton,
+                (!overview.canFinalise || finalising) && styles.disabledButton,
+              ]}
+            >
+              {finalising ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.finaliseButtonText}>Finalise Competition</Text>
+              )}
+            </Pressable>
+            {!overview.canFinalise && !overview.isReadOnly ? (
+              <Text style={styles.finaliseHintText}>
+                Finalisation becomes available after rankings/DE completion.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Competition Journey</Text>
+          {journeySteps.map((step, index) => (
+            <View
+              key={step.key}
+              style={styles.journeyItem}
+            >
+              <Pressable
+                onPress={step.onPress}
+                disabled={!step.onPress}
+                style={[
+                  styles.journeyStepCard,
+                  step.state === 'completed' && styles.journeyStepCompleted,
+                  step.state === 'active' && styles.journeyStepActive,
+                  step.state === 'locked' && styles.journeyStepLocked,
+                ]}
+              >
+                <View style={styles.journeyStepHeader}>
+                  <Text style={styles.journeyStepTitle}>
+                    {index + 1}. {step.title}
+                  </Text>
+                  <View
+                    style={[
+                      styles.journeyStateBadge,
+                      step.state === 'completed' && styles.journeyStateBadgeCompleted,
+                      step.state === 'active' && styles.journeyStateBadgeActive,
+                      step.state === 'locked' && styles.journeyStateBadgeLocked,
+                    ]}
+                  >
+                    <Text style={styles.journeyStateBadgeText}>
+                      {step.state === 'completed'
+                        ? 'Completed'
+                        : step.state === 'active'
+                          ? 'Active'
+                          : 'Locked'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.journeyStepSubtitle}>{step.subtitle}</Text>
+                {step.lockReason ? (
+                  <Text style={styles.journeyStepLockReason}>{step.lockReason}</Text>
+                ) : null}
+                {step.onPress ? (
+                  <Text style={styles.journeyStepLink}>
+                    {step.state === 'locked' ? 'Preview Step' : 'Open Step'}
+                  </Text>
+                ) : null}
+              </Pressable>
+              {index < journeySteps.length - 1 ? (
+                <View style={styles.journeyArrowWrap}>
+                  <Text style={styles.journeyArrow}>↓</Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
         </View>
       </ScrollView>
     </View>
-  );
-}
-
-function NavCard({ title, onPress }: { title: string; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={styles.navCard}
-    >
-      <Text style={styles.navCardText}>{title}</Text>
-    </Pressable>
   );
 }
 
@@ -399,25 +672,85 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
-  navGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 2,
+  journeyItem: {
+    marginTop: 8,
   },
-  navCard: {
-    width: '48%',
-    minHeight: 70,
+  journeyStepCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#343434',
+    borderColor: '#3A3A3A',
     backgroundColor: '#191919',
-    justifyContent: 'center',
     paddingHorizontal: 12,
+    paddingVertical: 12,
   },
-  navCardText: {
+  journeyStepCompleted: {
+    borderColor: 'rgba(16,185,129,0.5)',
+    backgroundColor: 'rgba(16,185,129,0.12)',
+  },
+  journeyStepActive: {
+    borderColor: 'rgba(139,92,246,0.55)',
+    backgroundColor: 'rgba(139,92,246,0.14)',
+  },
+  journeyStepLocked: {
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1B1B1B',
+  },
+  journeyStepHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  journeyStepTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+  },
+  journeyStateBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  journeyStateBadgeCompleted: {
+    backgroundColor: '#10B981',
+  },
+  journeyStateBadgeActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  journeyStateBadgeLocked: {
+    backgroundColor: '#404040',
+  },
+  journeyStateBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  journeyStepSubtitle: {
+    color: '#D3D3D3',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  journeyStepLockReason: {
+    color: '#B9B9B9',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  journeyStepLink: {
+    color: '#E9D7FF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  journeyArrowWrap: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  journeyArrow: {
+    color: '#8B5CF6',
+    fontSize: 18,
     fontWeight: '700',
   },
   registrationButton: {
@@ -435,6 +768,26 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.45,
+  },
+  finaliseButton: {
+    borderRadius: 10,
+    marginTop: 10,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: '#A23A3A',
+    backgroundColor: 'rgba(239,68,68,0.26)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  finaliseButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  finaliseHintText: {
+    color: '#9D9D9D',
+    fontSize: 12,
+    marginTop: 8,
   },
   errorText: {
     color: '#FF7675',

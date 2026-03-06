@@ -1,4 +1,7 @@
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import {
+  BottomTabBarProps,
+  BottomTabNavigationOptions,
+} from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
@@ -9,6 +12,15 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { analytics } from '@/lib/analytics';
+
+type ExpoHrefOption = {
+  href?: string | { pathname: string; params?: Record<string, string> } | null;
+};
+
+const isHiddenByHref = (options: BottomTabNavigationOptions): boolean => {
+  const withHref = options as BottomTabNavigationOptions & ExpoHrefOption;
+  return withHref.href === null;
+};
 
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { height, width } = useWindowDimensions();
@@ -25,7 +37,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
         .filter(
           (route) =>
             !hiddenTabs.has(route.name) &&
-            descriptors[route.key]?.options?.href !== null
+            !isHiddenByHref(descriptors[route.key]?.options ?? {})
         )
         .map((route) => {
         const { options } = descriptors[route.key];

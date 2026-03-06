@@ -658,10 +658,11 @@ export default function NeutralMatchSummary() {
       const { data: matchData, error: matchError } = await postgrestSelectOne<{
         fencer_1_name: string | null;
         fencer_2_name: string | null;
+        weapon_type: string | null;
       }>(
         'match',
         {
-          select: 'fencer_1_name,fencer_2_name',
+          select: 'fencer_1_name,fencer_2_name,weapon_type',
           match_id: `eq.${matchId}`,
           limit: 1,
         },
@@ -681,8 +682,16 @@ export default function NeutralMatchSummary() {
       console.log('🔍 SCORE-BASED LEADING DEBUG - Final fencer names:', { finalFencer1Name, finalFencer2Name });
 
       // If sabre, reuse the already deduped/ordered progression to avoid duplicate/timestamp issues
-      const weaponType = matchData?.weapon_type || params.weaponType || '';
-      const isSabre = weaponType?.toLowerCase() === 'sabre' || weaponType?.toLowerCase() === 'saber';
+      const paramWeaponType =
+        typeof params.weaponType === 'string'
+          ? params.weaponType
+          : Array.isArray(params.weaponType)
+            ? (params.weaponType[0] || '')
+            : '';
+      const weaponType = matchData?.weapon_type || paramWeaponType;
+      const normalizedWeaponType = weaponType.toLowerCase();
+      const isSabre =
+        normalizedWeaponType === 'sabre' || normalizedWeaponType === 'saber';
       if (isSabre) {
         const progression = localMatchEvents.length > 0
           ? buildAnonymousProgressionFromEvents(localMatchEvents, matchData)

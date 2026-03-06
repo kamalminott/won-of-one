@@ -20,10 +20,10 @@ import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { goalService, matchService, userService } from '@/lib/database';
+import { isPlaceholderDisplayName, resolveAuthMetadataDisplayName } from '@/lib/displayName';
 import { subscriptionService } from '@/lib/subscriptionService';
 import { Goal, SimpleGoal, SimpleMatch } from '@/types/database';
 
-const FALLBACK_NAME_VALUES = new Set(['user', 'guest user', 'guest', 'unknown']);
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
 const PROFILE_CHECK_TIMEOUT_MS = 5000;
 const USER_NAME_WAIT_TIMEOUT_MS = 3000;
@@ -68,12 +68,7 @@ const safeRequest = async <T,>(
 };
 
 const isPlaceholderName = (name: string, email?: string | null) => {
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) return true;
-  if (FALLBACK_NAME_VALUES.has(normalized)) return true;
-  const emailPrefix = email?.split('@')[0]?.trim().toLowerCase();
-  if (emailPrefix && normalized === emailPrefix) return true;
-  return false;
+  return isPlaceholderDisplayName(name, email);
 };
 
 const hasFullNameParts = (name: string) => {
@@ -84,14 +79,7 @@ const hasFullNameParts = (name: string) => {
 const isProfilePromptDismissed = (value: unknown) => value === true || value === 'true';
 
 const getAuthMetadataName = (authUser?: { user_metadata?: Record<string, any> } | null) => {
-  if (!authUser?.user_metadata) return '';
-  const metadata = authUser.user_metadata;
-  return (
-    metadata.full_name ||
-    metadata.name ||
-    metadata.display_name ||
-    [metadata.given_name, metadata.family_name].filter(Boolean).join(' ')
-  );
+  return resolveAuthMetadataDisplayName(authUser);
 };
 
 const getMatchTimestamp = (match: SimpleMatch): number => {

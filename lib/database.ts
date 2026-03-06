@@ -1382,6 +1382,137 @@ export const competitionService = {
   },
 };
 
+export type ManualMatchInput = {
+  userId: string;
+  opponentName: string;
+  yourScore: number;
+  opponentScore: number;
+  matchType: 'training' | 'competition';
+  date: string;
+  time: string;
+  notes?: string;
+  weaponType?: string;
+  competitionId?: string | null;
+  phase?: 'POULE' | 'DE' | null;
+  deRound?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
+  fencer1Name?: string;
+  fencer2Name?: string;
+  accessToken?: string | null;
+};
+
+export type ManualMatchSaveErrorType =
+  | 'validation_error'
+  | 'auth_session_missing'
+  | 'network_error'
+  | 'timeout'
+  | 'fk_user_missing'
+  | 'db_constraint_violation'
+  | 'db_error'
+  | 'unknown_error';
+
+export type ManualMatchSaveError = {
+  type: ManualMatchSaveErrorType;
+  message: string;
+  retryable: boolean;
+  code?: string;
+  status?: number;
+  details?: string;
+};
+
+export type ManualMatchCreateResult = {
+  match: Match | null;
+  error: ManualMatchSaveError | null;
+};
+
+const mapManualMatchSaveError = (error: any): ManualMatchSaveError => {
+  const message = typeof error?.message === 'string' ? error.message : 'Failed to save match.';
+  const details = typeof error?.details === 'string' ? error.details : undefined;
+  const hint = typeof error?.hint === 'string' ? error.hint : undefined;
+  const code = typeof error?.code === 'string' ? error.code : undefined;
+  const status = typeof error?.status === 'number' ? error.status : undefined;
+  const haystack = `${message} ${details || ''} ${hint || ''}`.toLowerCase();
+
+  if (status === 401 || message === 'auth_session_missing') {
+    return {
+      type: 'auth_session_missing',
+      message: 'Your session is still syncing. Please try again in a moment.',
+      retryable: true,
+      code,
+      status,
+      details,
+    };
+  }
+
+  if (message === 'postgrest_timeout' || haystack.includes('timed out') || haystack.includes('timeout')) {
+    return {
+      type: 'timeout',
+      message: 'The request timed out while saving your match.',
+      retryable: true,
+      code,
+      status,
+      details,
+    };
+  }
+
+  if (
+    status === 0 ||
+    haystack.includes('network request failed') ||
+    haystack.includes('network error') ||
+    haystack.includes('connection')
+  ) {
+    return {
+      type: 'network_error',
+      message: 'Network connection issue while saving your match.',
+      retryable: true,
+      code,
+      status,
+      details,
+    };
+  }
+
+  if (code === '23503') {
+    return {
+      type: 'fk_user_missing',
+      message: 'Your profile is still syncing. Please try saving again.',
+      retryable: true,
+      code,
+      status,
+      details,
+    };
+  }
+
+  if (code === '23514') {
+    return {
+      type: 'db_constraint_violation',
+      message: 'This match has invalid values for required rules.',
+      retryable: false,
+      code,
+      status,
+      details,
+    };
+  }
+
+  if (code || status) {
+    return {
+      type: 'db_error',
+      message: message || 'Database error while saving match.',
+      retryable: status === undefined || status >= 500,
+      code,
+      status,
+      details,
+    };
+  }
+
+  return {
+    type: 'unknown_error',
+    message: message || 'Unexpected error while saving match.',
+    retryable: true,
+    code,
+    status,
+    details,
+  };
+};
+
 // Match-related functions
 export const matchService = {
   // Get recent matches for a user
@@ -1864,36 +1995,46 @@ export const matchService = {
     return data || [];
   },
 
-  // Create a manual match
-  async createManualMatch(matchData: {
-    userId: string;
-    opponentName: string;
-    yourScore: number;
-    opponentScore: number;
-    matchType: 'training' | 'competition';
-    date: string;
-    time: string;
-    notes?: string;
-    weaponType?: string;
-    competitionId?: string | null;
-    phase?: 'POULE' | 'DE' | null;
-    deRound?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
-    fencer1Name?: string;
-    fencer2Name?: string;
-    accessToken?: string | null;
-  }): Promise<Match | null> {
+  // Backwards-compatible helper for older call sites.
+  async createManualMatch(matchData: ManualMatchInput): Promise<Match | null> {
+    const result = await matchService.createManualMatchWithResult(matchData);
+    return result.match;
+  },
+
+  // Create a manual match with structured error details for reliable UX handling.
+  async createManualMatchWithResult(matchData: ManualMatchInput): Promise<ManualMatchCreateResult> {
     const { userId, opponentName, yourScore, opponentScore, matchType, date, time, notes, weaponType } = matchData;
-    
-    // Validate required fields
+
     if (!userId) {
       console.error('❌ Error: userId is required');
-      return null;
+      return {
+        match: null,
+        error: {
+          type: 'validation_error',
+          message: 'Missing user ID.',
+          retryable: false,
+        },
+      };
     }
 
-    const token = resolveAccessToken(matchData.accessToken);
+    let token = resolveAccessToken(matchData.accessToken);
+    if (!token) {
+      // Recover from brief auth hydration races during app foreground/login transitions.
+      const hydratedSession = await ensureAuthSession('createManualMatch');
+      token = hydratedSession?.access_token ?? resolveAccessToken(matchData.accessToken);
+    }
+
     if (!token) {
       console.warn('⚠️ createManualMatch blocked - auth session not ready', { userId });
-      return null;
+      return {
+        match: null,
+        error: {
+          type: 'auth_session_missing',
+          message: 'Auth session is not ready.',
+          retryable: true,
+          status: 401,
+        },
+      };
     }
 
     try {
@@ -1901,68 +2042,85 @@ export const matchService = {
     } catch (error) {
       console.warn('⚠️ Unable to ensure app_user record before match insert:', error);
     }
-    
+
     if (!opponentName || opponentName.trim() === '') {
       console.error('❌ Error: opponentName is required and cannot be empty');
-      return null;
+      return {
+        match: null,
+        error: {
+          type: 'validation_error',
+          message: 'Opponent name is required.',
+          retryable: false,
+        },
+      };
     }
-    
-    // Parse date and time with validation
+
     const [day, month, year] = date.split('/');
     const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
     const isPM = time.toUpperCase().includes('PM');
-    
-    // Validate parsed values
+
     const dayNum = parseInt(day);
     const monthNum = parseInt(month);
     const yearNum = parseInt(year);
     const hourNum = parseInt(hour);
     const minuteNum = parseInt(minute);
-    
+
     let eventDateTime: Date;
-    
-    // Check for invalid values
     if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) || isNaN(hourNum) || isNaN(minuteNum)) {
       console.error('❌ Invalid date/time values:', { day, month, year, hour, minute });
-      // Fallback to current date/time
       eventDateTime = new Date();
       console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
-    } else if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31 || hourNum < 0 || hourNum > 23 || minuteNum < 0 || minuteNum > 59) {
-      console.error('❌ Date/time values out of valid range:', { day: dayNum, month: monthNum, year: yearNum, hour: hourNum, minute: minuteNum });
-      // Fallback to current date/time
+    } else if (
+      monthNum < 1 ||
+      monthNum > 12 ||
+      dayNum < 1 ||
+      dayNum > 31 ||
+      hourNum < 0 ||
+      hourNum > 23 ||
+      minuteNum < 0 ||
+      minuteNum > 59
+    ) {
+      console.error('❌ Date/time values out of valid range:', {
+        day: dayNum,
+        month: monthNum,
+        year: yearNum,
+        hour: hourNum,
+        minute: minuteNum,
+      });
       eventDateTime = new Date();
       console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
     } else {
       let hour24 = hourNum;
       if (isPM && hour24 !== 12) hour24 += 12;
       if (!isPM && hour24 === 12) hour24 = 0;
-      
+
       eventDateTime = new Date(yearNum, monthNum - 1, dayNum, hour24, minuteNum);
-      
-      // Validate the Date object is valid
       if (isNaN(eventDateTime.getTime())) {
-        console.error('❌ Invalid Date object created from:', { day: dayNum, month: monthNum, year: yearNum, hour: hour24, minute: minuteNum });
-        // Fallback to current date/time
+        console.error('❌ Invalid Date object created from:', {
+          day: dayNum,
+          month: monthNum,
+          year: yearNum,
+          hour: hour24,
+          minute: minuteNum,
+        });
         eventDateTime = new Date();
         console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
       }
     }
-    
-    // Normalize weapon type to lowercase
+
     const normalizedWeaponType = weaponType ? weaponType.toLowerCase() : 'foil';
     const eventTimezone = resolveDeviceTimezone();
     const eventLocalDate = formatLocalDateKey(eventDateTime);
     const eventLocalTime = formatLocalTimeKey(eventDateTime);
-    
+
     const trimmedFencer1Name = matchData.fencer1Name?.trim() || '';
     const trimmedFencer2Name = matchData.fencer2Name?.trim() || '';
 
     const insertData = {
       user_id: userId,
-      fencer_1_name: trimmedFencer1Name || 'You', // Default to "You" if not provided
+      fencer_1_name: trimmedFencer1Name || 'You',
       fencer_2_name: trimmedFencer2Name || opponentName.trim(),
       final_score: yourScore,
-      // touches_against: opponentScore, // This is a generated column - will be calculated automatically
       event_date: eventDateTime.toISOString(),
       event_timezone: eventTimezone,
       event_local_date: eventLocalDate,
@@ -2010,39 +2168,52 @@ export const matchService = {
 
     let result = await insertManualMatchRecord();
 
-    if (result.error) {
-      if (result.error.code === '23503') {
-        console.warn('⚠️ Manual match insert failed due to missing user record; retrying once');
+    if (result.error && result.error.code === '23503') {
+      console.warn('⚠️ Manual match insert failed due to missing user record; retrying once');
+      try {
         await userService.ensureUserById(userId, undefined, token);
-        result = await insertManualMatchRecord();
-
-        if (result.error) {
-          console.error('❌ Error creating manual match after retry:', result.error);
-          return null;
-        }
-      } else {
-        console.error('❌ Error creating manual match:', result.error);
-        console.error('❌ Error details:', {
-          message: result.error.message,
-          details: result.error.details,
-          hint: result.error.hint,
-          code: result.error.code,
-          insertData: JSON.stringify(insertData, null, 2),
-        });
-        return null;
+      } catch (profileError) {
+        console.warn('⚠️ Retry ensureUserById failed before second insert attempt:', profileError);
       }
+      result = await insertManualMatchRecord();
+    }
+
+    if (result.error) {
+      console.error('❌ Error creating manual match:', result.error);
+      console.error('❌ Error details:', {
+        message: result.error.message,
+        details: result.error.details,
+        hint: result.error.hint,
+        code: result.error.code,
+        insertData: JSON.stringify(insertData, null, 2),
+      });
+      return {
+        match: null,
+        error: mapManualMatchSaveError(result.error),
+      };
     }
 
     const row = Array.isArray(result.data) ? result.data[0] ?? null : null;
-    console.log('✅ Manual match created successfully:', row);
-    if (row?.match_id) {
-      try {
-        await goalService.recalculateActiveGoalsForUser(userId, token);
-      } catch (goalError) {
-        console.error('❌ Error recalculating goals after manual match creation:', goalError);
-      }
+    if (!row?.match_id) {
+      console.error('❌ Manual match insert returned no match row.');
+      return {
+        match: null,
+        error: {
+          type: 'db_error',
+          message: 'No match record was returned after save.',
+          retryable: true,
+        },
+      };
     }
-    return row;
+
+    console.log('✅ Manual match created successfully:', row);
+    try {
+      await goalService.recalculateActiveGoalsForUser(userId, token);
+    } catch (goalError) {
+      console.error('❌ Error recalculating goals after manual match creation:', goalError);
+    }
+
+    return { match: row, error: null };
   },
 
   // Create a new match from fencing remote data

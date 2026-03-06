@@ -1,3 +1,4 @@
+import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ENABLE_RESULT_AGREEMENT,
@@ -12,10 +13,12 @@ import {
   setCompetitionMatchLiveScore,
   takeOverCompetitionMatchRemoteScoring,
 } from '@/lib/clubCompetitionService';
+import { runCompetitionWriteWithRetry } from '@/lib/competitionRetry';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { CompetitionMatchScoringData, CompetitionScoringMode } from '@/types/competition';
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -70,15 +73,19 @@ export default function ManualScoreEntryScreen() {
   const [saving, setSaving] = useState(false);
   const [updatingLiveScore, setUpdatingLiveScore] = useState(false);
   const [takingOver, setTakingOver] = useState(false);
+  const matchVersionRef = useRef('');
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showSpinner = true): Promise<string | null> => {
     if (!user?.id || !competitionId || !matchId) {
       setErrorText('Match context was not found.');
       setLoading(false);
-      return;
+      matchVersionRef.current = '';
+      return null;
     }
 
-    setLoading(true);
+    if (showSpinner) {
+      setLoading(true);
+    }
     setErrorText(null);
     setInfoText(null);
 
@@ -92,7 +99,8 @@ export default function ManualScoreEntryScreen() {
       setErrorText('You do not have access to this match.');
       setData(null);
       setLoading(false);
-      return;
+      matchVersionRef.current = '';
+      return null;
     }
 
     const requestedMode = routeMode ?? initial.match.scoring_mode ?? 'manual';
@@ -101,8 +109,11 @@ export default function ManualScoreEntryScreen() {
       (initial.match.scoring_mode !== 'remote' ||
         initial.match.status !== 'live' ||
         initial.match.authoritative_scorer_user_id !== user.id);
+    const isCompetitionReadOnly = initial.competition.status === 'finalised';
 
-    if (initial.match.status !== 'completed') {
+    if (isCompetitionReadOnly) {
+      setInfoText('Competition is finalised. This match is read-only.');
+    } else if (initial.match.status !== 'completed') {
       const preparation = await prepareCompetitionMatchScoring({
         matchId,
         mode: requestedMode,
@@ -134,7 +145,8 @@ export default function ManualScoreEntryScreen() {
       setErrorText('Match could not be loaded.');
       setData(null);
       setLoading(false);
-      return;
+      matchVersionRef.current = '';
+      return null;
     }
 
     const resolvedMode = refreshed.match.scoring_mode ?? requestedMode;
@@ -146,12 +158,38 @@ export default function ManualScoreEntryScreen() {
     setScoreBInput(
       refreshed.match.score_b != null ? String(refreshed.match.score_b) : ''
     );
+    const version = `${refreshed.competition.updated_at}:${refreshed.match.updated_at}:${refreshed.match.status}:${refreshed.match.score_a ?? ''}:${refreshed.match.score_b ?? ''}`;
+    matchVersionRef.current = version;
     setLoading(false);
+    return version;
   }, [competitionId, matchId, routeMode, user?.id]);
+
+  const {
+    bannerText: realtimeBannerText,
+    correctionNotice: realtimeCorrectionNotice,
+    clearCorrectionNotice,
+    retryNow: retryRealtime,
+  } = useCompetitionRealtime({
+    competitionId,
+    activeMatchId: matchId,
+    enabled: Boolean(user?.id && competitionId && matchId),
+    surface: 'manual',
+    onCompetitionEvent: () => {
+      void loadData(false);
+    },
+    onMatchEvent: () => {
+      void loadData(false);
+    },
+    onReconnectRefetch: async () => {
+      const before = matchVersionRef.current;
+      const after = await loadData(false);
+      return Boolean(after && after !== before);
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadData();
+      void loadData(true);
     }, [loadData])
   );
 
@@ -172,6 +210,7 @@ export default function ManualScoreEntryScreen() {
   const canEditRemoteScore =
     !!data &&
     scoringMode === 'remote' &&
+    data.competition.status !== 'finalised' &&
     data.match.status !== 'completed' &&
     data.isAuthoritativeScorer;
 
@@ -179,6 +218,7 @@ export default function ManualScoreEntryScreen() {
     saving ||
     loading ||
     !data ||
+    data.competition.status === 'finalised' ||
     data.match.status === 'completed' ||
     (scoringMode === 'remote' && !data.isAuthoritativeScorer);
 
@@ -227,12 +267,6 @@ export default function ManualScoreEntryScreen() {
     if (scoreA > touchLimit || scoreB > touchLimit) {
       return 'Score cannot exceed touch limit.';
     }
-    if (scoreA !== touchLimit && scoreB !== touchLimit) {
-      return `One fencer must reach ${touchLimit} touches.`;
-    }
-    if (scoreA >= touchLimit && scoreB >= touchLimit) {
-      return 'Losing score must be below touch limit.';
-    }
     return null;
   };
 
@@ -259,16 +293,34 @@ export default function ManualScoreEntryScreen() {
     setSaving(true);
     setErrorText(null);
 
-    const result = await completeCompetitionMatchScore({
-      matchId,
-      scoreA,
-      scoreB,
-      mode: scoringMode,
-    });
+    const execution = await runCompetitionWriteWithRetry(() =>
+      completeCompetitionMatchScore({
+        matchId,
+        scoreA,
+        scoreB,
+        mode: scoringMode,
+      })
+    );
+    const result = execution.result;
 
     setSaving(false);
     if (!result.ok) {
+      if (execution.exhausted) {
+        analytics.capture('competition_write_retry_exhausted', {
+          competition_id: competitionId,
+          match_id: matchId,
+          stage: data.match.stage,
+          operation: 'complete_match',
+          attempts: execution.attempts,
+        });
+      }
       setErrorText(result.message);
+      analytics.capture('competition_score_save_failed', {
+        competition_id: competitionId,
+        match_id: matchId,
+        stage: data.match.stage,
+        scoring_mode: scoringMode,
+      });
       return;
     }
 
@@ -298,15 +350,32 @@ export default function ManualScoreEntryScreen() {
     if (nextA === currentScoreA && nextB === currentScoreB) return;
 
     setUpdatingLiveScore(true);
-    const result = await setCompetitionMatchLiveScore({
-      matchId,
-      scoreA: nextA,
-      scoreB: nextB,
-    });
+    const execution = await runCompetitionWriteWithRetry(() =>
+      setCompetitionMatchLiveScore({
+        matchId,
+        scoreA: nextA,
+        scoreB: nextB,
+      })
+    );
+    const result = execution.result;
     setUpdatingLiveScore(false);
 
     if (!result.ok) {
+      if (execution.exhausted) {
+        analytics.capture('competition_write_retry_exhausted', {
+          competition_id: competitionId,
+          match_id: matchId,
+          stage: data.match.stage,
+          operation: 'set_live_score',
+          attempts: execution.attempts,
+        });
+      }
       setErrorText(result.message);
+      analytics.capture('competition_live_score_failed', {
+        competition_id: competitionId,
+        match_id: matchId,
+        stage: data.match.stage,
+      });
       return;
     }
 
@@ -338,11 +407,28 @@ export default function ManualScoreEntryScreen() {
           text: 'Take Over',
           onPress: async () => {
             setTakingOver(true);
-            const result = await takeOverCompetitionMatchRemoteScoring({ matchId });
+            const execution = await runCompetitionWriteWithRetry(() =>
+              takeOverCompetitionMatchRemoteScoring({ matchId })
+            );
+            const result = execution.result;
             setTakingOver(false);
 
             if (!result.ok) {
+              if (execution.exhausted) {
+                analytics.capture('competition_write_retry_exhausted', {
+                  competition_id: competitionId,
+                  match_id: matchId,
+                  stage: data.match.stage,
+                  operation: 'take_over_remote',
+                  attempts: execution.attempts,
+                });
+              }
               setErrorText(result.message);
+              analytics.capture('competition_takeover_failed', {
+                competition_id: competitionId,
+                match_id: matchId,
+                stage: data.match.stage,
+              });
               return;
             }
 
@@ -350,7 +436,7 @@ export default function ManualScoreEntryScreen() {
               competition_id: competitionId,
               match_id: matchId,
             });
-            await loadData();
+            await loadData(false);
           },
         },
       ]
@@ -401,6 +487,12 @@ export default function ManualScoreEntryScreen() {
           <Text style={styles.title}>
             {scoringMode === 'remote' ? 'Remote Scoring' : 'Manual Score Entry'}
           </Text>
+          <CompetitionRealtimeBanner
+            bannerText={realtimeBannerText}
+            correctionNotice={realtimeCorrectionNotice}
+            onRetry={retryRealtime}
+            onDismissCorrection={clearCorrectionNotice}
+          />
           <Text style={styles.subtitle}>
             {fencerAName} vs {fencerBName}
           </Text>
@@ -474,13 +566,21 @@ export default function ManualScoreEntryScreen() {
                 label={fencerAName}
                 value={scoreAInput}
                 onChangeText={setScoreAInput}
-                editable={!saving && data.match.status !== 'completed'}
+                editable={
+                  !saving &&
+                  data.competition.status !== 'finalised' &&
+                  data.match.status !== 'completed'
+                }
               />
               <ScoreInput
                 label={fencerBName}
                 value={scoreBInput}
                 onChangeText={setScoreBInput}
-                editable={!saving && data.match.status !== 'completed'}
+                editable={
+                  !saving &&
+                  data.competition.status !== 'finalised' &&
+                  data.match.status !== 'completed'
+                }
               />
 
               <Pressable
