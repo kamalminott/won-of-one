@@ -1,3 +1,4 @@
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
@@ -22,6 +23,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -44,6 +46,7 @@ const sanitizeCode = (value: string): string => {
 export default function JoinCompetitionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user, userName } = useAuth();
   const params = useLocalSearchParams<{
     competition_id?: string;
@@ -113,6 +116,8 @@ export default function JoinCompetitionScreen() {
   }, [deepLinkJoinCode]);
 
   const canJoinByCode = useMemo(() => code.length === 6 && !submittingCode, [code, submittingCode]);
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 20;
 
   const navigateToOverview = useCallback((competitionId: string) => {
     router.replace({
@@ -377,12 +382,18 @@ export default function JoinCompetitionScreen() {
             styles.content,
             {
               paddingTop: insets.top + 12,
-              paddingBottom: insets.bottom + 20,
+              paddingBottom: contentBottomPadding,
             },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.backRow}>
+            <BackButton
+              onPress={() => router.replace('/(tabs)/competitions')}
+              style={styles.backIconButton}
+            />
+          </View>
           <Text style={styles.title}>Join Competition</Text>
           <Text style={styles.subtitle}>
             Enter the 6-digit code or scan a QR invite to join.
@@ -442,6 +453,18 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 16,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  backIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1F1F1F',
   },
   title: {
     color: '#FFFFFF',

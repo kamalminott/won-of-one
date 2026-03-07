@@ -1,4 +1,5 @@
 import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ENABLE_RESULT_AGREEMENT,
@@ -30,6 +31,7 @@ import {
   Text,
   TextInput,
   ToastAndroid,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,6 +52,7 @@ const showSuccessToast = (message: string) => {
 export default function ManualScoreEntryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const params = useLocalSearchParams<{
     competitionId?: string;
@@ -466,6 +469,8 @@ export default function ManualScoreEntryScreen() {
   }
 
   const authoritativeName = data.authoritativeScorer?.display_name ?? 'Another user';
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 20;
 
   return (
     <View style={styles.container}>
@@ -478,12 +483,18 @@ export default function ManualScoreEntryScreen() {
             styles.content,
             {
               paddingTop: insets.top + 12,
-              paddingBottom: insets.bottom + 20,
+              paddingBottom: contentBottomPadding,
             },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.backRow}>
+            <BackButton
+              onPress={navigateBackToSource}
+              style={styles.backIconButton}
+            />
+          </View>
           <Text style={styles.title}>
             {scoringMode === 'remote' ? 'Remote Scoring' : 'Manual Score Entry'}
           </Text>
@@ -689,6 +700,18 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 16,
     gap: 12,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  backIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1F1F1F',
   },
   title: {
     color: '#FFFFFF',

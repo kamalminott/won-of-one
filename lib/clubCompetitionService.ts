@@ -1037,6 +1037,9 @@ export const moveCompetitionPoolAssignment = async (input: {
     if (message.includes('not_allowed')) {
       return { ok: false, message: 'Only organisers can edit poule assignments.' };
     }
+    if (message.includes('competition_not_found')) {
+      return { ok: false, message: 'Competition was not found.' };
+    }
     if (message.includes('assignments_editable_only_before_poules_locked')) {
       return { ok: false, message: 'Assignments can only be edited before poules are locked.' };
     }
@@ -1048,6 +1051,13 @@ export const moveCompetitionPoolAssignment = async (input: {
     }
     if (message.includes('target_pool_invalid')) {
       return { ok: false, message: 'Target poule is invalid.' };
+    }
+    if (
+      message.includes('duplicate key') ||
+      message.includes('unique constraint') ||
+      message.includes('club_pool_assignment_pool_id_position_key')
+    ) {
+      return { ok: false, message: 'Assignment order conflicted. Pull to refresh and try again.' };
     }
     return { ok: false, message: 'Could not update assignment right now.' };
   }

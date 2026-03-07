@@ -1,4 +1,5 @@
 import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_MATCH_STATUS_COLORS,
@@ -31,6 +32,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,6 +47,7 @@ type OverrideState = {
 export default function DeTableauScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const params = useLocalSearchParams<{ competitionId?: string }>();
   const competitionId = typeof params.competitionId === 'string' ? params.competitionId : '';
@@ -138,6 +141,8 @@ export default function DeTableauScreen() {
     setRefreshing(true);
     await loadData(false);
   };
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 20;
 
   const navigateToScoring = (
     match: ClubCompetitionMatchRecord,
@@ -417,7 +422,7 @@ export default function DeTableauScreen() {
           styles.content,
           {
             paddingTop: insets.top + 12,
-            paddingBottom: insets.bottom + 20,
+            paddingBottom: contentBottomPadding,
           },
         ]}
         refreshControl={
@@ -429,6 +434,21 @@ export default function DeTableauScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.backRow}>
+          <BackButton
+            onPress={() => {
+              if (!competitionId) {
+                router.replace('/(tabs)/competitions');
+                return;
+              }
+              router.replace({
+                pathname: '/(tabs)/competitions/overview',
+                params: { competitionId },
+              });
+            }}
+            style={styles.backIconButton}
+          />
+        </View>
         <Text style={styles.title}>DE Tableau</Text>
         <CompetitionRealtimeBanner
           bannerText={realtimeBannerText}
@@ -704,6 +724,18 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 16,
     gap: 12,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  backIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1F1F1F',
   },
   title: {
     color: '#FFFFFF',

@@ -1,5 +1,6 @@
 import { CompetitionQrCode } from '@/components/CompetitionQrCode';
 import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanner';
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_ROLE_LABELS,
@@ -392,6 +393,12 @@ export default function CompetitionOverviewScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.backRow}>
+          <BackButton
+            onPress={() => router.replace('/(tabs)/competitions')}
+            style={styles.backIconButton}
+          />
+        </View>
         <Text style={styles.title}>Competition Overview</Text>
         <CompetitionRealtimeBanner
           bannerText={realtimeBannerText}
@@ -581,6 +588,18 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 16,
     gap: 12,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  backIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1F1F1F',
   },
   title: {
     color: '#FFFFFF',

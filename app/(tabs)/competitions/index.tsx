@@ -19,6 +19,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,6 +46,7 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<
 export default function CompetitionsHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
 
   const [activeCompetitions, setActiveCompetitions] = useState<CompetitionSummary[]>([]);
@@ -257,6 +259,8 @@ export default function CompetitionsHubScreen() {
 
   const hasActive = activeCompetitions.length > 0;
   const hasPast = pastCompetitions.length > 0;
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 16;
 
   return (
     <View style={styles.container}>
@@ -265,7 +269,7 @@ export default function CompetitionsHubScreen() {
           styles.content,
           {
             paddingTop: insets.top + 8,
-            paddingBottom: insets.bottom + 16,
+            paddingBottom: contentBottomPadding,
           },
         ]}
         refreshControl={

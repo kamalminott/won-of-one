@@ -1,3 +1,4 @@
+import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_FORMAT_LABELS,
@@ -20,6 +21,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function CreateCompetitionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user, userName } = useAuth();
 
   const [name, setName] = useState('');
@@ -38,6 +41,8 @@ export default function CreateCompetitionScreen() {
 
   const nameLength = useMemo(() => name.trim().length, [name]);
   const canSubmit = nameLength >= 2 && !submitting;
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 20;
   const competitionDisplayName = useMemo(
     () =>
       resolveCompetitionDisplayName({
@@ -105,12 +110,18 @@ export default function CreateCompetitionScreen() {
             styles.content,
             {
               paddingTop: insets.top + 12,
-              paddingBottom: insets.bottom + 20,
+              paddingBottom: contentBottomPadding,
             },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.backRow}>
+            <BackButton
+              onPress={() => router.replace('/(tabs)/competitions')}
+              style={styles.backIconButton}
+            />
+          </View>
           <Text style={styles.title}>Create Competition</Text>
           <Text style={styles.subtitle}>
             Set up your event, then share the join code or QR from the overview.
@@ -230,6 +241,18 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 16,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  backIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#1F1F1F',
   },
   title: {
     color: '#FFFFFF',
