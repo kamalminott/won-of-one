@@ -16,6 +16,7 @@ export default function CompetitionsLayout() {
       <Stack.Screen name="poules" />
       <Stack.Screen name="rankings" />
       <Stack.Screen name="de-tableau" />
+      <Stack.Screen name="final-standings" />
       <Stack.Screen name="manual-score-entry" />
     </Stack>
   );

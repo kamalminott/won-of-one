@@ -383,7 +383,7 @@ export default function ParticipantsAndRolesScreen() {
             return (
               <View
                 key={participant.id}
-                style={styles.participantRow}
+                style={[styles.participantRow, participant.isSelf && styles.participantRowSelf]}
               >
                 <View style={styles.participantIdentity}>
                   <View style={styles.avatarCircle}>
@@ -392,10 +392,14 @@ export default function ParticipantsAndRolesScreen() {
                     </Text>
                   </View>
                   <View style={styles.nameColumn}>
-                    <Text style={styles.participantName}>
-                      {participant.display_name}
-                      {participant.isSelf ? ' (You)' : ''}
-                    </Text>
+                    <View style={styles.participantNameRow}>
+                      <Text style={styles.participantName}>{participant.display_name}</Text>
+                      {participant.isSelf ? (
+                        <View style={styles.selfBadge}>
+                          <Text style={styles.selfBadgeText}>You</Text>
+                        </View>
+                      ) : null}
+                    </View>
                     <View style={styles.badgesRow}>
                       <Badge
                         text={COMPETITION_ROLE_LABELS[participant.role]}
@@ -623,6 +627,10 @@ const styles = StyleSheet.create({
     borderColor: '#2D2D2D',
     padding: 10,
   },
+  participantRowSelf: {
+    borderColor: 'rgba(139,92,246,0.7)',
+    backgroundColor: 'rgba(139,92,246,0.1)',
+  },
   participantIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -644,11 +652,30 @@ const styles = StyleSheet.create({
   nameColumn: {
     flex: 1,
   },
+  participantNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
   participantName: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 6,
+    flexShrink: 1,
+  },
+  selfBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.45)',
+    backgroundColor: 'rgba(200,166,255,0.18)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  selfBadgeText: {
+    color: '#EBD8FF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   badgesRow: {
     flexDirection: 'row',

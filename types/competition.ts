@@ -205,6 +205,8 @@ export interface CompetitionDeMatchView {
   match: ClubCompetitionMatchRecord;
   fencerA: CompetitionParticipantView | null;
   fencerB: CompetitionParticipantView | null;
+  fencerASeedRank: number | null;
+  fencerBSeedRank: number | null;
   canScore: boolean;
   canOverride: boolean;
   canReset: boolean;
@@ -221,6 +223,25 @@ export interface CompetitionDeTableauData {
   currentUserRole: CompetitionRole;
   rounds: CompetitionDeRoundView[];
   canGenerateDe: boolean;
+}
+
+export type CompetitionFinalStandingMedal = 'gold' | 'silver' | 'bronze' | null;
+
+export interface CompetitionFinalStandingEntry {
+  participant: CompetitionParticipantView;
+  position: number | null;
+  positionLabel: string;
+  medal: CompetitionFinalStandingMedal;
+  seedRank: number | null;
+  deExitRoundLabel: string | null;
+  isPending: boolean;
+}
+
+export interface CompetitionFinalStandingsData {
+  competition: ClubCompetitionRecord;
+  currentUserRole: CompetitionRole;
+  standings: CompetitionFinalStandingEntry[];
+  isProvisional: boolean;
 }
 
 export interface JoinCompetitionQrPayload {

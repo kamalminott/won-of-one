@@ -312,6 +312,14 @@ export default function PoulesScreen() {
     return map;
   }, [selectedPool]);
 
+  const selectedPoolParticipantById = useMemo(() => {
+    const map = new Map<string, CompetitionPouleParticipant['participant']>();
+    selectedPool?.participants.forEach((entry) => {
+      map.set(entry.participant.id, entry.participant);
+    });
+    return map;
+  }, [selectedPool]);
+
   const poolLabelById = useMemo(() => {
     const map = new Map<string, string>();
     data?.pools.forEach((pool) => {
@@ -934,10 +942,17 @@ export default function PoulesScreen() {
                       {selectedPoolParticipantsOrdered.map((entry, rowIndex) => (
                         <View
                           key={entry.assignment.id}
-                          style={styles.tableRow}
+                          style={[styles.tableRow, entry.participant.isSelf && styles.tableRowSelf]}
                         >
-                          <Text style={[styles.bodyCell, styles.formalNameCell]}>
+                          <Text
+                            style={[
+                              styles.bodyCell,
+                              styles.formalNameCell,
+                              entry.participant.isSelf && styles.bodyCellSelf,
+                            ]}
+                          >
                             {rowIndex + 1}. {getShortName(entry.participant.display_name)}
+                            {entry.participant.isSelf ? ' • You' : ''}
                           </Text>
                           {selectedPoolParticipantsOrdered.map((opponent) => {
                             if (opponent.participant.id === entry.participant.id) {
@@ -1018,6 +1033,7 @@ export default function PoulesScreen() {
                           disabled={!!activeActionKey || !!assignmentDrag}
                           style={[
                             styles.editorRow,
+                            entry.participant.isSelf && styles.editorRowSelf,
                             isDragging && styles.editorRowDragging,
                             isSamePoolDropTarget && !isDragging && styles.editorRowDropTarget,
                           ]}
@@ -1026,6 +1042,7 @@ export default function PoulesScreen() {
                             <Text style={styles.dragHandle}>☰</Text>
                             <Text style={styles.editorName}>
                               {entry.assignment.position}. {entry.participant.display_name}
+                              {entry.participant.isSelf ? ' • You' : ''}
                             </Text>
                           </View>
                           <Text style={styles.editorDragHint}>Press and hold to drag</Text>
@@ -1066,17 +1083,36 @@ export default function PoulesScreen() {
                       const canOpenMatch =
                         data.competition.status !== 'finalised' &&
                         (match.status === 'pending' || match.status === 'live');
+                      const isFencerASelf = Boolean(
+                        match.fencer_a_participant_id &&
+                          selectedPoolParticipantById.get(match.fencer_a_participant_id)?.isSelf
+                      );
+                      const isFencerBSelf = Boolean(
+                        match.fencer_b_participant_id &&
+                          selectedPoolParticipantById.get(match.fencer_b_participant_id)?.isSelf
+                      );
+                      const isUserMatch = isFencerASelf || isFencerBSelf;
 
                       return (
                         <Pressable
                           key={match.id}
                           onPress={() => onPressMatch(match)}
                           disabled={!canOpenMatch}
-                          style={[styles.matchRow, !canOpenMatch && styles.matchRowDisabled]}
+                          style={[
+                            styles.matchRow,
+                            isUserMatch && styles.matchRowSelf,
+                            !canOpenMatch && styles.matchRowDisabled,
+                          ]}
                         >
                           <View style={styles.matchInfo}>
                             <Text style={styles.matchText}>
-                              {fencerA} vs {fencerB}
+                              <Text style={[styles.matchFencerText, isFencerASelf && styles.matchFencerTextSelf]}>
+                                {fencerA}
+                              </Text>
+                              {' vs '}
+                              <Text style={[styles.matchFencerText, isFencerBSelf && styles.matchFencerTextSelf]}>
+                                {fencerB}
+                              </Text>
                             </Text>
                             <View
                               style={[
@@ -1385,6 +1421,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 10,
   },
+  tableRowSelf: {
+    backgroundColor: 'rgba(139,92,246,0.1)',
+  },
   tableHeaderRow: {
     backgroundColor: '#1F1F1F',
   },
@@ -1401,6 +1440,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  bodyCellSelf: {
+    color: '#EBD8FF',
+    fontWeight: '700',
   },
   formalNameCell: {
     width: 210,
@@ -1456,6 +1499,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#171717',
     padding: 10,
     gap: 8,
+  },
+  editorRowSelf: {
+    borderColor: 'rgba(139,92,246,0.62)',
+    backgroundColor: 'rgba(139,92,246,0.1)',
   },
   editorRowTop: {
     flexDirection: 'row',
@@ -1523,6 +1570,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 8,
   },
+  matchRowSelf: {
+    borderColor: 'rgba(139,92,246,0.62)',
+    backgroundColor: 'rgba(139,92,246,0.08)',
+  },
   matchRowDisabled: {
     opacity: 0.72,
   },
@@ -1537,6 +1588,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  matchFencerText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  matchFencerTextSelf: {
+    color: '#EBD8FF',
+    fontWeight: '800',
   },
   matchStatusBadge: {
     borderRadius: 999,

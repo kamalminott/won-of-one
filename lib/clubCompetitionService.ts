@@ -7,6 +7,9 @@ import type {
   CompetitionDeTableauData,
   CompetitionDeMatchView,
   CompetitionDeRoundView,
+  CompetitionFinalStandingsData,
+  CompetitionFinalStandingEntry,
+  CompetitionFinalStandingMedal,
   ClubPoolAssignmentRecord,
   ClubPoolRecord,
   CompetitionFormat,
@@ -28,6 +31,7 @@ const CLUB_COMPETITION_PARTICIPANT_TABLE = 'club_competition_participant';
 const CLUB_POOL_TABLE = 'club_pool';
 const CLUB_POOL_ASSIGNMENT_TABLE = 'club_pool_assignment';
 const CLUB_COMPETITION_MATCH_TABLE = 'club_competition_match';
+const CLUB_COMPETITION_RANKING_TABLE = 'club_competition_ranking';
 
 const JOINABLE_STATUSES = new Set(['registration_open', 'finalised']);
 const WITHDRAWAL_EDITABLE_STATUSES = new Set([
@@ -302,6 +306,26 @@ const isDeRoundDependentStarted = (
     nextMatch.score_b != null ||
     nextMatch.winner_participant_id != null
   );
+};
+
+const getPlacementBaseFromRoundLabel = (roundLabel: string | null | undefined): number | null => {
+  if (!roundLabel) return null;
+  if (roundLabel === 'F') return 2;
+  if (roundLabel === 'SF') return 3;
+  if (roundLabel === 'QF') return 5;
+
+  const match = /^L(\d+)$/.exec(roundLabel);
+  if (!match) return null;
+  const tableSize = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(tableSize) || tableSize <= 1) return null;
+  return Math.floor(tableSize / 2) + 1;
+};
+
+const getMedalForPosition = (position: number | null): CompetitionFinalStandingMedal => {
+  if (position === 1) return 'gold';
+  if (position === 2) return 'silver';
+  if (position === 3) return 'bronze';
+  return null;
 };
 
 const resolveCompetitionForJoin = async (
@@ -1318,6 +1342,11 @@ export const getCompetitionDeTableauData = async (input: {
     return null;
   }
 
+  const { data: rankings } = await supabase
+    .from(CLUB_COMPETITION_RANKING_TABLE)
+    .select('participant_id, rank')
+    .eq('competition_id', input.competitionId);
+
   const participantViews = (participants as ClubCompetitionParticipantRecord[]).map(
     (participant) => ({
       ...participant,
@@ -1326,6 +1355,12 @@ export const getCompetitionDeTableauData = async (input: {
   );
   const participantById = new Map(
     participantViews.map((participant) => [participant.id, participant])
+  );
+  const seedRankByParticipantId = new Map(
+    ((rankings ?? []) as { participant_id: string; rank: number }[]).map((row) => [
+      row.participant_id,
+      row.rank,
+    ])
   );
 
   const matchRows = matches as ClubCompetitionMatchRecord[];
@@ -1347,6 +1382,8 @@ export const getCompetitionDeTableauData = async (input: {
       match,
       fencerA,
       fencerB,
+      fencerASeedRank: fencerA ? seedRankByParticipantId.get(fencerA.id) ?? null : null,
+      fencerBSeedRank: fencerB ? seedRankByParticipantId.get(fencerB.id) ?? null : null,
       canScore:
         !overview.isReadOnly &&
         !!fencerA &&
@@ -1400,6 +1437,191 @@ export const getCompetitionDeTableauData = async (input: {
     currentUserRole: overview.role,
     rounds,
     canGenerateDe,
+  };
+};
+
+export const getCompetitionFinalStandingsData = async (input: {
+  userId: string;
+  competitionId: string;
+}): Promise<CompetitionFinalStandingsData | null> => {
+  const overview = await getCompetitionOverviewData(input);
+  if (!overview) {
+    return null;
+  }
+
+  const { data: rankingRowsRaw, error: rankingError } = await supabase.rpc(
+    'fetch_club_competition_rankings',
+    {
+      p_competition_id: input.competitionId,
+    }
+  );
+
+  if (rankingError) {
+    return null;
+  }
+
+  const rankingRows = (Array.isArray(rankingRowsRaw) ? rankingRowsRaw : []) as RankingRpcRow[];
+  const seedRankByParticipantId = new Map<string, number>();
+  rankingRows.forEach((row) => {
+    seedRankByParticipantId.set(row.participant_id, row.rank);
+  });
+
+  const { data: participantsRaw, error: participantsError } = await supabase
+    .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
+    .select('*')
+    .eq('competition_id', input.competitionId);
+
+  if (participantsError || !participantsRaw) {
+    return null;
+  }
+
+  const participants = (participantsRaw as ClubCompetitionParticipantRecord[]).map(
+    (participant) => ({
+      ...participant,
+      isSelf: participant.user_id === input.userId,
+    })
+  );
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+
+  const { data: deMatchesRaw, error: deMatchesError } = await supabase
+    .from(CLUB_COMPETITION_MATCH_TABLE)
+    .select('*')
+    .eq('competition_id', input.competitionId)
+    .eq('stage', 'de');
+
+  if (deMatchesError) {
+    return null;
+  }
+
+  const deMatches = (deMatchesRaw ?? []) as ClubCompetitionMatchRecord[];
+  const deMatchCount = deMatches.length;
+  const deLoserPlacementByParticipantId = new Map<string, { position: number; roundLabel: string }>();
+  let championParticipantId: string | null = null;
+  let finalistLoserParticipantId: string | null = null;
+
+  deMatches.forEach((match) => {
+    if (
+      match.status !== 'completed' ||
+      !match.fencer_a_participant_id ||
+      !match.fencer_b_participant_id ||
+      !match.winner_participant_id
+    ) {
+      return;
+    }
+
+    const loserParticipantId =
+      match.winner_participant_id === match.fencer_a_participant_id
+        ? match.fencer_b_participant_id
+        : match.fencer_a_participant_id;
+
+    const placementBase = getPlacementBaseFromRoundLabel(match.round_label ?? null);
+    if (placementBase != null) {
+      const existing = deLoserPlacementByParticipantId.get(loserParticipantId);
+      if (!existing || placementBase < existing.position) {
+        deLoserPlacementByParticipantId.set(loserParticipantId, {
+          position: placementBase,
+          roundLabel: match.round_label ?? '',
+        });
+      }
+    }
+
+    if (match.round_label === 'F') {
+      championParticipantId = match.winner_participant_id;
+      finalistLoserParticipantId = loserParticipantId;
+    }
+  });
+
+  const rankingOrderedParticipants = rankingRows
+    .map((row) => participantById.get(row.participant_id))
+    .filter((participant): participant is NonNullable<typeof participant> => Boolean(participant));
+  const rankingOrderedIds = new Set(rankingOrderedParticipants.map((participant) => participant.id));
+  const appendedParticipants = participants
+    .filter((participant) => !rankingOrderedIds.has(participant.id))
+    .sort((a, b) => a.display_name.localeCompare(b.display_name));
+  const orderedParticipants = [...rankingOrderedParticipants, ...appendedParticipants];
+
+  const standings: CompetitionFinalStandingEntry[] = orderedParticipants.map((participant) => {
+    const seedRank = seedRankByParticipantId.get(participant.id) ?? null;
+    let position: number | null = null;
+    let positionLabel = 'TBD';
+    let deExitRoundLabel: string | null = null;
+    let isPending = false;
+
+    if (participant.status === 'dns') {
+      positionLabel = 'DNS';
+    } else if (participant.status === 'withdrawn' && deMatchCount === 0) {
+      positionLabel = 'WD';
+    } else if (overview.competition.format === 'poules_only' || deMatchCount === 0) {
+      if (seedRank != null) {
+        position = seedRank;
+        positionLabel = `${seedRank}`;
+      } else if (participant.status === 'withdrawn') {
+        positionLabel = 'WD';
+      } else {
+        positionLabel = '-';
+      }
+    } else if (participant.id === championParticipantId) {
+      position = 1;
+      positionLabel = '1';
+      deExitRoundLabel = 'Champion';
+    } else if (participant.id === finalistLoserParticipantId) {
+      position = 2;
+      positionLabel = '2';
+      deExitRoundLabel = 'F';
+    } else {
+      const loserPlacement = deLoserPlacementByParticipantId.get(participant.id);
+      if (loserPlacement) {
+        position = loserPlacement.position;
+        positionLabel = `${loserPlacement.position}`;
+        deExitRoundLabel = loserPlacement.roundLabel;
+      } else if (participant.status === 'withdrawn') {
+        positionLabel = 'WD';
+      } else {
+        isPending = true;
+        positionLabel = 'TBD';
+      }
+    }
+
+    return {
+      participant,
+      position,
+      positionLabel,
+      medal: getMedalForPosition(position),
+      seedRank,
+      deExitRoundLabel,
+      isPending,
+    };
+  });
+
+  standings.sort((a, b) => {
+    const category = (entry: CompetitionFinalStandingEntry): number => {
+      if (entry.position != null) return 0;
+      if (entry.isPending) return 1;
+      if (entry.participant.status === 'withdrawn') return 2;
+      if (entry.participant.status === 'dns') return 3;
+      return 4;
+    };
+    const categoryDiff = category(a) - category(b);
+    if (categoryDiff !== 0) return categoryDiff;
+
+    if (a.position != null && b.position != null && a.position !== b.position) {
+      return a.position - b.position;
+    }
+
+    if (a.seedRank != null && b.seedRank != null && a.seedRank !== b.seedRank) {
+      return a.seedRank - b.seedRank;
+    }
+
+    if (a.seedRank != null && b.seedRank == null) return -1;
+    if (a.seedRank == null && b.seedRank != null) return 1;
+    return a.participant.display_name.localeCompare(b.participant.display_name);
+  });
+
+  return {
+    competition: overview.competition,
+    currentUserRole: overview.role,
+    standings,
+    isProvisional: overview.competition.status !== 'finalised',
   };
 };
 

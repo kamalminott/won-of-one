@@ -302,15 +302,25 @@ export default function RankingsScreen() {
           ) : (
             data.rankings.map((entry) => {
               const { ranking, participant } = entry;
+              const isSelf = participant.isSelf;
               return (
                 <View
                   key={participant.id}
-                  style={styles.row}
+                  style={[styles.row, isSelf && styles.rowSelf]}
                 >
                   <View style={styles.rowLeft}>
                     <Text style={styles.rankValue}>#{ranking.rank}</Text>
                     <View>
-                      <Text style={styles.nameText}>{participant.display_name}</Text>
+                      <View style={styles.nameRow}>
+                        <Text style={[styles.nameText, isSelf && styles.nameTextSelf]}>
+                          {participant.display_name}
+                        </Text>
+                        {isSelf ? (
+                          <View style={styles.selfBadge}>
+                            <Text style={styles.selfBadgeText}>You</Text>
+                          </View>
+                        ) : null}
+                      </View>
                       <Text style={styles.subMetaText}>
                         W {ranking.wins} • L {ranking.losses} • IND {ranking.indicator}
                       </Text>
@@ -474,6 +484,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  rowSelf: {
+    borderColor: 'rgba(139,92,246,0.65)',
+    backgroundColor: 'rgba(139,92,246,0.1)',
+  },
   rowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -494,6 +508,27 @@ const styles = StyleSheet.create({
   nameText: {
     color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  nameTextSelf: {
+    color: '#EBD8FF',
+  },
+  selfBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.45)',
+    backgroundColor: 'rgba(200,166,255,0.18)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  selfBadgeText: {
+    color: '#EBD8FF',
+    fontSize: 10,
     fontWeight: '700',
   },
   subMetaText: {

@@ -233,6 +233,29 @@ export default function CompetitionOverviewScreen() {
             params: { competitionId: competition.id },
           }),
       });
+
+      const finalStandingsState: JourneyStepState =
+        competitionStatus === 'finalised'
+          ? 'completed'
+          : competitionStatus === 'de_generated'
+            ? 'active'
+            : 'locked';
+
+      steps.push({
+        key: 'final-standings',
+        title: 'Final Standings',
+        subtitle: 'See final placements with 2 bronze medalists.',
+        state: finalStandingsState,
+        lockReason:
+          finalStandingsState === 'locked'
+            ? 'Generate DE to unlock final standings.'
+            : undefined,
+        onPress: () =>
+          router.push({
+            pathname: '/(tabs)/competitions/final-standings',
+            params: { competitionId: competition.id },
+          }),
+      });
     }
 
     const finalisationState: JourneyStepState = overview.isReadOnly

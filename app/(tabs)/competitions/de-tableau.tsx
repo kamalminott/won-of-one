@@ -44,6 +44,41 @@ type OverrideState = {
   reason: string;
 };
 
+type DeRoundMatchView = NonNullable<
+  Awaited<ReturnType<typeof getCompetitionDeTableauData>>
+>['rounds'][number]['matches'][number];
+
+type DeTreeNode = {
+  matchIndex: number;
+  top: number;
+  centerY: number;
+  matchView: DeRoundMatchView;
+};
+
+type DeTreeColumn = {
+  roundLabel: string;
+  roundIndex: number;
+  columnLeft: number;
+  nodes: DeTreeNode[];
+};
+
+type DeTreeConnector = {
+  key: string;
+  startX: number;
+  kneeX: number;
+  endX: number;
+  startY: number;
+  endY: number;
+};
+
+const DE_NODE_WIDTH = 210;
+const DE_NODE_HEIGHT = 140;
+const DE_NODE_GAP = 16;
+const DE_ROUND_COLUMN_WIDTH = 226;
+const DE_ROUND_COLUMN_GAP = 20;
+const DE_CONNECTOR_STROKE = 2;
+const DE_CONNECTOR_KNEE_OFFSET = 14;
+
 export default function DeTableauScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -192,6 +227,81 @@ export default function DeTableauScreen() {
       });
     });
     return map;
+  }, [data]);
+
+  const deTree = useMemo(() => {
+    if (!data || data.rounds.length === 0) {
+      return {
+        treeHeight: 0,
+        treeWidth: 0,
+        roundColumns: [] as DeTreeColumn[],
+        connectors: [] as DeTreeConnector[],
+      };
+    }
+
+    const firstRoundCount = data.rounds[0]?.matches.length ?? 0;
+    if (firstRoundCount <= 0) {
+      return {
+        treeHeight: 0,
+        treeWidth: 0,
+        roundColumns: [] as DeTreeColumn[],
+        connectors: [] as DeTreeConnector[],
+      };
+    }
+
+    const slotStep = DE_NODE_HEIGHT + DE_NODE_GAP;
+    const columnStep = DE_ROUND_COLUMN_WIDTH + DE_ROUND_COLUMN_GAP;
+    const roundCount = data.rounds.length;
+    const treeHeight =
+      firstRoundCount * DE_NODE_HEIGHT + Math.max(0, firstRoundCount - 1) * DE_NODE_GAP;
+    const treeWidth =
+      roundCount * DE_ROUND_COLUMN_WIDTH + Math.max(0, roundCount - 1) * DE_ROUND_COLUMN_GAP;
+
+    const roundColumns = data.rounds.map((round, roundIndex) => {
+      const span = 2 ** roundIndex;
+      const nodes = round.matches.map((matchView, matchIndex) => ({
+        matchIndex,
+        top: (matchIndex * span + (span - 1) / 2) * slotStep,
+        centerY: (matchIndex * span + (span - 1) / 2) * slotStep + DE_NODE_HEIGHT / 2,
+        matchView,
+      }));
+
+      return {
+        roundLabel: round.roundLabel,
+        roundIndex,
+        columnLeft: roundIndex * columnStep,
+        nodes,
+      };
+    });
+
+    const connectors: DeTreeConnector[] = [];
+    for (let roundIndex = 0; roundIndex < roundColumns.length - 1; roundIndex += 1) {
+      const currentColumn = roundColumns[roundIndex];
+      const nextColumn = roundColumns[roundIndex + 1];
+      currentColumn.nodes.forEach((node) => {
+        const nextNode = nextColumn.nodes[Math.floor(node.matchIndex / 2)];
+        if (!nextNode) return;
+
+        const startX = currentColumn.columnLeft + DE_NODE_WIDTH - 1;
+        const kneeX = currentColumn.columnLeft + DE_NODE_WIDTH + DE_CONNECTOR_KNEE_OFFSET;
+        const endX = nextColumn.columnLeft + 1;
+        connectors.push({
+          key: `${roundIndex}-${node.matchIndex}-to-${roundIndex + 1}-${Math.floor(node.matchIndex / 2)}`,
+          startX,
+          kneeX,
+          endX,
+          startY: node.centerY,
+          endY: nextNode.centerY,
+        });
+      });
+    }
+
+    return {
+      treeHeight,
+      treeWidth,
+      roundColumns,
+      connectors,
+    };
   }, [data]);
 
   const onPressMatch = (match: ClubCompetitionMatchRecord) => {
@@ -483,7 +593,7 @@ export default function DeTableauScreen() {
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
-        {data.rounds.length === 0 ? (
+        {deTree.roundColumns.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No DE tableau yet</Text>
             <Text style={styles.emptyText}>
@@ -494,89 +604,461 @@ export default function DeTableauScreen() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.roundsRow}
+            contentContainerStyle={styles.treeScrollContent}
           >
-            {data.rounds.map((round) => (
-              <View
-                key={`round-${round.roundIndex}`}
-                style={styles.roundColumn}
-              >
-                <Text style={styles.roundTitle}>{round.roundLabel}</Text>
-                {round.matches.map((matchView) => {
-                  const { match, fencerA, fencerB } = matchView;
-                  const statusLabel = COMPETITION_MATCH_STATUS_LABELS[match.status];
-                  const scoreText =
-                    match.status === 'completed' &&
-                    match.score_a != null &&
-                    match.score_b != null
-                      ? `${match.score_a}-${match.score_b}`
-                      : null;
-                  const canOpen = matchView.canScore;
-                  const hasAdminActions = matchView.canOverride || matchView.canReset;
+            <View style={[styles.treeBracket, { width: deTree.treeWidth }]}>
+              <View style={styles.treeRoundTitleRow}>
+                {deTree.roundColumns.map((roundColumn) => (
+                  <View
+                    key={`title-${roundColumn.roundIndex}`}
+                    style={styles.treeRoundTitleCell}
+                  >
+                    <Text style={styles.treeRoundTitle}>{roundColumn.roundLabel}</Text>
+                  </View>
+                ))}
+              </View>
 
-                  return (
-                    <Pressable
-                      key={match.id}
-                      onPress={() => onPressMatch(match)}
-                      disabled={!canOpen}
-                      style={[styles.matchCard, !canOpen && styles.matchCardDisabled]}
-                    >
-                      <View style={styles.matchTop}>
-                        <Text style={styles.matchNames}>
-                          {fencerA?.display_name ?? 'TBD'} vs {fencerB?.display_name ?? 'TBD'}
-                        </Text>
+              <View style={[styles.treeBodyCanvas, { height: deTree.treeHeight }]}>
+                <View
+                  pointerEvents="none"
+                  style={styles.treeConnectorLayer}
+                >
+                  {deTree.connectors.map((connector) => {
+                    const verticalTop = Math.min(connector.startY, connector.endY);
+                    const verticalHeight = Math.max(
+                      DE_CONNECTOR_STROKE,
+                      Math.abs(connector.endY - connector.startY)
+                    );
+                    return (
+                      <View
+                        key={connector.key}
+                        style={styles.treeConnectorGroup}
+                      >
                         <View
                           style={[
-                            styles.statusBadge,
+                            styles.treeConnector,
                             {
-                              backgroundColor: COMPETITION_MATCH_STATUS_COLORS[match.status],
+                              left: connector.startX,
+                              top: connector.startY - DE_CONNECTOR_STROKE / 2,
+                              width: connector.kneeX - connector.startX + 1,
                             },
                           ]}
-                        >
-                          <Text style={styles.statusText}>{statusLabel}</Text>
-                        </View>
+                        />
+                        <View
+                          style={[
+                            styles.treeConnector,
+                            {
+                              left: connector.kneeX - DE_CONNECTOR_STROKE / 2,
+                              top: verticalTop,
+                              width: DE_CONNECTOR_STROKE,
+                              height: verticalHeight,
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.treeConnector,
+                            {
+                              left: connector.kneeX,
+                              top: connector.endY - DE_CONNECTOR_STROKE / 2,
+                              width: connector.endX - connector.kneeX + 1,
+                            },
+                          ]}
+                        />
                       </View>
+                    );
+                  })}
+                </View>
 
-                      {scoreText ? <Text style={styles.scoreText}>{scoreText}</Text> : null}
-                      <Text style={styles.tapHint}>
-                        {canOpen
+                {deTree.roundColumns.map((roundColumn) => (
+                  <View
+                    key={`round-${roundColumn.roundIndex}`}
+                    style={[styles.treeRoundColumn, { left: roundColumn.columnLeft }]}
+                  >
+                    {roundColumn.nodes.map((node) => {
+                      const { matchView, top } = node;
+                      const {
+                        match,
+                        fencerA,
+                        fencerB,
+                        fencerASeedRank,
+                        fencerBSeedRank,
+                        canScore,
+                        canOverride,
+                        canReset,
+                      } = matchView;
+                      const statusLabel = COMPETITION_MATCH_STATUS_LABELS[match.status];
+                      const hasAdminActions = canOverride || canReset;
+                      const isByeAdvance =
+                        match.status === 'completed' &&
+                        match.canceled_reason === 'bye';
+                      const hasScores = match.score_a != null && match.score_b != null;
+                      const hintText = isByeAdvance
+                        ? 'Advanced by bye'
+                        : canScore
                           ? 'Tap to score'
-                          : data.competition.status === 'finalised'
-                            ? 'Read-only'
-                            : scoreText
-                              ? 'Result saved'
-                              : 'Waiting for fencers'}
-                      </Text>
+                        : data.competition.status === 'finalised'
+                          ? 'Read-only'
+                          : hasScores
+                            ? 'Result saved'
+                            : 'Waiting for fencers';
+                      const fencerADisplayName =
+                        fencerA?.display_name ?? (isByeAdvance && !fencerA ? 'BYE' : 'TBD');
+                      const fencerBDisplayName =
+                        fencerB?.display_name ?? (isByeAdvance && !fencerB ? 'BYE' : 'TBD');
+                      const showVsDivider = fencerADisplayName !== 'BYE' && fencerBDisplayName !== 'BYE';
+                      const showFencerARow = !(
+                        isByeAdvance &&
+                        fencerADisplayName === 'BYE' &&
+                        fencerBDisplayName !== 'BYE'
+                      );
+                      const showFencerBRow = !(
+                        isByeAdvance &&
+                        fencerBDisplayName === 'BYE' &&
+                        fencerADisplayName !== 'BYE'
+                      );
+                      const fencerASeedLabel =
+                        fencerASeedRank != null &&
+                        fencerADisplayName !== 'BYE' &&
+                        fencerADisplayName !== 'TBD'
+                          ? `#${fencerASeedRank}`
+                          : null;
+                      const fencerBSeedLabel =
+                        fencerBSeedRank != null &&
+                        fencerBDisplayName !== 'BYE' &&
+                        fencerBDisplayName !== 'TBD'
+                          ? `#${fencerBSeedRank}`
+                          : null;
+                      const fencerAIsSelf = Boolean(fencerA?.isSelf && fencerADisplayName !== 'BYE');
+                      const fencerBIsSelf = Boolean(fencerB?.isSelf && fencerBDisplayName !== 'BYE');
+                      const fencerAResult =
+                        isByeAdvance && fencerADisplayName !== 'BYE'
+                          ? { label: 'BYE', tone: 'bye' as const }
+                          : match.status === 'completed' && hasScores && fencerA
+                            ? {
+                                label: `${
+                                  (match.winner_participant_id
+                                    ? match.winner_participant_id === fencerA.id
+                                    : (match.score_a as number) > (match.score_b as number))
+                                    ? 'V'
+                                    : 'L'
+                                }${match.score_a}`,
+                                tone: (match.winner_participant_id
+                                  ? match.winner_participant_id === fencerA.id
+                                  : (match.score_a as number) > (match.score_b as number))
+                                  ? ('win' as const)
+                                  : ('loss' as const),
+                              }
+                            : null;
+                      const fencerBResult =
+                        isByeAdvance && fencerBDisplayName !== 'BYE'
+                          ? { label: 'BYE', tone: 'bye' as const }
+                          : match.status === 'completed' && hasScores && fencerB
+                            ? {
+                                label: `${
+                                  (match.winner_participant_id
+                                    ? match.winner_participant_id === fencerB.id
+                                    : (match.score_b as number) > (match.score_a as number))
+                                    ? 'V'
+                                    : 'L'
+                                }${match.score_b}`,
+                                tone: (match.winner_participant_id
+                                  ? match.winner_participant_id === fencerB.id
+                                  : (match.score_b as number) > (match.score_a as number))
+                                  ? ('win' as const)
+                                  : ('loss' as const),
+                              }
+                            : null;
 
-                      {hasAdminActions ? (
-                        <View style={styles.adminActionRow}>
-                          {matchView.canOverride ? (
+                      return (
+                        <View
+                          key={match.id}
+                          style={[styles.treeNodeWrap, { top }]}
+                        >
+                          {canScore ? (
                             <Pressable
-                              onPress={() => onOpenOverride(match)}
-                              style={styles.adminActionButton}
+                              onPress={() => onPressMatch(match)}
+                              style={[
+                                styles.treeNodeCard,
+                                match.status === 'completed' && styles.treeNodeCardCompleted,
+                                match.status === 'live' && styles.treeNodeCardLive,
+                                canScore && styles.treeNodeCardScorable,
+                              ]}
                             >
-                              <Text style={styles.adminActionText}>Override</Text>
+                              <View style={styles.treeNodeHeader}>
+                                <View style={styles.treeNodeHeaderSpacer} />
+                                <View
+                                  style={[
+                                    styles.treeStatusBadge,
+                                    { backgroundColor: COMPETITION_MATCH_STATUS_COLORS[match.status] },
+                                  ]}
+                                >
+                                  <Text style={styles.treeStatusBadgeText}>{statusLabel}</Text>
+                                </View>
+                              </View>
+                              <View style={styles.treeFencersWrap}>
+                                {showFencerARow ? (
+                                  <View style={styles.treeFencerRow}>
+                                    <View style={styles.treeFencerIdentity}>
+                                      {fencerASeedLabel ? (
+                                        <View style={styles.treeFencerSeedWrap}>
+                                          <View style={styles.treeSeedBadge}>
+                                            <Text style={styles.treeSeedBadgeText}>{fencerASeedLabel}</Text>
+                                          </View>
+                                        </View>
+                                      ) : null}
+                                      <View style={styles.treeFencerNameWrap}>
+                                        {fencerAIsSelf ? (
+                                          <View style={styles.treeSelfNamePill}>
+                                            <Text
+                                              style={styles.treeFencerNameSelfText}
+                                              numberOfLines={1}
+                                            >
+                                              {fencerADisplayName}
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <Text
+                                            style={styles.treeFencerName}
+                                            numberOfLines={1}
+                                          >
+                                            {fencerADisplayName}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                    {fencerAResult ? (
+                                      <View style={styles.treeFencerResultWrap}>
+                                        <View
+                                          style={[
+                                            styles.treeResultBadge,
+                                            fencerAResult.tone === 'win' && styles.treeResultBadgeWin,
+                                            fencerAResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerAResult.tone === 'bye' && styles.treeResultBadgeBye,
+                                          ]}
+                                        >
+                                          <Text style={styles.treeResultBadgeText}>{fencerAResult.label}</Text>
+                                        </View>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                                {showVsDivider ? <Text style={styles.treeVsText}>vs</Text> : null}
+                                {showFencerBRow ? (
+                                  <View style={styles.treeFencerRow}>
+                                    <View style={styles.treeFencerIdentity}>
+                                      {fencerBSeedLabel ? (
+                                        <View style={styles.treeFencerSeedWrap}>
+                                          <View style={styles.treeSeedBadge}>
+                                            <Text style={styles.treeSeedBadgeText}>{fencerBSeedLabel}</Text>
+                                          </View>
+                                        </View>
+                                      ) : null}
+                                      <View style={styles.treeFencerNameWrap}>
+                                        {fencerBIsSelf ? (
+                                          <View style={styles.treeSelfNamePill}>
+                                            <Text
+                                              style={styles.treeFencerNameSelfText}
+                                              numberOfLines={1}
+                                            >
+                                              {fencerBDisplayName}
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <Text
+                                            style={styles.treeFencerName}
+                                            numberOfLines={1}
+                                          >
+                                            {fencerBDisplayName}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                    {fencerBResult ? (
+                                      <View style={styles.treeFencerResultWrap}>
+                                        <View
+                                          style={[
+                                            styles.treeResultBadge,
+                                            fencerBResult.tone === 'win' && styles.treeResultBadgeWin,
+                                            fencerBResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerBResult.tone === 'bye' && styles.treeResultBadgeBye,
+                                          ]}
+                                        >
+                                          <Text style={styles.treeResultBadgeText}>{fencerBResult.label}</Text>
+                                        </View>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                              </View>
+                              <View style={styles.treeNodeFooter}>
+                                <Text
+                                  style={styles.treeHintText}
+                                  numberOfLines={1}
+                                >
+                                  {hintText}
+                                </Text>
+                              </View>
                             </Pressable>
-                          ) : null}
-                          {matchView.canReset ? (
-                            <Pressable
-                              onPress={() => onResetMatch(match)}
-                              style={[styles.adminActionButton, styles.adminActionDanger]}
+                          ) : (
+                            <View
+                              style={[
+                                styles.treeNodeCard,
+                                match.status === 'completed' && styles.treeNodeCardCompleted,
+                                match.status === 'live' && styles.treeNodeCardLive,
+                              ]}
                             >
-                              {actionKey === `reset:${match.id}` ? (
-                                <ActivityIndicator color="#FFFFFF" size="small" />
-                              ) : (
-                                <Text style={styles.adminActionText}>Reset</Text>
-                              )}
-                            </Pressable>
-                          ) : null}
+                              <View style={styles.treeNodeHeader}>
+                                <View style={styles.treeNodeHeaderSpacer} />
+                                <View
+                                  style={[
+                                    styles.treeStatusBadge,
+                                    { backgroundColor: COMPETITION_MATCH_STATUS_COLORS[match.status] },
+                                  ]}
+                                >
+                                  <Text style={styles.treeStatusBadgeText}>{statusLabel}</Text>
+                                </View>
+                              </View>
+                              <View style={styles.treeFencersWrap}>
+                                {showFencerARow ? (
+                                  <View style={styles.treeFencerRow}>
+                                    <View style={styles.treeFencerIdentity}>
+                                      {fencerASeedLabel ? (
+                                        <View style={styles.treeFencerSeedWrap}>
+                                          <View style={styles.treeSeedBadge}>
+                                            <Text style={styles.treeSeedBadgeText}>{fencerASeedLabel}</Text>
+                                          </View>
+                                        </View>
+                                      ) : null}
+                                      <View style={styles.treeFencerNameWrap}>
+                                        {fencerAIsSelf ? (
+                                          <View style={styles.treeSelfNamePill}>
+                                            <Text
+                                              style={styles.treeFencerNameSelfText}
+                                              numberOfLines={1}
+                                            >
+                                              {fencerADisplayName}
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <Text
+                                            style={styles.treeFencerName}
+                                            numberOfLines={1}
+                                          >
+                                            {fencerADisplayName}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                    {fencerAResult ? (
+                                      <View style={styles.treeFencerResultWrap}>
+                                        <View
+                                          style={[
+                                            styles.treeResultBadge,
+                                            fencerAResult.tone === 'win' && styles.treeResultBadgeWin,
+                                            fencerAResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerAResult.tone === 'bye' && styles.treeResultBadgeBye,
+                                          ]}
+                                        >
+                                          <Text style={styles.treeResultBadgeText}>{fencerAResult.label}</Text>
+                                        </View>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                                {showVsDivider ? <Text style={styles.treeVsText}>vs</Text> : null}
+                                {showFencerBRow ? (
+                                  <View style={styles.treeFencerRow}>
+                                    <View style={styles.treeFencerIdentity}>
+                                      {fencerBSeedLabel ? (
+                                        <View style={styles.treeFencerSeedWrap}>
+                                          <View style={styles.treeSeedBadge}>
+                                            <Text style={styles.treeSeedBadgeText}>{fencerBSeedLabel}</Text>
+                                          </View>
+                                        </View>
+                                      ) : null}
+                                      <View style={styles.treeFencerNameWrap}>
+                                        {fencerBIsSelf ? (
+                                          <View style={styles.treeSelfNamePill}>
+                                            <Text
+                                              style={styles.treeFencerNameSelfText}
+                                              numberOfLines={1}
+                                            >
+                                              {fencerBDisplayName}
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <Text
+                                            style={styles.treeFencerName}
+                                            numberOfLines={1}
+                                          >
+                                            {fencerBDisplayName}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                    {fencerBResult ? (
+                                      <View style={styles.treeFencerResultWrap}>
+                                        <View
+                                          style={[
+                                            styles.treeResultBadge,
+                                            fencerBResult.tone === 'win' && styles.treeResultBadgeWin,
+                                            fencerBResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerBResult.tone === 'bye' && styles.treeResultBadgeBye,
+                                          ]}
+                                        >
+                                          <Text style={styles.treeResultBadgeText}>{fencerBResult.label}</Text>
+                                        </View>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                              </View>
+                              <View style={styles.treeNodeFooter}>
+                                {hasAdminActions ? (
+                                  <View style={styles.treeAdminRow}>
+                                    {canOverride ? (
+                                      <Pressable
+                                        onPress={() => onOpenOverride(match)}
+                                        style={styles.treeAdminButton}
+                                      >
+                                        <Text style={styles.treeAdminButtonText}>Override</Text>
+                                      </Pressable>
+                                    ) : null}
+                                    {canReset ? (
+                                      <Pressable
+                                        onPress={() => onResetMatch(match)}
+                                        style={[styles.treeAdminButton, styles.treeAdminButtonDanger]}
+                                      >
+                                        {actionKey === `reset:${match.id}` ? (
+                                          <ActivityIndicator
+                                            color="#FFFFFF"
+                                            size="small"
+                                          />
+                                        ) : (
+                                          <Text style={styles.treeAdminButtonText}>Reset</Text>
+                                        )}
+                                      </Pressable>
+                                    ) : null}
+                                  </View>
+                                ) : (
+                                  <Text
+                                    style={styles.treeHintText}
+                                    numberOfLines={1}
+                                  >
+                                    {hintText}
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                          )}
                         </View>
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
+                      );
+                    })}
+                  </View>
+                ))}
               </View>
-            ))}
+            </View>
           </ScrollView>
         )}
       </ScrollView>
@@ -782,69 +1264,205 @@ const styles = StyleSheet.create({
   actionButtonDisabled: {
     opacity: 0.5,
   },
-  roundsRow: {
+  treeScrollContent: {
     paddingRight: 12,
-    gap: 10,
   },
-  roundColumn: {
-    width: 300,
-    gap: 8,
+  treeBracket: {
+    position: 'relative',
   },
-  roundTitle: {
+  treeRoundTitleRow: {
+    flexDirection: 'row',
+    gap: DE_ROUND_COLUMN_GAP,
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  treeRoundTitleCell: {
+    width: DE_ROUND_COLUMN_WIDTH,
+  },
+  treeRoundColumn: {
+    position: 'absolute',
+    top: 0,
+    width: DE_ROUND_COLUMN_WIDTH,
+    overflow: 'visible',
+  },
+  treeRoundTitle: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
   },
-  matchCard: {
-    borderRadius: 10,
+  treeBodyCanvas: {
+    position: 'relative',
+    overflow: 'visible',
+  },
+  treeConnectorLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
+  treeConnectorGroup: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  treeNodeWrap: {
+    position: 'absolute',
+    left: 0,
+    width: DE_NODE_WIDTH,
+    overflow: 'visible',
+  },
+  treeNodeCard: {
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#2F2F2F',
     backgroundColor: '#171717',
     padding: 10,
-    gap: 8,
+    height: DE_NODE_HEIGHT,
+    justifyContent: 'space-between',
+    zIndex: 3,
   },
-  matchCardDisabled: {
-    opacity: 0.9,
+  treeNodeCardCompleted: {
+    borderColor: 'rgba(16,185,129,0.45)',
   },
-  matchTop: {
+  treeNodeCardLive: {
+    borderColor: 'rgba(139,92,246,0.5)',
+  },
+  treeNodeCardScorable: {
+    borderColor: 'rgba(200,166,255,0.5)',
+  },
+  treeNodeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
+    marginBottom: 6,
   },
-  matchNames: {
+  treeNodeHeaderSpacer: {
     flex: 1,
+  },
+  treeFencersWrap: {
+    gap: 4,
+  },
+  treeFencerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  treeFencerIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  treeFencerNameWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  treeFencerName: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
+    lineHeight: 16,
   },
-  statusBadge: {
+  treeSelfNamePill: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.45)',
+    backgroundColor: 'rgba(200,166,255,0.14)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  treeFencerNameSelfText: {
+    color: '#EBD8FF',
+    fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  treeFencerSeedWrap: {
+    flexShrink: 0,
+  },
+  treeFencerResultWrap: {
+    marginLeft: 8,
+    flexShrink: 0,
+  },
+  treeVsText: {
+    color: '#8F8F8F',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  treeSeedBadge: {
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.35)',
+    backgroundColor: 'rgba(200,166,255,0.14)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
-  statusText: {
+  treeSeedBadgeText: {
+    color: '#EBD8FF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  treeResultBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: '#2A2A2A',
+    borderColor: '#4A4A4A',
+  },
+  treeResultBadgeWin: {
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderColor: 'rgba(16,185,129,0.42)',
+  },
+  treeResultBadgeLoss: {
+    backgroundColor: 'rgba(239,68,68,0.16)',
+    borderColor: 'rgba(239,68,68,0.4)',
+  },
+  treeResultBadgeBye: {
+    backgroundColor: 'rgba(148,163,184,0.16)',
+    borderColor: 'rgba(148,163,184,0.38)',
+  },
+  treeResultBadgeText: {
     color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
   },
-  scoreText: {
+  treeNodeNames: {
+    flex: 1,
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   },
-  tapHint: {
+  treeStatusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  treeStatusBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  treeNodeFooter: {
+    minHeight: 28,
+    justifyContent: 'center',
+    paddingBottom: 2,
+  },
+  treeHintText: {
     color: '#8F8F8F',
     fontSize: 12,
+    lineHeight: 16,
   },
-  adminActionRow: {
+  treeAdminRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 2,
+    gap: 6,
   },
-  adminActionButton: {
+  treeAdminButton: {
     flex: 1,
-    minHeight: 34,
+    minHeight: 26,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#3A3A3A',
@@ -852,14 +1470,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  adminActionDanger: {
+  treeAdminButtonDanger: {
     borderColor: '#7A2A2A',
     backgroundColor: 'rgba(239,68,68,0.2)',
   },
-  adminActionText: {
+  treeAdminButtonText: {
     color: '#E9D7FF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+  },
+  treeConnector: {
+    position: 'absolute',
+    backgroundColor: 'rgba(200,166,255,0.9)',
+    height: DE_CONNECTOR_STROKE,
+    borderRadius: DE_CONNECTOR_STROKE,
+    zIndex: 2,
   },
   emptyCard: {
     borderRadius: 14,

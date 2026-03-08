@@ -5,6 +5,38 @@ let initialized = false;
 let isAvailable = false;
 const SHOULD_FLUSH = !__DEV__;
 
+const getAnalyticsErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && typeof error.message === 'string') {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'unknown_error';
+  }
+};
+
+const safeDevLog = (message: string): void => {
+  if (!__DEV__) return;
+  try {
+    console.log(message);
+  } catch {
+    // Avoid crashing analytics calls because console formatting failed in dev.
+  }
+};
+
+const safeDevError = (label: string, error: unknown): void => {
+  const message = `${label}: ${getAnalyticsErrorMessage(error)}`;
+  try {
+    console.error(message);
+  } catch {
+    // Avoid recursive console failures.
+  }
+};
+
 const POSTHOG_KEY = process.env.EXPO_PUBLIC_POSTHOG_KEY || 'phc_XLNZ0QN65VPSN1vDlJOXP1j0CS4PVIGmKJXKypHbFWJ';
 // Note: If you used --region eu in the wizard, use: 'https://eu.posthog.com'
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://eu.posthog.com';
@@ -39,9 +71,9 @@ export const analytics = {
     if (!isAvailable || !userId || !posthogInstance) return;
     try {
       posthogInstance.identify(userId, props);
-      __DEV__ && console.log(`📊 PostHog: Identify user "${userId}"`, props || '');
+      safeDevLog(`📊 PostHog: Identify user "${userId}"`);
     } catch (error) {
-      console.error('PostHog identify error:', error);
+      safeDevError('PostHog identify error', error);
     }
   },
 
@@ -58,12 +90,12 @@ export const analytics = {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.screen(name, props);
-      __DEV__ && console.log(`📊 PostHog: Screen "${name}"`, props || '');
+      safeDevLog(`📊 PostHog: Screen "${name}"`);
       if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
-      console.error('PostHog screen error:', error);
+      safeDevError('PostHog screen error', error);
     }
   },
 
@@ -71,12 +103,12 @@ export const analytics = {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture(event, props);
-      __DEV__ && console.log(`📊 PostHog: Event "${event}"`, props || '');
+      safeDevLog(`📊 PostHog: Event "${event}"`);
       if (SHOULD_FLUSH && posthogInstance.flush) {
         posthogInstance.flush();
       }
     } catch (error) {
-      console.error('PostHog capture error:', error);
+      safeDevError('PostHog capture error', error);
     }
   },
 

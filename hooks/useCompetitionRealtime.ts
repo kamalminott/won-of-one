@@ -21,7 +21,8 @@ type UseCompetitionRealtimeOptions = {
     | 'rankings'
     | 'de'
     | 'manual'
-    | 'remote';
+    | 'remote'
+    | 'final_standings';
   maxRetries?: number;
   onCompetitionEvent?: (payload: RealtimeChangePayload) => void;
   onMatchEvent?: (payload: RealtimeChangePayload) => void;
