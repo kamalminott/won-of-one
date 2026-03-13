@@ -694,12 +694,15 @@ const fetchUserMatchesForGoal = async (
 const computeGoalValueFromMatches = (goal: GoalRecord, matches: SimplifiedMatch[]): number => {
   const goalStartTimestamp = goal.created_at ? new Date(goal.created_at).getTime() : null;
   const hasValidGoalStart = goalStartTimestamp !== null && Number.isFinite(goalStartTimestamp);
+  const normalizedGoalStartTimestamp = hasValidGoalStart
+    ? Math.floor((goalStartTimestamp as number) / 60000) * 60000
+    : null;
   const matchesSinceGoal = hasValidGoalStart
     ? matches.filter(match => {
         if (match.eventDateTimestamp === null) {
           return true;
         }
-        return match.eventDateTimestamp >= (goalStartTimestamp as number);
+        return match.eventDateTimestamp >= (normalizedGoalStartTimestamp as number);
       })
     : matches;
   const category = goal.category || '';
@@ -1390,6 +1393,7 @@ export type ManualMatchInput = {
   matchType: 'training' | 'competition';
   date: string;
   time: string;
+  eventDateIso?: string;
   notes?: string;
   weaponType?: string;
   competitionId?: string | null;
@@ -2055,56 +2059,80 @@ export const matchService = {
       };
     }
 
-    const [day, month, year] = date.split('/');
-    const [hour, minute] = time.replace(/[AP]M/i, '').split(':');
-    const isPM = time.toUpperCase().includes('PM');
-
-    const dayNum = parseInt(day);
-    const monthNum = parseInt(month);
-    const yearNum = parseInt(year);
-    const hourNum = parseInt(hour);
-    const minuteNum = parseInt(minute);
+    const parsedIsoEventDate =
+      typeof matchData.eventDateIso === 'string' && matchData.eventDateIso.trim().length > 0
+        ? new Date(matchData.eventDateIso)
+        : null;
 
     let eventDateTime: Date;
-    if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) || isNaN(hourNum) || isNaN(minuteNum)) {
-      console.error('❌ Invalid date/time values:', { day, month, year, hour, minute });
-      eventDateTime = new Date();
-      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
-    } else if (
-      monthNum < 1 ||
-      monthNum > 12 ||
-      dayNum < 1 ||
-      dayNum > 31 ||
-      hourNum < 0 ||
-      hourNum > 23 ||
-      minuteNum < 0 ||
-      minuteNum > 59
-    ) {
-      console.error('❌ Date/time values out of valid range:', {
-        day: dayNum,
-        month: monthNum,
-        year: yearNum,
-        hour: hourNum,
-        minute: minuteNum,
-      });
-      eventDateTime = new Date();
-      console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+    if (parsedIsoEventDate && !isNaN(parsedIsoEventDate.getTime())) {
+      eventDateTime = parsedIsoEventDate;
     } else {
-      let hour24 = hourNum;
-      if (isPM && hour24 !== 12) hour24 += 12;
-      if (!isPM && hour24 === 12) hour24 = 0;
+      const [day, month, year] = date.split('/');
+      const normalizedTime = time.toUpperCase().trim();
+      const timeWithoutMeridiem = normalizedTime.replace(/\s?[AP]M/i, '').trim();
+      const [hourPart, minutePart, secondPart = '0'] = timeWithoutMeridiem.split(':');
+      const isPM = normalizedTime.includes('PM');
+      const isAM = normalizedTime.includes('AM');
 
-      eventDateTime = new Date(yearNum, monthNum - 1, dayNum, hour24, minuteNum);
-      if (isNaN(eventDateTime.getTime())) {
-        console.error('❌ Invalid Date object created from:', {
+      const dayNum = parseInt(day, 10);
+      const monthNum = parseInt(month, 10);
+      const yearNum = parseInt(year, 10);
+      const hourNum = parseInt(hourPart, 10);
+      const minuteNum = parseInt(minutePart, 10);
+      const secondNum = parseInt(secondPart, 10);
+
+      if (
+        isNaN(dayNum) ||
+        isNaN(monthNum) ||
+        isNaN(yearNum) ||
+        isNaN(hourNum) ||
+        isNaN(minuteNum) ||
+        isNaN(secondNum)
+      ) {
+        console.error('❌ Invalid date/time values:', { day, month, year, hourPart, minutePart, secondPart });
+        eventDateTime = new Date();
+        console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+      } else if (
+        monthNum < 1 ||
+        monthNum > 12 ||
+        dayNum < 1 ||
+        dayNum > 31 ||
+        hourNum < 0 ||
+        hourNum > 23 ||
+        minuteNum < 0 ||
+        minuteNum > 59 ||
+        secondNum < 0 ||
+        secondNum > 59
+      ) {
+        console.error('❌ Date/time values out of valid range:', {
           day: dayNum,
           month: monthNum,
           year: yearNum,
-          hour: hour24,
+          hour: hourNum,
           minute: minuteNum,
+          second: secondNum,
         });
         eventDateTime = new Date();
         console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+      } else {
+        let hour24 = hourNum;
+        if (isPM && hour24 !== 12) hour24 += 12;
+        if (isAM && hour24 === 12) hour24 = 0;
+
+        eventDateTime = new Date(yearNum, monthNum - 1, dayNum, hour24, minuteNum, secondNum);
+        if (isNaN(eventDateTime.getTime())) {
+          console.error('❌ Invalid Date object created from:', {
+            day: dayNum,
+            month: monthNum,
+            year: yearNum,
+            hour: hour24,
+            minute: minuteNum,
+            second: secondNum,
+          });
+          eventDateTime = new Date();
+          console.log('⚠️ Using current date/time as fallback:', eventDateTime.toISOString());
+        }
       }
     }
 

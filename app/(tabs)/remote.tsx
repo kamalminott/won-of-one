@@ -8016,9 +8016,11 @@ export default function RemoteScreen() {
   const bottomDockOffset = (
     isAndroid ? tabBarHeight + timerReadyDockGap : height * 0.08
   ) - competitionIosBottomDrop;
+  const sabreBottomDockLift = isSabre ? height * (isAndroid ? 0.018 : 0.024) : 0;
+  const bottomControlsDockBottom = bottomDockOffset + sabreBottomDockLift;
   const bottomControlsReserveMin =
     height *
-    (selectedWeapon === 'sabre' ? (isAndroid ? 0.14 : 0.12) : (isAndroid ? 0.22 : 0.2)) *
+    (selectedWeapon === 'sabre' ? (isAndroid ? 0.12 : 0.1) : (isAndroid ? 0.22 : 0.2)) *
     competitionCompactScale;
   const bottomControlsReserve = Math.max(bottomControlsHeight, bottomControlsReserveMin);
   const fencersContainerBottom = height * (isAndroid ? 0.03 : 0.015) * competitionCompactScale;
@@ -8033,7 +8035,7 @@ export default function RemoteScreen() {
   const sabreFencerCardHeight = height * (isAndroid ? 0.325 : 0.35) * competitionCompactScale;
   const sabreFencerCardHeightReady = height * (isAndroid ? 0.355 : 0.375) * competitionCompactScale;
   const sabreFencerCardHeightWithCards = height * (isAndroid ? 0.315 : 0.335) * competitionCompactScale;
-  const sabreFencersContainerBottom = height * (isAndroid ? 0.012 : 0.01) * competitionCompactScale;
+  const sabreFencersContainerBottom = height * (isAndroid ? 0.006 : 0.005) * competitionCompactScale;
   const fencerCardTimerReadyPadding = width * (isAndroid ? 0.024 : 0.03) * competitionCompactScale;
   const fencerNameMarginBottomTimerReady = height * (isAndroid ? 0.002 : 0.006) * competitionCompactScale;
   const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015) * competitionCompactScale;
@@ -8470,6 +8472,25 @@ export default function RemoteScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: width * 0.05, // Smaller margin on Nexus S
+    },
+    headerResetButton: {
+      width: width * 0.11,
+      height: width * 0.075,
+      borderRadius: width * 0.05,
+      backgroundColor: '#FB5D5C',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: width * 0.05,
+      borderWidth: width * 0.005,
+      borderColor: 'transparent',
+      shadowColor: '#6C5CE7',
+      shadowOffset: { width: 0, height: height * 0.003 },
+      shadowOpacity: 0.25,
+      shadowRadius: width * 0.03,
+      elevation: 8,
+    },
+    headerActionDisabled: {
+      opacity: 0.45,
     },
     editNamesButtonText: {
       fontSize: width * 0.04, // Smaller font on Nexus S, minimum 12px
@@ -9649,7 +9670,11 @@ export default function RemoteScreen() {
     isAndroid && isNonSabreActive && !lockAndroidTimerReadyLayout
       ? height * 0.03
       : 0;
-  const bottomControlsSpacerHeight = bottomControlsReserve + bottomDockOffset + bottomControlsReserveExtra + bottomControlsActiveExtra;
+  const sabreBottomControlsPullUp = isSabre ? height * (isAndroid ? 0.03 : 0.025) : 0;
+  const bottomControlsSpacerHeight = Math.max(
+    height * 0.04,
+    bottomControlsReserve + bottomControlsDockBottom + bottomControlsReserveExtra + bottomControlsActiveExtra - sabreBottomControlsPullUp
+  );
   const sabreMatchReady = isSabre && !hasMatchStarted && !isPlaying;
   const canAssignPriority = !isSabre && timeRemaining === 0 && scores.fencerA === scores.fencerB;
   const sabreCardHeight = sabreHasIssuedCards
@@ -10199,8 +10224,19 @@ export default function RemoteScreen() {
             </Text>
           ) : null}
         </View>
-        {!(selectedWeapon === 'sabre' || isCompetitionRemoteMode) && (
-          <TouchableOpacity 
+        {selectedWeapon === 'sabre' && !isCompetitionRemoteMode ? (
+          <TouchableOpacity
+            style={[
+              styles.headerResetButton,
+              competitionIsReadOnly && styles.headerActionDisabled,
+            ]}
+            onPress={resetTimer}
+            disabled={competitionIsReadOnly}
+          >
+            <Ionicons name="refresh" size={22} color="white" />
+          </TouchableOpacity>
+        ) : !(selectedWeapon === 'sabre' || isCompetitionRemoteMode) && (
+          <TouchableOpacity
             style={styles.editNamesButton}
             onPress={openEditNamesPopup}
           >
@@ -10766,15 +10802,15 @@ export default function RemoteScreen() {
 		      <View
             onLayout={handleBottomControlsLayout}
 		        style={[
-		          {
-		            position: 'absolute',
-		            left: 0,
-		            right: 0,
-		            bottom: bottomDockOffset,
-		            zIndex: 20,
-		          },
-		        ]}
-		      >
+			          {
+			            position: 'absolute',
+			            left: 0,
+			            right: 0,
+			            bottom: bottomControlsDockBottom,
+			            zIndex: 20,
+			          },
+			        ]}
+			      >
 		        {/* Bottom Controls */}
         <View style={[
           styles.bottomControls,
@@ -10788,7 +10824,7 @@ export default function RemoteScreen() {
             transform: [{ translateY: inProgressCardsLowering }],
           } : {},
           isSabre ? {
-            marginTop: -(height * 0.006),
+            marginTop: -(height * 0.014),
           } : {}
         ]}>
 		          <View style={[
@@ -11130,39 +11166,50 @@ export default function RemoteScreen() {
             <Text style={styles.popupTitle}>Reset Options</Text>
             <Text style={styles.inputHint}>What would you like to reset?</Text>
             <View style={styles.popupButtons}>
-              <TouchableOpacity style={styles.saveButton} onPress={() => {
-                resetScores();
-                setShowResetPopup(false);
-              }}>
-                <Text style={styles.saveButtonText}>Reset Scores</Text>
-              </TouchableOpacity>
-              {selectedWeapon !== 'sabre' && (
+              {selectedWeapon === 'sabre' ? (
+                !isCompetitionRemoteMode && (
+                  <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
+                    await resetAll();
+                    setShowResetPopup(false);
+                  }}>
+                    <Text style={styles.saveButtonText}>Reset All</Text>
+                  </TouchableOpacity>
+                )
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.saveButton} onPress={() => {
+                    resetScores();
+                    setShowResetPopup(false);
+                  }}>
+                    <Text style={styles.saveButtonText}>Reset Scores</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.saveButton} onPress={() => {
+                    resetTime();
+                    setShowResetPopup(false);
+                  }}>
+                    <Text style={styles.saveButtonText}>Reset Time</Text>
+                  </TouchableOpacity>
                 <TouchableOpacity style={styles.saveButton} onPress={() => {
-                  resetTime();
+                  resetPeriod();
                   setShowResetPopup(false);
                 }}>
-                  <Text style={styles.saveButtonText}>Reset Time</Text>
+                  <Text style={styles.saveButtonText}>Reset Period</Text>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.saveButton} onPress={() => {
-                resetPeriod();
-                setShowResetPopup(false);
-              }}>
-                <Text style={styles.saveButtonText}>Reset Period</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.yellow.accent }]} onPress={() => {
-                resetAllCards();
-                setShowResetPopup(false);
-              }}>
-                <Text style={styles.saveButtonText}>Reset Cards</Text>
-              </TouchableOpacity>
-              {!isCompetitionRemoteMode && (
-                <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
-                  await resetAll();
+                <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.yellow.accent }]} onPress={() => {
+                  resetAllCards();
                   setShowResetPopup(false);
                 }}>
-                  <Text style={styles.saveButtonText}>Reset All</Text>
+                  <Text style={styles.saveButtonText}>Reset Cards</Text>
                 </TouchableOpacity>
+                  {!isCompetitionRemoteMode && (
+                    <TouchableOpacity style={[styles.saveButton, { backgroundColor: Colors.red.accent }]} onPress={async () => {
+                      await resetAll();
+                      setShowResetPopup(false);
+                    }}>
+                      <Text style={styles.saveButtonText}>Reset All</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
               )}
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowResetPopup(false)}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>

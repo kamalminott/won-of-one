@@ -923,34 +923,19 @@ export default function AddMatchScreen() {
       let manualSaveError: ManualMatchSaveError | null = null;
 
       if (isEditing) {
-    // Update existing match
-    const dateStr = safeDate.toLocaleDateString('en-GB');
-    const timeStr = safeDate.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit',
-      hour12: true 
-    });
-    
-    // Parse date and time to create ISO string
-    const [day, month, year] = dateStr.split('/');
-    const [hour, minute] = timeStr.replace(/[AP]M/i, '').split(':');
-    const isPM = timeStr.toUpperCase().includes('PM');
-    let hour24 = parseInt(hour, 10);
-    if (isPM && hour24 !== 12) hour24 += 12;
-    if (!isPM && hour24 === 12) hour24 = 0;
-    
-    const eventDateTime = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), hour24, parseInt(minute, 10));
-    const eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    const eventLocalDate = [
-      eventDateTime.getFullYear(),
-      `${eventDateTime.getMonth() + 1}`.padStart(2, '0'),
-      `${eventDateTime.getDate()}`.padStart(2, '0'),
-    ].join('-');
-    const eventLocalTime = [
-      `${eventDateTime.getHours()}`.padStart(2, '0'),
-      `${eventDateTime.getMinutes()}`.padStart(2, '0'),
-      `${eventDateTime.getSeconds()}`.padStart(2, '0'),
-    ].join(':');
+        // Update existing match
+        const eventDateTime = safeDate;
+        const eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const eventLocalDate = [
+          eventDateTime.getFullYear(),
+          `${eventDateTime.getMonth() + 1}`.padStart(2, '0'),
+          `${eventDateTime.getDate()}`.padStart(2, '0'),
+        ].join('-');
+        const eventLocalTime = [
+          `${eventDateTime.getHours()}`.padStart(2, '0'),
+          `${eventDateTime.getMinutes()}`.padStart(2, '0'),
+          `${eventDateTime.getSeconds()}`.padStart(2, '0'),
+        ].join(':');
         
         const userDisplayName = userName || 'You';
         
@@ -977,6 +962,7 @@ export default function AddMatchScreen() {
           yourScore: yourScoreNum,
           opponentScore: opponentScoreNum,
           matchType: event === 'Training' ? 'training' : 'competition',
+          eventDateIso: safeDate.toISOString(),
           date: safeDate.toLocaleDateString('en-GB'),
           time: safeDate.toLocaleTimeString('en-US', { 
             hour: 'numeric', 
