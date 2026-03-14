@@ -586,6 +586,7 @@ export default function MatchSummaryScreen() {
               );
               
               if (success) {
+                analytics.matchDeleted({ match_id: match.match_id });
                 // Navigate back to home screen
                 router.replace('/(tabs)');
               } else {

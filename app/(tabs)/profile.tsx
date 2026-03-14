@@ -298,6 +298,7 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets[0]) {
         const imageUri = result.assets[0].uri;
         await setProfileImage(imageUri);
+        analytics.capture('profile_image_changed', { source });
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -308,6 +309,7 @@ export default function ProfileScreen() {
   const removeProfileImage = async () => {
     try {
       await setProfileImage(null);
+      analytics.capture('profile_image_removed');
     } catch (error) {
       console.error('Error removing profile image:', error);
     }
@@ -341,6 +343,7 @@ export default function ProfileScreen() {
         // Save to database first (source of truth)
         const updatedUser = await userService.updateUser(user.id, { name: fullName }, accessToken);
         if (updatedUser?.name) {
+          analytics.capture('profile_name_saved');
           // Update Supabase Auth user metadata (display_name)
           try {
             const { error: updateError } = await supabase.auth.updateUser({

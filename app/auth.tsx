@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -24,16 +25,23 @@ export default function AuthCallbackScreen() {
   );
 
   useEffect(() => {
+    analytics.screen('Auth');
+    analytics.capture('auth_viewed', { has_auth_params: hasAuthParams });
+  }, [hasAuthParams]);
+
+  useEffect(() => {
     if (hasRedirectedRef.current || loading) return;
 
     if (isPasswordRecovery) {
       hasRedirectedRef.current = true;
+      analytics.capture('auth_redirect', { target: 'reset_password' });
       router.replace('/reset-password');
       return;
     }
 
     if (user) {
       hasRedirectedRef.current = true;
+      analytics.capture('auth_redirect', { target: 'tabs' });
       router.replace('/(tabs)');
       return;
     }
@@ -42,6 +50,7 @@ export default function AuthCallbackScreen() {
     const timeoutId = setTimeout(() => {
       if (hasRedirectedRef.current) return;
       hasRedirectedRef.current = true;
+      analytics.capture('auth_redirect', { target: 'login' });
       router.replace('/login');
     }, timeoutMs);
 

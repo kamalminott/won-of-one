@@ -157,6 +157,7 @@ export default function ManualMatchSummaryScreen() {
               const success = await matchService.deleteMatch(matchId, undefined, session?.access_token);
               
               if (success) {
+                analytics.matchDeleted({ match_id: matchId });
                 console.log('✅ Match deleted successfully');
                 Alert.alert('Success', 'Match deleted successfully');
                 router.push('/(tabs)');

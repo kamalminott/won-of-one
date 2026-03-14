@@ -1,6 +1,6 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { BackButton } from '@/components/BackButton';
 import MatchSummaryCardWithBorder from '@/components/MatchSummaryCardWithBorder';
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { useAuth } from '@/contexts/AuthContext';
+import { analytics } from '@/lib/analytics';
 import { matchService } from '@/lib/database';
 import { postgrestSelect } from '@/lib/postgrest';
 
@@ -47,6 +48,13 @@ export default function MatchDetailsScreen() {
   const [matchInsights, setMatchInsights] = useState<MatchInsights>(EMPTY_MATCH_INSIGHTS);
   
   const [matchNotes, setMatchNotes] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('MatchHistoryDetails');
+      analytics.capture('match_history_details_viewed', { match_id: params.matchId as string || undefined });
+    }, [params.matchId])
+  );
   const [match, setMatch] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
@@ -674,6 +682,7 @@ export default function MatchDetailsScreen() {
               const success = await matchService.deleteMatch(matchId, undefined, session?.access_token);
 
               if (success) {
+                analytics.matchDeleted({ match_id: matchId });
                 console.log('✅ Match deleted successfully');
                 Alert.alert('Success', 'Match deleted successfully');
                 router.push('/(tabs)');

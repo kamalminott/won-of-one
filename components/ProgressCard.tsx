@@ -329,9 +329,11 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       );
       
       if (session) {
+        analytics.sessionLogged({ activity_type: selectedActivity });
         // Check for target completion
         const newProgress = current + 1;
         if (newProgress >= total && total > 0) {
+          analytics.progressTargetReached({ activity_type: selectedActivity });
           setShowCelebration(true);
           setTimeout(() => setShowCelebration(false), 3000);
           

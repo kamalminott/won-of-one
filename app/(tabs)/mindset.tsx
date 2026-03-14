@@ -1,9 +1,18 @@
 import { Colors } from '@/constants/Colors';
-import React from 'react';
+import { analytics } from '@/lib/analytics';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 export default function MindsetScreen() {
   const { width, height } = useWindowDimensions();
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('Mindset');
+      analytics.capture('mindset_viewed');
+    }, [])
+  );
 
   const styles = StyleSheet.create({
     container: {

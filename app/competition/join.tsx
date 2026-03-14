@@ -1,5 +1,6 @@
+import { analytics } from '@/lib/analytics';
 import { Redirect, useLocalSearchParams } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 
 export default function CompetitionJoinDeepLinkRedirect() {
   const params = useLocalSearchParams<{
@@ -22,6 +23,14 @@ export default function CompetitionJoinDeepLinkRedirect() {
       : typeof params.joinCode === 'string'
         ? params.joinCode
         : undefined;
+
+  useEffect(() => {
+    analytics.screen('CompetitionJoinDeepLink');
+    analytics.capture('competition_join_deeplink_viewed', {
+      has_competition_id: !!competitionId,
+      has_join_code: !!joinCode,
+    });
+  }, [competitionId, joinCode]);
 
   return (
     <Redirect

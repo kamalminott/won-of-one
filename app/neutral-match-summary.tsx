@@ -7,9 +7,10 @@ import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { analytics } from '@/lib/analytics';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -264,6 +265,13 @@ export default function NeutralMatchSummary() {
     fencer1Name,
     fencer2Name,
   } = params;
+
+  useFocusEffect(
+    useCallback(() => {
+      analytics.screen('NeutralMatchSummary');
+      analytics.capture('neutral_match_summary_viewed', { match_id: matchId || undefined });
+    }, [matchId])
+  );
 
   useEffect(() => {
     const loadLocalEvents = async () => {

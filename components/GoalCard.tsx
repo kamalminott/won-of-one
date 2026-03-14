@@ -171,6 +171,9 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   const openGoalModal = (mode: 'create' | 'edit') => {
     analytics.capture('goal_modal_opened', { mode });
     analytics.goalModalOpen();
+    if (mode === 'create') {
+      analytics.goalCreationFlowStarted();
+    }
     setShowGoalModal(true);
   };
 
@@ -300,6 +303,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
               onPress: () => {
                 if (onGoalUpdated) {
                   onGoalUpdated(goalId, goalData);
+                  analytics.goalModalClose({ saved: true });
                   setShowGoalModal(false);
                 }
               }
@@ -321,6 +325,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
               onPress: () => {
                 if (onGoalUpdated) {
                   onGoalUpdated(goalId, goalData);
+                  analytics.goalModalClose({ saved: true });
                   setShowGoalModal(false);
                 }
               }
@@ -379,6 +384,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       }
     }
     
+    analytics.goalModalClose({ saved: true });
     setShowGoalModal(false);
   };
 
@@ -407,6 +413,7 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
   };
 
   const handleCancel = () => {
+    analytics.goalModalClose({ saved: false });
     setShowGoalModal(false);
     setShowGoalTypeDropdown(false);
     setShowTimeframeDropdown(false);

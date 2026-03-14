@@ -108,9 +108,24 @@ export default function CompetitionOverviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      analytics.screen('CompetitionOverview');
       void loadOverview(true);
     }, [loadOverview])
   );
+
+  useEffect(() => {
+    if (overview?.competition?.id) {
+      analytics.capture('overview_viewed', {
+        competition_id: overview.competition.id,
+        role: overview.role,
+      });
+      if (overview.role === 'organiser' && qrPayload) {
+        analytics.capture('competition_qr_viewed', {
+          competition_id: overview.competition.id,
+        });
+      }
+    }
+  }, [overview?.competition?.id, overview?.role, qrPayload]);
 
   const qrPayload = useMemo(() => {
     if (!overview || overview.role !== 'organiser') return null;

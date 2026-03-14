@@ -69,6 +69,7 @@ export const offlineRemoteService = {
     }
     
     // Create offline session (network unavailable or online creation failed)
+    analytics.offlineModeDetected();
     const remoteId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const session: RemoteSession = {
       remote_id: remoteId,
@@ -369,6 +370,7 @@ export const offlineRemoteService = {
         return { success: false };
       }
 
+      analytics.offlineMatchSaved();
       console.log('✅ Pending match created with ID:', matchId);
       
       // Clear session cache
