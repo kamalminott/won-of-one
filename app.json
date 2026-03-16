@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kamalminott.wonofone",
-      "buildNumber": "5.0.0",
+      "buildNumber": "5.0.1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
