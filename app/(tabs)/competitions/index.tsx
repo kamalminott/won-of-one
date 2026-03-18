@@ -24,30 +24,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const HUB_LOAD_TIMEOUT_MS = 12000;
-
-const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error('competition_hub_load_timeout'));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-};
-
 export default function CompetitionsHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, loading: authLoading, authReady, retryAuthHydration } = useAuth();
 
   const [activeCompetitions, setActiveCompetitions] = useState<CompetitionSummary[]>([]);
   const [pastCompetitions, setPastCompetitions] = useState<CompetitionSummary[]>([]);
@@ -56,6 +37,7 @@ export default function CompetitionsHubScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [realtimeBannerText, setRealtimeBannerText] = useState<string | null>(null);
   const hasLoadedCompetitionsSuccessfullyRef = useRef(false);
+  const loadRequestIdRef = useRef(0);
   const realtimeRetryAttemptRef = useRef(0);
   const realtimeRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeLastEventMsRef = useRef(0);
@@ -63,7 +45,13 @@ export default function CompetitionsHubScreen() {
   const realtimeDisconnectHandledRef = useRef(false);
   const [realtimeNonce, setRealtimeNonce] = useState(0);
 
-  const loadCompetitions = useCallback(async () => {
+  const loadCompetitions = useCallback(async (options?: { forceBlockingLoader?: boolean }) => {
+    const forceBlockingLoader = options?.forceBlockingLoader ?? false;
+
+    if (authLoading || !authReady) {
+      return;
+    }
+
     if (!user?.id) {
       setActiveCompetitions([]);
       setPastCompetitions([]);
@@ -72,17 +60,44 @@ export default function CompetitionsHubScreen() {
       return;
     }
 
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+    const shouldBlock = forceBlockingLoader || !hasLoadedCompetitionsSuccessfullyRef.current;
+    const canAttemptRecovery = !hasLoadedCompetitionsSuccessfullyRef.current;
+
     try {
+      if (shouldBlock) {
+        setLoading(true);
+      }
       setErrorText(null);
-      const summaries = await withTimeout(
-        listCompetitionSummariesForUser(user.id),
-        HUB_LOAD_TIMEOUT_MS
-      );
+      let summaries: Awaited<ReturnType<typeof listCompetitionSummariesForUser>>;
+
+      try {
+        summaries = await listCompetitionSummariesForUser(user.id);
+      } catch (error) {
+        if (!canAttemptRecovery) {
+          throw error;
+        }
+
+        console.warn(
+          'Competition hub initial load failed; retrying after auth rehydrate:',
+          error
+        );
+        await retryAuthHydration();
+        summaries = await listCompetitionSummariesForUser(user.id);
+      }
+
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
 
       setActiveCompetitions(summaries.active);
       setPastCompetitions(summaries.past);
       hasLoadedCompetitionsSuccessfullyRef.current = true;
     } catch (error) {
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
       console.warn('Competition hub load failed:', error);
       if (!hasLoadedCompetitionsSuccessfullyRef.current) {
         setActiveCompetitions([]);
@@ -90,12 +105,19 @@ export default function CompetitionsHubScreen() {
       }
       setErrorText('Could not load competitions. Pull to refresh and try again.');
     } finally {
-      setLoading(false);
+      if (loadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [user?.id]);
+  }, [authLoading, authReady, retryAuthHydration, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
+      if (authLoading || !authReady) {
+        setLoading(true);
+        return;
+      }
+
       if (!user?.id) {
         setActiveCompetitions([]);
         setPastCompetitions([]);
@@ -105,13 +127,12 @@ export default function CompetitionsHubScreen() {
       }
 
       analytics.capture('competition_hub_viewed');
-      setLoading(true);
       void loadCompetitions();
-    }, [loadCompetitions, user?.id])
+    }, [authLoading, authReady, loadCompetitions, user?.id])
   );
 
   useEffect(() => {
-    if (!user?.id) {
+    if (authLoading || !authReady || !user?.id) {
       if (realtimeRetryTimerRef.current) {
         clearTimeout(realtimeRetryTimerRef.current);
         realtimeRetryTimerRef.current = null;
@@ -119,6 +140,14 @@ export default function CompetitionsHubScreen() {
       realtimeRetryAttemptRef.current = 0;
       realtimeDisconnectHandledRef.current = false;
       setRealtimeBannerText(null);
+      if (authLoading || !authReady) {
+        setLoading(true);
+      } else {
+        setActiveCompetitions([]);
+        setPastCompetitions([]);
+        setErrorText(null);
+        setLoading(false);
+      }
       return;
     }
 
@@ -235,7 +264,7 @@ export default function CompetitionsHubScreen() {
       }
       void supabase.removeChannel(channel);
     };
-  }, [loadCompetitions, realtimeNonce, user?.id]);
+  }, [authLoading, authReady, loadCompetitions, realtimeNonce, user?.id]);
 
   const onRetryRealtime = () => {
     realtimeRetryAttemptRef.current = 0;
@@ -249,7 +278,7 @@ export default function CompetitionsHubScreen() {
   };
 
   const onRefresh = async () => {
-    if (!user?.id) {
+    if (authLoading || !authReady || !user?.id) {
       return;
     }
     setRefreshing(true);
@@ -259,6 +288,9 @@ export default function CompetitionsHubScreen() {
 
   const hasActive = activeCompetitions.length > 0;
   const hasPast = pastCompetitions.length > 0;
+  const hasRenderableData = hasActive || hasPast;
+  const showBlockingLoader =
+    loading && !hasLoadedCompetitionsSuccessfullyRef.current && !hasRenderableData;
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
   const contentBottomPadding = tabBarOverlayHeight + 16;
 
@@ -303,10 +335,16 @@ export default function CompetitionsHubScreen() {
           bannerText={realtimeBannerText}
           onRetry={onRetryRealtime}
         />
+        {loading && hasRenderableData ? (
+          <InlineLoadingNotice text="Refreshing competitions..." />
+        ) : null}
 
-        {loading ? (
+        {showBlockingLoader ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator color={Colors.purple.primary} />
+            {!authReady ? (
+              <Text style={styles.loadingText}>Syncing your session...</Text>
+            ) : null}
           </View>
         ) : (
           <>
@@ -398,6 +436,15 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+function InlineLoadingNotice({ text }: { text: string }) {
+  return (
+    <View style={styles.inlineLoadingNotice}>
+      <ActivityIndicator color={Colors.purple.primary} size="small" />
+      <Text style={styles.inlineLoadingText}>{text}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -448,6 +495,29 @@ const styles = StyleSheet.create({
     minHeight: 120,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
+  },
+  loadingText: {
+    color: '#9D9D9D',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  inlineLoadingNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(200,166,255,0.18)',
+    backgroundColor: '#191919',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  inlineLoadingText: {
+    color: '#C9C9C9',
+    fontSize: 13,
+    fontWeight: '600',
   },
   section: {
     marginBottom: 20,

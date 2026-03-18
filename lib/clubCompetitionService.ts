@@ -102,6 +102,16 @@ const isUniqueViolation = (error: unknown): boolean => {
   return err.code === '23505' || text.includes('unique') || text.includes('duplicate');
 };
 
+const createCompetitionServiceError = (context: string, error: unknown): Error => {
+  if (error instanceof Error) {
+    error.message = `${context}: ${error.message}`;
+    return error;
+  }
+
+  const message = getSupabaseErrorMessage(error) || 'unknown_error';
+  return new Error(`${context}: ${message}`);
+};
+
 const getSupabaseErrorMessage = (error: unknown): string => {
   if (!error || typeof error !== 'object') return '';
   const err = error as {
@@ -504,79 +514,82 @@ export const listCompetitionSummariesForUser = async (
   active: CompetitionSummary[];
   past: CompetitionSummary[];
 }> => {
-  try {
-    const { data: memberships, error: membershipError } = await supabase
-      .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
-      .select('competition_id, role')
-      .eq('user_id', userId);
+  const { data: memberships, error: membershipError } = await supabase
+    .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
+    .select('competition_id, role')
+    .eq('user_id', userId);
 
-    if (membershipError || !memberships || memberships.length === 0) {
-      return { active: [], past: [] };
-    }
+  if (membershipError) {
+    throw createCompetitionServiceError('Failed to load competition memberships', membershipError);
+  }
 
-    const competitionIds = memberships
-      .map((membership) => membership.competition_id as string)
-      .filter(Boolean);
-
-    const { data: competitions, error: competitionsError } = await supabase
-      .from(CLUB_COMPETITION_TABLE)
-      .select('id, name, weapon, status, updated_at, finalised_at')
-      .in('id', competitionIds);
-
-    if (competitionsError || !competitions || competitions.length === 0) {
-      return { active: [], past: [] };
-    }
-
-    const { data: participantRows } = await supabase
-      .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
-      .select('competition_id')
-      .in('competition_id', competitionIds);
-
-    const participantCountMap = new Map<string, number>();
-    participantRows?.forEach((row) => {
-      const competitionId = row.competition_id as string;
-      participantCountMap.set(
-        competitionId,
-        (participantCountMap.get(competitionId) ?? 0) + 1
-      );
-    });
-
-    const membershipRoleByCompetitionId = new Map<string, 'organiser' | 'participant'>();
-    memberships.forEach((membership) => {
-      membershipRoleByCompetitionId.set(
-        membership.competition_id as string,
-        membership.role
-      );
-    });
-
-    const summaries = competitions
-      .map((competition) => {
-        const role = membershipRoleByCompetitionId.get(competition.id as string);
-        if (!role) return null;
-        const count = participantCountMap.get(competition.id as string) ?? 1;
-        return toSummary(
-          competition as Pick<
-            ClubCompetitionRecord,
-            'id' | 'name' | 'weapon' | 'status' | 'updated_at' | 'finalised_at'
-          >,
-          role,
-          count
-        );
-      })
-      .filter((summary): summary is CompetitionSummary => summary !== null);
-
-    const active = summaries
-      .filter((summary) => summary.status !== 'finalised')
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    const past = summaries
-      .filter((summary) => summary.status === 'finalised')
-      .sort((a, b) => (b.finalisedAt ?? '').localeCompare(a.finalisedAt ?? ''));
-
-    return { active, past };
-  } catch (error) {
-    console.warn('Failed to list competition summaries:', error);
+  if (!memberships || memberships.length === 0) {
     return { active: [], past: [] };
   }
+
+  const competitionIds = memberships
+    .map((membership) => membership.competition_id as string)
+    .filter(Boolean);
+
+  const { data: competitions, error: competitionsError } = await supabase
+    .from(CLUB_COMPETITION_TABLE)
+    .select('id, name, weapon, status, updated_at, finalised_at')
+    .in('id', competitionIds);
+
+  if (competitionsError) {
+    throw createCompetitionServiceError('Failed to load competitions', competitionsError);
+  }
+
+  if (!competitions || competitions.length === 0) {
+    return { active: [], past: [] };
+  }
+
+  const { data: participantRows } = await supabase
+    .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
+    .select('competition_id')
+    .in('competition_id', competitionIds);
+
+  const participantCountMap = new Map<string, number>();
+  participantRows?.forEach((row) => {
+    const competitionId = row.competition_id as string;
+    participantCountMap.set(
+      competitionId,
+      (participantCountMap.get(competitionId) ?? 0) + 1
+    );
+  });
+
+  const membershipRoleByCompetitionId = new Map<string, 'organiser' | 'participant'>();
+  memberships.forEach((membership) => {
+    membershipRoleByCompetitionId.set(
+      membership.competition_id as string,
+      membership.role
+    );
+  });
+
+  const summaries = competitions
+    .map((competition) => {
+      const role = membershipRoleByCompetitionId.get(competition.id as string);
+      if (!role) return null;
+      const count = participantCountMap.get(competition.id as string) ?? 1;
+      return toSummary(
+        competition as Pick<
+          ClubCompetitionRecord,
+          'id' | 'name' | 'weapon' | 'status' | 'updated_at' | 'finalised_at'
+        >,
+        role,
+        count
+      );
+    })
+    .filter((summary): summary is CompetitionSummary => summary !== null);
+
+  const active = summaries
+    .filter((summary) => summary.status !== 'finalised')
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const past = summaries
+    .filter((summary) => summary.status === 'finalised')
+    .sort((a, b) => (b.finalisedAt ?? '').localeCompare(a.finalisedAt ?? ''));
+
+  return { active, past };
 };
 
 export const createClubCompetition = async (

@@ -17,7 +17,7 @@ import {
 } from '@/lib/clubCompetitionService';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -113,6 +113,14 @@ export default function CompetitionOverviewScreen() {
     }, [loadOverview])
   );
 
+  const qrPayload = useMemo(() => {
+    if (!overview || overview.role !== 'organiser') return null;
+    return buildCompetitionJoinQrPayload(
+      overview.competition.id,
+      overview.competition.join_code
+    );
+  }, [overview]);
+
   useEffect(() => {
     if (overview?.competition?.id) {
       analytics.capture('overview_viewed', {
@@ -126,14 +134,6 @@ export default function CompetitionOverviewScreen() {
       }
     }
   }, [overview?.competition?.id, overview?.role, qrPayload]);
-
-  const qrPayload = useMemo(() => {
-    if (!overview || overview.role !== 'organiser') return null;
-    return buildCompetitionJoinQrPayload(
-      overview.competition.id,
-      overview.competition.join_code
-    );
-  }, [overview]);
 
   const journeySteps: JourneyStep[] = useMemo(() => {
     if (!overview) {
