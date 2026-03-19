@@ -7,13 +7,20 @@ import {
 } from '@/constants/competition';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
-import { listCompetitionSummariesForUser } from '@/lib/clubCompetitionService';
+import {
+  archiveCompetitionForUser,
+  deleteCompetition,
+  listCompetitionSummariesForUser,
+  restoreCompetitionForUser,
+} from '@/lib/clubCompetitionService';
 import { supabase } from '@/lib/supabase';
 import type { CompetitionSummary } from '@/types/competition';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -32,9 +39,11 @@ export default function CompetitionsHubScreen() {
 
   const [activeCompetitions, setActiveCompetitions] = useState<CompetitionSummary[]>([]);
   const [pastCompetitions, setPastCompetitions] = useState<CompetitionSummary[]>([]);
+  const [archivedCompetitions, setArchivedCompetitions] = useState<CompetitionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [actionCompetitionId, setActionCompetitionId] = useState<string | null>(null);
   const [realtimeBannerText, setRealtimeBannerText] = useState<string | null>(null);
   const hasLoadedCompetitionsSuccessfullyRef = useRef(false);
   const loadRequestIdRef = useRef(0);
@@ -55,6 +64,7 @@ export default function CompetitionsHubScreen() {
     if (!user?.id) {
       setActiveCompetitions([]);
       setPastCompetitions([]);
+      setArchivedCompetitions([]);
       setErrorText(null);
       setLoading(false);
       return;
@@ -93,6 +103,7 @@ export default function CompetitionsHubScreen() {
 
       setActiveCompetitions(summaries.active);
       setPastCompetitions(summaries.past);
+      setArchivedCompetitions(summaries.archived);
       hasLoadedCompetitionsSuccessfullyRef.current = true;
     } catch (error) {
       if (loadRequestIdRef.current !== requestId) {
@@ -102,6 +113,7 @@ export default function CompetitionsHubScreen() {
       if (!hasLoadedCompetitionsSuccessfullyRef.current) {
         setActiveCompetitions([]);
         setPastCompetitions([]);
+        setArchivedCompetitions([]);
       }
       setErrorText('Could not load competitions. Pull to refresh and try again.');
     } finally {
@@ -121,6 +133,7 @@ export default function CompetitionsHubScreen() {
       if (!user?.id) {
         setActiveCompetitions([]);
         setPastCompetitions([]);
+        setArchivedCompetitions([]);
         setErrorText(null);
         setLoading(false);
         return;
@@ -145,6 +158,7 @@ export default function CompetitionsHubScreen() {
       } else {
         setActiveCompetitions([]);
         setPastCompetitions([]);
+        setArchivedCompetitions([]);
         setErrorText(null);
         setLoading(false);
       }
@@ -286,9 +300,74 @@ export default function CompetitionsHubScreen() {
     setRefreshing(false);
   };
 
+  const runCompetitionAction = useCallback(
+    async (competition: CompetitionSummary, action: 'archive' | 'restore' | 'delete') => {
+      if (actionCompetitionId) {
+        return;
+      }
+
+      setActionCompetitionId(competition.id);
+
+      const result =
+        action === 'archive'
+          ? await archiveCompetitionForUser({ competitionId: competition.id })
+          : action === 'restore'
+            ? await restoreCompetitionForUser({ competitionId: competition.id })
+            : await deleteCompetition({ competitionId: competition.id });
+
+      if (!result.ok) {
+        Alert.alert(
+          action === 'delete' ? 'Could not delete competition' : 'Could not update competition',
+          result.message
+        );
+        setActionCompetitionId(null);
+        return;
+      }
+
+      await loadCompetitions();
+      setActionCompetitionId(null);
+    },
+    [actionCompetitionId, loadCompetitions]
+  );
+
+  const onArchiveCompetition = useCallback(
+    (competition: CompetitionSummary) => {
+      void runCompetitionAction(competition, 'archive');
+    },
+    [runCompetitionAction]
+  );
+
+  const onRestoreCompetition = useCallback(
+    (competition: CompetitionSummary) => {
+      void runCompetitionAction(competition, 'restore');
+    },
+    [runCompetitionAction]
+  );
+
+  const onDeleteCompetition = useCallback(
+    (competition: CompetitionSummary) => {
+      Alert.alert(
+        'Delete competition?',
+        'This will permanently remove participants, matches, and competition data. This cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              void runCompetitionAction(competition, 'delete');
+            },
+          },
+        ]
+      );
+    },
+    [runCompetitionAction]
+  );
+
   const hasActive = activeCompetitions.length > 0;
   const hasPast = pastCompetitions.length > 0;
-  const hasRenderableData = hasActive || hasPast;
+  const hasArchived = archivedCompetitions.length > 0;
+  const hasRenderableData = hasActive || hasPast || hasArchived;
   const showBlockingLoader =
     loading && !hasLoadedCompetitionsSuccessfullyRef.current && !hasRenderableData;
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
@@ -355,6 +434,9 @@ export default function CompetitionsHubScreen() {
                   <CompetitionCard
                     key={competition.id}
                     competition={competition}
+                    isBusy={actionCompetitionId === competition.id}
+                    onArchive={onArchiveCompetition}
+                    onDelete={onDeleteCompetition}
                   />
                 ))
               ) : (
@@ -369,12 +451,30 @@ export default function CompetitionsHubScreen() {
                   <CompetitionCard
                     key={competition.id}
                     competition={competition}
+                    isBusy={actionCompetitionId === competition.id}
+                    onArchive={onArchiveCompetition}
                   />
                 ))
               ) : (
                 <EmptyState text="No past competitions yet." />
               )}
             </View>
+
+            {hasArchived ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Archived</Text>
+                {archivedCompetitions.map((competition) => (
+                  <CompetitionCard
+                    key={competition.id}
+                    competition={competition}
+                    isArchived
+                    isBusy={actionCompetitionId === competition.id}
+                    onRestore={onRestoreCompetition}
+                    onDelete={onDeleteCompetition}
+                  />
+                ))}
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -382,11 +482,60 @@ export default function CompetitionsHubScreen() {
   );
 }
 
-function CompetitionCard({ competition }: { competition: CompetitionSummary }) {
+function CompetitionCard({
+  competition,
+  isArchived = false,
+  isBusy = false,
+  onArchive,
+  onRestore,
+  onDelete,
+}: {
+  competition: CompetitionSummary;
+  isArchived?: boolean;
+  isBusy?: boolean;
+  onArchive?: (competition: CompetitionSummary) => void;
+  onRestore?: (competition: CompetitionSummary) => void;
+  onDelete?: (competition: CompetitionSummary) => void;
+}) {
   const router = useRouter();
+  const canDelete = competition.role === 'organiser' && competition.status === 'registration_open';
+
+  const openActions = () => {
+    const buttons: {
+      text: string;
+      style?: 'default' | 'cancel' | 'destructive';
+      onPress?: () => void;
+    }[] = [];
+
+    if (isArchived && onRestore) {
+      buttons.push({
+        text: 'Restore to hub',
+        onPress: () => onRestore(competition),
+      });
+    }
+
+    if (!isArchived && onArchive) {
+      buttons.push({
+        text: 'Archive from hub',
+        onPress: () => onArchive(competition),
+      });
+    }
+
+    if (canDelete && onDelete) {
+      buttons.push({
+        text: 'Delete competition',
+        style: 'destructive',
+        onPress: () => onDelete(competition),
+      });
+    }
+
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(competition.name, undefined, buttons);
+  };
 
   return (
     <Pressable
+      disabled={isBusy}
       onPress={() => {
         analytics.capture('competition_opened', {
           competition_id: competition.id,
@@ -403,15 +552,37 @@ function CompetitionCard({ competition }: { competition: CompetitionSummary }) {
     >
       <View style={styles.cardTopRow}>
         <Text style={styles.cardTitle}>{competition.name}</Text>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: COMPETITION_STATUS_COLORS[competition.status] },
-          ]}
-        >
-          <Text style={styles.statusText}>
-            {COMPETITION_STATUS_LABELS[competition.status]}
-          </Text>
+        <View style={styles.cardTopRowRight}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: COMPETITION_STATUS_COLORS[competition.status] },
+            ]}
+          >
+            <Text style={styles.statusText}>
+              {COMPETITION_STATUS_LABELS[competition.status]}
+            </Text>
+          </View>
+          {(onArchive || onRestore || (canDelete && onDelete)) ? (
+            <Pressable
+              disabled={isBusy}
+              onPress={(event) => {
+                event.stopPropagation();
+                openActions();
+              }}
+              style={styles.cardMenuButton}
+            >
+              {isBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons
+                  name="ellipsis-vertical"
+                  size={18}
+                  color="rgba(255,255,255,0.75)"
+                />
+              )}
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -420,9 +591,12 @@ function CompetitionCard({ competition }: { competition: CompetitionSummary }) {
           {competition.weapon.toUpperCase()} • {competition.participantCount}{' '}
           participants
         </Text>
-        <Text style={styles.roleText}>
-          {COMPETITION_ROLE_LABELS[competition.role]}
-        </Text>
+        <View style={styles.cardMetaRight}>
+          {isArchived ? <Text style={styles.archivedText}>Archived</Text> : null}
+          <Text style={styles.roleText}>
+            {COMPETITION_ROLE_LABELS[competition.role]}
+          </Text>
+        </View>
       </View>
     </Pressable>
   );
@@ -543,6 +717,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  cardTopRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   cardTitle: {
     color: '#FFFFFF',
     fontSize: 16,
@@ -564,13 +743,31 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  cardMetaRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   cardMeta: {
     color: '#9D9D9D',
     fontSize: 13,
     fontWeight: '500',
   },
+  cardMenuButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
   roleText: {
     color: '#E9D7FF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  archivedText: {
+    color: '#9D9D9D',
     fontSize: 12,
     fontWeight: '700',
   },

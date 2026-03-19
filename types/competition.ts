@@ -36,6 +36,7 @@ export interface CompetitionSummary {
   role: CompetitionRole;
   updatedAt: string;
   finalisedAt?: string | null;
+  archivedAt?: string | null;
 }
 
 export interface ClubCompetitionRecord {
@@ -59,6 +60,7 @@ export interface ClubCompetitionParticipantRecord {
   display_name: string;
   role: CompetitionRole;
   status: CompetitionParticipantStatus;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

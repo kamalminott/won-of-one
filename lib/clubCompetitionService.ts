@@ -132,7 +132,8 @@ const isRegistrationJoinBlocked = (status: string): boolean => {
 const toSummary = (
   row: Pick<ClubCompetitionRecord, 'id' | 'name' | 'weapon' | 'status' | 'updated_at' | 'finalised_at'>,
   role: 'organiser' | 'participant',
-  participantCount: number
+  participantCount: number,
+  archivedAt: string | null = null
 ): CompetitionSummary => {
   return {
     id: row.id,
@@ -143,6 +144,7 @@ const toSummary = (
     participantCount,
     updatedAt: row.updated_at,
     finalisedAt: row.finalised_at,
+    archivedAt,
   };
 };
 
@@ -513,10 +515,11 @@ export const listCompetitionSummariesForUser = async (
 ): Promise<{
   active: CompetitionSummary[];
   past: CompetitionSummary[];
+  archived: CompetitionSummary[];
 }> => {
   const { data: memberships, error: membershipError } = await supabase
     .from(CLUB_COMPETITION_PARTICIPANT_TABLE)
-    .select('competition_id, role')
+    .select('competition_id, role, archived_at')
     .eq('user_id', userId);
 
   if (membershipError) {
@@ -524,7 +527,7 @@ export const listCompetitionSummariesForUser = async (
   }
 
   if (!memberships || memberships.length === 0) {
-    return { active: [], past: [] };
+    return { active: [], past: [], archived: [] };
   }
 
   const competitionIds = memberships
@@ -541,7 +544,7 @@ export const listCompetitionSummariesForUser = async (
   }
 
   if (!competitions || competitions.length === 0) {
-    return { active: [], past: [] };
+    return { active: [], past: [], archived: [] };
   }
 
   const { data: participantRows } = await supabase
@@ -558,38 +561,50 @@ export const listCompetitionSummariesForUser = async (
     );
   });
 
-  const membershipRoleByCompetitionId = new Map<string, 'organiser' | 'participant'>();
+  const membershipByCompetitionId = new Map<
+    string,
+    {
+      role: 'organiser' | 'participant';
+      archivedAt: string | null;
+    }
+  >();
   memberships.forEach((membership) => {
-    membershipRoleByCompetitionId.set(
-      membership.competition_id as string,
-      membership.role
-    );
+    membershipByCompetitionId.set(membership.competition_id as string, {
+      role: membership.role,
+      archivedAt: membership.archived_at ?? null,
+    });
   });
 
   const summaries = competitions
     .map((competition) => {
-      const role = membershipRoleByCompetitionId.get(competition.id as string);
-      if (!role) return null;
+      const membership = membershipByCompetitionId.get(competition.id as string);
+      if (!membership) return null;
       const count = participantCountMap.get(competition.id as string) ?? 1;
       return toSummary(
         competition as Pick<
           ClubCompetitionRecord,
           'id' | 'name' | 'weapon' | 'status' | 'updated_at' | 'finalised_at'
         >,
-        role,
-        count
+        membership.role,
+        count,
+        membership.archivedAt
       );
     })
     .filter((summary): summary is CompetitionSummary => summary !== null);
 
-  const active = summaries
+  const visibleSummaries = summaries.filter((summary) => !summary.archivedAt);
+
+  const active = visibleSummaries
     .filter((summary) => summary.status !== 'finalised')
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const past = summaries
+  const past = visibleSummaries
     .filter((summary) => summary.status === 'finalised')
     .sort((a, b) => (b.finalisedAt ?? '').localeCompare(a.finalisedAt ?? ''));
+  const archived = summaries
+    .filter((summary) => Boolean(summary.archivedAt))
+    .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''));
 
-  return { active, past };
+  return { active, past, archived };
 };
 
 export const createClubCompetition = async (
@@ -2226,6 +2241,78 @@ export const leaveCompetitionAsParticipant = async (input: {
       return { ok: false, message: 'You cannot leave as the last organiser.' };
     }
     return { ok: false, message: 'Could not leave competition right now.' };
+  }
+
+  return {
+    ok: true,
+    data: true,
+  };
+};
+
+export const archiveCompetitionForUser = async (input: {
+  competitionId: string;
+}): Promise<CompetitionActionResult<true>> => {
+  const { error } = await supabase.rpc('archive_club_competition_for_user', {
+    p_competition_id: input.competitionId,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('participant_not_found')) {
+      return { ok: false, message: 'You can only archive competitions you are part of.' };
+    }
+    return { ok: false, message: 'Could not archive this competition right now.' };
+  }
+
+  return {
+    ok: true,
+    data: true,
+  };
+};
+
+export const restoreCompetitionForUser = async (input: {
+  competitionId: string;
+}): Promise<CompetitionActionResult<true>> => {
+  const { error } = await supabase.rpc('restore_club_competition_for_user', {
+    p_competition_id: input.competitionId,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('participant_not_found')) {
+      return { ok: false, message: 'You can only restore competitions you are part of.' };
+    }
+    return { ok: false, message: 'Could not restore this competition right now.' };
+  }
+
+  return {
+    ok: true,
+    data: true,
+  };
+};
+
+export const deleteCompetition = async (input: {
+  competitionId: string;
+}): Promise<CompetitionActionResult<true>> => {
+  const { error } = await supabase.rpc('delete_club_competition', {
+    p_competition_id: input.competitionId,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('delete_only_during_registration_open')) {
+      return {
+        ok: false,
+        message: 'Only registration-open competitions can be deleted.',
+      };
+    }
+    if (message.includes('not_allowed')) {
+      return { ok: false, message: 'Only organisers can delete competitions.' };
+    }
+    if (message.includes('competition_not_found')) {
+      return { ok: false, message: 'Competition was not found.' };
+    }
+    return { ok: false, message: 'Could not delete this competition right now.' };
   }
 
   return {
