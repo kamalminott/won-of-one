@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { trackOnce } from '@/lib/analyticsTracking';
 import { matchService } from '@/lib/database';
-import { SimpleMatch } from '@/types/database';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
@@ -43,6 +42,8 @@ interface Match {
   competitionRound?: 'L256' | 'L128' | 'L96' | 'L64' | 'L32' | 'L16' | 'QF' | 'SF' | 'F' | null;
 }
 
+const MATCH_HISTORY_PAGE_SIZE = 50;
+
 type HighlightChunk = {
   text: string;
   highlight: boolean;
@@ -74,6 +75,7 @@ export default function RecentMatchesScreen() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [allMatches, setAllMatches] = useState<Match[]>([]); // Store all matches for filtering
   const [loading, setLoading] = useState(true);
+  const [historyLimit, setHistoryLimit] = useState(MATCH_HISTORY_PAGE_SIZE);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [selectedType, setSelectedType] = useState<'All' | 'Competition' | 'Training'>('All');
   const [showWinLossDropdown, setShowWinLossDropdown] = useState(false);
@@ -213,28 +215,6 @@ export default function RecentMatchesScreen() {
     }
     return 'Competition';
   };
-
-  const convertToMatch = (simpleMatch: SimpleMatch): Match => ({
-    id: simpleMatch.id,
-    opponentName: simpleMatch.opponentName,
-    opponentImage: '', // No default image - will use initials fallback
-    date: formatDate(simpleMatch.date),
-    time: simpleMatch.time, // Pass through the completion time
-    matchType: toDisplayMatchType(simpleMatch.matchType),
-    outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',
-    playerScore: simpleMatch.youScore,
-    opponentScore: simpleMatch.opponentScore,
-    source: simpleMatch.source ?? 'unknown',
-    notes: simpleMatch.notes ?? '',
-    competitionId: simpleMatch.competitionId ?? null,
-    competitionName: simpleMatch.competitionName ?? null,
-    competitionDate: simpleMatch.competitionDate
-      ? formatDate(simpleMatch.competitionDate)
-      : null,
-    competitionWeaponType: simpleMatch.competitionWeaponType ?? null,
-    competitionPhase: simpleMatch.competitionPhase ?? null,
-    competitionRound: simpleMatch.competitionRound ?? null,
-  });
 
   type CompetitionGroup = {
     id: string;
@@ -568,19 +548,40 @@ export default function RecentMatchesScreen() {
   }, [groupedMatches, expandedCompetitions]);
 
   // Fetch matches data
-  const fetchMatches = async () => {
+  const fetchMatches = useCallback(async (limitOverride?: number) => {
     if (!user) return;
     
     try {
       setLoading(true);
       console.log('🔄 Fetching matches for match history...');
+      const limitToUse = limitOverride ?? historyLimit;
       const simpleMatches = await matchService.getRecentMatches(
         user.id,
-        50,
+        limitToUse,
         undefined,
         session?.access_token
       ); // Get more matches for history page
-      const convertedMatches = simpleMatches.map(convertToMatch);
+      const convertedMatches = simpleMatches.map((simpleMatch): Match => ({
+        id: simpleMatch.id,
+        opponentName: simpleMatch.opponentName,
+        opponentImage: '', // No default image - will use initials fallback
+        date: formatDate(simpleMatch.date),
+        time: simpleMatch.time, // Pass through the completion time
+        matchType: toDisplayMatchType(simpleMatch.matchType),
+        outcome: simpleMatch.isWin ? 'Victory' : 'Defeat',
+        playerScore: simpleMatch.youScore,
+        opponentScore: simpleMatch.opponentScore,
+        source: simpleMatch.source ?? 'unknown',
+        notes: simpleMatch.notes ?? '',
+        competitionId: simpleMatch.competitionId ?? null,
+        competitionName: simpleMatch.competitionName ?? null,
+        competitionDate: simpleMatch.competitionDate
+          ? formatDate(simpleMatch.competitionDate)
+          : null,
+        competitionWeaponType: simpleMatch.competitionWeaponType ?? null,
+        competitionPhase: simpleMatch.competitionPhase ?? null,
+        competitionRound: simpleMatch.competitionRound ?? null,
+      }));
       console.log(`📊 Fetched ${convertedMatches.length} matches for history`);
       setAllMatches(convertedMatches);
       setMatches(convertedMatches);
@@ -589,12 +590,12 @@ export default function RecentMatchesScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [historyLimit, session?.access_token, user]);
 
   // Fetch matches when component mounts
   useEffect(() => {
     fetchMatches();
-  }, [user]);
+  }, [fetchMatches]);
 
   // Refresh matches when screen comes into focus (e.g., when returning from add-match)
   useFocusEffect(
@@ -605,8 +606,19 @@ export default function RecentMatchesScreen() {
         console.log('🎯 Match history screen focused - refreshing matches...');
         fetchMatches();
       }
-    }, [user])
+    }, [fetchMatches, user])
   );
+
+  const canLoadMoreMatches = allMatches.length >= historyLimit;
+
+  const handleLoadOlderMatches = () => {
+    const nextLimit = historyLimit + MATCH_HISTORY_PAGE_SIZE;
+    analytics.capture('match_history_load_more', {
+      previous_limit: historyLimit,
+      next_limit: nextLimit,
+    });
+    setHistoryLimit(nextLimit);
+  };
 
   // Handle match deletion
   const handleDeleteMatch = async (matchId: string) => {
@@ -1256,6 +1268,35 @@ export default function RecentMatchesScreen() {
       fontSize: width * 0.03,
       fontWeight: '600',
     },
+    loadMoreContainer: {
+      paddingHorizontal: width * 0.04,
+      paddingTop: height * 0.008,
+      paddingBottom: height * 0.02,
+    },
+    loadMoreButton: {
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      borderRadius: width * 0.04,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      paddingVertical: height * 0.018,
+      paddingHorizontal: width * 0.04,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    loadMoreButtonDisabled: {
+      opacity: 0.6,
+    },
+    loadMoreButtonText: {
+      color: 'white',
+      fontSize: width * 0.035,
+      fontWeight: '600',
+    },
+    loadMoreHint: {
+      color: 'rgba(255,255,255,0.6)',
+      fontSize: width * 0.03,
+      textAlign: 'center',
+      marginTop: height * 0.01,
+    },
   });
 
   return (
@@ -1700,6 +1741,22 @@ export default function RecentMatchesScreen() {
               })}
             </View>
           ))
+        )}
+
+        {!loading && matches.length > 0 && canLoadMoreMatches && (
+          <View style={styles.loadMoreContainer}>
+            <TouchableOpacity
+              style={[styles.loadMoreButton, loading && styles.loadMoreButtonDisabled]}
+              onPress={handleLoadOlderMatches}
+              activeOpacity={0.85}
+              disabled={loading}
+            >
+              <Text style={styles.loadMoreButtonText}>Load Older Matches</Text>
+            </TouchableOpacity>
+            <Text style={styles.loadMoreHint}>
+              Showing the newest {allMatches.length} matches. Load more to see older results.
+            </Text>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>

@@ -103,6 +103,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const lastAuthEventRef = useRef<string | null>(null);
   const manualRetryInFlightRef = useRef(false);
   const googleSignInConfiguredRef = useRef(false);
+  const authBootResolvedRef = useRef(false);
 
   const userNameStorageKey = (userId?: string | null) => {
     return userId ? `user_name:${userId}` : 'user_name';
@@ -260,6 +261,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       console.warn(`⚠️ [AUTH] hydration log failed: ${step}`, error);
     }
+  };
+
+  const trackAuthBootResolved = (props: {
+    outcome: 'authenticated' | 'unauthenticated' | 'password_recovery' | 'error';
+    provider?: string | null;
+    storage_has_session?: boolean;
+    error_type?: string;
+  }) => {
+    if (authBootResolvedRef.current) return;
+    authBootResolvedRef.current = true;
+    analytics.capture('auth_boot_resolved', props);
   };
 
   const updateAppleMetadata = async (
@@ -1010,12 +1022,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const getInitialSession = async () => {
       console.log('🔍 [AUTH] Checking for existing session on app start...');
       setIsPasswordRecovery(false);
+      let storageHasSession = false;
       
       try {
         // Check AsyncStorage directly for debugging
         try {
           const storedSession = await AsyncStorage.getItem(getSupabaseStorageKey());
           if (storedSession) {
+            storageHasSession = true;
             console.log('✅ [AUTH] AsyncStorage session found:', storedSession.substring(0, 50) + '...');
             await logAuthHydrationStep('boot_storage_checked', null, {
               storage_has_session: true,
@@ -1043,6 +1057,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           await logAuthHydrationStep('boot_get_session_error', null, {
             error: error.message || 'unknown_error',
           });
+          trackAuthBootResolved({
+            outcome: 'error',
+            error_type: error.message || 'unknown_error',
+            storage_has_session: storageHasSession,
+          });
           // If session retrieval fails, clear any stale data
           setSession(null);
           setUser(null);
@@ -1054,6 +1073,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (!session) {
           console.log('⚠️ [AUTH] No session found - user needs to login');
           await logAuthHydrationStep('boot_no_session');
+          trackAuthBootResolved({
+            outcome: 'unauthenticated',
+            storage_has_session: storageHasSession,
+          });
           setSession(null);
           setUser(null);
           setCachedAuthSession(null, 'BOOT_NO_SESSION');
@@ -1068,6 +1091,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           refreshToken: session?.refresh_token ? 'Present' : 'Missing'
         });
         await logAuthHydrationStep('boot_session_found', session);
+        trackAuthBootResolved({
+          outcome: 'authenticated',
+          storage_has_session: storageHasSession,
+          provider: session.user?.app_metadata?.provider ?? null,
+        });
         
         // Check if session is expired
         if (session && session.expires_at) {
@@ -1094,6 +1122,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         markBootComplete();
       } catch (error) {
         console.error('❌ [AUTH] Unexpected error getting session:', error);
+        trackAuthBootResolved({
+          outcome: 'error',
+          error_type: (error as any)?.message || 'unexpected_error',
+          storage_has_session: storageHasSession,
+        });
         setSession(null);
         setUser(null);
         markBootComplete();
@@ -1112,6 +1145,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (event === 'PASSWORD_RECOVERY') {
           console.log('🔐 Password recovery event detected - limiting access until reset completes');
+          trackAuthBootResolved({
+            outcome: 'password_recovery',
+            provider: session?.user?.app_metadata?.provider ?? null,
+          });
           setIsPasswordRecovery(true);
           setSession(session);
           setUser(null);

@@ -29,6 +29,7 @@ export default function LoginScreen() {
   const [socialAuthLoading, setSocialAuthLoading] = useState<'google' | 'apple' | null>(null);
   const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [hasStartedForm, setHasStartedForm] = useState(false);
   
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -40,6 +41,7 @@ export default function LoginScreen() {
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Login');
+      analytics.capture('auth_viewed', { screen: 'login' });
     }, [])
   );
 
@@ -87,6 +89,15 @@ export default function LoginScreen() {
     return validateEmail(trimmed) ? null : 'Enter a valid email address';
   };
 
+  const resolveLoginErrorType = (message?: string) => {
+    const normalized = message?.toLowerCase() || '';
+    if (normalized.includes('cancel')) return 'cancelled';
+    if (normalized.includes('password')) return 'wrong_password';
+    if (normalized.includes('email')) return 'invalid_email';
+    if (normalized.includes('network') || normalized.includes('connection')) return 'network_error';
+    return 'unknown_error';
+  };
+
   const handleEmailChange = (value: string) => {
     setEmail(value);
     if (emailTouched) {
@@ -94,8 +105,20 @@ export default function LoginScreen() {
     }
   };
 
+  useEffect(() => {
+    if ((email || password) && !hasStartedForm) {
+      setHasStartedForm(true);
+      analytics.capture('login_form_interacted', { method: 'email' });
+    }
+  }, [email, hasStartedForm, password]);
+
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
+      analytics.capture('login_validation_error', {
+        field: 'required_fields',
+        error_type: 'missing_fields',
+        method: 'email',
+      });
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
@@ -104,10 +127,15 @@ export default function LoginScreen() {
     if (nextEmailError) {
       setEmailTouched(true);
       setEmailError(nextEmailError);
+      analytics.capture('login_validation_error', {
+        field: 'email',
+        error_type: 'invalid_email',
+        method: 'email',
+      });
       return;
     }
 
-    analytics.loginAttempt();
+    analytics.loginAttempt({ method: 'email' });
     const loginStartTime = Date.now();
     setLoading(true);
 
@@ -115,23 +143,50 @@ export default function LoginScreen() {
       const { error } = await signIn(email, password);
       
       if (error) {
-        const errorType = error.message.includes('password') ? 'wrong_password' : 
-                         error.message.includes('email') ? 'invalid_email' :
-                         error.message.includes('network') || error.message.includes('connection') ? 'network_error' :
-                         'unknown_error';
-        analytics.loginFailure({ error_type: errorType });
+        const errorType = resolveLoginErrorType(error.message);
+        analytics.loginFailure({ error_type: errorType, method: 'email' });
         Alert.alert('Error', error.message);
       } else {
         const timeToLogin = Date.now() - loginStartTime;
-        analytics.loginSuccess({ time_to_login_ms: timeToLogin });
+        analytics.loginSuccess({ method: 'email', time_to_login_ms: timeToLogin });
         // Success - user will be automatically redirected by auth context
         router.push('/(tabs)');
       }
-    } catch (error) {
-      analytics.loginFailure({ error_type: 'unexpected_error' });
+    } catch {
+      analytics.loginFailure({ error_type: 'unexpected_error', method: 'email' });
       Alert.alert('Error', 'An unexpected error occurred');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (method: 'google' | 'apple') => {
+    if (socialAuthLoading) return;
+
+    setSocialAuthLoading(method);
+    analytics.loginAttempt({ method });
+
+    try {
+      const { error } = method === 'google' ? await signInWithGoogle() : await signInWithApple();
+      if (error) {
+        const errorType = resolveLoginErrorType(error.message);
+
+        if (errorType === 'cancelled') {
+          analytics.capture('login_cancelled', { method });
+          return;
+        }
+
+        analytics.loginFailure({ error_type: errorType, method });
+        Alert.alert('Error', error.message || `Failed to sign in with ${method === 'google' ? 'Google' : 'Apple'}`);
+        return;
+      }
+
+      analytics.loginSuccess({ method });
+      if (method === 'apple') {
+        router.push('/(tabs)');
+      }
+    } finally {
+      setSocialAuthLoading(null);
     }
   };
 
@@ -259,7 +314,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
               
               <TouchableOpacity onPress={() => {
-                analytics.capture('forgot_password_click');
+                analytics.capture('forgot_password_click', { source_screen: 'login' });
                 router.push('/forgot-password');
               }}>
                 <Text style={[styles.forgotPasswordText, { fontSize: width * 0.035 }]}>Forgot Password?</Text>
@@ -296,7 +351,7 @@ export default function LoginScreen() {
           <View style={[styles.socialSection, { marginTop: height * 0.04 }]}>
             <View style={[styles.separator, { marginBottom: height * 0.03 }]}>
               <View style={[styles.separatorLine, { height: 1, flex: 0.3 }]} />
-              <Text style={[styles.separatorText, { fontSize: width * 0.04 }]}>or sign up with</Text>
+              <Text style={[styles.separatorText, { fontSize: width * 0.04 }]}>or continue with</Text>
               <View style={[styles.separatorLine, { height: 1, flex: 0.3 }]} />
             </View>
             
@@ -309,23 +364,7 @@ export default function LoginScreen() {
                   opacity: socialAuthLoading ? 0.65 : 1,
                 }]}
                 disabled={!!socialAuthLoading}
-                onPress={async () => {
-                  if (socialAuthLoading) return;
-                  setSocialAuthLoading('google');
-                  analytics.capture('google_signin_attempt');
-                  try {
-                    const { error } = await signInWithGoogle();
-                    if (error) {
-                      analytics.capture('google_signin_failure', { error: error.message });
-                      Alert.alert('Error', error.message || 'Failed to sign in with Google');
-                    } else {
-                      analytics.capture('google_signin_success');
-                      // Navigation will happen automatically via auth state change
-                    }
-                  } finally {
-                    setSocialAuthLoading(null);
-                  }
-                }}
+                onPress={() => handleSocialLogin('google')}
               >
                 {socialAuthLoading === 'google' ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -343,25 +382,7 @@ export default function LoginScreen() {
                     opacity: socialAuthLoading ? 0.65 : 1,
                   }]}
                   disabled={!!socialAuthLoading}
-                  onPress={async () => {
-                    if (socialAuthLoading) return;
-                    setSocialAuthLoading('apple');
-                    analytics.capture('apple_signin_attempt');
-                    try {
-                      const { error } = await signInWithApple();
-                      if (error) {
-                        if (error.message !== 'Sign in was canceled') {
-                          analytics.capture('apple_signin_failure', { error: error.message });
-                          Alert.alert('Error', error.message || 'Failed to sign in with Apple');
-                        }
-                      } else {
-                        analytics.capture('apple_signin_success');
-                        router.push('/(tabs)');
-                      }
-                    } finally {
-                      setSocialAuthLoading(null);
-                    }
-                  }}
+                  onPress={() => handleSocialLogin('apple')}
                 >
                   {socialAuthLoading === 'apple' ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
@@ -381,8 +402,14 @@ export default function LoginScreen() {
               paddingVertical: height * 0.02
             }]}
             onPress={() => {
-              analytics.capture('create_account_click');
-              router.push('/create-account');
+              analytics.capture('create_account_click', {
+                source_screen: 'login',
+                target_screen: 'create_account',
+              });
+              router.push({
+                pathname: '/create-account',
+                params: { entry_point: 'login' },
+              });
             }}
           >
             <Text style={[styles.signUpText, { fontSize: width * 0.04 }]}>

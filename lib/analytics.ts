@@ -4,6 +4,14 @@ let posthogInstance: PostHog | null = null;
 let initialized = false;
 let isAvailable = false;
 const SHOULD_FLUSH = !__DEV__;
+const MAX_PENDING_ANALYTICS_CALLS = 100;
+
+type PendingAnalyticsCall =
+  | { type: 'identify'; userId: string; props?: Record<string, any> }
+  | { type: 'screen'; name: string; props?: Record<string, any> }
+  | { type: 'capture'; event: string; props?: Record<string, any> };
+
+const pendingAnalyticsCalls: PendingAnalyticsCall[] = [];
 
 const getAnalyticsErrorMessage = (error: unknown): string => {
   if (error instanceof Error && typeof error.message === 'string') {
@@ -41,6 +49,36 @@ const POSTHOG_KEY = process.env.EXPO_PUBLIC_POSTHOG_KEY || 'phc_XLNZ0QN65VPSN1vD
 // Note: If you used --region eu in the wizard, use: 'https://eu.posthog.com'
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://eu.posthog.com';
 
+const enqueueAnalyticsCall = (call: PendingAnalyticsCall) => {
+  if (pendingAnalyticsCalls.length >= MAX_PENDING_ANALYTICS_CALLS) {
+    pendingAnalyticsCalls.shift();
+  }
+  pendingAnalyticsCalls.push(call);
+};
+
+const flushPendingAnalyticsCalls = (instance: PostHog) => {
+  while (pendingAnalyticsCalls.length > 0) {
+    const call = pendingAnalyticsCalls.shift();
+    if (!call) continue;
+
+    try {
+      if (call.type === 'identify') {
+        instance.identify(call.userId, call.props);
+      } else if (call.type === 'screen') {
+        instance.screen(call.name, call.props);
+      } else {
+        instance.capture(call.event, call.props);
+      }
+    } catch (error) {
+      safeDevError(`PostHog pending ${call.type} error`, error);
+    }
+  }
+
+  if (SHOULD_FLUSH && instance.flush) {
+    instance.flush();
+  }
+};
+
 export const analytics = {
   setInstance: (instance: PostHog | null) => {
     posthogInstance = instance;
@@ -48,6 +86,7 @@ export const analytics = {
     if (instance) {
       initialized = true;
       console.log('✅ PostHog instance set');
+      flushPendingAnalyticsCalls(instance);
     }
   },
 
@@ -68,7 +107,11 @@ export const analytics = {
   },
 
   identify: (userId: string, props?: Record<string, any>) => {
-    if (!isAvailable || !userId || !posthogInstance) return;
+    if (!userId) return;
+    if (!posthogInstance) {
+      enqueueAnalyticsCall({ type: 'identify', userId, props });
+      return;
+    }
     try {
       posthogInstance.identify(userId, props);
       safeDevLog(`📊 PostHog: Identify user "${userId}"`);
@@ -87,7 +130,10 @@ export const analytics = {
   },
 
   screen: (name: string, props?: Record<string, any>) => {
-    if (!isAvailable || !posthogInstance) return;
+    if (!posthogInstance) {
+      enqueueAnalyticsCall({ type: 'screen', name, props });
+      return;
+    }
     try {
       posthogInstance.screen(name, props);
       safeDevLog(`📊 PostHog: Screen "${name}"`);
@@ -100,7 +146,10 @@ export const analytics = {
   },
 
   capture: (event: string, props?: Record<string, any>) => {
-    if (!isAvailable || !posthogInstance) return;
+    if (!posthogInstance) {
+      enqueueAnalyticsCall({ type: 'capture', event, props });
+      return;
+    }
     try {
       posthogInstance.capture(event, props);
       safeDevLog(`📊 PostHog: Event "${event}"`);
@@ -243,71 +292,57 @@ export const analytics = {
   },
 
   // Authentication tracking
-  loginAttempt: () => {
-    if (!isAvailable || !posthogInstance) return;
+  loginAttempt: (props?: { method?: string }) => {
     try {
-      posthogInstance.capture('login_attempt');
-      __DEV__ && console.log('📊 PostHog: login_attempt');
+      analytics.capture('login_attempt', props);
     } catch (error) {
       console.error('PostHog loginAttempt error:', error);
     }
   },
 
   loginSuccess: (props?: { method?: string; time_to_login_ms?: number }) => {
-    if (!isAvailable || !posthogInstance) return;
     try {
-      posthogInstance.capture('login_success', props);
-      __DEV__ && console.log('📊 PostHog: login_success', props);
+      analytics.capture('login_success', props);
     } catch (error) {
       console.error('PostHog loginSuccess error:', error);
     }
   },
 
-  loginFailure: (props: { error_type: string }) => {
-    if (!isAvailable || !posthogInstance) return;
+  loginFailure: (props: { error_type: string; method?: string }) => {
     try {
-      posthogInstance.capture('login_failure', props);
-      __DEV__ && console.log('📊 PostHog: login_failure', props);
+      analytics.capture('login_failure', props);
     } catch (error) {
       console.error('PostHog loginFailure error:', error);
     }
   },
 
-  signupStart: () => {
-    if (!isAvailable || !posthogInstance) return;
+  signupStart: (props?: { method?: string; trigger?: string; entry_point?: string }) => {
     try {
-      posthogInstance.capture('signup_start');
-      __DEV__ && console.log('📊 PostHog: signup_start');
+      analytics.capture('signup_start', props);
     } catch (error) {
       console.error('PostHog signupStart error:', error);
     }
   },
 
-  signupSuccess: () => {
-    if (!isAvailable || !posthogInstance) return;
+  signupSuccess: (props?: { method?: string; entry_point?: string }) => {
     try {
-      posthogInstance.capture('signup_success');
-      __DEV__ && console.log('📊 PostHog: signup_success');
+      analytics.capture('signup_success', props);
     } catch (error) {
       console.error('PostHog signupSuccess error:', error);
     }
   },
 
-  signupFailure: (props: { error_type: string }) => {
-    if (!isAvailable || !posthogInstance) return;
+  signupFailure: (props: { error_type: string; method?: string; entry_point?: string }) => {
     try {
-      posthogInstance.capture('signup_failure', props);
-      __DEV__ && console.log('📊 PostHog: signup_failure', props);
+      analytics.capture('signup_failure', props);
     } catch (error) {
       console.error('PostHog signupFailure error:', error);
     }
   },
 
-  signupAbandon: () => {
-    if (!isAvailable || !posthogInstance) return;
+  signupAbandon: (props?: { method?: string; entry_point?: string; had_form_input?: boolean }) => {
     try {
-      posthogInstance.capture('signup_abandon');
-      __DEV__ && console.log('📊 PostHog: signup_abandon');
+      analytics.capture('signup_abandon', props);
     } catch (error) {
       console.error('PostHog signupAbandon error:', error);
     }
@@ -790,7 +825,7 @@ export const POSTHOG_CONFIG = {
     autocapture: {
       uncaughtExceptions: true,
       unhandledRejections: true,
-      console: ['error', 'warn'] as Array<'debug' | 'log' | 'info' | 'warn' | 'error'>,
+      console: ['error', 'warn'] as ('debug' | 'log' | 'info' | 'warn' | 'error')[],
     },
   },
 };

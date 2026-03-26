@@ -64,7 +64,7 @@ function PostHogConnector() {
       analytics.setInstance(posthog);
       sessionTracker.startSession();
       
-      // Test event to verify connection
+      // Track app launch after analytics is connected
       setTimeout(async () => {
         try {
           console.log('📤 PostHog Configuration:');
@@ -72,15 +72,13 @@ function PostHogConnector() {
           console.log('   API Key:', POSTHOG_CONFIG.apiKey.substring(0, 15) + '...');
           console.log('   Project URL: https://eu.posthog.com/project/98132');
           
-          // Send multiple test events to verify
-          posthog.capture('app_launched', { 
+          analytics.capture('app_launched', {
             timestamp: new Date().toISOString(),
-            test_event: true,
             source: 'react_native_app',
+            build_type: __DEV__ ? 'development' : 'production',
+            execution_environment: Constants.executionEnvironment ?? 'unknown',
           });
-          
-          posthog.screen('App Launch Screen');
-          
+
           // Check if session replay methods exist
           const hasSessionReplay = (posthog as any).startSessionReplay || (posthog as any).stopSessionReplay;
           console.log('🎥 Session Replay available:', !!hasSessionReplay);
@@ -94,7 +92,7 @@ function PostHogConnector() {
             
             setTimeout(() => {
               console.log('📊 Check PostHog dashboard at: https://eu.posthog.com/project/98132/activity/live');
-              console.log('📊 Look for events: "app_launched" and "$screen"');
+              console.log('📊 Look for events like: "app_launched", "auth_boot_resolved", "auth_viewed"');
               console.log('🎥 Session recordings: https://eu.posthog.com/project/98132/replay');
               console.log('📊 If still no events, verify API key in PostHog: Project Settings → API Keys');
               console.log('⚠️ NOTE: Session recordings may require app rebuild if using dev client');
@@ -323,15 +321,27 @@ export default function RootLayout() {
               });
               if (verifyEmail.error) {
                 console.error('❌ Error verifying email with token:', verifyEmail.error);
+                analytics.capture('email_verification_failed', {
+                  error_type: verifyEmail.error.message || 'invalid_code',
+                  verification_type: 'token',
+                });
                 router.replace({
                   pathname: '/login',
                   params: { verification: 'error', error: 'invalid_code' },
                 });
                 return true;
               } else {
+                analytics.capture('email_verification_completed', {
+                  verification_type: 'token',
+                  verification_path: 'email',
+                });
                 console.log('✅ Email confirmed via token (email_confirm)');
               }
             } else {
+              analytics.capture('email_verification_completed', {
+                verification_type: 'token',
+                verification_path: 'signup',
+              });
               console.log('✅ Email confirmed via token (signup)');
             }
           } else if (hasTokens && accessToken && refreshToken) {
@@ -342,15 +352,27 @@ export default function RootLayout() {
             });
             if (sessionError) {
               console.error('❌ Error setting session for email confirmation:', sessionError);
+              analytics.capture('email_verification_failed', {
+                error_type: sessionError.message || 'invalid_link',
+                verification_type: 'session',
+              });
               router.replace({
                 pathname: '/login',
                 params: { verification: 'error', error: 'invalid_link' },
               });
               return true;
             }
+            analytics.capture('email_verification_completed', {
+              verification_type: 'session',
+              verification_path: 'session_fallback',
+            });
             console.log('✅ Email confirmed via session (fallback)');
           } else {
             console.warn('⚠️ Email confirmation link missing tokens or code');
+            analytics.capture('email_verification_failed', {
+              error_type: 'missing_tokens',
+              verification_type: 'missing_tokens',
+            });
             router.replace({
               pathname: '/login',
               params: { verification: 'error', error: 'missing_tokens' },
@@ -367,6 +389,10 @@ export default function RootLayout() {
           });
         } catch (error: any) {
           console.error('❌ Error handling email confirmation:', error);
+          analytics.capture('email_verification_failed', {
+            error_type: error?.message || 'unknown_error',
+            verification_type: 'unexpected_error',
+          });
           router.replace({
             pathname: '/login',
             params: { verification: 'error', error: error?.message || 'unknown_error' },

@@ -25,8 +25,8 @@ export default function AuthCallbackScreen() {
   );
 
   useEffect(() => {
-    analytics.screen('Auth');
-    analytics.capture('auth_viewed', { has_auth_params: hasAuthParams });
+    analytics.screen('AuthCallback');
+    analytics.capture('auth_callback_viewed', { has_auth_params: hasAuthParams });
   }, [hasAuthParams]);
 
   useEffect(() => {
@@ -34,14 +34,14 @@ export default function AuthCallbackScreen() {
 
     if (isPasswordRecovery) {
       hasRedirectedRef.current = true;
-      analytics.capture('auth_redirect', { target: 'reset_password' });
+      analytics.capture('auth_callback_redirect', { target: 'reset_password' });
       router.replace('/reset-password');
       return;
     }
 
     if (user) {
       hasRedirectedRef.current = true;
-      analytics.capture('auth_redirect', { target: 'tabs' });
+      analytics.capture('auth_callback_redirect', { target: 'tabs' });
       router.replace('/(tabs)');
       return;
     }
@@ -50,7 +50,7 @@ export default function AuthCallbackScreen() {
     const timeoutId = setTimeout(() => {
       if (hasRedirectedRef.current) return;
       hasRedirectedRef.current = true;
-      analytics.capture('auth_redirect', { target: 'login' });
+      analytics.capture('auth_callback_redirect', { target: 'login' });
       router.replace('/login');
     }, timeoutMs);
 

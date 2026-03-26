@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -24,6 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function CreateAccountScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ entry_point?: string | string[] }>();
   const { signUp, signUpWithGoogle, signUpWithApple, user, loading: authLoading, isPasswordRecovery } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -35,6 +36,9 @@ export default function CreateAccountScreen() {
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasStartedForm, setHasStartedForm] = useState(false);
+  const hasTrackedSignupStartRef = React.useRef(false);
+  const rawEntryPoint = Array.isArray(params.entry_point) ? params.entry_point[0] : params.entry_point;
+  const signupEntryPoint = rawEntryPoint === 'login' ? 'login' : 'direct';
 
   const getEmailStatus = (value: string) => {
     const trimmed = value.trim();
@@ -52,21 +56,37 @@ export default function CreateAccountScreen() {
     emailStatus === 'valid' ? 'checkmark-circle' : emailStatus === 'invalid' ? 'close-circle' : 'remove-circle';
   const emailStatusColor =
     emailStatus === 'valid' ? '#00B894' : emailStatus === 'invalid' ? '#EF4444' : '#9D9D9D';
+  const resolveSignupErrorType = (message?: string) => {
+    const normalized = message?.toLowerCase() || '';
+    if (normalized.includes('cancel')) return 'cancelled';
+    if (normalized.includes('email')) return 'invalid_email';
+    if (normalized.includes('exists') || normalized.includes('already')) return 'email_exists';
+    if (normalized.includes('network') || normalized.includes('connection')) return 'network_error';
+    return 'unknown_error';
+  };
 
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('CreateAccount');
-    }, [])
+      analytics.capture('signup_screen_viewed', { entry_point: signupEntryPoint });
+      if (!hasTrackedSignupStartRef.current) {
+        hasTrackedSignupStartRef.current = true;
+        analytics.signupStart({ entry_point: signupEntryPoint, trigger: 'screen_view' });
+      }
+    }, [signupEntryPoint])
   );
 
-  // Track form start when user begins filling
+  // Track the first form interaction separately from screen entry.
   useEffect(() => {
     if ((firstName || lastName || email || password || confirmPassword) && !hasStartedForm) {
       setHasStartedForm(true);
-      analytics.signupStart();
+      analytics.capture('signup_form_interacted', {
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
     }
-  }, [firstName, lastName, email, password, confirmPassword, hasStartedForm]);
+  }, [confirmPassword, email, firstName, hasStartedForm, lastName, password, signupEntryPoint]);
 
   // Track form abandonment on unmount if not saved
   useEffect(() => {
@@ -75,11 +95,15 @@ export default function CreateAccountScreen() {
         // Check if user navigated away without completing
         const hasData = firstName || lastName || email || password;
         if (hasData) {
-          analytics.signupAbandon();
+          analytics.signupAbandon({
+            method: 'email',
+            entry_point: signupEntryPoint,
+            had_form_input: true,
+          });
         }
       }
     };
-  }, [hasStartedForm, loading, firstName, lastName, email, password]);
+  }, [email, firstName, hasStartedForm, lastName, loading, password, signupEntryPoint]);
 
   useEffect(() => {
     if (authLoading || isPasswordRecovery) return;
@@ -95,44 +119,71 @@ export default function CreateAccountScreen() {
   const handleCreateAccount = async () => {
     // Validation
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !password.trim()) {
-      analytics.capture('signup_validation_error', { field: 'required_fields', error_type: 'missing_fields' });
+      analytics.capture('signup_validation_error', {
+        field: 'required_fields',
+        error_type: 'missing_fields',
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
     if (password !== confirmPassword) {
-      analytics.capture('signup_validation_error', { field: 'password_confirm', error_type: 'password_mismatch' });
+      analytics.capture('signup_validation_error', {
+        field: 'password_confirm',
+        error_type: 'password_mismatch',
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
       Alert.alert('Error', 'Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      analytics.capture('signup_validation_error', { field: 'password', error_type: 'password_too_short' });
+      analytics.capture('signup_validation_error', {
+        field: 'password',
+        error_type: 'password_too_short',
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
       Alert.alert('Error', 'Password must be at least 6 characters long');
       return;
     }
 
     if (!agreeToTerms) {
-      analytics.capture('signup_validation_error', { field: 'terms', error_type: 'terms_not_agreed' });
+      analytics.capture('signup_validation_error', {
+        field: 'terms',
+        error_type: 'terms_not_agreed',
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
       Alert.alert('Error', 'Please agree to the Terms and Conditions');
       return;
     }
 
     setLoading(true);
-    analytics.capture('signup_submit');
+    analytics.capture('signup_submit', {
+      method: 'email',
+      entry_point: signupEntryPoint,
+    });
 
     try {
       const { error } = await signUp(email, password, firstName.trim(), lastName.trim());
       
       if (error) {
-        const errorType = error.message.includes('email') ? 'invalid_email' :
-                         error.message.includes('exists') || error.message.includes('already') ? 'email_exists' :
-                         error.message.includes('network') || error.message.includes('connection') ? 'network_error' :
-                         'unknown_error';
-        analytics.signupFailure({ error_type: errorType });
+        const errorType = resolveSignupErrorType(error.message);
+        analytics.signupFailure({
+          error_type: errorType,
+          method: 'email',
+          entry_point: signupEntryPoint,
+        });
         Alert.alert('Error', error.message);
       } else {
-        analytics.signupSuccess();
+        analytics.signupSuccess({
+          method: 'email',
+          entry_point: signupEntryPoint,
+        });
         Alert.alert(
           'Success',
           'Account created! Please verify your email address to sign in.',
@@ -144,11 +195,53 @@ export default function CreateAccountScreen() {
           ]
         );
       }
-    } catch (error) {
-      analytics.signupFailure({ error_type: 'unexpected_error' });
+    } catch {
+      analytics.signupFailure({
+        error_type: 'unexpected_error',
+        method: 'email',
+        entry_point: signupEntryPoint,
+      });
       Alert.alert('Error', 'An unexpected error occurred');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSocialSignup = async (method: 'google' | 'apple') => {
+    analytics.capture('signup_submit', {
+      method,
+      entry_point: signupEntryPoint,
+    });
+
+    const { error } = method === 'google' ? await signUpWithGoogle() : await signUpWithApple();
+
+    if (error) {
+      const errorType = resolveSignupErrorType(error.message);
+
+      if (errorType === 'cancelled') {
+        analytics.capture('signup_cancelled', {
+          method,
+          entry_point: signupEntryPoint,
+        });
+        return;
+      }
+
+      analytics.signupFailure({
+        error_type: errorType,
+        method,
+        entry_point: signupEntryPoint,
+      });
+      Alert.alert('Error', error.message || `Failed to sign up with ${method === 'google' ? 'Google' : 'Apple'}`);
+      return;
+    }
+
+    analytics.signupSuccess({
+      method,
+      entry_point: signupEntryPoint,
+    });
+
+    if (method === 'apple') {
+      router.push('/(tabs)');
     }
   };
 
@@ -421,7 +514,7 @@ export default function CreateAccountScreen() {
             lineHeight: 16,
             paddingHorizontal: width * 0.03,
             paddingVertical: height * 0.005
-          }]}>or sign up with</Text>
+          }]}>or continue with</Text>
           <View style={styles.separatorLine} />
         </View>
         
@@ -432,17 +525,7 @@ export default function CreateAccountScreen() {
               height: width * 0.12, 
               borderRadius: width * 0.06 
             }]}
-            onPress={async () => {
-              analytics.capture('google_signup_attempt');
-              const { error } = await signUpWithGoogle();
-              if (error) {
-                analytics.capture('google_signup_failure', { error: error.message });
-                Alert.alert('Error', error.message || 'Failed to sign up with Google');
-              } else {
-                analytics.capture('google_signup_success');
-                // Navigation will happen automatically via auth state change
-              }
-            }}
+            onPress={() => handleSocialSignup('google')}
           >
             <GoogleIcon size={width * 0.045} />
           </TouchableOpacity>
@@ -454,19 +537,7 @@ export default function CreateAccountScreen() {
                 height: width * 0.12, 
                 borderRadius: width * 0.06 
               }]}
-              onPress={async () => {
-                analytics.capture('apple_signup_attempt');
-                const { error } = await signUpWithApple();
-                if (error) {
-                  if (error.message !== 'Sign up was canceled') {
-                    analytics.capture('apple_signup_failure', { error: error.message });
-                    Alert.alert('Error', error.message || 'Failed to sign up with Apple');
-                  }
-                } else {
-                  analytics.capture('apple_signup_success');
-                  router.push('/(tabs)');
-                }
-              }}
+              onPress={() => handleSocialSignup('apple')}
             >
               <Ionicons name="logo-apple" size={width * 0.06} color="white" />
             </TouchableOpacity>
