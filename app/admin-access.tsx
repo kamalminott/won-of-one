@@ -48,6 +48,26 @@ const getAccessSummary = (user: AdminAccessSearchResult) => {
   return `Access until ${formatAccessDate(user.access_ends_at)}`;
 };
 
+const getAccessDaysRemaining = (user: AdminAccessSearchResult) => {
+  if (!user.has_active_access || !user.access_ends_at) {
+    return null;
+  }
+
+  const endsAt = new Date(user.access_ends_at);
+  if (Number.isNaN(endsAt.getTime())) {
+    return null;
+  }
+
+  const diffMs = endsAt.getTime() - Date.now();
+  const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+  if (daysLeft === 1) {
+    return '1 day left';
+  }
+
+  return `${daysLeft} days left`;
+};
+
 export default function AdminAccessScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -65,6 +85,7 @@ export default function AdminAccessScreen() {
   const [granting, setGranting] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [loadingDefaultUsers, setLoadingDefaultUsers] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -110,12 +131,34 @@ export default function AdminAccessScreen() {
     });
   };
 
+  const loadActiveUsers = useCallback(
+    async (fallbackSelected?: AdminAccessSearchResult | null) => {
+      try {
+        setLoadingDefaultUsers(true);
+        const foundUsers = await adminAccessService.listActiveUsers(
+          session?.access_token
+        );
+        setResults(foundUsers);
+        setHasSearched(false);
+        updateSelectionFromResults(foundUsers, fallbackSelected);
+        return foundUsers;
+      } catch (error: any) {
+        Alert.alert(
+          'Could not load access list',
+          error?.message || 'Unable to load current access grants right now.'
+        );
+        return [];
+      } finally {
+        setLoadingDefaultUsers(false);
+      }
+    },
+    [session?.access_token]
+  );
+
   const runSearch = async (queryOverride?: string) => {
     const activeQuery = (queryOverride ?? query).trim();
     if (!activeQuery) {
-      setResults([]);
-      setHasSearched(false);
-      return [];
+      return loadActiveUsers();
     }
 
     try {
@@ -159,13 +202,18 @@ export default function AdminAccessScreen() {
         );
         setResults(foundUsers);
         updateSelectionFromResults(foundUsers, nextSelected);
-      } else if (nextSelected) {
-        setResults([nextSelected]);
+      } else {
+        await loadActiveUsers(nextSelected);
       }
     } catch (error) {
       console.warn('⚠️ Failed to refresh selected admin access user:', error);
     }
   };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void loadActiveUsers();
+  }, [isAdmin, loadActiveUsers]);
 
   const resolvedDurationDays = (() => {
     if (selectedDurationDays && selectedDurationDays > 0) {
@@ -404,6 +452,37 @@ export default function AdminAccessScreen() {
       fontSize: width * 0.03,
       fontWeight: '600',
     },
+    statusGroup: {
+      alignItems: 'flex-end',
+      flexShrink: 0,
+    },
+    statusPillsRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: width * 0.018,
+    },
+    accessMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: width * 0.02,
+      marginTop: height * 0.006,
+    },
+    daysLeftPill: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: width * 0.026,
+      paddingVertical: height * 0.006,
+      borderRadius: width * 0.03,
+      backgroundColor: 'rgba(108, 92, 231, 0.16)',
+      borderWidth: 1,
+      borderColor: '#6C5CE7',
+    },
+    daysLeftPillText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.029,
+      fontWeight: '700',
+    },
     selectedLabel: {
       color: '#9D9D9D',
       fontSize: width * 0.032,
@@ -549,7 +628,8 @@ export default function AdminAccessScreen() {
             <Text style={styles.sectionTitle}>Search Users</Text>
             <View style={styles.card}>
               <Text style={styles.helperText}>
-                Search by user ID, email, or name. User ID is always the most reliable match.
+                Users with active manual access appear here automatically. Search by user ID,
+                email, or name to find anyone else.
               </Text>
               <TextInput
                 style={styles.searchInput}
@@ -581,18 +661,24 @@ export default function AdminAccessScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Results</Text>
-            {results.length === 0 ? (
+            {loadingDefaultUsers ? (
+              <View style={[styles.card, styles.emptyCard]}>
+                <ActivityIndicator size="small" color="#6C5CE7" />
+                <Text style={styles.emptyText}>Loading users with active access...</Text>
+              </View>
+            ) : results.length === 0 ? (
               <View style={[styles.card, styles.emptyCard]}>
                 <Ionicons name="search" size={width * 0.09} color="#6C5CE7" />
                 <Text style={styles.emptyText}>
                   {hasSearched
                     ? 'No users matched that search.'
-                    : 'Search to find a user and manage their access.'}
+                    : 'No users currently have manual access. Search to find a user and manage their access.'}
                 </Text>
               </View>
             ) : (
               results.map((entry) => {
                 const isSelected = selectedUser?.user_id === entry.user_id;
+                const daysRemaining = getAccessDaysRemaining(entry);
                 return (
                   <TouchableOpacity
                     key={entry.user_id}
@@ -613,15 +699,24 @@ export default function AdminAccessScreen() {
                         <Text style={styles.userMeta}>ID: {entry.user_id}</Text>
                         <Text style={styles.userMeta}>{getAccessSummary(entry)}</Text>
                       </View>
-                      <View
-                        style={[
-                          styles.statusPill,
-                          entry.has_active_access && styles.statusPillActive,
-                        ]}
-                      >
-                        <Text style={styles.statusPillText}>
-                          {entry.has_active_access ? 'ACTIVE' : 'NONE'}
-                        </Text>
+                      <View style={styles.statusGroup}>
+                        <View style={styles.statusPillsRow}>
+                          {daysRemaining ? (
+                            <View style={styles.daysLeftPill}>
+                              <Text style={styles.daysLeftPillText}>{daysRemaining}</Text>
+                            </View>
+                          ) : null}
+                          <View
+                            style={[
+                              styles.statusPill,
+                              entry.has_active_access && styles.statusPillActive,
+                            ]}
+                          >
+                            <Text style={styles.statusPillText}>
+                              {entry.has_active_access ? 'ACTIVE' : 'NONE'}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -641,7 +736,16 @@ export default function AdminAccessScreen() {
                     {selectedUser.email?.trim() || 'No email on file'}
                   </Text>
                   <Text style={styles.userMeta}>ID: {selectedUser.user_id}</Text>
-                  <Text style={styles.currentStatusText}>{getAccessSummary(selectedUser)}</Text>
+                  <View style={styles.accessMetaRow}>
+                    {selectedUser.has_active_access && getAccessDaysRemaining(selectedUser) ? (
+                      <View style={styles.daysLeftPill}>
+                        <Text style={styles.daysLeftPillText}>
+                          {getAccessDaysRemaining(selectedUser)}
+                        </Text>
+                      </View>
+                    ) : null}
+                    <Text style={styles.currentStatusText}>{getAccessSummary(selectedUser)}</Text>
+                  </View>
                   {selectedUser.access_reason ? (
                     <Text style={styles.currentReasonText}>
                       Current reason: {selectedUser.access_reason}

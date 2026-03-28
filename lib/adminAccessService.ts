@@ -108,6 +108,25 @@ export const adminAccessService = {
     return Array.isArray(data) ? data : [];
   },
 
+  async listActiveUsers(
+    accessToken?: string | null,
+    limit: number = 20
+  ): Promise<AdminAccessSearchResult[]> {
+    const { data, error } = await postgrestRpc<AdminAccessSearchResult[]>(
+      'admin_list_active_access_users',
+      {
+        p_limit: limit,
+      },
+      accessToken ? { accessToken } : undefined
+    );
+
+    if (error) {
+      throw new Error(extractErrorMessage(error));
+    }
+
+    return Array.isArray(data) ? data : [];
+  },
+
   async grantAccess(
     input: AdminGrantAccessInput,
     accessToken?: string | null
