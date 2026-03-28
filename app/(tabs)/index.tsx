@@ -19,6 +19,7 @@ import { CompleteProfilePrompt } from '@/components/CompleteProfilePrompt';
 import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { adminAccessService, type ManualAccessStatus } from '@/lib/adminAccessService';
 import { goalService, matchService, userService } from '@/lib/database';
 import { isPlaceholderDisplayName, resolveAuthMetadataDisplayName } from '@/lib/displayName';
 import { subscriptionService } from '@/lib/subscriptionService';
@@ -29,6 +30,7 @@ const PROFILE_CHECK_TIMEOUT_MS = 5000;
 const USER_NAME_WAIT_TIMEOUT_MS = 3000;
 const HOME_LOAD_TIMEOUT_MS = 12000;
 const HOME_REQUEST_TIMEOUT_MS = 8000;
+const MANUAL_ACCESS_MESSAGE_DURATION_MS = 5000;
 
 const withTimeout = async <T,>(
   promise: Promise<T>,
@@ -101,6 +103,8 @@ const getMatchTimestamp = (match: SimpleMatch): number => {
 };
 
 const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
+const manualAccessMessageSeenStorageKey = (userId: string, grantId: string) =>
+  `manual_access_message_seen:${userId}:${grantId}`;
 
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
@@ -153,6 +157,7 @@ export default function HomeScreen() {
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
   const [profilePromptRequested, setProfilePromptRequested] = useState(false);
+  const [manualAccessBannerMessage, setManualAccessBannerMessage] = useState<string | null>(null);
 
   const fetchInFlightRef = useRef(false);
   const lastFetchAtMsRef = useRef(0);
@@ -164,6 +169,7 @@ export default function HomeScreen() {
   const profilePromptShownRef = useRef(false);
   const profilePromptSuppressedRef = useRef(false);
   const dashboardStartRef = useRef<number | null>(null);
+  const manualAccessMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCompleteProfilePromptEnabled = profilePromptRequested && !profilePromptDismissed;
   const shouldShowCompleteProfilePrompt =
     isCompleteProfilePromptEnabled && (showCompleteProfilePrompt || profileNameStatus === 'missing');
@@ -194,6 +200,54 @@ export default function HomeScreen() {
   useEffect(() => {
     userNameRef.current = userName;
   }, [userName]);
+
+  useEffect(() => {
+    return () => {
+      if (manualAccessMessageTimeoutRef.current) {
+        clearTimeout(manualAccessMessageTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const maybeShowManualAccessMessage = useCallback(
+    async (manualAccessStatus: ManualAccessStatus | null) => {
+      const userId = user?.id;
+      const grantId = manualAccessStatus?.grant_id;
+      const message = manualAccessStatus?.user_message?.trim();
+
+      if (!userId || !grantId || !message) {
+        return;
+      }
+
+      const storageKey = manualAccessMessageSeenStorageKey(userId, grantId);
+
+      try {
+        const hasSeenMessage = await AsyncStorage.getItem(storageKey);
+        if (hasSeenMessage === 'true') {
+          return;
+        }
+        await AsyncStorage.setItem(storageKey, 'true');
+      } catch (error) {
+        console.warn('Failed to persist manual access message state:', error);
+      }
+
+      if (manualAccessMessageTimeoutRef.current) {
+        clearTimeout(manualAccessMessageTimeoutRef.current);
+      }
+
+      setManualAccessBannerMessage(message);
+      analytics.capture('manual_access_message_viewed', {
+        grant_id: grantId,
+        duration_ms: MANUAL_ACCESS_MESSAGE_DURATION_MS,
+      });
+
+      manualAccessMessageTimeoutRef.current = setTimeout(() => {
+        setManualAccessBannerMessage(null);
+        manualAccessMessageTimeoutRef.current = null;
+      }, MANUAL_ACCESS_MESSAGE_DURATION_MS);
+    },
+    [user?.id]
+  );
 
   // Hydrate from cache ASAP so the Home screen feels instant
   useEffect(() => {
@@ -601,12 +655,20 @@ export default function HomeScreen() {
       if (pathname === '/paywall' || paywallNavigationRef.current) return;
 
       try {
-        const subscriptionInfo = await subscriptionService.getSubscriptionInfo();
-        const previewStatus = await subscriptionService.getPaywallPreviewStatus(user);
-        
-        // If user has no active subscription and no active trial, show paywall
-        if (!subscriptionInfo.isActive && !subscriptionInfo.isTrial && !previewStatus.isActive) {
-          console.log('🔒 No active subscription or trial, redirecting to paywall');
+        const [subscriptionInfo, previewStatus, manualAccessStatus] = await Promise.all([
+          subscriptionService.getSubscriptionInfo(),
+          subscriptionService.getPaywallPreviewStatus(user),
+          adminAccessService.getCurrentManualAccessStatus(session?.access_token),
+        ]);
+
+        // If user has no active subscription, trial, preview, or manual access, show paywall
+        if (
+          !subscriptionInfo.isActive &&
+          !subscriptionInfo.isTrial &&
+          !previewStatus.isActive &&
+          !manualAccessStatus
+        ) {
+          console.log('🔒 No active paid, trial, preview, or manual access; redirecting to paywall');
           paywallNavigationRef.current = true;
           router.replace('/paywall');
         } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
@@ -616,6 +678,8 @@ export default function HomeScreen() {
           if (now >= expiresAt) {
             if (previewStatus.isActive) {
               console.log('✅ Preview active, allowing access');
+            } else if (manualAccessStatus) {
+              console.log('✅ Manual access active, allowing access');
             } else {
               console.log('⏰ Trial expired, redirecting to paywall');
               paywallNavigationRef.current = true;
@@ -624,8 +688,12 @@ export default function HomeScreen() {
           } else {
             console.log('✅ Trial active, allowing access');
           }
+        } else if (manualAccessStatus) {
+          console.log('✅ Manual access active, allowing access');
+          paywallNavigationRef.current = false;
         } else if (previewStatus.isActive) {
           console.log('✅ Preview active, allowing access');
+          paywallNavigationRef.current = false;
         } else if (subscriptionInfo.isActive) {
           console.log('✅ Active subscription, allowing access');
           paywallNavigationRef.current = false;
@@ -639,7 +707,7 @@ export default function HomeScreen() {
     if (user && !loading && authReady) {
       checkSubscription();
     }
-  }, [user, loading, authReady]);
+  }, [user, loading, authReady, pathname, session?.access_token, shouldAutoShowPaywall]);
 
   // Screen tracking and identify
   useEffect(() => {
@@ -847,6 +915,32 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!user?.id || !authReady) {
+        return;
+      }
+
+      let cancelled = false;
+
+      void (async () => {
+        try {
+          const manualAccessStatus = await adminAccessService.getCurrentManualAccessStatus(
+            session?.access_token
+          );
+          if (cancelled) return;
+          await maybeShowManualAccessMessage(manualAccessStatus);
+        } catch (error) {
+          console.warn('Failed to refresh manual access banner state:', error);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [authReady, maybeShowManualAccessMessage, session?.access_token, user?.id])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       dashboardStartRef.current = Date.now();
       return () => {
         if (!dashboardStartRef.current) return;
@@ -957,6 +1051,30 @@ export default function HomeScreen() {
       marginTop: -height * 0.015, // Move up closer to content above
       marginBottom: height * 0.1, // Ensure RecentMatches stays above tab bar
     },
+    manualAccessBanner: {
+      marginTop: height * 0.006,
+      marginBottom: height * 0.016,
+      backgroundColor: 'rgba(108, 92, 231, 0.16)',
+      borderColor: '#6C5CE7',
+      borderWidth: 1,
+      borderRadius: 18,
+      paddingHorizontal: width * 0.04,
+      paddingVertical: height * 0.014,
+    },
+    manualAccessBannerLabel: {
+      color: '#CFC6FF',
+      fontSize: width * 0.03,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      marginBottom: height * 0.004,
+    },
+    manualAccessBannerText: {
+      color: '#FFFFFF',
+      fontSize: width * 0.037,
+      lineHeight: width * 0.052,
+      fontWeight: '500',
+    },
     summaryRow: {
       flexDirection: 'row',
       marginBottom: height * 0.008,
@@ -1034,6 +1152,12 @@ export default function HomeScreen() {
         {/* Content with bottom safe area */}
         <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
           <View style={styles.contentContainer}>
+            {manualAccessBannerMessage ? (
+              <View style={styles.manualAccessBanner}>
+                <Text style={styles.manualAccessBannerLabel}>Message from Won Of One</Text>
+                <Text style={styles.manualAccessBannerText}>{manualAccessBannerMessage}</Text>
+              </View>
+            ) : null}
             <View style={styles.progressCardContainer}>
               <ProgressCard
                 activityType="Footwork"

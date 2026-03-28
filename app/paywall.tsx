@@ -1,3 +1,4 @@
+import { adminAccessService } from '@/lib/adminAccessService';
 import { subscriptionService, type PurchasesOffering } from '@/lib/subscriptionService';
 import { analytics } from '@/lib/analytics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -9,7 +10,7 @@ import { Colors } from '@/constants/Colors';
 import RevenueCatUI from 'react-native-purchases-ui';
 
 export default function PaywallScreen() {
-  const { user, loading } = useAuth();
+  const { user, loading, session } = useAuth();
   const params = useLocalSearchParams();
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
@@ -22,7 +23,7 @@ export default function PaywallScreen() {
   const paywallOfferingId = 'Main';
 
   const handleClose = (
-    reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' | 'preview' = 'user',
+    reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' | 'preview' | 'manual_access' = 'user',
     options?: { profilePrompt?: boolean }
   ) => {
     if (!allowUserDismiss && reason === 'user') {
@@ -68,6 +69,15 @@ export default function PaywallScreen() {
           return;
         }
 
+        const manualAccess = await adminAccessService.getCurrentManualAccessStatus(
+          session?.access_token
+        );
+        if (paywallSource !== 'settings' && manualAccess) {
+          setCanDismiss(true);
+          handleClose('manual_access');
+          return;
+        }
+
         await subscriptionService.initialize(user?.id);
         if (!subscriptionService.isConfigured()) {
           throw new Error('Subscriptions are unavailable. Please try again later.');
@@ -102,7 +112,7 @@ export default function PaywallScreen() {
     return () => {
       isActive = false;
     };
-  }, [user?.id, loading, paywallSource]);
+  }, [user?.id, loading, paywallSource, session?.access_token]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -160,7 +170,7 @@ export default function PaywallScreen() {
       >
         <View style={styles.previewOverlay}>
           <View style={styles.previewContainer}>
-            <Text style={styles.previewTitle}>We don't want to lose you</Text>
+            <Text style={styles.previewTitle}>We don&apos;t want to lose you</Text>
             <Text style={styles.previewBody}>
               Enjoy 3 days of full access on behalf of the Won Of One team - no card details needed.
             </Text>

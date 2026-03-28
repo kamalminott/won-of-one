@@ -1,6 +1,7 @@
 import { BackButton } from '@/components/BackButton';
 import { BugReportModal } from '@/components/BugReportModal';
 import { useAuth } from '@/contexts/AuthContext';
+import { adminAccessService } from '@/lib/adminAccessService';
 import { accountService } from '@/lib/database';
 import { analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
@@ -57,19 +58,33 @@ export default function SettingsScreen() {
 
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
   const showDiagnostics = __DEV__;
   const showPaywallOption = true;
+
+  const loadAdminStatus = useCallback(async (accessTokenOverride?: string | null) => {
+    if (!user?.id) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const nextIsAdmin = await adminAccessService.isCurrentUserAdmin(
+      accessTokenOverride ?? session?.access_token
+    );
+    setIsAdmin(nextIsAdmin);
+  }, [session?.access_token, user?.id]);
 
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Settings');
+      void loadAdminStatus();
       if (showDiagnostics) {
         loadUpdateInfo();
         loadTokenInfo();
       }
-    }, [loadTokenInfo, loadUpdateInfo, showDiagnostics, user?.id])
+    }, [loadAdminStatus, showDiagnostics, user?.id, session?.access_token])
   );
 
   // Load token information
@@ -123,7 +138,11 @@ export default function SettingsScreen() {
     if (session) {
       loadTokenInfo(session);
     }
-  }, [showDiagnostics, session?.access_token, session?.refresh_token]);
+  }, [showDiagnostics, session]);
+
+  useEffect(() => {
+    void loadAdminStatus();
+  }, [loadAdminStatus]);
 
   // Listen for token refresh events
   useEffect(() => {
@@ -269,6 +288,11 @@ export default function SettingsScreen() {
       pathname: '/paywall',
       params: { source: 'settings' },
     });
+  };
+
+  const handleOpenAdminAccess = () => {
+    analytics.capture('admin_access_opened_from_settings');
+    router.push('/admin-access');
   };
 
   const handleLogOut = async () => {
@@ -593,6 +617,19 @@ export default function SettingsScreen() {
                 <Ionicons name="lock-closed" size={width * 0.06} color="#FFFFFF" />
               </View>
               <Text style={styles.optionText}>Upgrade to Premium</Text>
+              <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isAdmin && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Admin</Text>
+            <TouchableOpacity style={[styles.card, styles.profileCard]} onPress={handleOpenAdminAccess}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="shield-checkmark" size={width * 0.06} color="#FFFFFF" />
+              </View>
+              <Text style={styles.optionText}>Access Control</Text>
               <Ionicons name="chevron-forward" size={width * 0.055} color="#9D9D9D" />
             </TouchableOpacity>
           </View>
