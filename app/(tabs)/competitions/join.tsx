@@ -17,6 +17,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -26,7 +27,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const formatCooldownMessage = (milliseconds: number): string => {
@@ -41,6 +41,24 @@ const formatCooldownMessage = (milliseconds: number): string => {
 
 const sanitizeCode = (value: string): string => {
   return value.replace(/\D/g, '').slice(0, 6);
+};
+
+const QR_BARCODE_TYPES = ['qr'];
+
+type ExpoCameraModule = typeof import('expo-camera');
+
+const loadExpoCameraModule = async (): Promise<ExpoCameraModule | null> => {
+  try {
+    const expoModulesCore = await import('expo-modules-core');
+    const cameraNativeModule = expoModulesCore.requireOptionalNativeModule('ExpoCamera');
+    if (!cameraNativeModule) {
+      return null;
+    }
+    return await import('expo-camera');
+  } catch (error) {
+    console.error('ExpoCamera native module is unavailable:', error);
+    return null;
+  }
 };
 
 export default function JoinCompetitionScreen() {
@@ -61,6 +79,8 @@ export default function JoinCompetitionScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [infoText, setInfoText] = useState<string | null>(null);
   const deepLinkAttemptedRef = useRef<string | null>(null);
+  const qrScannerSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+  const hasHandledScannerResultRef = useRef(false);
   const competitionDisplayName = useMemo(
     () =>
       resolveCompetitionDisplayName({
@@ -116,6 +136,7 @@ export default function JoinCompetitionScreen() {
   }, [deepLinkJoinCode]);
 
   const canJoinByCode = useMemo(() => code.length === 6 && !submittingCode, [code, submittingCode]);
+  const cameraButtonLabel = Platform.OS === 'android' ? 'Open Camera App' : 'Scan QR';
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
   const contentBottomPadding = tabBarOverlayHeight + 20;
 
@@ -138,36 +159,14 @@ export default function JoinCompetitionScreen() {
     return remaining;
   }, []);
 
-  const decodeQrPayloadFromImage = async (imageUri: string): Promise<string | null> => {
-    const formData = new FormData();
-    formData.append('file', {
-      uri: imageUri,
-      name: 'competition-qr.jpg',
-      type: 'image/jpeg',
-    } as unknown as Blob);
-
-    const response = await fetch('https://api.qrserver.com/v1/read-qr-code/', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) return null;
-
-    const payload = (await response.json()) as {
-      symbol?: {
-        data?: string | null;
-        error?: string | null;
-      }[];
-    }[];
-
-    const decoded = payload?.[0]?.symbol?.[0]?.data?.trim();
-    if (!decoded) return null;
-    return decoded;
-  };
+  const clearQrScannerSubscription = useCallback(() => {
+    qrScannerSubscriptionRef.current?.remove();
+    qrScannerSubscriptionRef.current = null;
+  }, []);
 
   const submitQrPayload = useCallback(async (
     payload: string,
-    method: 'qr_camera' | 'qr_deep_link'
+    method: 'qr_scanner' | 'qr_deep_link'
   ) => {
     if (!user?.id) {
       setErrorText('You need to be signed in to join a competition.');
@@ -305,41 +304,86 @@ export default function JoinCompetitionScreen() {
   };
 
   const onScanQrWithCamera = async () => {
-    if (!user?.id) {
-      setErrorText('You need to be signed in to join a competition.');
-      return;
-    }
+    setErrorText(null);
+    setInfoText(null);
 
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissionResult.granted) {
-      setErrorText('Camera permission is required to scan QR codes.');
-      return;
-    }
-
-    const scanResult = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 0.8,
-    });
-
-    if (scanResult.canceled || !scanResult.assets?.[0]?.uri) {
+    if (Platform.OS === 'android') {
+      try {
+        await Linking.sendIntent('android.media.action.STILL_IMAGE_CAMERA');
+        setInfoText(
+          'Your camera app is open. Scan the QR invite there and tap the prompt to return here.'
+        );
+      } catch (error) {
+        console.error('Error opening system camera:', error);
+        setErrorText('Could not open your camera app. Use the 6-digit code instead.');
+      }
       return;
     }
 
     setSubmittingQr(true);
-    setErrorText(null);
-    setInfoText('Reading QR code...');
 
-    const payload = await decodeQrPayloadFromImage(scanResult.assets[0].uri);
-    setSubmittingQr(false);
+    try {
+      const cameraModule = await loadExpoCameraModule();
+      if (!cameraModule) {
+        setErrorText('QR scanner is not available in this build yet. Reinstall the latest iPhone dev build or use the 6-digit code.');
+        return;
+      }
 
-    if (!payload) {
-      setInfoText(null);
-      setErrorText('Could not read QR code. Try scanning again or use the 6-digit code.');
-      return;
+      const CameraView = cameraModule.CameraView;
+      const requestCameraPermissionsAsync =
+        cameraModule.requestCameraPermissionsAsync ??
+        cameraModule.Camera?.requestCameraPermissionsAsync;
+      if (!requestCameraPermissionsAsync) {
+        setErrorText('QR scanner permission API is unavailable in this build. Reinstall the latest iPhone dev build or use the 6-digit code.');
+        return;
+      }
+      const permissionResult = await requestCameraPermissionsAsync();
+      if (!permissionResult.granted) {
+        setErrorText('Camera permission is required to scan competition QR codes.');
+        return;
+      }
+
+      if (!CameraView.isModernBarcodeScannerAvailable) {
+        setErrorText('QR scanning on iPhone requires iOS 16 or later. Use the 6-digit code instead.');
+        return;
+      }
+
+      clearQrScannerSubscription();
+      hasHandledScannerResultRef.current = false;
+      qrScannerSubscriptionRef.current = CameraView.onModernBarcodeScanned(async (event) => {
+        if (hasHandledScannerResultRef.current) {
+          return;
+        }
+        hasHandledScannerResultRef.current = true;
+        clearQrScannerSubscription();
+
+        try {
+          await CameraView.dismissScanner();
+        } catch (error) {
+          console.error('Error dismissing QR scanner:', error);
+        }
+
+        const payload = event.data?.trim();
+        if (!payload) {
+          setErrorText('Could not read QR code. Try scanning again or use the 6-digit code.');
+          return;
+        }
+
+        setInfoText('QR scanned. Joining competition...');
+        await submitQrPayload(payload, 'qr_scanner');
+      });
+
+      await CameraView.launchScanner({
+        barcodeTypes: QR_BARCODE_TYPES,
+      });
+      setInfoText('Scan the competition QR code.');
+    } catch (error) {
+      console.error('Error opening QR scanner:', error);
+      clearQrScannerSubscription();
+      setErrorText('Could not open QR scanner. Use the 6-digit code instead.');
+    } finally {
+      setSubmittingQr(false);
     }
-
-    await submitQrPayload(payload, 'qr_camera');
   };
 
   useEffect(() => {
@@ -371,6 +415,19 @@ export default function JoinCompetitionScreen() {
     user?.id,
   ]);
 
+  useEffect(() => {
+    return () => {
+      clearQrScannerSubscription();
+      if (Platform.OS === 'ios') {
+        void loadExpoCameraModule().then((cameraModule) => {
+          if (cameraModule) {
+            void cameraModule.CameraView.dismissScanner().catch(() => undefined);
+          }
+        });
+      }
+    };
+  }, [clearQrScannerSubscription]);
+
   return (
     <View style={styles.container}>
       <KeyboardAvoidingView
@@ -396,7 +453,7 @@ export default function JoinCompetitionScreen() {
           </View>
           <Text style={styles.title}>Join Competition</Text>
           <Text style={styles.subtitle}>
-            Enter the 6-digit code or scan a QR invite to join.
+            {'Enter the 6-digit code or scan a QR invite to join.'}
           </Text>
 
           <View style={styles.card}>
@@ -430,7 +487,7 @@ export default function JoinCompetitionScreen() {
               {submittingQr ? (
                 <ActivityIndicator color="#E9D7FF" />
               ) : (
-                <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                <Text style={styles.secondaryButtonText}>{cameraButtonLabel}</Text>
               )}
             </Pressable>
           </View>

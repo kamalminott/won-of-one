@@ -41,6 +41,7 @@ export default function CreateCompetitionScreen() {
 
   const nameLength = useMemo(() => name.trim().length, [name]);
   const canSubmit = nameLength >= 2 && !submitting;
+  const includesDeStage = format !== 'poules_only';
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
   const contentBottomPadding = tabBarOverlayHeight + 20;
   const competitionDisplayName = useMemo(
@@ -165,17 +166,21 @@ export default function CreateCompetitionScreen() {
               ))}
             </View>
 
-            <Text style={styles.fieldLabel}>DE Touch Limit</Text>
-            <View style={styles.optionRow}>
-              {DE_TOUCH_LIMIT_OPTIONS.map((value) => (
-                <OptionChip
-                  key={value}
-                  label={`${value}`}
-                  active={deTouchLimit === value}
-                  onPress={() => setDeTouchLimit(value)}
-                />
-              ))}
-            </View>
+            {includesDeStage ? (
+              <>
+                <Text style={styles.fieldLabel}>DE Touch Limit</Text>
+                <View style={styles.optionRow}>
+                  {DE_TOUCH_LIMIT_OPTIONS.map((value) => (
+                    <OptionChip
+                      key={value}
+                      label={`${value}`}
+                      active={deTouchLimit === value}
+                      onPress={() => setDeTouchLimit(value)}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : null}
           </View>
 
           {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}

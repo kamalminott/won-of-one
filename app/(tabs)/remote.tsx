@@ -2255,6 +2255,7 @@ export default function RemoteScreen() {
 
   const updateCompetitionScoringState = useCallback(
     (data: CompetitionMatchScoringData) => {
+      const isSameCompetitionMatch = competitionScoringData?.match.id === data.match.id;
       const fencerAName = data.fencerA?.display_name ?? 'Fencer A';
       const fencerBName = data.fencerB?.display_name ?? 'Fencer B';
 
@@ -2273,8 +2274,10 @@ export default function RemoteScreen() {
       weaponSelectionLockedRef.current = true;
       userHasToggledProfileRef.current = true;
       setShowUserProfile(false);
-      setFencerPositions({ fencerA: 'left', fencerB: 'right' });
-      setToggleCardPosition('left');
+      if (!isSameCompetitionMatch) {
+        setFencerPositions({ fencerA: 'left', fencerB: 'right' });
+        setToggleCardPosition('left');
+      }
       setFencerNames({ fencerA: fencerAName, fencerB: fencerBName });
       const scoreA = data.match.score_a ?? 0;
       const scoreB = data.match.score_b ?? 0;
@@ -2304,11 +2307,11 @@ export default function RemoteScreen() {
         }
       );
     },
-    []
+    [competitionScoringData?.match.id]
   );
 
-  // Competition mode should always display immutable participant names from match context.
-  // This guards against any late legacy param timeout/state restore overwriting names.
+  // Competition mode should always display immutable participant names from match context,
+  // but it must not reset the scorer's chosen left/right layout.
   useEffect(() => {
     if (!isCompetitionRemoteMode || !competitionScoringData) {
       return;
@@ -2321,14 +2324,6 @@ export default function RemoteScreen() {
     keepToggleOffLockedNamesRef.current = { fencerA: fencerAName, fencerB: fencerBName };
 
     setShowUserProfile(false);
-    setFencerPositions((prev) =>
-      prev.fencerA === 'left' && prev.fencerB === 'right'
-        ? prev
-        : { fencerA: 'left', fencerB: 'right' }
-    );
-    if (toggleCardPosition !== 'left') {
-      setToggleCardPosition('left');
-    }
     setFencerNames((prev) =>
       prev.fencerA === fencerAName && prev.fencerB === fencerBName
         ? prev
@@ -2337,7 +2332,6 @@ export default function RemoteScreen() {
   }, [
     competitionScoringData,
     isCompetitionRemoteMode,
-    toggleCardPosition,
   ]);
 
   const syncCompetitionLiveScore = useCallback(

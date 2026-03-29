@@ -2,7 +2,7 @@
   "expo": {
     "name": "Won Of One",
     "slug": "won-of-one",
-    "version": "5.0.1",
+    "version": "5.0.2",
     "runtimeVersion": "5.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -12,10 +12,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kamalminott.wonofone",
-      "buildNumber": "5.0.1",
+      "buildNumber": "5.0.2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Allow Won Of One to use your camera to capture screenshots for bug reports.",
+        "NSCameraUsageDescription": "Allow Won Of One to use your camera to scan competition QR codes and capture screenshots for bug reports.",
         "NSPhotoLibraryUsageDescription": "Allow Won Of One to access your photo library so you can attach screenshots to bug reports.",
         "NSPhotoLibraryAddUsageDescription": "Allow Won Of One to save screenshots to your photo library when needed.",
         "UISupportedInterfaceOrientations": [
