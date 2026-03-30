@@ -1,7 +1,7 @@
 {
   "name": "won-of-one",
   "main": "expo-router/entry",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "scripts": {
     "start": "expo start --dev-client",
     "start:go": "expo start",
