@@ -1239,6 +1239,11 @@ export const getCompetitionRankingsData = async (input: {
       (overview.competition.format !== 'de_only' &&
         overview.competition.status === 'poules_locked'));
 
+  const canEditSeedOrder =
+    overview.role === 'organiser' &&
+    overview.competition.format === 'de_only' &&
+    overview.competition.status === 'registration_locked';
+
   const canGenerateDe =
     overview.role === 'organiser' &&
     overview.competition.format !== 'poules_only' &&
@@ -1248,10 +1253,55 @@ export const getCompetitionRankingsData = async (input: {
     competition: overview.competition,
     currentUserRole: overview.role,
     rankings,
-    tieBreakCaption: 'Tie-break: Win% → Indicator → Hits',
+    tieBreakCaption:
+      overview.competition.format === 'de_only'
+        ? 'Manual seeding: drag to reorder before locking rankings.'
+        : 'Tie-break: Win% → Indicator → Hits',
     hasWithdrawalAdjustments: (withdrawalAnnulmentCount ?? 0) > 0,
+    canEditSeedOrder,
     canLockRankings,
     canGenerateDe,
+  };
+};
+
+export const reorderCompetitionDeSeeds = async (input: {
+  competitionId: string;
+  participantIds: string[];
+}): Promise<CompetitionActionResult<boolean>> => {
+  const { data, error } = await supabase.rpc('reorder_club_competition_de_seeds', {
+    p_competition_id: input.competitionId,
+    p_participant_ids: input.participantIds,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('not_allowed')) {
+      return { ok: false, message: 'Only organisers can reorder DE seeds.' };
+    }
+    if (message.includes('competition_finalised')) {
+      return { ok: false, message: 'Competition is finalised and cannot be edited.' };
+    }
+    if (message.includes('manual_seeding_only_for_de_only')) {
+      return { ok: false, message: 'Manual seed reordering is only available for DE-only competitions.' };
+    }
+    if (message.includes('manual_seeding_requires_registration_locked')) {
+      return { ok: false, message: 'Lock registration before editing DE seed order.' };
+    }
+    if (message.includes('manual_seeding_requires_full_order')) {
+      return { ok: false, message: 'Could not save the full DE seed order. Refresh and try again.' };
+    }
+    if (
+      message.includes('manual_seeding_duplicate_participant') ||
+      message.includes('manual_seeding_participant_mismatch')
+    ) {
+      return { ok: false, message: 'The ranking order changed while you were editing. Refresh and try again.' };
+    }
+    return { ok: false, message: 'Could not save the DE seed order right now.' };
+  }
+
+  return {
+    ok: true,
+    data: Boolean(data),
   };
 };
 

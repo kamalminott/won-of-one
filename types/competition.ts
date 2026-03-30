@@ -199,6 +199,7 @@ export interface CompetitionRankingsData {
   rankings: CompetitionRankingEntry[];
   tieBreakCaption: string;
   hasWithdrawalAdjustments: boolean;
+  canEditSeedOrder: boolean;
   canLockRankings: boolean;
   canGenerateDe: boolean;
 }

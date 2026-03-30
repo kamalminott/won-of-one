@@ -229,6 +229,27 @@ export default function DeTableauScreen() {
     return map;
   }, [data]);
 
+  const overrideLabelsByMatchId = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        scoreALabel: string;
+        scoreBLabel: string;
+      }
+    >();
+
+    data?.rounds.forEach((round) => {
+      round.matches.forEach((matchView) => {
+        map.set(matchView.match.id, {
+          scoreALabel: matchView.fencerA?.display_name ?? 'Fencer A',
+          scoreBLabel: matchView.fencerB?.display_name ?? 'Fencer B',
+        });
+      });
+    });
+
+    return map;
+  }, [data]);
+
   const deTree = useMemo(() => {
     if (!data || data.rounds.length === 0) {
       return {
@@ -525,6 +546,13 @@ export default function DeTableauScreen() {
     );
   }
 
+  const overrideLabels = overrideState
+    ? overrideLabelsByMatchId.get(overrideState.match.id) ?? {
+        scoreALabel: 'Fencer A',
+        scoreBLabel: 'Fencer B',
+      }
+    : null;
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -695,6 +723,8 @@ export default function DeTableauScreen() {
                       const hasScores = match.score_a != null && match.score_b != null;
                       const hintText = isByeAdvance
                         ? 'Advanced by bye'
+                        : match.status === 'live'
+                          ? 'Live score updating'
                         : canScore
                           ? 'Tap to score'
                         : data.competition.status === 'finalised'
@@ -734,6 +764,11 @@ export default function DeTableauScreen() {
                       const fencerAResult =
                         isByeAdvance && fencerADisplayName !== 'BYE'
                           ? { label: 'BYE', tone: 'bye' as const }
+                          : match.status === 'live' && fencerA
+                            ? {
+                                label: `${match.score_a ?? 0}`,
+                                tone: 'live' as const,
+                              }
                           : match.status === 'completed' && hasScores && fencerA
                             ? {
                                 label: `${
@@ -753,6 +788,11 @@ export default function DeTableauScreen() {
                       const fencerBResult =
                         isByeAdvance && fencerBDisplayName !== 'BYE'
                           ? { label: 'BYE', tone: 'bye' as const }
+                          : match.status === 'live' && fencerB
+                            ? {
+                                label: `${match.score_b ?? 0}`,
+                                tone: 'live' as const,
+                              }
                           : match.status === 'completed' && hasScores && fencerB
                             ? {
                                 label: `${
@@ -834,6 +874,7 @@ export default function DeTableauScreen() {
                                             styles.treeResultBadge,
                                             fencerAResult.tone === 'win' && styles.treeResultBadgeWin,
                                             fencerAResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerAResult.tone === 'live' && styles.treeResultBadgeLive,
                                             fencerAResult.tone === 'bye' && styles.treeResultBadgeBye,
                                           ]}
                                         >
@@ -881,6 +922,7 @@ export default function DeTableauScreen() {
                                             styles.treeResultBadge,
                                             fencerBResult.tone === 'win' && styles.treeResultBadgeWin,
                                             fencerBResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerBResult.tone === 'live' && styles.treeResultBadgeLive,
                                             fencerBResult.tone === 'bye' && styles.treeResultBadgeBye,
                                           ]}
                                         >
@@ -957,6 +999,7 @@ export default function DeTableauScreen() {
                                             styles.treeResultBadge,
                                             fencerAResult.tone === 'win' && styles.treeResultBadgeWin,
                                             fencerAResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerAResult.tone === 'live' && styles.treeResultBadgeLive,
                                             fencerAResult.tone === 'bye' && styles.treeResultBadgeBye,
                                           ]}
                                         >
@@ -1004,6 +1047,7 @@ export default function DeTableauScreen() {
                                             styles.treeResultBadge,
                                             fencerBResult.tone === 'win' && styles.treeResultBadgeWin,
                                             fencerBResult.tone === 'loss' && styles.treeResultBadgeLoss,
+                                            fencerBResult.tone === 'live' && styles.treeResultBadgeLive,
                                             fencerBResult.tone === 'bye' && styles.treeResultBadgeBye,
                                           ]}
                                         >
@@ -1124,7 +1168,7 @@ export default function DeTableauScreen() {
 
             <View style={styles.overrideInputRow}>
               <View style={styles.scoreInputWrap}>
-                <Text style={styles.inputLabel}>Score A</Text>
+                <Text style={styles.inputLabel}>{overrideLabels?.scoreALabel ?? 'Fencer A'}</Text>
                 <TextInput
                   value={overrideState?.scoreA ?? ''}
                   onChangeText={(next) =>
@@ -1137,7 +1181,7 @@ export default function DeTableauScreen() {
                 />
               </View>
               <View style={styles.scoreInputWrap}>
-                <Text style={styles.inputLabel}>Score B</Text>
+                <Text style={styles.inputLabel}>{overrideLabels?.scoreBLabel ?? 'Fencer B'}</Text>
                 <TextInput
                   value={overrideState?.scoreB ?? ''}
                   onChangeText={(next) =>
@@ -1419,6 +1463,10 @@ const styles = StyleSheet.create({
   treeResultBadgeLoss: {
     backgroundColor: 'rgba(239,68,68,0.16)',
     borderColor: 'rgba(239,68,68,0.4)',
+  },
+  treeResultBadgeLive: {
+    backgroundColor: 'rgba(59,130,246,0.18)',
+    borderColor: 'rgba(96,165,250,0.42)',
   },
   treeResultBadgeBye: {
     backgroundColor: 'rgba(148,163,184,0.16)',

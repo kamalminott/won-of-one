@@ -6,18 +6,21 @@ import {
   COMPETITION_STATUS_LABELS,
 } from '@/constants/competition';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { analytics } from '@/lib/analytics';
 import {
   generateCompetitionDeTableau,
   getCompetitionRankingsData,
   lockCompetitionRankings,
+  reorderCompetitionDeSeeds,
 } from '@/lib/clubCompetitionService';
-import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
+import type { CompetitionRankingEntry } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  GestureResponderEvent,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -27,6 +30,58 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+type RankingRowRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rank: number;
+};
+
+type RankingDropTarget = {
+  targetRank: number;
+  previewLabel: string;
+};
+
+type RankingDragState = {
+  entry: CompetitionRankingEntry;
+  sourceRank: number;
+  pointerX: number;
+  pointerY: number;
+  offsetX: number;
+  offsetY: number;
+  rowWidth: number;
+  rowHeight: number;
+};
+
+const resequenceRankingEntries = (
+  entries: CompetitionRankingEntry[]
+): CompetitionRankingEntry[] =>
+  entries.map((entry, index) => ({
+    ...entry,
+    ranking: {
+      ...entry.ranking,
+      rank: index + 1,
+    },
+  }));
+
+const reorderRankingEntries = (
+  entries: CompetitionRankingEntry[],
+  participantId: string,
+  targetRank: number
+): CompetitionRankingEntry[] => {
+  const sourceIndex = entries.findIndex((entry) => entry.participant.id === participantId);
+  if (sourceIndex < 0) return entries;
+
+  const nextEntries = entries.slice();
+  const [movedEntry] = nextEntries.splice(sourceIndex, 1);
+  if (!movedEntry) return entries;
+
+  const boundedIndex = Math.max(0, Math.min(targetRank - 1, nextEntries.length));
+  nextEntries.splice(boundedIndex, 0, movedEntry);
+  return resequenceRankingEntries(nextEntries);
+};
 
 export default function RankingsScreen() {
   const router = useRouter();
@@ -41,7 +96,14 @@ export default function RankingsScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [actionKey, setActionKey] = useState<'lock' | 'generate' | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof getCompetitionRankingsData>>>(null);
+  const [rankingDrag, setRankingDrag] = useState<RankingDragState | null>(null);
+  const [rankingDropTarget, setRankingDropTarget] = useState<RankingDropTarget | null>(null);
+  const [seedSaveParticipantId, setSeedSaveParticipantId] = useState<string | null>(null);
   const rankingsVersionRef = useRef('');
+  const rankingRowRefs = useRef<Record<string, View | null>>({});
+  const rankingRowRectsRef = useRef<Record<string, RankingRowRect>>({});
+  const rankingDragRef = useRef<RankingDragState | null>(null);
+  const rankingDropTargetRef = useRef<RankingDropTarget | null>(null);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
@@ -87,6 +149,227 @@ export default function RankingsScreen() {
     [competitionId, user?.id]
   );
 
+  const measureViewInWindow = useCallback(
+    (view: View | null) =>
+      new Promise<Omit<RankingRowRect, 'rank'> | null>((resolve) => {
+        if (!view || typeof view.measureInWindow !== 'function') {
+          resolve(null);
+          return;
+        }
+
+        view.measureInWindow((x, y, width, height) => {
+          if (width <= 0 || height <= 0) {
+            resolve(null);
+            return;
+          }
+          resolve({ x, y, width, height });
+        });
+      }),
+    []
+  );
+
+  const captureRankingDropZones = useCallback(async () => {
+    if (!data) {
+      rankingRowRectsRef.current = {};
+      return;
+    }
+
+    const rects: Record<string, RankingRowRect> = {};
+    await Promise.all(
+      data.rankings.map(async (entry) => {
+        const rect = await measureViewInWindow(rankingRowRefs.current[entry.participant.id] ?? null);
+        if (!rect) return;
+        rects[entry.participant.id] = {
+          ...rect,
+          rank: entry.ranking.rank,
+        };
+      })
+    );
+    rankingRowRectsRef.current = rects;
+  }, [data, measureViewInWindow]);
+
+  const computeRankingDropPosition = useCallback(
+    (pageY: number, draggingParticipantId: string): number | null => {
+      if (!data || data.rankings.length === 0) return null;
+
+      const nonDraggingRows = data.rankings
+        .filter((entry) => entry.participant.id !== draggingParticipantId)
+        .map((entry) => ({
+          rect: rankingRowRectsRef.current[entry.participant.id],
+        }))
+        .filter(
+          (
+            row
+          ): row is {
+            rect: RankingRowRect;
+          } => Boolean(row.rect)
+        );
+
+      if (nonDraggingRows.length === 0) {
+        return 1;
+      }
+
+      let insertionIndex = data.rankings.length;
+      for (let index = 0; index < nonDraggingRows.length; index += 1) {
+        const row = nonDraggingRows[index];
+        const rowCenter = row.rect.y + row.rect.height / 2;
+        if (pageY < rowCenter) {
+          insertionIndex = index + 1;
+          break;
+        }
+      }
+
+      return insertionIndex;
+    },
+    [data]
+  );
+
+  const startRankingDrag = useCallback(
+    async (entry: CompetitionRankingEntry, event: GestureResponderEvent) => {
+      if (
+        !data?.canEditSeedOrder ||
+        !!actionKey ||
+        !!seedSaveParticipantId ||
+        !!rankingDragRef.current
+      ) {
+        return;
+      }
+
+      await captureRankingDropZones();
+      const rowRect = rankingRowRectsRef.current[entry.participant.id];
+      if (!rowRect) {
+        return;
+      }
+
+      const pointerX = event.nativeEvent.pageX;
+      const pointerY = event.nativeEvent.pageY;
+      const offsetX = Math.max(0, Math.min(pointerX - rowRect.x, rowRect.width));
+      const offsetY = Math.max(0, Math.min(pointerY - rowRect.y, rowRect.height));
+
+      setRankingDrag({
+        entry,
+        sourceRank: entry.ranking.rank,
+        pointerX,
+        pointerY,
+        offsetX,
+        offsetY,
+        rowWidth: rowRect.width,
+        rowHeight: rowRect.height,
+      });
+      setRankingDropTarget({
+        targetRank: entry.ranking.rank,
+        previewLabel: `Move to seed #${entry.ranking.rank}`,
+      });
+    },
+    [actionKey, captureRankingDropZones, data?.canEditSeedOrder, seedSaveParticipantId]
+  );
+
+  const onRankingDragMove = useCallback(
+    (event: GestureResponderEvent) => {
+      const drag = rankingDragRef.current;
+      if (!drag) return;
+
+      const pointerX = event.nativeEvent.pageX;
+      const pointerY = event.nativeEvent.pageY;
+
+      setRankingDrag((previous) =>
+        previous
+          ? {
+              ...previous,
+              pointerX,
+              pointerY,
+            }
+          : previous
+      );
+
+      const targetRank = computeRankingDropPosition(pointerY, drag.entry.participant.id);
+      if (targetRank == null) {
+        setRankingDropTarget(null);
+        return;
+      }
+
+      setRankingDropTarget({
+        targetRank,
+        previewLabel:
+          targetRank === drag.sourceRank
+            ? `Keep ${drag.entry.participant.display_name} at seed #${targetRank}`
+            : `Drop ${drag.entry.participant.display_name} at seed #${targetRank}`,
+      });
+    },
+    [computeRankingDropPosition]
+  );
+
+  const endRankingDrag = useCallback(async () => {
+    const drag = rankingDragRef.current;
+    const dropTarget = rankingDropTargetRef.current;
+    const currentData = data;
+
+    setRankingDrag(null);
+    setRankingDropTarget(null);
+
+    if (!drag || !dropTarget || !currentData) {
+      return;
+    }
+
+    if (dropTarget.targetRank === drag.sourceRank) {
+      return;
+    }
+
+    const previousRankings = currentData.rankings;
+    const nextRankings = reorderRankingEntries(
+      previousRankings,
+      drag.entry.participant.id,
+      dropTarget.targetRank
+    );
+
+    setData((previous) =>
+      previous
+        ? {
+            ...previous,
+            rankings: nextRankings,
+          }
+        : previous
+    );
+    setSeedSaveParticipantId(drag.entry.participant.id);
+
+    const result = await reorderCompetitionDeSeeds({
+      competitionId: currentData.competition.id,
+      participantIds: nextRankings.map((entry) => entry.participant.id),
+    });
+
+    if (!result.ok) {
+      setData((previous) =>
+        previous
+          ? {
+              ...previous,
+              rankings: previousRankings,
+            }
+          : previous
+      );
+      setSeedSaveParticipantId(null);
+      setErrorText(result.message);
+      return;
+    }
+
+    analytics.capture('de_seed_order_reordered', {
+      competition_id: currentData.competition.id,
+      participant_id: drag.entry.participant.id,
+      from_seed: drag.sourceRank,
+      to_seed: dropTarget.targetRank,
+    });
+
+    await loadData(false);
+    setSeedSaveParticipantId(null);
+  }, [data, loadData]);
+
+  const onRankingDragEndTouch = useCallback(() => {
+    if (!rankingDragRef.current) return;
+    void endRankingDrag();
+  }, [endRankingDrag]);
+
+  rankingDragRef.current = rankingDrag;
+  rankingDropTargetRef.current = rankingDropTarget;
+
   const {
     bannerText: realtimeBannerText,
     correctionNotice: realtimeCorrectionNotice,
@@ -97,6 +380,7 @@ export default function RankingsScreen() {
     enabled: Boolean(user?.id && competitionId),
     surface: 'rankings',
     onCompetitionEvent: () => {
+      if (rankingDragRef.current) return;
       void loadData(false);
     },
     onReconnectRefetch: async () => {
@@ -119,14 +403,15 @@ export default function RankingsScreen() {
     setRefreshing(true);
     await loadData(false);
   };
-  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
-  const contentBottomPadding = tabBarOverlayHeight + 20;
 
   const onLockRankings = () => {
     if (!data) return;
+
     Alert.alert(
       'Lock rankings?',
-      'This freezes ranking order and blocks further poule score edits.',
+      data.competition.format === 'de_only'
+        ? 'This freezes the DE seed order for bracket generation.'
+        : 'This freezes ranking order and blocks further poule score edits.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -155,6 +440,7 @@ export default function RankingsScreen() {
 
   const onGenerateDe = () => {
     if (!data) return;
+
     Alert.alert(
       'Generate DE tableau?',
       'This creates the seeded elimination bracket and applies automatic byes.',
@@ -213,8 +499,18 @@ export default function RankingsScreen() {
     );
   }
 
+  const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
+  const contentBottomPadding = tabBarOverlayHeight + 20;
+  const isManualSeedMode = data.competition.format === 'de_only';
+  const isSavingSeedOrder = seedSaveParticipantId !== null;
+
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onTouchMove={onRankingDragMove}
+      onTouchEnd={onRankingDragEndTouch}
+      onTouchCancel={onRankingDragEndTouch}
+    >
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -230,6 +526,7 @@ export default function RankingsScreen() {
             tintColor={Colors.purple.primary}
           />
         }
+        scrollEnabled={!rankingDrag}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.backRow}>
@@ -277,7 +574,7 @@ export default function RankingsScreen() {
                   text="Lock Rankings"
                   onPress={onLockRankings}
                   loading={actionKey === 'lock'}
-                  disabled={actionKey === 'generate'}
+                  disabled={actionKey === 'generate' || isSavingSeedOrder}
                   primary
                 />
               ) : null}
@@ -286,7 +583,7 @@ export default function RankingsScreen() {
                   text="Generate DE"
                   onPress={onGenerateDe}
                   loading={actionKey === 'generate'}
-                  disabled={actionKey === 'lock'}
+                  disabled={actionKey === 'lock' || isSavingSeedOrder}
                 />
               ) : null}
             </View>
@@ -296,21 +593,38 @@ export default function RankingsScreen() {
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Standings</Text>
+          <Text style={styles.sectionTitle}>{isManualSeedMode ? 'Seed Order' : 'Standings'}</Text>
+          {data.canEditSeedOrder ? (
+            <>
+              <Text style={styles.helperText}>
+                Long-press and drag a participant to change the DE seed order. Changes save as soon
+                as you drop.
+              </Text>
+              {isSavingSeedOrder ? (
+                <Text style={styles.dragPreviewText}>Saving updated seed order…</Text>
+              ) : null}
+              {rankingDrag && rankingDropTarget ? (
+                <Text style={styles.dragPreviewText}>{rankingDropTarget.previewLabel}</Text>
+              ) : null}
+            </>
+          ) : null}
+
           {data.rankings.length === 0 ? (
             <Text style={styles.emptyText}>No ranking data yet.</Text>
           ) : (
             data.rankings.map((entry) => {
               const { ranking, participant } = entry;
               const isSelf = participant.isSelf;
-              return (
-                <View
-                  key={participant.id}
-                  style={[styles.row, isSelf && styles.rowSelf]}
-                >
+              const isDragging = rankingDrag?.entry.participant.id === participant.id;
+              const isDropTarget = rankingDropTarget?.targetRank === ranking.rank && !isDragging;
+              const isSavingRow = seedSaveParticipantId === participant.id;
+
+              const rowContent = (
+                <>
                   <View style={styles.rowLeft}>
+                    {data.canEditSeedOrder ? <Text style={styles.dragHandle}>☰</Text> : null}
                     <Text style={styles.rankValue}>#{ranking.rank}</Text>
-                    <View>
+                    <View style={styles.nameBlock}>
                       <View style={styles.nameRow}>
                         <Text style={[styles.nameText, isSelf && styles.nameTextSelf]}>
                           {participant.display_name}
@@ -322,24 +636,95 @@ export default function RankingsScreen() {
                         ) : null}
                       </View>
                       <Text style={styles.subMetaText}>
-                        W {ranking.wins} • L {ranking.losses} • IND {ranking.indicator}
+                        {isManualSeedMode
+                          ? data.canEditSeedOrder
+                            ? 'Press and hold to drag'
+                            : 'Seed order locked for DE tableau'
+                          : `W ${ranking.wins} • L ${ranking.losses} • IND ${ranking.indicator}`}
                       </Text>
                     </View>
                   </View>
+
                   <View style={styles.rowRight}>
-                    <Text style={styles.statText}>HS {ranking.hits_scored}</Text>
-                    <Text style={styles.statText}>HR {ranking.hits_received}</Text>
-                    <Text style={styles.statText}>Win% {(ranking.win_pct * 100).toFixed(1)}</Text>
+                    {isSavingRow ? (
+                      <ActivityIndicator size="small" color="#E9D7FF" />
+                    ) : isManualSeedMode ? null : (
+                      <>
+                        <Text style={styles.statText}>HS {ranking.hits_scored}</Text>
+                        <Text style={styles.statText}>HR {ranking.hits_received}</Text>
+                        <Text style={styles.statText}>
+                          Win% {(ranking.win_pct * 100).toFixed(1)}
+                        </Text>
+                      </>
+                    )}
                     {participant.status === 'withdrawn' ? (
                       <Text style={styles.withdrawnText}>Withdrawn</Text>
                     ) : null}
                   </View>
+                </>
+              );
+
+              if (data.canEditSeedOrder) {
+                return (
+                  <Pressable
+                    key={participant.id}
+                    ref={(node) => {
+                      rankingRowRefs.current[participant.id] = node;
+                    }}
+                    onLongPress={(event) => void startRankingDrag(entry, event)}
+                    delayLongPress={180}
+                    disabled={!!actionKey || !!rankingDrag || isSavingSeedOrder}
+                    style={[
+                      styles.row,
+                      styles.rowEditable,
+                      isSelf && styles.rowSelf,
+                      isDragging && styles.rowDragging,
+                      isDropTarget && styles.rowDropTarget,
+                    ]}
+                  >
+                    {rowContent}
+                  </Pressable>
+                );
+              }
+
+              return (
+                <View
+                  key={participant.id}
+                  style={[styles.row, isSelf && styles.rowSelf]}
+                >
+                  {rowContent}
                 </View>
               );
             })
           )}
         </View>
       </ScrollView>
+
+      {rankingDrag ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.rankingDragGhost,
+            {
+              left: rankingDrag.pointerX - rankingDrag.offsetX,
+              top: rankingDrag.pointerY - rankingDrag.offsetY,
+              width: rankingDrag.rowWidth,
+              minHeight: rankingDrag.rowHeight,
+            },
+          ]}
+        >
+          <View style={styles.rowLeft}>
+            <Text style={styles.dragHandle}>☰</Text>
+            <Text style={styles.rankValue}>#{rankingDrag.sourceRank}</Text>
+            <View style={styles.nameBlock}>
+              <Text style={styles.nameText}>{rankingDrag.entry.participant.display_name}</Text>
+              <Text style={styles.subMetaText}>
+                {rankingDropTarget?.previewLabel ?? `Move to seed #${rankingDrag.sourceRank}`}
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -442,6 +827,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
+  helperText: {
+    color: '#9D9D9D',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  dragPreviewText: {
+    color: '#E9D7FF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   controlWrap: {
     marginTop: 4,
     gap: 8,
@@ -482,11 +877,22 @@ const styles = StyleSheet.create({
     padding: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 12,
+  },
+  rowEditable: {
+    minHeight: 68,
   },
   rowSelf: {
     borderColor: 'rgba(139,92,246,0.65)',
     backgroundColor: 'rgba(139,92,246,0.1)',
+  },
+  rowDragging: {
+    opacity: 0.32,
+  },
+  rowDropTarget: {
+    borderColor: '#8B5CF6',
+    backgroundColor: 'rgba(139,92,246,0.18)',
   },
   rowLeft: {
     flexDirection: 'row',
@@ -494,10 +900,20 @@ const styles = StyleSheet.create({
     gap: 10,
     flex: 1,
   },
+  nameBlock: {
+    flex: 1,
+  },
   rowRight: {
     alignItems: 'flex-end',
     gap: 2,
     minWidth: 86,
+  },
+  dragHandle: {
+    color: '#C8A6FF',
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginTop: -1,
   },
   rankValue: {
     color: '#FFFFFF',
@@ -569,5 +985,22 @@ const styles = StyleSheet.create({
     color: '#D8D8D8',
     fontSize: 14,
     fontWeight: '600',
+  },
+  rankingDragGhost: {
+    position: 'absolute',
+    zIndex: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#8B5CF6',
+    backgroundColor: '#1F1A28',
+    padding: 10,
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 16,
   },
 });
