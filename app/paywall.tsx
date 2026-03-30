@@ -9,6 +9,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Colors } from '@/constants/Colors';
 import RevenueCatUI from 'react-native-purchases-ui';
 
+type NonUserPaywallCloseReason =
+  | 'purchase'
+  | 'restore'
+  | 'already_subscribed'
+  | 'error'
+  | 'preview'
+  | 'manual_access';
+
+const PAYWALL_ABANDON_MIN_MS = 3000;
+
 export default function PaywallScreen() {
   const { user, loading, session } = useAuth();
   const params = useLocalSearchParams();
@@ -18,11 +28,14 @@ export default function PaywallScreen() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [paywallOffering, setPaywallOffering] = useState<PurchasesOffering | null>(null);
   const paywallStartTimeRef = React.useRef<number>(Date.now());
+  const paywallCloseReasonRef = React.useRef<NonUserPaywallCloseReason | null>(null);
+  const paywallManuallyDismissedRef = React.useRef(false);
+  const paywallAbandonedTrackedRef = React.useRef(false);
   const paywallSource = params.source === 'settings' ? 'settings' : 'auto';
   const allowUserDismiss = paywallSource === 'settings' || canDismiss;
   const paywallOfferingId = 'Main';
 
-  const handleClose = (
+  const handleClose = React.useCallback((
     reason: 'user' | 'purchase' | 'restore' | 'already_subscribed' | 'error' | 'preview' | 'manual_access' = 'user',
     options?: { profilePrompt?: boolean }
   ) => {
@@ -30,8 +43,6 @@ export default function PaywallScreen() {
       return;
     }
     console.log('🚪 Closing paywall, navigating to home with bypass flag');
-    // Track paywall dismissed (user closed without purchasing)
-    analytics.capture('paywall_dismissed', { reason });
     const params: Record<string, string> = {
       bypassPaywall: 'true',
     };
@@ -42,7 +53,32 @@ export default function PaywallScreen() {
       pathname: '/(tabs)',
       params,
     });
-  };
+  }, [allowUserDismiss]);
+
+  const markNonUserPaywallClose = React.useCallback((reason: NonUserPaywallCloseReason) => {
+    paywallCloseReasonRef.current = reason;
+    const baseProps = { source: paywallSource };
+    switch (reason) {
+      case 'purchase':
+        analytics.capture('paywall_closed_after_purchase', baseProps);
+        break;
+      case 'restore':
+        analytics.capture('paywall_closed_after_restore', baseProps);
+        break;
+      case 'already_subscribed':
+        analytics.capture('paywall_skipped_already_subscribed', baseProps);
+        break;
+      case 'preview':
+        analytics.capture('paywall_skipped_preview_active', baseProps);
+        break;
+      case 'manual_access':
+        analytics.capture('paywall_skipped_manual_access', baseProps);
+        break;
+      case 'error':
+        analytics.capture('paywall_closed_after_error', baseProps);
+        break;
+    }
+  }, [paywallSource]);
 
   useEffect(() => {
     if (loading) return;
@@ -52,9 +88,6 @@ export default function PaywallScreen() {
     }
 
     analytics.screen('Paywall');
-    // Track paywall viewed
-    analytics.capture('paywall_viewed');
-    paywallStartTimeRef.current = Date.now();
     let isActive = true;
 
     const init = async () => {
@@ -65,6 +98,7 @@ export default function PaywallScreen() {
         setCanDismiss(!previewSnapshot.hasStarted);
 
         if (paywallSource !== 'settings' && previewSnapshot.isActive) {
+          markNonUserPaywallClose('preview');
           handleClose('preview');
           return;
         }
@@ -74,6 +108,7 @@ export default function PaywallScreen() {
         );
         if (paywallSource !== 'settings' && manualAccess) {
           setCanDismiss(true);
+          markNonUserPaywallClose('manual_access');
           handleClose('manual_access');
           return;
         }
@@ -86,6 +121,7 @@ export default function PaywallScreen() {
         if (info.isActive) {
           setCanDismiss(true);
           if (paywallSource !== 'settings') {
+            markNonUserPaywallClose('already_subscribed');
             handleClose('already_subscribed');
             return;
           }
@@ -95,6 +131,11 @@ export default function PaywallScreen() {
         if (!offering) {
           throw new Error('Paywall offering is unavailable. Please try again later.');
         }
+        analytics.capture('paywall_viewed', { source: paywallSource });
+        paywallStartTimeRef.current = Date.now();
+        paywallCloseReasonRef.current = null;
+        paywallManuallyDismissedRef.current = false;
+        paywallAbandonedTrackedRef.current = false;
         setPaywallOffering(offering);
       } catch (error: any) {
         if (isActive) {
@@ -112,15 +153,25 @@ export default function PaywallScreen() {
     return () => {
       isActive = false;
     };
-  }, [user?.id, loading, paywallSource, session?.access_token]);
+  }, [user, loading, paywallSource, session?.access_token, handleClose, markNonUserPaywallClose]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        const timeOnPaywallMs = Date.now() - paywallStartTimeRef.current;
+      if (nextState === 'background') {
+        const timeOnPaywallMs = Math.max(0, Date.now() - paywallStartTimeRef.current);
+        if (paywallAbandonedTrackedRef.current) {
+          return;
+        }
+        if (paywallCloseReasonRef.current || paywallManuallyDismissedRef.current) {
+          return;
+        }
+        if (timeOnPaywallMs < PAYWALL_ABANDON_MIN_MS) {
+          return;
+        }
+        paywallAbandonedTrackedRef.current = true;
         analytics.capture('paywall_abandoned', {
           source: paywallSource,
-          time_on_paywall_ms: Math.max(0, timeOnPaywallMs),
+          time_on_paywall_ms: timeOnPaywallMs,
         });
       }
     });
@@ -148,7 +199,13 @@ export default function PaywallScreen() {
         <ExpoStatusBar style="light" />
         <View style={styles.statusContainer}>
           <Text style={styles.errorText}>{initError}</Text>
-          <TouchableOpacity onPress={() => handleClose('error')} style={styles.closeButton}>
+          <TouchableOpacity
+            onPress={() => {
+              markNonUserPaywallClose('error');
+              handleClose('error');
+            }}
+            style={styles.closeButton}
+          >
             <Text style={styles.closeButtonText}>Close Paywall</Text>
           </TouchableOpacity>
         </View>
@@ -192,9 +249,19 @@ export default function PaywallScreen() {
           offering: paywallOffering,
         }}
         onDismiss={() => {
+          const closeReason = paywallCloseReasonRef.current;
+          if (closeReason) {
+            paywallCloseReasonRef.current = null;
+            return;
+          }
           if (!allowUserDismiss) {
             return;
           }
+          paywallManuallyDismissedRef.current = true;
+          analytics.capture('paywall_dismissed', {
+            source: paywallSource,
+            dismiss_method: 'user_dismissed',
+          });
           if (paywallSource === 'settings') {
             handleClose('user');
             return;
@@ -261,7 +328,8 @@ export default function PaywallScreen() {
           } catch (error) {
             console.error('Error tracking purchase completion:', error);
           }
-          
+
+          markNonUserPaywallClose('purchase');
           handleClose('purchase', { profilePrompt: true });
         }}
         onRestoreCompleted={async (customerInfo) => {
@@ -282,7 +350,8 @@ export default function PaywallScreen() {
           } catch (error) {
             console.error('Error tracking restore completion:', error);
           }
-          
+
+          markNonUserPaywallClose('restore');
           handleClose('restore', { profilePrompt: true });
         }}
         onPurchaseError={({ error }) => {

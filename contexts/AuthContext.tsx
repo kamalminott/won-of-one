@@ -1,6 +1,7 @@
 import { userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { analytics } from '@/lib/analytics';
+import { trackOncePerDay } from '@/lib/analyticsTracking';
 import {
   isFallbackDisplayName,
   isOpaqueIdentifierName,
@@ -1196,6 +1197,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           } catch (error) {
             console.error('❌ Error logging out RevenueCat user:', error);
           }
+
+          analytics.reset();
           return;
         }
 
@@ -1371,7 +1374,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [user]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !session?.access_token || isPasswordRecoveryRef.current) return;
     let cancelled = false;
     const trimmedName = (userName || '').trim();
     const metadataName = resolveAuthMetadataDisplayName(user);
@@ -1394,6 +1397,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     identifyWithProps();
+    void trackOncePerDay(
+      'user_active_day',
+      {
+        source: 'auth_identify',
+        auth_event: lastAuthEventRef.current ?? 'unknown',
+      },
+      user.id
+    );
 
     const loadSubscriptionStatus = async () => {
       try {
