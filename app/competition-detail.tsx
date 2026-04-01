@@ -392,6 +392,15 @@ export default function CompetitionDetailScreen() {
     }));
   }, [matches]);
 
+  const deSummary = useMemo(() => {
+    const deMatches = matches.filter(match => match.competitionPhase === 'DE' || match.competitionRound);
+    const winCount = deMatches.filter(match => match.isWin).length;
+    return {
+      wins: winCount,
+      losses: deMatches.length - winCount,
+    };
+  }, [matches]);
+
   const tableauUserLabel = useMemo(() => {
     const trimmed = userName?.trim();
     return trimmed && trimmed.length > 0 ? trimmed : 'You';
@@ -1157,7 +1166,14 @@ export default function CompetitionDetailScreen() {
 
               {pouleMatches.length > 0 && (
                 <View style={styles.sectionBlock}>
-                  <Text style={styles.sectionLabel}>Poule</Text>
+                  <View style={styles.sectionLabelRow}>
+                    <Text style={[styles.sectionLabel, styles.sectionLabelInline]}>Poule</Text>
+                    <View style={styles.sectionSummaryPill}>
+                      <Text style={styles.sectionSummaryPillText}>
+                        {crossMatrixSummary.wins}V - {crossMatrixSummary.losses}D
+                      </Text>
+                    </View>
+                  </View>
                   <TouchableOpacity
                     style={styles.breakdownDropdownToggle}
                     activeOpacity={0.85}
@@ -1319,7 +1335,16 @@ export default function CompetitionDetailScreen() {
 
               {deMatchesByRound.length > 0 && (
                 <View style={styles.sectionBlock}>
-                  <Text style={styles.sectionLabel}>Direct Elimination</Text>
+                  <View style={styles.sectionLabelRow}>
+                    <Text style={[styles.sectionLabel, styles.sectionLabelInline]}>
+                      Direct Elimination
+                    </Text>
+                    <View style={styles.sectionSummaryPill}>
+                      <Text style={styles.sectionSummaryPillText}>
+                        {deSummary.wins}V - {deSummary.losses}D
+                      </Text>
+                    </View>
+                  </View>
                   <TouchableOpacity
                     style={styles.breakdownDropdownToggle}
                     activeOpacity={0.85}
@@ -2168,6 +2193,29 @@ const styles = StyleSheet.create({
   breakdownDropdownText: {
     color: '#E9D7FF',
     fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  sectionLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  sectionLabelInline: {
+    marginBottom: 0,
+  },
+  sectionSummaryPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.32)',
+  },
+  sectionSummaryPillText: {
+    color: '#D1FAE5',
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.2,
   },

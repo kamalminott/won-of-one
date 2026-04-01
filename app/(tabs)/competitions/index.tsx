@@ -40,6 +40,7 @@ export default function CompetitionsHubScreen() {
   const [activeCompetitions, setActiveCompetitions] = useState<CompetitionSummary[]>([]);
   const [pastCompetitions, setPastCompetitions] = useState<CompetitionSummary[]>([]);
   const [archivedCompetitions, setArchivedCompetitions] = useState<CompetitionSummary[]>([]);
+  const [showArchivedCompetitions, setShowArchivedCompetitions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -462,17 +463,36 @@ export default function CompetitionsHubScreen() {
 
             {hasArchived ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Archived</Text>
-                {archivedCompetitions.map((competition) => (
-                  <CompetitionCard
-                    key={competition.id}
-                    competition={competition}
-                    isArchived
-                    isBusy={actionCompetitionId === competition.id}
-                    onRestore={onRestoreCompetition}
-                    onDelete={onDeleteCompetition}
+                <Pressable
+                  onPress={() => setShowArchivedCompetitions((previous) => !previous)}
+                  style={styles.sectionHeaderButton}
+                >
+                  <View style={styles.sectionHeaderTitleRow}>
+                    <Text style={styles.sectionTitleInline}>Archived</Text>
+                    <View style={styles.sectionCountBadge}>
+                      <Text style={styles.sectionCountText}>
+                        {archivedCompetitions.length}
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons
+                    name={showArchivedCompetitions ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color="#B9B9B9"
                   />
-                ))}
+                </Pressable>
+                {showArchivedCompetitions ? (
+                  archivedCompetitions.map((competition) => (
+                    <CompetitionCard
+                      key={competition.id}
+                      competition={competition}
+                      isArchived
+                      isBusy={actionCompetitionId === competition.id}
+                      onRestore={onRestoreCompetition}
+                      onDelete={onDeleteCompetition}
+                    />
+                  ))
+                ) : null}
               </View>
             ) : null}
           </>
@@ -701,6 +721,38 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 10,
+  },
+  sectionTitleInline: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  sectionHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sectionHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionCountBadge: {
+    minWidth: 24,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  sectionCountText: {
+    color: '#D8D8D8',
+    fontSize: 12,
+    fontWeight: '700',
   },
   card: {
     backgroundColor: '#212121',

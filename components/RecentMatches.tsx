@@ -91,18 +91,24 @@ export const RecentMatches: React.FC<RecentMatchesProps> = ({
       fieldSize: competition.fieldSize ?? null,
     }));
 
-  const matchItems: MatchCarouselItem[] = matches.map(match => ({
-    type: 'match',
-    id: match.id,
-    date: match.date,
-    isWin: match.isWin,
-    youScore: match.youScore,
-    opponentScore: match.opponentScore,
-    opponentName: match.opponentName,
-    source: match.source,
-    notes: match.notes,
-    matchType: match.matchType,
-  }));
+  const displayedCompetitionIds = new Set(
+    competitionItems.map(item => item.competitionId).filter(Boolean)
+  );
+
+  const matchItems: MatchCarouselItem[] = matches
+    .filter(match => !match.competitionId || !displayedCompetitionIds.has(match.competitionId))
+    .map(match => ({
+      type: 'match',
+      id: match.id,
+      date: match.date,
+      isWin: match.isWin,
+      youScore: match.youScore,
+      opponentScore: match.opponentScore,
+      opponentName: match.opponentName,
+      source: match.source,
+      notes: match.notes,
+      matchType: match.matchType,
+    }));
 
   const carouselItems = [...competitionItems, ...matchItems]
     .sort((a, b) => {

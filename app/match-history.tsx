@@ -1,4 +1,4 @@
-import { RecentMatchCard } from '@/components';
+import { LossPill, RecentMatchCard, WinPill } from '@/components';
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -828,15 +828,21 @@ export default function RecentMatchesScreen() {
             >
               <Ionicons name="trash-outline" size={18} color="#FF7675" />
             </TouchableOpacity>
-          ) : match.outcome === 'Defeat' ? (
-            <View style={styles.lossPill}>
-              <Ionicons name="close" size={12} color="#FFD6D6" />
-              <Text style={styles.lossPillText}>Loss</Text>
-            </View>
           ) : (
-            <View style={styles.scoreRow}>
-              <View style={styles.scoreDot} />
-              <Text style={styles.scoreText}>{scoreText}</Text>
+            <View style={styles.competitionResultStack}>
+              <Text
+                style={[
+                  styles.scoreText,
+                  match.outcome === 'Defeat' ? styles.scoreTextLoss : styles.scoreTextWin,
+                ]}
+              >
+                {scoreText}
+              </Text>
+              {match.outcome === 'Victory' ? (
+                <WinPill customStyle={styles.competitionResultPill} textStyle={styles.competitionResultPillText} />
+              ) : (
+                <LossPill customStyle={styles.competitionResultPill} textStyle={styles.competitionResultPillText} />
+              )}
             </View>
           )}
         </View>
@@ -1184,37 +1190,26 @@ export default function RecentMatchesScreen() {
       alignItems: 'flex-end',
       justifyContent: 'center',
     },
-    lossPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: 'rgba(255, 107, 107, 0.2)',
-      borderRadius: width * 0.04,
-      paddingHorizontal: width * 0.025,
-      paddingVertical: height * 0.006,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 107, 107, 0.6)',
+    competitionResultStack: {
+      alignItems: 'flex-end',
+      gap: height * 0.006,
     },
-    lossPillText: {
-      marginLeft: width * 0.01,
-      color: '#FFD6D6',
-      fontSize: width * 0.032,
-      fontWeight: '600',
+    competitionResultPill: {
+      paddingHorizontal: width * 0.022,
+      paddingVertical: height * 0.005,
     },
-    scoreRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+    competitionResultPillText: {
+      fontSize: width * 0.03,
     },
     scoreText: {
-      color: 'rgb(179, 241, 229)',
       fontSize: width * 0.04,
       fontWeight: '700',
     },
-    scoreDot: {
-      width: width * 0.02,
-      height: width * 0.02,
-      borderRadius: width * 0.01,
-      backgroundColor: 'rgb(179, 241, 229)',
-      marginRight: width * 0.01,
+    scoreTextWin: {
+      color: 'rgb(179, 241, 229)',
+    },
+    scoreTextLoss: {
+      color: '#FFD6D6',
     },
     competitionDelete: {
       padding: width * 0.01,

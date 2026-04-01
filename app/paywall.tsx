@@ -271,6 +271,14 @@ export default function PaywallScreen() {
               const { status, granted } = await subscriptionService.grantPaywallPreview(user);
               if (granted) {
                 analytics.capture('paywall_preview_started', {
+                  source: paywallSource,
+                  preview_source: 'paywall_dismiss',
+                  ends_at: status.endsAt?.toISOString(),
+                });
+                analytics.capture('paywall_dismissed_and_preview_granted', {
+                  source: paywallSource,
+                  dismiss_method: 'user_dismissed',
+                  preview_duration_days: 3,
                   ends_at: status.endsAt?.toISOString(),
                 });
                 setShowPreviewModal(true);
