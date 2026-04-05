@@ -221,6 +221,7 @@ export default function RecentMatchesScreen() {
     name: string;
     date: string;
     weapon: string;
+    isChampion: boolean;
     wins: number;
     losses: number;
     pouleWins: number;
@@ -482,6 +483,7 @@ export default function RecentMatchesScreen() {
             name,
             date,
             weapon,
+            isChampion: false,
             wins: 0,
             losses: 0,
             pouleWins: 0,
@@ -515,9 +517,13 @@ export default function RecentMatchesScreen() {
 
         const pouleWins = pouleMatches.filter((m) => m.outcome === 'Victory').length;
         const pouleLosses = pouleMatches.filter((m) => m.outcome === 'Defeat').length;
+        const isChampion = deMatches.some(
+          (m) => m.competitionRound === 'F' && m.outcome === 'Victory'
+        );
 
         return {
           ...group,
+          isChampion,
           wins,
           losses,
           pouleWins,
@@ -1012,6 +1018,14 @@ export default function RecentMatchesScreen() {
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    competitionCardChampion: {
+      borderColor: 'rgba(251, 191, 36, 0.4)',
+      shadowColor: '#F59E0B',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+      elevation: 6,
     },
     competitionHeaderRow: {
       flexDirection: 'row',
@@ -1630,7 +1644,13 @@ export default function RecentMatchesScreen() {
                 const deExpanded =
                   expandedCompetitionSections[competition.id]?.de ?? sectionDefaults.de;
                 return (
-                  <View key={competition.id} style={styles.competitionCard}>
+                  <View
+                    key={competition.id}
+                    style={[
+                      styles.competitionCard,
+                      competition.isChampion && styles.competitionCardChampion,
+                    ]}
+                  >
                     <View style={styles.competitionHeaderRow}>
                       <TouchableOpacity
                         style={styles.competitionHeaderLeft}

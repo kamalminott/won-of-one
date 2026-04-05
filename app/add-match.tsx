@@ -526,9 +526,7 @@ export default function AddMatchScreen() {
         setUsedDeRounds(DE_ROUNDS.filter((round) => usedRounds.has(round)));
       } catch (error) {
         console.warn('Failed to load used DE rounds', error);
-        if (!cancelled) {
-          setUsedDeRounds([]);
-        }
+        if (!cancelled) setUsedDeRounds([]);
       }
     };
 
@@ -2493,7 +2491,7 @@ export default function AddMatchScreen() {
               <View style={styles.scoreInputContainer}>
                 <Text style={styles.scoreInput}>{yourScore}</Text>
               </View>
-              <Text style={styles.scoreLabel}>{userFirstName}'s Score</Text>
+              <Text style={styles.scoreLabel}>{userFirstName}&apos;s Score</Text>
             </TouchableOpacity>
             
             <TouchableOpacity

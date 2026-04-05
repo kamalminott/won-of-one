@@ -8,10 +8,10 @@ import { competitionService, matchService } from '@/lib/database';
 import { Competition, SimpleMatch } from '@/types/database';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { InteractionManager, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type CompetitionMatch = SimpleMatch;
@@ -65,16 +65,18 @@ const roundOrder: Record<string, number> = {
 const deRoundSequence = Object.entries(roundOrder)
   .sort((a, b) => a[1] - b[1])
   .map(([round]) => round);
+const OPTIONAL_DE_ROUNDS = new Set(['L96']);
 
 const TABLEAU_SLOT_HEIGHT = 44;
 const TABLEAU_SLOT_GAP = 10;
-const TABLEAU_ROUND_STAIR_STEP = 10;
 const TABLEAU_ROUND_COLUMN_WIDTH = 168;
 const TABLEAU_ROUND_COLUMN_GAP = 10;
 const TABLEAU_CARD_WIDTH = 146;
 const TABLEAU_CARD_HEIGHT = 66;
 const TABLEAU_OTHER_CARD_WIDTH = 116;
 const TABLEAU_OTHER_CARD_HEIGHT = 20;
+const TABLEAU_OTHER_CARD_LEFT_INSET = 10;
+const TABLEAU_MAIN_PATH_STEP = 64;
 const TABLEAU_CONNECTOR_KNEE_OFFSET = 12;
 const TABLEAU_CONNECTOR_JOIN_OVERLAP = 1;
 const TABLEAU_CONNECTOR_STROKE_WIDTH = 2;
@@ -147,6 +149,7 @@ export default function CompetitionDetailScreen() {
   const [datePickerValue, setDatePickerValue] = useState<Date>(new Date());
   const [isPouleVisualExpanded, setIsPouleVisualExpanded] = useState(false);
   const [isTableauVisualExpanded, setIsTableauVisualExpanded] = useState(false);
+  const [isDetailContentReady, setIsDetailContentReady] = useState(false);
   const hasTrackedDetailViewRef = useRef(false);
   const postNotesEditedRef = useRef(false);
 
@@ -263,7 +266,19 @@ export default function CompetitionDetailScreen() {
   };
 
   useEffect(() => {
+    setIsDetailContentReady(false);
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      setIsDetailContentReady(true);
+    });
+
+    return () => {
+      interaction.cancel();
+    };
+  }, [competitionId]);
+
+  useEffect(() => {
     let isMounted = true;
+
     const loadCompetition = async () => {
       if (!competitionId || !user?.id) return;
       setLoading(true);
@@ -291,11 +306,14 @@ export default function CompetitionDetailScreen() {
       }
     };
 
-    loadCompetition();
+    if (isDetailContentReady) {
+      loadCompetition();
+    }
+
     return () => {
       isMounted = false;
     };
-  }, [competitionId, refreshKey, user?.id, session?.access_token, userName]);
+  }, [competitionId, refreshKey, user?.id, session?.access_token, userName, isDetailContentReady]);
 
   useEffect(() => {
     if (!competition || hasTrackedDetailViewRef.current) return;
@@ -314,18 +332,24 @@ export default function CompetitionDetailScreen() {
     }
   }, [competition, isEditing]);
 
+  const deferredMatches = useDeferredValue(matches);
+
   const { wins, losses } = useMemo(() => {
-    const winCount = matches.filter(match => match.isWin).length;
-    return { wins: winCount, losses: matches.length - winCount };
-  }, [matches]);
+    const winCount = deferredMatches.filter(match => match.isWin).length;
+    return { wins: winCount, losses: deferredMatches.length - winCount };
+  }, [deferredMatches]);
 
   const pouleMatches = useMemo(() => {
-    return matches
+    return deferredMatches
       .filter(match => match.competitionPhase === 'POULE' || (!match.competitionPhase && !match.competitionRound))
       .sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a));
-  }, [matches]);
+  }, [deferredMatches]);
 
   const crossMatrixOpponents = useMemo<CrossMatrixOpponent[]>(() => {
+    if (!isPouleVisualExpanded) {
+      return [];
+    }
+
     const opponents = new Map<string, CrossMatrixOpponent>();
 
     pouleMatches.forEach(match => {
@@ -348,13 +372,18 @@ export default function CompetitionDetailScreen() {
     });
 
     return Array.from(opponents.values());
-  }, [pouleMatches]);
+  }, [isPouleVisualExpanded, pouleMatches]);
 
   const crossMatrixSummary = useMemo(() => {
-    const winsCount = crossMatrixOpponents.filter(opponent => opponent.result === 'win').length;
-    const lossesCount = crossMatrixOpponents.filter(opponent => opponent.result === 'loss').length;
+    const completedPoules = pouleMatches.filter(
+      match => !(match.youScore === 0 && match.opponentScore === 0 && !match.isWin)
+    );
+    const winsCount = completedPoules.filter(match => match.isWin).length;
+    const lossesCount = completedPoules.length - winsCount;
     const fencedCount = winsCount + lossesCount;
     const ratio = fencedCount > 0 ? (winsCount / fencedCount).toFixed(2) : '0.00';
+    const hitsScored = pouleMatches.reduce((sum, match) => sum + match.youScore, 0);
+    const hitsReceived = pouleMatches.reduce((sum, match) => sum + match.opponentScore, 0);
     const indicatorValue = pouleMatches.reduce(
       (sum, match) => sum + (match.youScore - match.opponentScore),
       0
@@ -365,12 +394,14 @@ export default function CompetitionDetailScreen() {
       wins: winsCount,
       losses: lossesCount,
       ratio,
+      hitsScored,
+      hitsReceived,
       indicator,
     };
-  }, [crossMatrixOpponents, pouleMatches]);
+  }, [pouleMatches]);
 
   const deMatchesByRound = useMemo(() => {
-    const deMatches = matches.filter(match => match.competitionPhase === 'DE' || match.competitionRound);
+    const deMatches = deferredMatches.filter(match => match.competitionPhase === 'DE' || match.competitionRound);
     const map = new Map<string, CompetitionMatch[]>();
     deMatches.forEach(match => {
       const round = match.competitionRound || 'DE';
@@ -390,16 +421,24 @@ export default function CompetitionDetailScreen() {
       round,
       matches: roundMatches.sort((a, b) => getMatchTimestamp(b) - getMatchTimestamp(a)),
     }));
-  }, [matches]);
+  }, [deferredMatches]);
 
   const deSummary = useMemo(() => {
-    const deMatches = matches.filter(match => match.competitionPhase === 'DE' || match.competitionRound);
-    const winCount = deMatches.filter(match => match.isWin).length;
-    return {
-      wins: winCount,
-      losses: deMatches.length - winCount,
-    };
-  }, [matches]);
+    const bestRoundGroup = deMatchesByRound[deMatchesByRound.length - 1];
+    const bestRound = bestRoundGroup?.round;
+    const isChampion =
+      bestRound === 'F' && !!bestRoundGroup?.matches.some((match) => match.isWin);
+
+    if (!bestRound) {
+      return { label: 'Reached DE', isChampion: false };
+    }
+
+    if (isChampion) {
+      return { label: 'Champion', isChampion: true };
+    }
+
+    return { label: `Reached ${bestRound}`, isChampion: false };
+  }, [deMatchesByRound]);
 
   const tableauUserLabel = useMemo(() => {
     const trimmed = userName?.trim();
@@ -407,10 +446,15 @@ export default function CompetitionDetailScreen() {
   }, [userName]);
 
   const visualTableauRounds = useMemo<VisualTableauRound[]>(() => {
+    if (!isTableauVisualExpanded) {
+      return [];
+    }
+
     const loggedRoundEntries = deMatchesByRound.filter(({ matches: roundMatches }) => roundMatches.length > 0);
     if (loggedRoundEntries.length === 0) return [];
 
     const loggedRoundNames = loggedRoundEntries.map(({ round }) => round);
+    const loggedRoundNameSet = new Set(loggedRoundNames);
     const firstLoggedRound = loggedRoundNames[0];
     const lastLoggedRound = loggedRoundNames[loggedRoundNames.length - 1];
     const firstLoggedIndex = deRoundSequence.indexOf(firstLoggedRound);
@@ -419,7 +463,9 @@ export default function CompetitionDetailScreen() {
     const roundsToRender =
       firstLoggedIndex >= 0 &&
       lastLoggedIndex >= firstLoggedIndex
-        ? deRoundSequence.slice(firstLoggedIndex, lastLoggedIndex + 1)
+        ? deRoundSequence
+            .slice(firstLoggedIndex, lastLoggedIndex + 1)
+            .filter((round) => !OPTIONAL_DE_ROUNDS.has(round) || loggedRoundNameSet.has(round))
         : loggedRoundNames;
 
     const roundToMatch = new Map<string, CompetitionMatch>();
@@ -472,31 +518,66 @@ export default function CompetitionDetailScreen() {
 
       return acc;
     }, []);
-  }, [deMatchesByRound]);
+  }, [deMatchesByRound, isTableauVisualExpanded]);
 
   const tableauTreeHeight = useMemo(() => {
     if (visualTableauRounds.length === 0) return 0;
     const baseSlots = visualTableauRounds[0].slotCount;
-    return baseSlots * TABLEAU_SLOT_HEIGHT + Math.max(0, baseSlots - 1) * TABLEAU_SLOT_GAP;
+    const slotDrivenHeight =
+      baseSlots * TABLEAU_SLOT_HEIGHT + Math.max(0, baseSlots - 1) * TABLEAU_SLOT_GAP;
+    const steppedContentHeight = visualTableauRounds.reduce((maxBottom, _round, roundIndex) => {
+      const nodeTop = roundIndex * TABLEAU_MAIN_PATH_STEP;
+      const includesOtherBranch = roundIndex < visualTableauRounds.length - 1;
+      const columnBottom = includesOtherBranch
+        ? nodeTop +
+          TABLEAU_CARD_HEIGHT / 2 +
+          TABLEAU_MAIN_PATH_STEP * 2 +
+          TABLEAU_OTHER_CARD_HEIGHT / 2
+        : nodeTop + TABLEAU_CARD_HEIGHT;
+      return Math.max(maxBottom, columnBottom);
+    }, 0);
+
+    return Math.max(slotDrivenHeight, steppedContentHeight);
   }, [visualTableauRounds]);
 
-  const getTableauNodeTop = (slotCount: number, userSlotIndex: number, roundIndex: number): number => {
-    const slotStep = TABLEAU_SLOT_HEIGHT + TABLEAU_SLOT_GAP;
-    const columnContentHeight =
-      slotCount * TABLEAU_SLOT_HEIGHT + Math.max(0, slotCount - 1) * TABLEAU_SLOT_GAP;
-    const columnTopOffset = Math.max(0, (tableauTreeHeight - columnContentHeight) / 2);
-    const staircaseOffset = roundIndex * TABLEAU_ROUND_STAIR_STEP;
-    const unclampedNodeTop = columnTopOffset + userSlotIndex * slotStep + staircaseOffset;
-    return Math.min(Math.max(0, tableauTreeHeight - TABLEAU_CARD_HEIGHT), unclampedNodeTop);
+  const tableauMainPathBaseTop = useMemo(() => {
+    if (visualTableauRounds.length === 0) return 0;
+
+    const maxContentBottom = visualTableauRounds.reduce((maxBottom, _round, roundIndex) => {
+      const nodeTop = roundIndex * TABLEAU_MAIN_PATH_STEP;
+      const includesOtherBranch = roundIndex < visualTableauRounds.length - 1;
+      const columnBottom = includesOtherBranch
+        ? nodeTop +
+          TABLEAU_CARD_HEIGHT / 2 +
+          TABLEAU_MAIN_PATH_STEP * 2 +
+          TABLEAU_OTHER_CARD_HEIGHT / 2
+        : nodeTop + TABLEAU_CARD_HEIGHT;
+      return Math.max(maxBottom, columnBottom);
+    }, 0);
+
+    return Math.max(0, Math.round((tableauTreeHeight - maxContentBottom) / 2));
+  }, [tableauTreeHeight, visualTableauRounds]);
+
+  const getTableauNodeTop = (
+    _slotCount: number,
+    _userSlotIndex: number,
+    roundIndex: number
+  ): number => {
+    return tableauMainPathBaseTop + roundIndex * TABLEAU_MAIN_PATH_STEP;
+  };
+
+  const getTableauOtherNodeTop = (currentCenterY: number, nextCenterY: number): number => {
+    const mirroredCenterY = nextCenterY + (nextCenterY - currentCenterY);
+    return mirroredCenterY - TABLEAU_OTHER_CARD_HEIGHT / 2;
   };
 
   const latestMatch = useMemo(() => {
-    if (matches.length === 0) return null;
-    return matches.reduce((latest, match) => {
+    if (deferredMatches.length === 0) return null;
+    return deferredMatches.reduce((latest, match) => {
       if (!latest) return match;
       return getMatchTimestamp(match) > getMatchTimestamp(latest) ? match : latest;
     }, null as CompetitionMatch | null);
-  }, [matches]);
+  }, [deferredMatches]);
 
   const renderMatchRow = (match: CompetitionMatch, pillLabel: string) => {
     const scoreText = `${match.youScore} - ${match.opponentScore}`;
@@ -1196,14 +1277,16 @@ export default function CompetitionDetailScreen() {
                     <View style={styles.pouleVisualCard}>
                       <View style={styles.crossSummaryRow}>
                         <View style={styles.crossSummaryChip}>
-                          <Text style={styles.crossSummaryChipLabel}>Record</Text>
-                          <Text style={styles.crossSummaryChipValue}>
-                            {crossMatrixSummary.wins}V - {crossMatrixSummary.losses}D
-                          </Text>
-                        </View>
-                        <View style={styles.crossSummaryChip}>
                           <Text style={styles.crossSummaryChipLabel}>V/M</Text>
                           <Text style={styles.crossSummaryChipValue}>{crossMatrixSummary.ratio}</Text>
+                        </View>
+                        <View style={styles.crossSummaryChip}>
+                          <Text style={styles.crossSummaryChipLabel}>HS</Text>
+                          <Text style={styles.crossSummaryChipValue}>{crossMatrixSummary.hitsScored}</Text>
+                        </View>
+                        <View style={styles.crossSummaryChip}>
+                          <Text style={styles.crossSummaryChipLabel}>HR</Text>
+                          <Text style={styles.crossSummaryChipValue}>{crossMatrixSummary.hitsReceived}</Text>
                         </View>
                         <View style={styles.crossSummaryChip}>
                           <Text style={styles.crossSummaryChipLabel}>IND</Text>
@@ -1339,9 +1422,19 @@ export default function CompetitionDetailScreen() {
                     <Text style={[styles.sectionLabel, styles.sectionLabelInline]}>
                       Direct Elimination
                     </Text>
-                    <View style={styles.sectionSummaryPill}>
-                      <Text style={styles.sectionSummaryPillText}>
-                        {deSummary.wins}V - {deSummary.losses}D
+                    <View
+                      style={[
+                        styles.sectionSummaryPill,
+                        deSummary.isChampion && styles.championSummaryPill,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.sectionSummaryPillText,
+                          deSummary.isChampion && styles.championSummaryPillText,
+                        ]}
+                      >
+                        {deSummary.label}
                       </Text>
                     </View>
                   </View>
@@ -1374,6 +1467,8 @@ export default function CompetitionDetailScreen() {
                           {visualTableauRounds.map((roundColumn, columnIndex) => {
                             const userBout = roundColumn.userBout;
                             const isPendingUserSlot = !userBout;
+                            const isChampionFinalNode =
+                              roundColumn.round === 'F' && userBout?.outcome === 'win';
                             const nodeTop = getTableauNodeTop(
                               roundColumn.slotCount,
                               roundColumn.userSlotIndex,
@@ -1392,7 +1487,8 @@ export default function CompetitionDetailScreen() {
                               nextNodeTop !== null ? nextNodeTop + TABLEAU_CARD_HEIGHT / 2 : null;
 
                             const connectorStartXUser = TABLEAU_CARD_WIDTH - 1;
-                            const connectorStartXOther = TABLEAU_OTHER_CARD_WIDTH - 1;
+                            const connectorStartXOther =
+                              TABLEAU_OTHER_CARD_LEFT_INSET + TABLEAU_OTHER_CARD_WIDTH - 1;
                             const connectorKneeX = connectorStartXUser + TABLEAU_CONNECTOR_KNEE_OFFSET;
                             const connectorEndX = TABLEAU_ROUND_COLUMN_WIDTH + TABLEAU_ROUND_COLUMN_GAP + 2;
                             const connectorJoinOverlap = TABLEAU_CONNECTOR_JOIN_OVERLAP;
@@ -1402,10 +1498,7 @@ export default function CompetitionDetailScreen() {
                             const shouldRenderOtherBranch = !!userBout && hasNextUserBout && shouldRenderMainConnector;
                             const otherNodeTop =
                               shouldRenderOtherBranch && nextCenterY !== null
-                                ? Math.min(
-                                    Math.max(0, tableauTreeHeight - TABLEAU_OTHER_CARD_HEIGHT),
-                                    2 * nextCenterY - currentCenterY - TABLEAU_OTHER_CARD_HEIGHT / 2
-                                  )
+                                ? getTableauOtherNodeTop(currentCenterY, nextCenterY)
                                 : null;
                             const otherCenterY =
                               otherNodeTop !== null ? otherNodeTop + TABLEAU_OTHER_CARD_HEIGHT / 2 : null;
@@ -1431,6 +1524,7 @@ export default function CompetitionDetailScreen() {
                                         isPendingUserSlot && styles.tableauSlotCardPending,
                                         userBout?.outcome === 'win' && styles.tableauSlotCardWin,
                                         userBout?.outcome === 'loss' && styles.tableauSlotCardLoss,
+                                        isChampionFinalNode && styles.tableauSlotCardChampion,
                                       ]}
                                     >
                                       {userBout ? (
@@ -1449,6 +1543,7 @@ export default function CompetitionDetailScreen() {
                                                 userBout.outcome === 'win' && styles.tableauOutcomePillWin,
                                                 userBout.outcome === 'loss' && styles.tableauOutcomePillLoss,
                                                 userBout.outcome === 'pending' && styles.tableauOutcomePillPending,
+                                                isChampionFinalNode && styles.tableauOutcomePillChampion,
                                               ]}
                                             >
                                               <Text style={styles.tableauOutcomePillText}>
@@ -2219,6 +2314,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
   },
+  championSummaryPill: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderColor: 'rgba(251, 191, 36, 0.45)',
+  },
+  championSummaryPillText: {
+    color: '#FDE68A',
+  },
   previewBadge: {
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -2443,8 +2545,10 @@ const styles = StyleSheet.create({
     color: '#E9D7FF',
     fontSize: 11,
     fontWeight: '700',
+    width: TABLEAU_CARD_WIDTH,
     marginBottom: 8,
     letterSpacing: 0.2,
+    textAlign: 'center',
   },
   tableauSlotsColumn: {
     width: TABLEAU_ROUND_COLUMN_WIDTH,
@@ -2472,6 +2576,10 @@ const styles = StyleSheet.create({
   tableauSlotCardWin: {
     borderColor: 'rgba(16, 185, 129, 0.75)',
     backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  tableauSlotCardChampion: {
+    borderColor: 'rgba(251, 191, 36, 0.55)',
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
   },
   tableauSlotCardLoss: {
     borderColor: 'rgba(248, 113, 113, 0.75)',
@@ -2518,6 +2626,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(16, 185, 129, 0.9)',
     backgroundColor: 'rgba(16, 185, 129, 0.22)',
   },
+  tableauOutcomePillChampion: {
+    borderColor: 'rgba(251, 191, 36, 0.55)',
+    backgroundColor: 'rgba(245, 158, 11, 0.22)',
+  },
   tableauOutcomePillLoss: {
     borderColor: 'rgba(248, 113, 113, 0.9)',
     backgroundColor: 'rgba(248, 113, 113, 0.2)',
@@ -2542,7 +2654,7 @@ const styles = StyleSheet.create({
   },
   tableauOtherNode: {
     position: 'absolute',
-    left: 0,
+    left: TABLEAU_OTHER_CARD_LEFT_INSET,
     width: TABLEAU_OTHER_CARD_WIDTH,
     zIndex: 2,
   },
@@ -2552,7 +2664,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: 'rgba(21, 24, 28, 0.92)',
     alignItems: 'center',
     justifyContent: 'center',
   },

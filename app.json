@@ -13,6 +13,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.kamalminott.wonofone",
       "buildNumber": "5.0.3",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Allow Won Of One to use your camera to scan competition QR codes and capture screenshots for bug reports.",

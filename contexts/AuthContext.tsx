@@ -16,6 +16,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import * as Linking from 'expo-linking';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
+import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
@@ -136,9 +137,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const decoded = Buffer.from(padded, 'base64').toString('utf8');
       return JSON.parse(decoded);
     } catch (error) {
-      console.warn('⚠️ Failed to decode Google idToken payload:', error);
+      console.warn('⚠️ Failed to decode idToken payload:', error);
       return null;
     }
+  };
+
+  const createAppleNonce = async () => {
+    const rawNonce = Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce
+    );
+
+    return { rawNonce, hashedNonce };
+  };
+
+  const isAppleAuthCancelledError = (error: any) =>
+    error?.code === 'ERR_CANCELED' || error?.code === 'ERR_REQUEST_CANCELED';
+
+  const buildAppleAuthTelemetry = (
+    credential: AppleAuthentication.AppleAuthenticationCredential,
+    rawNonce: string
+  ) => {
+    const tokenPayload =
+      typeof credential.identityToken === 'string' ? decodeJwtPayload(credential.identityToken) : null;
+
+    return {
+      has_email: !!credential.email,
+      has_full_name: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+      has_identity_token: !!credential.identityToken,
+      has_authorization_code: !!credential.authorizationCode,
+      nonce_length: rawNonce.length,
+      token_has_nonce_claim: Boolean(tokenPayload?.nonce),
+      token_has_at_hash_claim: Boolean(tokenPayload?.at_hash),
+      token_has_c_hash_claim: Boolean(tokenPayload?.c_hash),
+    };
   };
 
   const ensureGoogleSignInConfigured = () => {
@@ -1779,35 +1812,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return { error: { message: 'Apple Sign In is not available on this device' } };
       }
 
+      const { rawNonce, hashedNonce } = await createAppleNonce();
+
       // Request Apple authentication
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
+
+      const appleTelemetry = buildAppleAuthTelemetry(credential, rawNonce);
 
       console.log('✅ Apple credential received:', {
         user: credential.user,
-        hasEmail: !!credential.email,
-        hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+        ...appleTelemetry,
       });
       await logAuthHydrationStep('apple_credential_received', null, {
         provider: 'apple',
-        has_email: !!credential.email,
-        has_full_name: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+        ...appleTelemetry,
       });
 
       // Sign in with Supabase using the Apple credential
       const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken!,
+        access_token: credential.authorizationCode || undefined,
+        nonce: rawNonce,
       });
 
       if (error) {
         console.error('❌ Apple sign in error:', error);
         await logAuthHydrationStep('apple_sign_in_error', null, {
           provider: 'apple',
+          code: error.code || null,
           error: error.message || 'unknown_error',
         });
         return { error };
@@ -1880,10 +1919,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       return { error: null };
     } catch (error: any) {
-      if (error.code === 'ERR_CANCELED') {
+      if (isAppleAuthCancelledError(error)) {
         console.log('⚠️ Apple sign in was canceled by user');
         return { error: { message: 'Sign in was canceled' } };
       }
+      await logAuthHydrationStep('apple_sign_in_exception', null, {
+        provider: 'apple',
+        code: error?.code || null,
+        error: error?.message || 'unknown_error',
+      });
       console.error('❌ Apple sign in exception:', error);
       return { error };
     }
@@ -1910,35 +1954,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return { error: { message: 'Apple Sign In is not available on this device' } };
       }
 
+      const { rawNonce, hashedNonce } = await createAppleNonce();
+
       // Request Apple authentication
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
+
+      const appleTelemetry = buildAppleAuthTelemetry(credential, rawNonce);
 
       console.log('✅ Apple credential received for sign up:', {
         user: credential.user,
-        hasEmail: !!credential.email,
-        hasFullName: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+        ...appleTelemetry,
       });
       await logAuthHydrationStep('apple_sign_up_credential_received', null, {
         provider: 'apple',
-        has_email: !!credential.email,
-        has_full_name: !!(credential.fullName?.givenName || credential.fullName?.familyName),
+        ...appleTelemetry,
       });
 
       // Sign in with Supabase using the Apple credential
       const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken!,
+        access_token: credential.authorizationCode || undefined,
+        nonce: rawNonce,
       });
 
       if (error) {
         console.error('❌ Apple sign up error:', error);
         await logAuthHydrationStep('apple_sign_up_error', null, {
           provider: 'apple',
+          code: error.code || null,
           error: error.message || 'unknown_error',
         });
         return { error };
@@ -2011,10 +2061,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       return { error: null };
     } catch (error: any) {
-      if (error.code === 'ERR_CANCELED') {
+      if (isAppleAuthCancelledError(error)) {
         console.log('⚠️ Apple sign up was canceled by user');
         return { error: { message: 'Sign up was canceled' } };
       }
+      await logAuthHydrationStep('apple_sign_up_exception', null, {
+        provider: 'apple',
+        code: error?.code || null,
+        error: error?.message || 'unknown_error',
+      });
       console.error('❌ Apple sign up exception:', error);
       return { error };
     }
