@@ -42,6 +42,13 @@ export default function PaywallScreen() {
     if (!allowUserDismiss && reason === 'user') {
       return;
     }
+
+    if (paywallSource === 'settings') {
+      console.log('🚪 Closing paywall, returning to previous screen');
+      router.back();
+      return;
+    }
+
     console.log('🚪 Closing paywall, navigating to home with bypass flag');
     const params: Record<string, string> = {
       bypassPaywall: 'true',
@@ -53,7 +60,7 @@ export default function PaywallScreen() {
       pathname: '/(tabs)',
       params,
     });
-  }, [allowUserDismiss]);
+  }, [allowUserDismiss, paywallSource]);
 
   const markNonUserPaywallClose = React.useCallback((reason: NonUserPaywallCloseReason) => {
     paywallCloseReasonRef.current = reason;
@@ -352,9 +359,16 @@ export default function PaywallScreen() {
               product_id: subscriptionInfo.productId,
               is_trial: subscriptionInfo.isTrial,
             });
-            if (subscriptionInfo.isActive) {
-              setCanDismiss(true);
+
+            if (!subscriptionInfo.isActive) {
+              Alert.alert(
+                'No active subscription found',
+                'Restore completed, but there is no active subscription on this account.'
+              );
+              return;
             }
+
+            setCanDismiss(true);
           } catch (error) {
             console.error('Error tracking restore completion:', error);
           }

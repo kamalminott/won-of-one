@@ -1,7 +1,7 @@
 import { analytics } from '@/lib/analytics';
 import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
 import { sessionTracker } from '@/lib/sessionTracker';
-import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -139,7 +139,6 @@ export default function HomeScreen() {
     retryAuthHydration,
   } = useAuth();
   const params = useLocalSearchParams();
-  const pathname = usePathname();
   const goalCardRef = useRef<GoalCardRef>(null);
   const bypassPaywallRef = useRef(false);
   const paywallNavigationRef = useRef(false);
@@ -669,68 +668,79 @@ export default function HomeScreen() {
     }
   }, [user?.id]);
 
-  // Check subscription status and redirect to paywall if needed
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (!user || loading || !authReady) return;
-      if (!shouldAutoShowPaywall) return;
-      if (bypassPaywallRef.current) return;
-      if (pathname === '/paywall' || paywallNavigationRef.current) return;
+  // Check subscription status and redirect to paywall if needed, but only while Home is focused.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
 
-      try {
-        const [subscriptionInfo, previewStatus, manualAccessStatus] = await Promise.all([
-          subscriptionService.getSubscriptionInfo(),
-          subscriptionService.getPaywallPreviewStatus(user),
-          adminAccessService.getCurrentManualAccessStatus(session?.access_token),
-        ]);
+      const checkSubscription = async () => {
+        if (!user || loading || !authReady) return;
+        if (!shouldAutoShowPaywall) return;
+        if (bypassPaywallRef.current) return;
+        if (paywallNavigationRef.current) return;
 
-        // If user has no active subscription, trial, preview, or manual access, show paywall
-        if (
-          !subscriptionInfo.isActive &&
-          !subscriptionInfo.isTrial &&
-          !previewStatus.isActive &&
-          !manualAccessStatus
-        ) {
-          console.log('🔒 No active paid, trial, preview, or manual access; redirecting to paywall');
-          paywallNavigationRef.current = true;
-          router.replace('/paywall');
-        } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
-          // Check if trial has expired
-          const now = new Date();
-          const expiresAt = subscriptionInfo.expiresAt;
-          if (now >= expiresAt) {
-            if (previewStatus.isActive) {
-              console.log('✅ Preview active, allowing access');
-            } else if (manualAccessStatus) {
-              console.log('✅ Manual access active, allowing access');
+        try {
+          await subscriptionService.initialize(user.id);
+
+          const [subscriptionInfo, previewStatus, manualAccessStatus] = await Promise.all([
+            subscriptionService.getSubscriptionInfo(),
+            subscriptionService.getPaywallPreviewStatus(user),
+            adminAccessService.getCurrentManualAccessStatus(session?.access_token),
+          ]);
+
+          if (cancelled) return;
+
+          // If user has no active subscription, trial, preview, or manual access, show paywall
+          if (
+            !subscriptionInfo.isActive &&
+            !subscriptionInfo.isTrial &&
+            !previewStatus.isActive &&
+            !manualAccessStatus
+          ) {
+            console.log('🔒 No active paid, trial, preview, or manual access; redirecting to paywall');
+            paywallNavigationRef.current = true;
+            router.replace('/paywall');
+          } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
+            // Check if trial has expired
+            const now = new Date();
+            const expiresAt = subscriptionInfo.expiresAt;
+            if (now >= expiresAt) {
+              if (previewStatus.isActive) {
+                console.log('✅ Preview active, allowing access');
+              } else if (manualAccessStatus) {
+                console.log('✅ Manual access active, allowing access');
+              } else {
+                console.log('⏰ Trial expired, redirecting to paywall');
+                paywallNavigationRef.current = true;
+                router.replace('/paywall');
+              }
             } else {
-              console.log('⏰ Trial expired, redirecting to paywall');
-              paywallNavigationRef.current = true;
-              router.replace('/paywall');
+              console.log('✅ Trial active, allowing access');
             }
-          } else {
-            console.log('✅ Trial active, allowing access');
+          } else if (manualAccessStatus) {
+            console.log('✅ Manual access active, allowing access');
+            paywallNavigationRef.current = false;
+          } else if (previewStatus.isActive) {
+            console.log('✅ Preview active, allowing access');
+            paywallNavigationRef.current = false;
+          } else if (subscriptionInfo.isActive) {
+            console.log('✅ Active subscription, allowing access');
+            paywallNavigationRef.current = false;
           }
-        } else if (manualAccessStatus) {
-          console.log('✅ Manual access active, allowing access');
-          paywallNavigationRef.current = false;
-        } else if (previewStatus.isActive) {
-          console.log('✅ Preview active, allowing access');
-          paywallNavigationRef.current = false;
-        } else if (subscriptionInfo.isActive) {
-          console.log('✅ Active subscription, allowing access');
-          paywallNavigationRef.current = false;
+        } catch (error) {
+          if (cancelled) return;
+          console.error('Error checking subscription:', error);
+          // On error, allow access (fail open) - you can change this to fail closed if preferred
         }
-      } catch (error) {
-        console.error('Error checking subscription:', error);
-        // On error, allow access (fail open) - you can change this to fail closed if preferred
-      }
-    };
+      };
 
-    if (user && !loading && authReady) {
-      checkSubscription();
-    }
-  }, [user, loading, authReady, pathname, session?.access_token, shouldAutoShowPaywall]);
+      void checkSubscription();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [user, loading, authReady, session?.access_token, shouldAutoShowPaywall])
+  );
 
   // Screen tracking and identify
   useEffect(() => {
