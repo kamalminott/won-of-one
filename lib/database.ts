@@ -17,6 +17,7 @@ import {
   postgrestUpdate,
   postgrestUpsert,
 } from './postgrest';
+import { formatErrorForLog } from './errorLogging';
 
 // Re-export supabase for use in other services
 export { supabase };
@@ -858,7 +859,7 @@ export const goalService: GoalService = {
     );
 
     if (error) {
-      console.error('Error fetching active goals:', error);
+      console.error('Error fetching active goals:', formatErrorForLog(error));
       return [];
     }
 
@@ -1539,7 +1540,7 @@ export const matchService = {
     if (!userDisplayName) {
       try {
         const userProfile = await withTimeout(
-          userService.getUserById(userId),
+          userService.getUserById(userId, accessToken),
           4000,
           'User profile lookup'
         );
@@ -1587,7 +1588,7 @@ export const matchService = {
 
     const { data, error } = recentMatchesResult;
     if (error) {
-      console.error('Error fetching matches:', error);
+      console.error('Error fetching matches:', formatErrorForLog(error));
       return [];
     }
 
@@ -1756,7 +1757,7 @@ export const matchService = {
     if (!userDisplayName) {
       try {
         const userProfile = await withTimeout(
-          userService.getUserById(userId),
+          userService.getUserById(userId, accessToken),
           4000,
           'User profile lookup'
         );
@@ -1957,11 +1958,11 @@ export const matchService = {
     ]);
 
     if (totalResult.error) {
-      console.error('Error fetching match count:', totalResult.error);
+      console.error('Error fetching match count:', formatErrorForLog(totalResult.error));
     }
 
     if (winResult.error) {
-      console.error('Error fetching win match count:', winResult.error);
+      console.error('Error fetching win match count:', formatErrorForLog(winResult.error));
     }
 
     return {

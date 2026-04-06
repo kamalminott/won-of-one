@@ -1,4 +1,5 @@
 import { postgrestRpc } from './postgrest';
+import { formatErrorForLog } from './errorLogging';
 
 export interface ManualAccessStatus {
   grant_id: string;
@@ -56,7 +57,7 @@ export const adminAccessService = {
     );
 
     if (error) {
-      console.warn('⚠️ Failed to resolve current admin status:', error);
+      console.warn('⚠️ Failed to resolve current admin status:', formatErrorForLog(error));
       return false;
     }
 
@@ -73,7 +74,7 @@ export const adminAccessService = {
     );
 
     if (error) {
-      console.warn('⚠️ Failed to resolve manual access status:', error);
+      console.warn('⚠️ Failed to resolve manual access status:', formatErrorForLog(error));
       return null;
     }
 

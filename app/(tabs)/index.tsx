@@ -493,20 +493,12 @@ export default function HomeScreen() {
         (max, goal) => Math.max(max, goal.match_window ?? 0),
         0
       );
-      const matchLimit = Math.min(Math.max(20, maxMatchWindow), 200);
-
-      const matchesData = await safeRequest(
-        'home_recent_matches',
-        matchService.getRecentMatches(userId, matchLimit, undefined, session?.access_token),
-        userId
-      );
 
       const calculatedWinRate =
         countsData && countsData.totalMatches > 0
           ? Math.round((countsData.winMatches / countsData.totalMatches) * 100)
           : 0;
 
-      if (matchesData) setMatches(matchesData);
       if (goalsData) setGoals(goalsData);
       if (countsData) {
         setMatchCounts(countsData);
@@ -514,7 +506,19 @@ export default function HomeScreen() {
       }
 
       setHasLoadedOnce(true);
-      if (matchesData || goalsData || countsData) {
+      if (goalsData || countsData) {
+        liveDataAppliedRef.current = true;
+      }
+
+      const matchLimit = Math.min(Math.max(20, maxMatchWindow), 200);
+      const matchesData = await safeRequest(
+        'home_recent_matches',
+        matchService.getRecentMatches(userId, matchLimit, undefined, session?.access_token),
+        userId
+      );
+
+      if (matchesData) {
+        setMatches(matchesData);
         liveDataAppliedRef.current = true;
       }
 

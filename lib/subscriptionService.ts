@@ -6,6 +6,8 @@
 import { Platform } from 'react-native';
 import type { User } from '@supabase/supabase-js';
 import { postgrestInsert, postgrestSelectOne } from './postgrest';
+import { getCachedAuthSession } from './authSessionCache';
+import { formatErrorForLog } from './errorLogging';
 import { supabase } from './supabase';
 import { analytics } from './analytics';
 
@@ -479,6 +481,12 @@ export const subscriptionService = {
   async syncSubscriptionToSupabase(userId: string, customerInfo: CustomerInfo): Promise<void> {
     try {
       const subscriptionInfo = this.parseCustomerInfo(customerInfo);
+      const accessToken = getCachedAuthSession()?.access_token ?? null;
+
+      if (!accessToken) {
+        console.warn('⚠️ Subscription sync skipped - auth session not ready');
+        return;
+      }
 
       // Upsert subscription status to Supabase
       const { error } = await postgrestInsert(
@@ -499,16 +507,17 @@ export const subscriptionService = {
         },
         {
           prefer: 'resolution=merge-duplicates, return=minimal',
+          accessToken,
         }
       );
 
       if (error) {
-        console.error('❌ Error syncing subscription to Supabase:', error);
+        console.error('❌ Error syncing subscription to Supabase:', formatErrorForLog(error));
       } else {
         console.log('✅ Subscription synced to Supabase');
       }
     } catch (error) {
-      console.error('❌ Error in syncSubscriptionToSupabase:', error);
+      console.error('❌ Error in syncSubscriptionToSupabase:', formatErrorForLog(error));
     }
   },
 
