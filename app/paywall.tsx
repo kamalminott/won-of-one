@@ -31,6 +31,7 @@ export default function PaywallScreen() {
   const paywallCloseReasonRef = React.useRef<NonUserPaywallCloseReason | null>(null);
   const paywallManuallyDismissedRef = React.useRef(false);
   const paywallAbandonedTrackedRef = React.useRef(false);
+  const paywallClosingRef = React.useRef(false);
   const paywallSource = params.source === 'settings' ? 'settings' : 'auto';
   const allowUserDismiss = paywallSource === 'settings' || canDismiss;
   const paywallOfferingId = 'Main';
@@ -42,6 +43,11 @@ export default function PaywallScreen() {
     if (!allowUserDismiss && reason === 'user') {
       return;
     }
+    if (paywallClosingRef.current) {
+      return;
+    }
+
+    paywallClosingRef.current = true;
 
     if (paywallSource === 'settings') {
       console.log('🚪 Closing paywall, returning to previous screen');
@@ -143,9 +149,11 @@ export default function PaywallScreen() {
         paywallCloseReasonRef.current = null;
         paywallManuallyDismissedRef.current = false;
         paywallAbandonedTrackedRef.current = false;
+        paywallClosingRef.current = false;
         setPaywallOffering(offering);
       } catch (error: any) {
         if (isActive) {
+          paywallClosingRef.current = false;
           setInitError(error?.message || 'Subscriptions are unavailable. Please try again later.');
         }
       } finally {
@@ -256,6 +264,9 @@ export default function PaywallScreen() {
           offering: paywallOffering,
         }}
         onDismiss={() => {
+          if (paywallClosingRef.current) {
+            return;
+          }
           const closeReason = paywallCloseReasonRef.current;
           if (closeReason) {
             paywallCloseReasonRef.current = null;
