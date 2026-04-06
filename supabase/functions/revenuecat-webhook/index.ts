@@ -10,6 +10,7 @@ type RevenueCatWebhookRequest = {
 type RevenueCatWebhookEvent = {
   id?: string | null;
   type?: string | null;
+  app_id?: string | null;
   app_user_id?: string | null;
   original_app_user_id?: string | null;
   aliases?: string[] | null;
@@ -19,30 +20,13 @@ type RevenueCatWebhookEvent = {
   entitlement_ids?: string[] | null;
   product_id?: string | null;
   period_type?: string | null;
+  store?: string | null;
   environment?: string | null;
   expiration_at_ms?: number | null;
   purchased_at_ms?: number | null;
   event_timestamp_ms?: number | null;
-};
-
-type RevenueCatSubscriberResponse = {
-  subscriber?: RevenueCatSubscriber | null;
-};
-
-type RevenueCatSubscriber = {
-  original_app_user_id?: string | null;
-  entitlements?: Record<string, RevenueCatEntitlement> | null;
-  subscriptions?: Record<string, RevenueCatSubscription> | null;
-};
-
-type RevenueCatEntitlement = {
-  expires_date?: string | null;
-  product_identifier?: string | null;
-};
-
-type RevenueCatSubscription = {
-  expires_date?: string | null;
-  period_type?: string | null;
+  cancel_reason?: string | null;
+  expiration_reason?: string | null;
 };
 
 type SubscriptionRow = {
@@ -72,6 +56,17 @@ const TRACKED_EVENT_TYPES = new Set([
   "BILLING_ISSUE",
   "PRODUCT_CHANGE",
   "TRANSFER",
+  "SUBSCRIPTION_EXTENDED",
+  "TEMPORARY_ENTITLEMENT_GRANT",
+  "REFUND_REVERSED",
+]);
+
+const DIRECT_ACTIVE_EVENT_TYPES = new Set([
+  "INITIAL_PURCHASE",
+  "RENEWAL",
+  "UNCANCELLATION",
+  "NON_RENEWING_PURCHASE",
+  "PRODUCT_CHANGE",
   "SUBSCRIPTION_EXTENDED",
   "TEMPORARY_ENTITLEMENT_GRANT",
   "REFUND_REVERSED",
@@ -116,29 +111,6 @@ const firstEntitlementId = (event: RevenueCatWebhookEvent) => {
     : null;
 };
 
-const isEntitlementActive = (entitlement: RevenueCatEntitlement) => {
-  if (!entitlement.expires_date) {
-    return true;
-  }
-
-  const expiryMs = Date.parse(entitlement.expires_date);
-  if (!Number.isFinite(expiryMs)) {
-    return true;
-  }
-
-  return expiryMs > Date.now();
-};
-
-const pickPrimaryEntitlement = (entitlements: Record<string, RevenueCatEntitlement>) => {
-  return Object.entries(entitlements)
-    .filter(([, entitlement]) => isEntitlementActive(entitlement))
-    .sort(([, left], [, right]) => {
-      const leftMs = left.expires_date ? Date.parse(left.expires_date) : Number.POSITIVE_INFINITY;
-      const rightMs = right.expires_date ? Date.parse(right.expires_date) : Number.POSITIVE_INFINITY;
-      return rightMs - leftMs;
-    })[0] ?? null;
-};
-
 const getCandidateUserIds = (event: RevenueCatWebhookEvent) => {
   const values = new Set<string>();
   const maybeAdd = (value?: string | null) => {
@@ -156,12 +128,16 @@ const getCandidateUserIds = (event: RevenueCatWebhookEvent) => {
   return Array.from(values);
 };
 
-const buildInactiveRow = (userId: string, event: RevenueCatWebhookEvent): SubscriptionRow => {
-  const transferredFrom = new Set((event.transferred_from ?? []).filter(isUuid));
+const buildInactiveRow = (
+  userId: string,
+  event: RevenueCatWebhookEvent,
+  statusOverride?: "expired" | "none"
+): SubscriptionRow => {
   const expiresAt = toIsoFromMs(event.expiration_at_ms);
   const isExpired =
+    statusOverride === "expired" ||
     event.type === "EXPIRATION" ||
-    (expiresAt !== null && Date.parse(expiresAt) <= Date.now() && !transferredFrom.has(userId));
+    (expiresAt !== null && Date.parse(expiresAt) <= Date.now());
 
   return {
     user_id: userId,
@@ -177,25 +153,30 @@ const buildInactiveRow = (userId: string, event: RevenueCatWebhookEvent): Subscr
   };
 };
 
-const buildRowFromSnapshot = (
+const buildRowFromEvent = (
   userId: string,
   event: RevenueCatWebhookEvent,
-  subscriber: RevenueCatSubscriber | null
+  mode: "default" | "transfer_from" | "transfer_to" = "default"
 ): SubscriptionRow => {
-  const entitlements = subscriber?.entitlements ?? {};
-  const primaryEntitlement = pickPrimaryEntitlement(entitlements);
-
-  if (!primaryEntitlement) {
-    return buildInactiveRow(userId, event);
+  if (mode === "transfer_from") {
+    return buildInactiveRow(userId, event, "none");
   }
 
-  const [entitlementId, entitlement] = primaryEntitlement;
-  const productId = entitlement.product_identifier ?? event.product_id ?? null;
-  const subscription = productId ? subscriber?.subscriptions?.[productId] ?? null : null;
-  const expiresAt = entitlement.expires_date ?? subscription?.expires_date ?? toIsoFromMs(event.expiration_at_ms);
-  const isTrial =
-    isTrialPeriod(subscription?.period_type) ||
-    (event.app_user_id === userId && isTrialPeriod(event.period_type));
+  const eventType = event.type?.toUpperCase() ?? "";
+  const expiresAt = toIsoFromMs(event.expiration_at_ms);
+  const hasFutureExpiry = expiresAt !== null && Date.parse(expiresAt) > Date.now();
+  const isTrial = isTrialPeriod(event.period_type);
+  const shouldBeActive =
+    mode === "transfer_to" ||
+    DIRECT_ACTIVE_EVENT_TYPES.has(eventType) ||
+    ((eventType === "CANCELLATION" ||
+      eventType === "BILLING_ISSUE" ||
+      eventType === "SUBSCRIPTION_PAUSED") &&
+      hasFutureExpiry);
+
+  if (!shouldBeActive) {
+    return buildInactiveRow(userId, event);
+  }
 
   return {
     user_id: userId,
@@ -203,50 +184,12 @@ const buildRowFromSnapshot = (
     is_active: true,
     is_trial: isTrial,
     expires_at: expiresAt,
-    product_id: productId,
-    entitlement_id: entitlementId,
+    product_id: event.product_id ?? null,
+    entitlement_id: firstEntitlementId(event),
     revenuecat_user_id:
-      subscriber?.original_app_user_id ??
-      event.original_app_user_id ??
-      event.app_user_id ??
-      userId,
+      event.original_app_user_id ?? event.app_user_id ?? userId,
     updated_at: new Date().toISOString(),
   };
-};
-
-const fetchSubscriberSnapshot = async (
-  apiKey: string,
-  appUserId: string,
-  environment?: string | null
-) => {
-  const headers: HeadersInit = {
-    Accept: "application/json",
-    Authorization: `Bearer ${apiKey}`,
-  };
-
-  if (environment?.toUpperCase() === "SANDBOX") {
-    headers["X-Is-Sandbox"] = "true";
-  }
-
-  const result = await fetch(
-    `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
-    {
-      method: "GET",
-      headers,
-    }
-  );
-
-  if (result.status === 404) {
-    return null;
-  }
-
-  if (!result.ok) {
-    const body = await result.text();
-    throw new Error(`revenuecat_subscriber_fetch_failed:${result.status}:${body}`);
-  }
-
-  const payload = (await result.json()) as RevenueCatSubscriberResponse;
-  return payload.subscriber ?? null;
 };
 
 Deno.serve(async (req) => {
@@ -259,9 +202,8 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey =
     Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const revenueCatSecretApiKey = Deno.env.get("REVENUECAT_SECRET_API_KEY");
 
-  if (!supabaseUrl || !serviceRoleKey || !revenueCatSecretApiKey || !webhookSecret) {
+  if (!supabaseUrl || !serviceRoleKey || !webhookSecret) {
     return response(500, {
       success: false,
       error: "Missing required environment variables",
@@ -302,13 +244,17 @@ Deno.serve(async (req) => {
   const eventType = event.type.toUpperCase();
 
   if (TRACKED_EVENT_TYPES.has(eventType) && candidateUserIds.length > 0) {
+    const transferredFrom = new Set((event.transferred_from ?? []).filter(isUuid));
+    const transferredTo = new Set((event.transferred_to ?? []).filter(isUuid));
+
     for (const userId of candidateUserIds) {
-      const subscriber = await fetchSubscriberSnapshot(
-        revenueCatSecretApiKey,
-        userId,
-        event.environment
-      );
-      const row = buildRowFromSnapshot(userId, event, subscriber);
+      const mode =
+        eventType === "TRANSFER" && transferredFrom.has(userId)
+          ? "transfer_from"
+          : eventType === "TRANSFER" && transferredTo.has(userId)
+            ? "transfer_to"
+            : "default";
+      const row = buildRowFromEvent(userId, event, mode);
 
       const { error: upsertError } = await admin
         .from("user_subscriptions")

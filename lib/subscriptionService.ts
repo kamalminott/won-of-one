@@ -102,6 +102,50 @@ export type PurchasesPackage = any;
 // Initialize RevenueCat
 let isInitialized = false;
 let isActuallyConfigured = false; // Track if RevenueCat SDK is actually configured (not just skipped)
+let currentRevenueCatUserId: string | null = null;
+
+const getAuthenticatedUserId = async (): Promise<string | null> => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session?.user?.id ?? null;
+  } catch (error) {
+    console.warn('⚠️ Failed to resolve authenticated user for RevenueCat:', error);
+    return null;
+  }
+};
+
+const ensureRevenueCatUser = async (preferredUserId?: string | null): Promise<string | null> => {
+  if (!Purchases || !isActuallyConfigured) {
+    return null;
+  }
+
+  const resolvedUserId = preferredUserId ?? (await getAuthenticatedUserId());
+  if (!resolvedUserId) {
+    return null;
+  }
+
+  try {
+    const currentAppUserId =
+      typeof Purchases.getAppUserID === 'function'
+        ? await Purchases.getAppUserID()
+        : currentRevenueCatUserId;
+
+    if (currentAppUserId === resolvedUserId) {
+      currentRevenueCatUserId = resolvedUserId;
+      return resolvedUserId;
+    }
+
+    await Purchases.logIn(resolvedUserId);
+    currentRevenueCatUserId = resolvedUserId;
+    console.log('✅ RevenueCat user linked:', resolvedUserId);
+    return resolvedUserId;
+  } catch (error) {
+    console.error('❌ Error ensuring RevenueCat user identity:', error);
+    throw error;
+  }
+};
 
 export const subscriptionService = {
   /**
@@ -111,6 +155,9 @@ export const subscriptionService = {
   async initialize(userId?: string): Promise<void> {
     if (isInitialized) {
       console.log('📦 RevenueCat already initialized');
+      if (userId) {
+        await ensureRevenueCatUser(userId);
+      }
       return;
     }
 
@@ -147,24 +194,30 @@ export const subscriptionService = {
         return;
       }
 
-      await Purchases.configure({ apiKey });
+      const initialUserId = userId ?? (await getAuthenticatedUserId());
+      await Purchases.configure(
+        initialUserId ? { apiKey, appUserID: initialUserId } : { apiKey }
+      );
       isInitialized = true;
       isActuallyConfigured = true;
       console.log('✅ RevenueCat initialized');
+      currentRevenueCatUserId = initialUserId ?? null;
 
       // Set user ID if provided (link RevenueCat user to your app user)
-      if (userId && Purchases) {
-        await Purchases.logIn(userId);
-        console.log('✅ RevenueCat user linked:', userId);
+      if (userId && Purchases && initialUserId !== userId) {
+        await ensureRevenueCatUser(userId);
       }
 
       // Set up listener for subscription updates
       if (Purchases) {
         Purchases.addCustomerInfoUpdateListener(async (customerInfo: CustomerInfo) => {
           console.log('📦 Subscription status updated');
-          if (userId) {
+          if (currentRevenueCatUserId) {
             // Get previous subscription status before updating
-            const previousInfo = await subscriptionService.getSubscriptionFromSupabase(userId, null).catch(() => null);
+            const previousInfo = await subscriptionService.getSubscriptionFromSupabase(
+              currentRevenueCatUserId,
+              null
+            ).catch(() => null);
             const currentInfo = subscriptionService.parseCustomerInfo(customerInfo);
             
             // Track subscription status changes
@@ -254,6 +307,11 @@ export const subscriptionService = {
     }
     
     try {
+      const resolvedUserId = await ensureRevenueCatUser();
+      if (!resolvedUserId) {
+        throw new Error('User must be authenticated before purchasing a subscription.');
+      }
+
       const { customerInfo } = await Purchases.purchasePackage(packageToPurchase);
       console.log('✅ Purchase successful');
 
@@ -279,6 +337,11 @@ export const subscriptionService = {
     }
     
     try {
+      const resolvedUserId = await ensureRevenueCatUser();
+      if (!resolvedUserId) {
+        throw new Error('User must be authenticated before restoring purchases.');
+      }
+
       const customerInfo = await Purchases.restorePurchases();
       console.log('✅ Purchases restored');
 
@@ -318,6 +381,7 @@ export const subscriptionService = {
           periodType: null,
         };
       }
+      await ensureRevenueCatUser();
       const customerInfo = await Purchases.getCustomerInfo();
       return this.parseCustomerInfo(customerInfo);
     } catch (error: any) {
@@ -510,8 +574,7 @@ export const subscriptionService = {
       return;
     }
     try {
-      await Purchases.logIn(userId);
-      console.log('✅ RevenueCat user linked:', userId);
+      await ensureRevenueCatUser(userId);
     } catch (error) {
       console.error('❌ Error linking user:', error);
       throw error;
@@ -528,6 +591,7 @@ export const subscriptionService = {
     }
     try {
       await Purchases.logOut();
+      currentRevenueCatUserId = null;
       console.log('✅ RevenueCat user logged out');
     } catch (error) {
       console.error('❌ Error logging out RevenueCat user:', error);

@@ -98,7 +98,7 @@ if (offering) {
     listener: {
       onPurchaseCompleted: async (customerInfo) => {
         console.log('Purchase completed!');
-        // Subscription is automatically synced to Supabase
+        // Subscription state is synced server-side by the RevenueCat webhook
       },
       onPurchaseError: (error) => {
         console.error('Purchase error:', error);
@@ -191,7 +191,6 @@ The `user_subscriptions` table stores:
 5. Deploy the `revenuecat-webhook` Supabase Edge Function and configure RevenueCat webhooks
 6. Add these function secrets in Supabase:
    - `REVENUECAT_WEBHOOK_AUTH`
-   - `REVENUECAT_SECRET_API_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` if your environment does not already provide it
 
 ## 📚 Resources
