@@ -106,6 +106,25 @@ const profileCompletedStorageKey = (userId: string) => `profile_completed:${user
 const manualAccessMessageSeenStorageKey = (userId: string, grantId: string) =>
   `manual_access_message_seen:${userId}:${grantId}`;
 
+const getResolvedUpdateChannel = () => {
+  const manifest = Updates.manifest as
+    | {
+        extra?: {
+          expoConfig?: {
+            updates?: {
+              requestHeaders?: Record<string, string | undefined>;
+            };
+          };
+        };
+      }
+    | undefined;
+
+  const manifestChannel =
+    manifest?.extra?.expoConfig?.updates?.requestHeaders?.['expo-channel-name'] || null;
+
+  return Updates.channel || manifestChannel;
+};
+
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
@@ -124,7 +143,7 @@ export default function HomeScreen() {
   const goalCardRef = useRef<GoalCardRef>(null);
   const bypassPaywallRef = useRef(false);
   const paywallNavigationRef = useRef(false);
-  const shouldAutoShowPaywall = Updates.channel === 'production';
+  const shouldAutoShowPaywall = getResolvedUpdateChannel() === 'production';
   const trimmedUserName = userName.trim();
   const authMetadataName = getAuthMetadataName(user)?.trim() || '';
   const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
