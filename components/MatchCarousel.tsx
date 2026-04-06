@@ -322,11 +322,6 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       padding: 0,
       position: 'relative',
       alignSelf: 'center',
-      shadowColor: 'rgba(108, 92, 231, 0.04)',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 1,
-      shadowRadius: 30,
-      elevation: 8,
     },
     competitionCard: {
       width: '100%',
@@ -337,11 +332,6 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
       paddingVertical: height * 0.015,
       borderWidth: 1,
       borderColor: 'rgba(153, 128, 255, 0.2)',
-      shadowColor: 'rgba(108, 92, 231, 0.08)',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 1,
-      shadowRadius: 24,
-      elevation: 8,
     },
     competitionHeader: {
       flexDirection: 'row',

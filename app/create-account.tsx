@@ -583,11 +583,6 @@ const styles = StyleSheet.create({
   },
   formCard: {
     backgroundColor: '#2A2A2A',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   nameRow: {
     flexDirection: 'row',
@@ -658,11 +653,6 @@ const styles = StyleSheet.create({
   createAccountButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
   },
   createAccountButtonText: {
     fontWeight: '600',
@@ -690,11 +680,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2A2A2A',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   signInContainer: {
     alignItems: 'center',

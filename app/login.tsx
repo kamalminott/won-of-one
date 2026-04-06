@@ -2,7 +2,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import GoogleIcon from '@/components/GoogleIcon';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -326,25 +325,26 @@ export default function LoginScreen() {
           <TouchableOpacity 
             style={[styles.loginButtonContainer, { 
               marginTop: height * 0.04,
-              marginHorizontal: width * 0.04
+              marginHorizontal: width * 0.04,
             }]}
             onPress={handleLogin}
             disabled={loading}
           >
-            <LinearGradient
-              colors={['#6C5CE7', '#5741FF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.loginButton, { 
-                height: height * 0.06,
-                borderRadius: width * 0.04,
-                opacity: loading ? 0.7 : 1
-              }]}
-            >
-              <Text style={[styles.loginButtonText, { fontSize: width * 0.04 }]}>
-                {loading ? 'Signing In...' : 'Log In'}
-              </Text>
-            </LinearGradient>
+            <View style={[styles.loginButtonShadow, {
+              borderRadius: width * 0.04,
+            }]}>
+              <View
+                style={[styles.loginButton, { 
+                  height: height * 0.06,
+                  borderRadius: width * 0.04,
+                  opacity: loading ? 0.7 : 1
+                }]}
+              >
+                <Text style={[styles.loginButtonText, { fontSize: width * 0.04 }]}>
+                  {loading ? 'Signing In...' : 'Log In'}
+                </Text>
+              </View>
+            </View>
           </TouchableOpacity>
 
           {/* Social Login Section */}
@@ -442,11 +442,6 @@ const styles = StyleSheet.create({
   },
   formCard: {
     backgroundColor: '#2A2A2A',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   inputContainer: {
   },
@@ -502,14 +497,14 @@ const styles = StyleSheet.create({
   },
   loginButtonContainer: {
   },
+  loginButtonShadow: {
+    backgroundColor: '#6C5CE7',
+    overflow: 'hidden',
+  },
   loginButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
+    backgroundColor: '#6C5CE7',
   },
   loginButtonText: {
     fontWeight: '600',
@@ -536,11 +531,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2A2A2A',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   signUpContainer: {
     alignItems: 'center',

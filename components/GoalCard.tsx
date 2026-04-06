@@ -899,11 +899,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       borderRadius: width * 0.03,
       width: width * 0.5,
       paddingVertical: height * 0.01,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 8,
     },
     menuOption: {
       flexDirection: 'row',
@@ -1151,14 +1146,6 @@ export const GoalCard = forwardRef<GoalCardRef, GoalCardProps>(({
       borderWidth: 1,
       borderColor: Colors.gray.light,
       marginTop: 2,
-      shadowColor: '#000',
-      shadowOffset: {
-        width: 0,
-        height: 2,
-      },
-      shadowOpacity: 0.25,
-      shadowRadius: 3.84,
-      elevation: 5,
     },
     dropdownOption: {
       paddingVertical: height * 0.008,

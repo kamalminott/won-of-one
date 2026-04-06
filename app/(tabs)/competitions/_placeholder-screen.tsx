@@ -29,6 +29,15 @@ export function CompetitionPlaceholderScreen({
   );
 }
 
+export default function CompetitionPlaceholderRoute() {
+  return (
+    <CompetitionPlaceholderScreen
+      title="Competitions"
+      description="This screen is a placeholder route."
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,

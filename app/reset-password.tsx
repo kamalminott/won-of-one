@@ -1,9 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -16,7 +14,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 
 import { BackButton } from '@/components/BackButton';
@@ -285,7 +283,7 @@ export default function ResetPasswordScreen() {
     <SafeAreaView style={[styles.container, { 
       paddingTop: insets.top, 
       paddingBottom: insets.bottom 
-    }]}>
+    }]} edges={['left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor="#212121" />
       
       <KeyboardAvoidingView
@@ -327,16 +325,15 @@ export default function ResetPasswordScreen() {
               borderRadius: width * 0.16,
               marginBottom: height * 0.04
             }]}>
-              <LinearGradient
-                colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={[styles.illustrationGradient, {
-                  borderRadius: width * 0.16
-                }]}
-              >
-                <Ionicons name="lock-closed-outline" size={width * 0.125} color="#FFFFFF" />
-              </LinearGradient>
+              <View style={[styles.illustrationShadow, { borderRadius: width * 0.16 }]}>
+                <View
+                  style={[styles.illustrationGradient, {
+                    borderRadius: width * 0.16
+                  }]}
+                >
+                  <Ionicons name="lock-closed-outline" size={width * 0.125} color="#FFFFFF" />
+                </View>
+              </View>
             </View>
 
             {/* Main Heading */}
@@ -352,7 +349,7 @@ export default function ResetPasswordScreen() {
               marginBottom: height * 0.06,
               maxWidth: width * 0.785
             }]}>
-              Enter your new password below. Make sure it's at least 6 characters long.
+              Enter your new password below. Make sure it&apos;s at least 6 characters long.
             </Text>
 
             {/* New Password Input */}
@@ -437,24 +434,25 @@ export default function ResetPasswordScreen() {
 
             {/* Reset Password Button */}
             <TouchableOpacity 
-              style={[styles.resetButtonContainer, { marginBottom: height * 0.02 }]}
+              style={[styles.resetButtonContainer, {
+                marginBottom: height * 0.02,
+              }]}
               onPress={handleResetPassword}
               disabled={isSubmitDisabled}
             >
-              <LinearGradient
-                colors={['#6C5CE7', '#5741FF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={[styles.resetButton, {
-                  height: height * 0.06,
-                  borderRadius: width * 0.04,
-                  opacity: isSubmitDisabled ? 0.6 : 1
-                }]}
-              >
-                <Text style={[styles.resetButtonText, { fontSize: width * 0.04 }]}>
-                  {loading ? 'Resetting...' : 'Reset Password'}
-                </Text>
-              </LinearGradient>
+              <View style={[styles.resetButtonShadow, { borderRadius: width * 0.04 }]}>
+                <View
+                  style={[styles.resetButton, {
+                    height: height * 0.06,
+                    borderRadius: width * 0.04,
+                    opacity: isSubmitDisabled ? 0.6 : 1
+                  }]}
+                >
+                  <Text style={[styles.resetButtonText, { fontSize: width * 0.04 }]}>
+                    {loading ? 'Resetting...' : 'Reset Password'}
+                  </Text>
+                </View>
+              </View>
             </TouchableOpacity>
 
             {/* Back to Login Link */}
@@ -489,24 +487,21 @@ const styles = StyleSheet.create({
   contentCard: {
     backgroundColor: '#2A2A2A',
     alignItems: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   lockIllustration: {
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
+  },
+  illustrationShadow: {
+    backgroundColor: 'rgba(153, 157, 249, 0.16)',
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
   illustrationGradient: {
     width: '100%',
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(171, 160, 245, 0.28)',
   },
   mainHeading: {
     fontWeight: '600',
@@ -541,14 +536,14 @@ const styles = StyleSheet.create({
   resetButtonContainer: {
     width: '100%',
   },
+  resetButtonShadow: {
+    backgroundColor: '#6C5CE7',
+    overflow: 'hidden',
+  },
   resetButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
+    backgroundColor: '#6C5CE7',
   },
   resetButtonText: {
     fontWeight: '600',

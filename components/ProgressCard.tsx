@@ -987,13 +987,14 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       borderRadius: width * 0.05,
       borderWidth: width * 0.01,
       borderColor: '#D1A3F0',
-      shadowColor: 'rgba(108, 92, 231, 0.04)',
-      shadowOffset: { width: 0, height: width * 0.01 },
-      shadowOpacity: 1,
-      shadowRadius: width * 0.075,
-      elevation: 8,
       overflow: 'hidden',
-      backgroundColor: 'transparent', // Ensures gradient renders properly without background interference
+      backgroundColor: 'transparent',
+    },
+    mainCardShadow: {
+      flex: 1,
+      borderRadius: width * 0.05,
+      backgroundColor: 'rgba(171, 160, 245, 0.28)',
+      overflow: 'hidden',
     },
     // Days Left Pill
     daysLeftPill: {
@@ -1141,11 +1142,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       top: height * 0.18,
       backgroundColor: '#2A2A2A',
       borderRadius: width * 0.05,
-      shadowColor: 'rgba(108, 92, 231, 0.04)',
-      shadowOffset: { width: 0, height: width * 0.01 },
-      shadowOpacity: 1,
-      shadowRadius: width * 0.075,
-      elevation: 8,
       padding: width * 0.05,
       overflow: 'visible', // Allow dropdowns to extend beyond card bounds
       zIndex: 1,
@@ -1200,11 +1196,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       width: width * 0.4,
       backgroundColor: '#393939',
       borderRadius: width * 0.04,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: width * 0.005 },
-      shadowOpacity: 0.25,
-      shadowRadius: width * 0.02,
-      elevation: 25, // Higher elevation for Android than week dropdown
       zIndex: 20001, // Higher than week dropdown menu to appear on top
     },
     dropdownItem: {
@@ -1287,11 +1278,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: height * 0.02,
-      shadowColor: 'rgba(108, 92, 231, 0.25)',
-      shadowOffset: { width: 0, height: width * 0.01 },
-      shadowOpacity: 1,
-      shadowRadius: width * 0.035,
-      elevation: 8,
     },
     saveButtonText: {
       fontFamily: 'Articulat CF',
@@ -1347,11 +1333,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       width: '100%',
       backgroundColor: '#393939',
       borderRadius: width * 0.04,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: width * 0.005 },
-      shadowOpacity: 0.25,
-      shadowRadius: width * 0.02,
-      elevation: 20, // Higher elevation for Android
       zIndex: 10001, // Higher than container to ensure it's on top
     },
     weekDropdownItem: {
@@ -1404,11 +1385,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       borderRadius: width * 0.035, // Reduced from 0.04
       paddingHorizontal: width * 0.05, // Reduced from 0.06
       paddingVertical: height * 0.01, // Reduced from 0.012
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
     },
     setTargetButtonText: {
       fontFamily: 'Articulat CF',
@@ -1446,11 +1422,6 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
       paddingVertical: width * 0.01,
       paddingHorizontal: width * 0.02,
       minWidth: width * 0.25,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 3.84,
-      elevation: 10,
     },
     editDropdownItem: {
       flexDirection: 'row',
@@ -1814,126 +1785,130 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
               </Text>
             </View>
 
+            <View style={styles.mainCardShadow}>
+              <LinearGradient
+                colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
+                style={styles.mainCard}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+              >
+                {/* Main Content */}
+                <View style={styles.mainContent}>
+                  {isFutureWeek ? (
+                    // Future Week Content
+                    <>
+                      <View style={styles.titleRow}>
+                        <View style={styles.editButtonContainer}>
+                          <TouchableOpacity 
+                            style={styles.editButton}
+                            onPress={handleThreeDotsPress}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="ellipsis-vertical" size={width * 0.04} color="#FFFFFF" />
+                          </TouchableOpacity>
+                          
+                        </View>
+                        <Text style={styles.title}>Are you ready for your training week?</Text>
+                      </View>
+                      
+                      <View style={styles.futureWeekContent}>
+                        <Text style={styles.countdownText}>
+                          {weeksUntilTarget > 1 ? `${weeksUntilTarget} weeks until target begins` :
+                           daysUntilTarget > 1 ? `${daysUntilTarget} days until target begins` :
+                           daysUntilTarget === 1 ? '1 day until target begins' :
+                           'Target begins tomorrow'}
+                        </Text>
+                        
+                        <Text style={styles.futureTargetText}>
+                          {selectedActivity}: {total} sessions
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    // Current Week Content
+                    <>
+                      <View style={styles.titleRow}>
+                        <View style={styles.editButtonContainer}>
+                          <TouchableOpacity 
+                            style={styles.editButton}
+                            onPress={handleThreeDotsPress}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="ellipsis-vertical" size={width * 0.04} color="#FFFFFF" />
+                          </TouchableOpacity>
+                          
+                        </View>
+                        <Text style={styles.title}>{selectedActivity}</Text>
+                      </View>
+                      <View style={styles.progressRow}>
+                        <Text style={styles.progressText}>{`${current}/${total}`}</Text>
+                        <View style={styles.progressBar}>
+                          <View style={[styles.progressFill, { width: `${Math.min((current / total) * 100, 100)}%` }]} />
+                        </View>
+                      </View>
+                      
+                      <Text style={styles.motivationalMessage}>{getMotivationalMessage()}</Text>
+                    </>
+                  )}
+                </View>
+
+                {/* Control Bar - Only show for current week */}
+                {!isFutureWeek && (
+                  <View style={styles.controlBar}>
+                  <TouchableOpacity 
+                    style={[styles.controlButton, styles.upButton]}
+                    onPress={handleIncrementSession}
+                    disabled={isProcessing}
+                  >
+                    <Ionicons name="chevron-up" size={width * 0.036} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  
+                  <Text style={styles.plusOneText}>{counterText}</Text>
+                  
+                  <TouchableOpacity 
+                    style={[styles.controlButton, styles.downButton]}
+                    onPress={handleDecrementSession}
+                    disabled={isProcessing}
+                  >
+                    <Ionicons name="chevron-down" size={width * 0.036} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+                )}
+              </LinearGradient>
+            </View>
+          </>
+        ) : (
+          /* Splash Screen */
+          <View style={styles.mainCardShadow}>
             <LinearGradient
               colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
               style={styles.mainCard}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
             >
-              {/* Main Content */}
-              <View style={styles.mainContent}>
-                {isFutureWeek ? (
-                  // Future Week Content
-                  <>
-                    <View style={styles.titleRow}>
-                      <View style={styles.editButtonContainer}>
-                        <TouchableOpacity 
-                          style={styles.editButton}
-                          onPress={handleThreeDotsPress}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="ellipsis-vertical" size={width * 0.04} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        
-                      </View>
-                      <Text style={styles.title}>Are you ready for your training week?</Text>
-                    </View>
-                    
-                    <View style={styles.futureWeekContent}>
-                      <Text style={styles.countdownText}>
-                        {weeksUntilTarget > 1 ? `${weeksUntilTarget} weeks until target begins` :
-                         daysUntilTarget > 1 ? `${daysUntilTarget} days until target begins` :
-                         daysUntilTarget === 1 ? '1 day until target begins' :
-                         'Target begins tomorrow'}
-                      </Text>
-                      
-                      <Text style={styles.futureTargetText}>
-                        {selectedActivity}: {total} sessions
-                      </Text>
-                    </View>
-                  </>
-                ) : (
-                  // Current Week Content
-                  <>
-                    <View style={styles.titleRow}>
-                      <View style={styles.editButtonContainer}>
-                        <TouchableOpacity 
-                          style={styles.editButton}
-                          onPress={handleThreeDotsPress}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="ellipsis-vertical" size={width * 0.04} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        
-                      </View>
-                      <Text style={styles.title}>{selectedActivity}</Text>
-                    </View>
-                    <View style={styles.progressRow}>
-                      <Text style={styles.progressText}>{`${current}/${total}`}</Text>
-                      <View style={styles.progressBar}>
-                        <View style={[styles.progressFill, { width: `${Math.min((current / total) * 100, 100)}%` }]} />
-                      </View>
-                    </View>
-                    
-                    <Text style={styles.motivationalMessage}>{getMotivationalMessage()}</Text>
-                  </>
-                )}
-              </View>
-
-              {/* Control Bar - Only show for current week */}
-              {!isFutureWeek && (
-                <View style={styles.controlBar}>
+              <View style={styles.splashContent}>
+                <Text style={styles.splashTitle}>Set Your Weekly Training Target</Text>
+                <Text style={styles.splashSubtitle}>Track your progress and stay motivated</Text>
                 <TouchableOpacity 
-                  style={[styles.controlButton, styles.upButton]}
-                  onPress={handleIncrementSession}
-                  disabled={isProcessing}
+                  style={styles.setTargetButton}
+                  onPress={() => {
+                    setSelectedActivity(activityType); // Reset to default activity type
+                    setModalSource('splash');
+                    setModalSaved(false);
+                    setModalOpenTime(Date.now());
+                    analytics.progressTargetModalOpen({ 
+                      activity_type: activityType, 
+                      source: 'splash' 
+                    });
+                    setShowModal(true);
+                  }}
+                  activeOpacity={0.8}
                 >
-                  <Ionicons name="chevron-up" size={width * 0.036} color="#FFFFFF" />
-                </TouchableOpacity>
-                
-                <Text style={styles.plusOneText}>{counterText}</Text>
-                
-                <TouchableOpacity 
-                  style={[styles.controlButton, styles.downButton]}
-                  onPress={handleDecrementSession}
-                  disabled={isProcessing}
-                >
-                  <Ionicons name="chevron-down" size={width * 0.036} color="#FFFFFF" />
+                  <Text style={styles.setTargetButtonText}>Set Target</Text>
                 </TouchableOpacity>
               </View>
-              )}
             </LinearGradient>
-          </>
-        ) : (
-          /* Splash Screen */
-          <LinearGradient
-            colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
-            style={styles.mainCard}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-          >
-            <View style={styles.splashContent}>
-              <Text style={styles.splashTitle}>Set Your Weekly Training Target</Text>
-              <Text style={styles.splashSubtitle}>Track your progress and stay motivated</Text>
-              <TouchableOpacity 
-                style={styles.setTargetButton}
-                onPress={() => {
-                  setSelectedActivity(activityType); // Reset to default activity type
-                  setModalSource('splash');
-                  setModalSaved(false);
-                  setModalOpenTime(Date.now());
-                  analytics.progressTargetModalOpen({ 
-                    activity_type: activityType, 
-                    source: 'splash' 
-                  });
-                  setShowModal(true);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.setTargetButtonText}>Set Target</Text>
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
+          </View>
         )}
         
         {/* Celebration Overlay */}

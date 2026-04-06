@@ -142,6 +142,80 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const serializeAuthError = (error: unknown): string | null => {
+    try {
+      if (error instanceof Error) {
+        const plainError = Object.getOwnPropertyNames(error).reduce<Record<string, unknown>>(
+          (acc, key) => {
+            acc[key] = (error as any)[key];
+            return acc;
+          },
+          {}
+        );
+        return JSON.stringify(plainError);
+      }
+
+      if (typeof error === 'object' && error !== null) {
+        return JSON.stringify(error);
+      }
+
+      if (typeof error === 'string') {
+        return error;
+      }
+
+      if (error === null || error === undefined) {
+        return null;
+      }
+
+      return String(error);
+    } catch {
+      return null;
+    }
+  };
+
+  const normalizeAuthError = (
+    error: unknown,
+    fallbackMessage = 'Unknown authentication error'
+  ) => {
+    const authError = (error ?? {}) as Record<string, unknown>;
+    const raw = serializeAuthError(error);
+    const details =
+      typeof authError.details === 'string' && authError.details.trim()
+        ? authError.details.trim()
+        : undefined;
+    const hint =
+      typeof authError.hint === 'string' && authError.hint.trim()
+        ? authError.hint.trim()
+        : undefined;
+    const errorDescription =
+      typeof authError.error_description === 'string' && authError.error_description.trim()
+        ? authError.error_description.trim()
+        : undefined;
+
+    let message =
+      typeof authError.message === 'string' && authError.message.trim()
+        ? authError.message.trim()
+        : typeof error === 'string' && error.trim()
+          ? error.trim()
+          : details || errorDescription || undefined;
+
+    if (!message || message === '[object Object]') {
+      message = fallbackMessage;
+    }
+
+    return {
+      message,
+      ...(typeof authError.code === 'string' || typeof authError.code === 'number'
+        ? { code: String(authError.code) }
+        : {}),
+      ...(typeof authError.name === 'string' ? { name: authError.name } : {}),
+      ...(typeof authError.status === 'number' ? { status: authError.status } : {}),
+      ...(details ? { details } : {}),
+      ...(hint ? { hint } : {}),
+      ...(raw && raw !== message ? { raw } : {}),
+    };
+  };
+
   const createAppleNonce = async () => {
     const rawNonce = Crypto.randomUUID();
     const hashedNonce = await Crypto.digestStringAsync(
@@ -1663,7 +1737,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return await startOAuthFlow('google');
       }
 
-      const { GoogleSignin, statusCodes } = googleModule;
+      const { GoogleSignin } = googleModule;
       if (Platform.OS === 'android') {
         await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       }
@@ -1717,12 +1791,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
 
       if (error) {
-        console.error('❌ Google sign in error:', error);
+        const normalizedError = normalizeAuthError(error, 'Google sign in failed');
+        console.error('❌ Google sign in error:', normalizedError);
         await logAuthHydrationStep('google_sign_in_error', null, {
           provider: 'google',
-          error: error.message || 'unknown_error',
+          error: normalizedError.message,
+          ...(normalizedError.code ? { error_code: normalizedError.code } : {}),
+          ...(normalizedError.name ? { error_name: normalizedError.name } : {}),
+          ...(typeof normalizedError.status === 'number'
+            ? { error_status: normalizedError.status }
+            : {}),
+          ...(normalizedError.details ? { error_details: normalizedError.details } : {}),
+          ...(normalizedError.hint ? { error_hint: normalizedError.hint } : {}),
+          ...(normalizedError.raw ? { error_raw: normalizedError.raw.slice(0, 1000) } : {}),
         });
-        return { error };
+        return { error: normalizedError };
       }
 
       if (data.session) {
@@ -1791,8 +1874,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return { error: { message: 'Google Play Services not available' } };
       }
 
-      console.error('❌ Google sign in exception:', error);
-      return { error };
+      const normalizedError = normalizeAuthError(error, 'Google sign in failed');
+      console.error('❌ Google sign in exception:', normalizedError);
+      await logAuthHydrationStep('google_sign_in_exception', null, {
+        provider: 'google',
+        error: normalizedError.message,
+        ...(normalizedError.code ? { error_code: normalizedError.code } : {}),
+        ...(normalizedError.name ? { error_name: normalizedError.name } : {}),
+        ...(typeof normalizedError.status === 'number'
+          ? { error_status: normalizedError.status }
+          : {}),
+        ...(normalizedError.details ? { error_details: normalizedError.details } : {}),
+        ...(normalizedError.hint ? { error_hint: normalizedError.hint } : {}),
+        ...(normalizedError.raw ? { error_raw: normalizedError.raw.slice(0, 1000) } : {}),
+      });
+      return { error: normalizedError };
     }
   };
 

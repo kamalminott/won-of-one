@@ -11,7 +11,6 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,7 +19,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Match {
   id: string;
@@ -1021,11 +1020,6 @@ export default function RecentMatchesScreen() {
     },
     competitionCardChampion: {
       borderColor: 'rgba(251, 191, 36, 0.4)',
-      shadowColor: '#F59E0B',
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
-      elevation: 6,
     },
     competitionHeaderRow: {
       flexDirection: 'row',
@@ -1312,7 +1306,7 @@ export default function RecentMatchesScreen() {
     <SafeAreaView style={[styles.container, { 
       paddingTop: insets.top, 
       paddingBottom: insets.bottom 
-    }]}>
+    }]} edges={['left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <BackButton onPress={() => router.back()} />

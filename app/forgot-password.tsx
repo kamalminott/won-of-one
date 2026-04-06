@@ -1,11 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -14,7 +12,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { analytics } from '@/lib/analytics';
@@ -107,7 +105,7 @@ export default function ForgotPasswordScreen() {
     <SafeAreaView style={[styles.container, { 
       paddingTop: insets.top, 
       paddingBottom: insets.bottom 
-    }]}>
+    }]} edges={['left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor="#212121" />
       
       {/* Header Background */}
@@ -136,16 +134,15 @@ export default function ForgotPasswordScreen() {
           borderRadius: width * 0.16,
           marginBottom: height * 0.04
         }]}>
-          <LinearGradient
-            colors={['rgba(210, 164, 241, 0.3)', 'rgba(153, 157, 249, 0.3)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={[styles.illustrationGradient, {
-              borderRadius: width * 0.16
-            }]}
-          >
-            <Ionicons name="mail-outline" size={width * 0.125} color="#FFFFFF" />
-          </LinearGradient>
+          <View style={[styles.illustrationShadow, { borderRadius: width * 0.16 }]}>
+            <View
+              style={[styles.illustrationGradient, {
+                borderRadius: width * 0.16
+              }]}
+            >
+              <Ionicons name="mail-outline" size={width * 0.125} color="#FFFFFF" />
+            </View>
+          </View>
         </View>
 
         {/* Main Heading */}
@@ -193,24 +190,25 @@ export default function ForgotPasswordScreen() {
 
         {/* Send Reset Link Button */}
         <TouchableOpacity 
-          style={[styles.sendButtonContainer, { marginBottom: height * 0.02 }]}
+          style={[styles.sendButtonContainer, {
+            marginBottom: height * 0.02,
+          }]}
           onPress={handleSendReset}
           disabled={isSendDisabled}
         >
-          <LinearGradient
-            colors={['#6C5CE7', '#5741FF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.sendButton, {
-              height: height * 0.06,
-              borderRadius: width * 0.04,
-              opacity: isSendDisabled ? 0.6 : 1
-            }]}
-          >
-            <Text style={[styles.sendButtonText, { fontSize: width * 0.04 }]}>
-              {loading ? 'Sending...' : 'Send Reset Link'}
-            </Text>
-          </LinearGradient>
+          <View style={[styles.sendButtonShadow, { borderRadius: width * 0.04 }]}>
+            <View
+              style={[styles.sendButton, {
+                height: height * 0.06,
+                borderRadius: width * 0.04,
+                opacity: isSendDisabled ? 0.6 : 1
+              }]}
+            >
+              <Text style={[styles.sendButtonText, { fontSize: width * 0.04 }]}>
+                {loading ? 'Sending...' : 'Send Reset Link'}
+              </Text>
+            </View>
+          </View>
         </TouchableOpacity>
 
         {statusMessage && (
@@ -259,24 +257,21 @@ const styles = StyleSheet.create({
   contentCard: {
     backgroundColor: '#2A2A2A',
     alignItems: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
   },
   emailIllustration: {
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 30,
-    elevation: 8,
+  },
+  illustrationShadow: {
+    backgroundColor: 'rgba(153, 157, 249, 0.16)',
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
   illustrationGradient: {
     width: '100%',
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(171, 160, 245, 0.28)',
   },
   mainHeading: {
     fontWeight: '600',
@@ -311,14 +306,14 @@ const styles = StyleSheet.create({
   sendButtonContainer: {
     width: '100%',
   },
+  sendButtonShadow: {
+    backgroundColor: '#6C5CE7',
+    overflow: 'hidden',
+  },
   sendButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C5CE7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
+    backgroundColor: '#6C5CE7',
   },
   sendButtonText: {
     fontWeight: '600',
