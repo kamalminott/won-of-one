@@ -103,6 +103,7 @@ export type PurchasesPackage = any;
 let isInitialized = false;
 let isActuallyConfigured = false; // Track if RevenueCat SDK is actually configured (not just skipped)
 let currentRevenueCatUserId: string | null = null;
+let initializationPromise: Promise<void> | null = null;
 
 const getAuthenticatedUserId = async (): Promise<string | null> => {
   try {
@@ -161,76 +162,93 @@ export const subscriptionService = {
       return;
     }
 
-    try {
-      // Skip test keys in production builds (RevenueCat can crash in release with test keys)
-      const apiKey = getRevenueCatApiKey();
-      const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-      const isTestKey = !!apiKey && apiKey.startsWith('test_');
-
-      if (!apiKey) {
-        console.warn('⚠️ RevenueCat API key missing - skipping initialization');
-        isInitialized = true;
-        isActuallyConfigured = false;
-        return;
-      }
-
-      if (isTestKey && !isDev) {
-        console.warn('⚠️ RevenueCat test API key detected - skipping initialization to prevent app crash');
-        console.warn('⚠️ Configure a production API key in RevenueCat dashboard to enable subscriptions');
-        // Mark as initialized to prevent retry loops, but don't actually configure
-        isInitialized = true;
-        isActuallyConfigured = false;
-        return;
-      }
-
-      if (isTestKey && isDev) {
-        console.warn('⚠️ RevenueCat test API key detected - allowed in dev build');
-      }
-
-      if (!Purchases) {
-        console.warn('⚠️ RevenueCat SDK not available - skipping configuration');
-        isInitialized = true;
-        isActuallyConfigured = false;
-        return;
-      }
-
-      const initialUserId = userId ?? (await getAuthenticatedUserId());
-      await Purchases.configure(
-        initialUserId ? { apiKey, appUserID: initialUserId } : { apiKey }
-      );
-      isInitialized = true;
-      isActuallyConfigured = true;
-      console.log('✅ RevenueCat initialized');
-      currentRevenueCatUserId = initialUserId ?? null;
-
-      // Set user ID if provided (link RevenueCat user to your app user)
-      if (userId && Purchases && initialUserId !== userId) {
+    if (initializationPromise) {
+      await initializationPromise;
+      if (userId && isActuallyConfigured && currentRevenueCatUserId !== userId) {
         await ensureRevenueCatUser(userId);
       }
+      return;
+    }
 
-      // Set up listener for subscription updates
-      if (Purchases) {
-        Purchases.addCustomerInfoUpdateListener(async (customerInfo: CustomerInfo) => {
-          console.log('📦 Subscription status updated');
-          if (currentRevenueCatUserId) {
-            // Get previous subscription status before updating
-            const previousInfo = await subscriptionService.getSubscriptionFromSupabase(
-              currentRevenueCatUserId,
-              null
-            ).catch(() => null);
-            const currentInfo = subscriptionService.parseCustomerInfo(customerInfo);
-            
-            // Track subscription status changes
-            subscriptionService.trackSubscriptionStatusChange(previousInfo, currentInfo);
-          }
-        });
+    initializationPromise = (async () => {
+      try {
+        // Skip test keys in production builds (RevenueCat can crash in release with test keys)
+        const apiKey = getRevenueCatApiKey();
+        const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+        const isTestKey = !!apiKey && apiKey.startsWith('test_');
+
+        if (!apiKey) {
+          console.warn('⚠️ RevenueCat API key missing - skipping initialization');
+          isInitialized = true;
+          isActuallyConfigured = false;
+          return;
+        }
+
+        if (isTestKey && !isDev) {
+          console.warn('⚠️ RevenueCat test API key detected - skipping initialization to prevent app crash');
+          console.warn('⚠️ Configure a production API key in RevenueCat dashboard to enable subscriptions');
+          // Mark as initialized to prevent retry loops, but don't actually configure
+          isInitialized = true;
+          isActuallyConfigured = false;
+          return;
+        }
+
+        if (isTestKey && isDev) {
+          console.warn('⚠️ RevenueCat test API key detected - allowed in dev build');
+        }
+
+        if (!Purchases) {
+          console.warn('⚠️ RevenueCat SDK not available - skipping configuration');
+          isInitialized = true;
+          isActuallyConfigured = false;
+          return;
+        }
+
+        const initialUserId = userId ?? (await getAuthenticatedUserId());
+        await Purchases.configure(
+          initialUserId ? { apiKey, appUserID: initialUserId } : { apiKey }
+        );
+        isInitialized = true;
+        isActuallyConfigured = true;
+        console.log('✅ RevenueCat initialized');
+        currentRevenueCatUserId = initialUserId ?? null;
+
+        // Set user ID if provided (link RevenueCat user to your app user)
+        if (userId && Purchases && initialUserId !== userId) {
+          await ensureRevenueCatUser(userId);
+        }
+
+        // Set up listener for subscription updates
+        if (Purchases) {
+          Purchases.addCustomerInfoUpdateListener(async (customerInfo: CustomerInfo) => {
+            console.log('📦 Subscription status updated');
+            if (currentRevenueCatUserId) {
+              // Get previous subscription status before updating
+              const previousInfo = await subscriptionService.getSubscriptionFromSupabase(
+                currentRevenueCatUserId,
+                null
+              ).catch(() => null);
+              const currentInfo = subscriptionService.parseCustomerInfo(customerInfo);
+              
+              // Track subscription status changes
+              subscriptionService.trackSubscriptionStatusChange(previousInfo, currentInfo);
+            }
+          });
+        }
+      } catch (error: any) {
+        // Don't crash the app if RevenueCat fails to initialize
+        console.error('❌ Error initializing RevenueCat (non-fatal):', error?.message || error);
+        // Mark as initialized anyway to prevent retry loops
+        isInitialized = true;
+        // Don't throw - allow app to continue without RevenueCat
+      } finally {
+        initializationPromise = null;
       }
-    } catch (error: any) {
-      // Don't crash the app if RevenueCat fails to initialize
-      console.error('❌ Error initializing RevenueCat (non-fatal):', error?.message || error);
-      // Mark as initialized anyway to prevent retry loops
-      isInitialized = true;
-      // Don't throw - allow app to continue without RevenueCat
+    })();
+
+    await initializationPromise;
+    if (userId && isActuallyConfigured && currentRevenueCatUserId !== userId) {
+      await ensureRevenueCatUser(userId);
     }
   },
 
@@ -569,11 +587,16 @@ export const subscriptionService = {
    * Link RevenueCat user to your app user
    */
   async linkUser(userId: string): Promise<void> {
-    if (!Purchases || !isActuallyConfigured) {
-      console.warn('⚠️ RevenueCat not configured - skipping linkUser');
-      return;
-    }
     try {
+      if (!isActuallyConfigured) {
+        await this.initialize(userId);
+      }
+
+      if (!Purchases || !isActuallyConfigured) {
+        console.warn('⚠️ RevenueCat not configured - skipping linkUser');
+        return;
+      }
+
       await ensureRevenueCatUser(userId);
     } catch (error) {
       console.error('❌ Error linking user:', error);
