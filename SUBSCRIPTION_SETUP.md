@@ -160,7 +160,7 @@ if (subscription?.isActive) {
 - The API key in `subscriptionService.ts` is a **test key** - safe to commit
 - Production keys should be stored in environment variables
 - RevenueCat handles all payment processing securely
-- Subscription status is synced to Supabase for fast lookups
+- Subscription status should be synced to Supabase from a secure server-side RevenueCat webhook
 
 ## 📊 Database Schema
 
@@ -188,11 +188,14 @@ The `user_subscriptions` table stores:
 2. Update API keys in `subscriptionService.ts`
 3. Test with real purchases (small amount first)
 4. Monitor RevenueCat dashboard for subscription events
-5. Set up webhooks (optional) for server-side notifications
+5. Deploy the `revenuecat-webhook` Supabase Edge Function and configure RevenueCat webhooks
+6. Add these function secrets in Supabase:
+   - `REVENUECAT_WEBHOOK_AUTH`
+   - `REVENUECAT_SECRET_API_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` if your environment does not already provide it
 
 ## 📚 Resources
 
 - [RevenueCat Docs](https://docs.revenuecat.com/)
 - [React Native Purchases](https://github.com/RevenueCat/react-native-purchases)
 - [RevenueCat Dashboard](https://app.revenuecat.com)
-

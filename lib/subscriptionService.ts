@@ -5,9 +5,7 @@
 
 import { Platform } from 'react-native';
 import type { User } from '@supabase/supabase-js';
-import { postgrestInsert, postgrestSelectOne } from './postgrest';
-import { getCachedAuthSession } from './authSessionCache';
-import { formatErrorForLog } from './errorLogging';
+import { postgrestSelectOne } from './postgrest';
 import { supabase } from './supabase';
 import { analytics } from './analytics';
 
@@ -171,8 +169,6 @@ export const subscriptionService = {
             
             // Track subscription status changes
             subscriptionService.trackSubscriptionStatusChange(previousInfo, currentInfo);
-            
-            await subscriptionService.syncSubscriptionToSupabase(userId, customerInfo);
           }
         });
       }
@@ -260,12 +256,6 @@ export const subscriptionService = {
     try {
       const { customerInfo } = await Purchases.purchasePackage(packageToPurchase);
       console.log('✅ Purchase successful');
-      
-      // Sync to Supabase if user is logged in
-      const userId = await this.getCurrentUserId();
-      if (userId) {
-        await this.syncSubscriptionToSupabase(userId, customerInfo);
-      }
 
       return customerInfo;
     } catch (error: any) {
@@ -291,12 +281,6 @@ export const subscriptionService = {
     try {
       const customerInfo = await Purchases.restorePurchases();
       console.log('✅ Purchases restored');
-
-      // Sync to Supabase if user is logged in
-      const userId = await this.getCurrentUserId();
-      if (userId) {
-        await this.syncSubscriptionToSupabase(userId, customerInfo);
-      }
 
       return customerInfo;
     } catch (error) {
@@ -475,53 +459,6 @@ export const subscriptionService = {
   },
 
   /**
-   * Sync subscription status to Supabase
-   * This keeps your database in sync with RevenueCat
-   */
-  async syncSubscriptionToSupabase(userId: string, customerInfo: CustomerInfo): Promise<void> {
-    try {
-      const subscriptionInfo = this.parseCustomerInfo(customerInfo);
-      const accessToken = getCachedAuthSession()?.access_token ?? null;
-
-      if (!accessToken) {
-        console.warn('⚠️ Subscription sync skipped - auth session not ready');
-        return;
-      }
-
-      // Upsert subscription status to Supabase
-      const { error } = await postgrestInsert(
-        'user_subscriptions',
-        {
-          user_id: userId,
-          subscription_status: subscriptionInfo.status,
-          is_active: subscriptionInfo.isActive,
-          is_trial: subscriptionInfo.isTrial,
-          expires_at: subscriptionInfo.expiresAt?.toISOString() || null,
-          product_id: subscriptionInfo.productId,
-          entitlement_id: subscriptionInfo.entitlementId,
-          revenuecat_user_id: customerInfo.originalAppUserId,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          on_conflict: 'user_id',
-        },
-        {
-          prefer: 'resolution=merge-duplicates, return=minimal',
-          accessToken,
-        }
-      );
-
-      if (error) {
-        console.error('❌ Error syncing subscription to Supabase:', formatErrorForLog(error));
-      } else {
-        console.log('✅ Subscription synced to Supabase');
-      }
-    } catch (error) {
-      console.error('❌ Error in syncSubscriptionToSupabase:', formatErrorForLog(error));
-    }
-  },
-
-  /**
    * Get subscription status from Supabase (faster than RevenueCat API)
    */
   async getSubscriptionFromSupabase(
@@ -565,19 +502,6 @@ export const subscriptionService = {
   },
 
   /**
-   * Get current user ID from Supabase auth
-   */
-  async getCurrentUserId(): Promise<string | null> {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      return user?.id || null;
-    } catch (error) {
-      console.error('❌ Error getting current user ID:', error);
-      return null;
-    }
-  },
-
-  /**
    * Link RevenueCat user to your app user
    */
   async linkUser(userId: string): Promise<void> {
@@ -588,10 +512,6 @@ export const subscriptionService = {
     try {
       await Purchases.logIn(userId);
       console.log('✅ RevenueCat user linked:', userId);
-      
-      // Sync current subscription status
-      const customerInfo = await Purchases.getCustomerInfo();
-      await this.syncSubscriptionToSupabase(userId, customerInfo);
     } catch (error) {
       console.error('❌ Error linking user:', error);
       throw error;
