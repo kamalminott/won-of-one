@@ -1,6 +1,7 @@
 const DEFAULT_MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 350;
 const MAX_BACKOFF_MS = 3000;
+const DEFAULT_READ_TIMEOUT_MS = 12000;
 
 type RetryableResult = {
   ok: boolean;
@@ -10,6 +11,11 @@ type RetryableResult = {
 
 type RetryOptions = {
   maxAttempts?: number;
+};
+
+type CompetitionReadTimeoutOptions = {
+  timeoutMs?: number;
+  label?: string;
 };
 
 export type RetryExecutionResult<T extends RetryableResult> = {
@@ -43,6 +49,32 @@ const wait = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+export const withCompetitionReadTimeout = async <T>(
+  operation: Promise<T> | (() => Promise<T>),
+  options?: CompetitionReadTimeoutOptions
+): Promise<T> => {
+  const timeoutMs = Math.max(1000, options?.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS);
+  const label = options?.label ?? 'Competition request';
+  const promise = typeof operation === 'function' ? operation() : operation;
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 export const runCompetitionWriteWithRetry = async <T extends RetryableResult>(
   operation: () => Promise<T>,

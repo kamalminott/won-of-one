@@ -14,7 +14,7 @@ import {
   setCompetitionMatchLiveScore,
   takeOverCompetitionMatchRemoteScoring,
 } from '@/lib/clubCompetitionService';
-import { runCompetitionWriteWithRetry } from '@/lib/competitionRetry';
+import { runCompetitionWriteWithRetry, withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { CompetitionMatchScoringData, CompetitionScoringMode } from '@/types/competition';
 import NetInfo from '@react-native-community/netinfo';
@@ -77,8 +77,12 @@ export default function ManualScoreEntryScreen() {
   const [updatingLiveScore, setUpdatingLiveScore] = useState(false);
   const [takingOver, setTakingOver] = useState(false);
   const matchVersionRef = useRef('');
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(async (showSpinner = true): Promise<string | null> => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+
     if (!user?.id || !competitionId || !matchId) {
       setErrorText('Match context was not found.');
       setLoading(false);
@@ -92,79 +96,115 @@ export default function ManualScoreEntryScreen() {
     setErrorText(null);
     setInfoText(null);
 
-    const initial = await getCompetitionMatchScoringData({
-      userId: user.id,
-      competitionId,
-      matchId,
-    });
+    try {
+      const initial = await withCompetitionReadTimeout(
+        () =>
+          getCompetitionMatchScoringData({
+            userId: user.id,
+            competitionId,
+            matchId,
+          }),
+        { label: 'Competition match scoring' }
+      );
 
-    if (!initial) {
-      setErrorText('You do not have access to this match.');
-      setData(null);
-      setLoading(false);
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      if (!initial) {
+        setErrorText('You do not have access to this match.');
+        setData(null);
+        matchVersionRef.current = '';
+        return null;
+      }
+
+      const requestedMode = routeMode ?? initial.match.scoring_mode ?? 'manual';
+      const shouldTrackRemoteStart =
+        requestedMode === 'remote' &&
+        (initial.match.scoring_mode !== 'remote' ||
+          initial.match.status !== 'live' ||
+          initial.match.authoritative_scorer_user_id !== user.id);
+      const isCompetitionReadOnly = initial.competition.status === 'finalised';
+
+      if (isCompetitionReadOnly) {
+        setInfoText('Competition is finalised. This match is read-only.');
+      } else if (initial.match.status !== 'completed') {
+        const preparation = await withCompetitionReadTimeout(
+          () =>
+            prepareCompetitionMatchScoring({
+              matchId,
+              mode: requestedMode,
+            }),
+          { label: 'Competition match setup' }
+        );
+
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        if (!preparation.ok) {
+          if (preparation.reason === 'remote_scorer_already_assigned') {
+            setInfoText('Match is being scored by another user. You are in view-only mode.');
+          } else if (preparation.reason === 'scoring_mode_locked_once_live') {
+            setInfoText('Scoring mode is already locked for this live match.');
+          } else {
+            setErrorText(preparation.message);
+          }
+        } else if (shouldTrackRemoteStart) {
+          analytics.capture('remote_scoring_started', {
+            competition_id: competitionId,
+            match_id: matchId,
+          });
+        }
+      }
+
+      const refreshed = await withCompetitionReadTimeout(
+        () =>
+          getCompetitionMatchScoringData({
+            userId: user.id,
+            competitionId,
+            matchId,
+          }),
+        { label: 'Competition match scoring refresh' }
+      );
+
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      if (!refreshed) {
+        setErrorText('Match could not be loaded.');
+        setData(null);
+        matchVersionRef.current = '';
+        return null;
+      }
+
+      const resolvedMode = refreshed.match.scoring_mode ?? requestedMode;
+      setScoringMode(resolvedMode);
+      setData(refreshed);
+      setScoreAInput(
+        refreshed.match.score_a != null ? String(refreshed.match.score_a) : ''
+      );
+      setScoreBInput(
+        refreshed.match.score_b != null ? String(refreshed.match.score_b) : ''
+      );
+      const version = `${refreshed.competition.updated_at}:${refreshed.match.updated_at}:${refreshed.match.status}:${refreshed.match.score_a ?? ''}:${refreshed.match.score_b ?? ''}`;
+      matchVersionRef.current = version;
+      return version;
+    } catch (error) {
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      console.warn('Competition manual score load failed:', error);
+      setErrorText('Could not load this match right now. Please retry.');
       matchVersionRef.current = '';
       return null;
-    }
-
-    const requestedMode = routeMode ?? initial.match.scoring_mode ?? 'manual';
-    const shouldTrackRemoteStart =
-      requestedMode === 'remote' &&
-      (initial.match.scoring_mode !== 'remote' ||
-        initial.match.status !== 'live' ||
-        initial.match.authoritative_scorer_user_id !== user.id);
-    const isCompetitionReadOnly = initial.competition.status === 'finalised';
-
-    if (isCompetitionReadOnly) {
-      setInfoText('Competition is finalised. This match is read-only.');
-    } else if (initial.match.status !== 'completed') {
-      const preparation = await prepareCompetitionMatchScoring({
-        matchId,
-        mode: requestedMode,
-      });
-
-      if (!preparation.ok) {
-        if (preparation.reason === 'remote_scorer_already_assigned') {
-          setInfoText('Match is being scored by another user. You are in view-only mode.');
-        } else if (preparation.reason === 'scoring_mode_locked_once_live') {
-          setInfoText('Scoring mode is already locked for this live match.');
-        } else {
-          setErrorText(preparation.message);
-        }
-      } else if (shouldTrackRemoteStart) {
-        analytics.capture('remote_scoring_started', {
-          competition_id: competitionId,
-          match_id: matchId,
-        });
+    } finally {
+      if (loadRequestIdRef.current === requestId) {
+        setLoading(false);
       }
     }
-
-    const refreshed = await getCompetitionMatchScoringData({
-      userId: user.id,
-      competitionId,
-      matchId,
-    });
-
-    if (!refreshed) {
-      setErrorText('Match could not be loaded.');
-      setData(null);
-      setLoading(false);
-      matchVersionRef.current = '';
-      return null;
-    }
-
-    const resolvedMode = refreshed.match.scoring_mode ?? requestedMode;
-    setScoringMode(resolvedMode);
-    setData(refreshed);
-    setScoreAInput(
-      refreshed.match.score_a != null ? String(refreshed.match.score_a) : ''
-    );
-    setScoreBInput(
-      refreshed.match.score_b != null ? String(refreshed.match.score_b) : ''
-    );
-    const version = `${refreshed.competition.updated_at}:${refreshed.match.updated_at}:${refreshed.match.status}:${refreshed.match.score_a ?? ''}:${refreshed.match.score_b ?? ''}`;
-    matchVersionRef.current = version;
-    setLoading(false);
-    return version;
   }, [competitionId, matchId, routeMode, user?.id]);
 
   const {

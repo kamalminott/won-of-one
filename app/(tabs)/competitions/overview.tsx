@@ -3,6 +3,7 @@ import { CompetitionRealtimeBanner } from '@/components/CompetitionRealtimeBanne
 import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
+  COMPETITION_PLACEMENT_MODE_LABELS,
   COMPETITION_ROLE_LABELS,
   COMPETITION_STATUS_COLORS,
   COMPETITION_STATUS_LABELS,
@@ -13,8 +14,10 @@ import {
   buildCompetitionJoinQrPayload,
   finaliseCompetition,
   getCompetitionOverviewData,
+  updateCompetitionPlacementMode,
   updateCompetitionRegistrationLock,
 } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -55,10 +58,15 @@ export default function CompetitionOverviewScreen() {
     ReturnType<typeof getCompetitionOverviewData>
   >>(null);
   const [updatingRegistration, setUpdatingRegistration] = useState(false);
+  const [updatingPlacementMode, setUpdatingPlacementMode] = useState<string | null>(null);
   const [finalising, setFinalising] = useState(false);
   const overviewVersionRef = useRef('');
+  const loadRequestIdRef = useRef(0);
 
   const loadOverview = useCallback(async (showSpinner = true): Promise<string | null> => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+
     if (!user?.id || !competitionId) {
       setLoading(false);
       setErrorText('Competition not found.');
@@ -70,21 +78,46 @@ export default function CompetitionOverviewScreen() {
       setLoading(true);
     }
     setErrorText(null);
-    const data = await getCompetitionOverviewData({
-      userId: user.id,
-      competitionId,
-    });
-    if (!data) {
-      setErrorText('You do not have access to this competition.');
+
+    try {
+      const data = await withCompetitionReadTimeout(
+        () =>
+          getCompetitionOverviewData({
+            userId: user.id,
+            competitionId,
+          }),
+        { label: 'Competition overview' }
+      );
+
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      if (!data) {
+        setOverview(null);
+        setErrorText('You do not have access to this competition.');
+        overviewVersionRef.current = '';
+        return null;
+      }
+
+      setOverview(data);
+      const version = `${data.competition.updated_at}:${data.competition.status}:${data.participantCount}`;
+      overviewVersionRef.current = version;
+      return version;
+    } catch (error) {
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      console.warn('Competition overview load failed:', error);
+      setErrorText('Could not load this competition right now. Pull to retry.');
       overviewVersionRef.current = '';
+      return null;
+    } finally {
+      if (loadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-    setOverview(data);
-    const version = data
-      ? `${data.competition.updated_at}:${data.competition.status}:${data.participantCount}`
-      : '';
-    overviewVersionRef.current = version;
-    setLoading(false);
-    return version || null;
   }, [competitionId, user?.id]);
 
   const {
@@ -259,7 +292,10 @@ export default function CompetitionOverviewScreen() {
       steps.push({
         key: 'final-standings',
         title: 'Final Standings',
-        subtitle: 'See final placements with 2 bronze medalists.',
+        subtitle:
+          competition.placement_mode === 'bronze_only'
+            ? 'See final placements with a bronze match for 3rd and 4th.'
+            : 'See final placements with 2 bronze medalists.',
         state: finalStandingsState,
         lockReason:
           finalStandingsState === 'locked'
@@ -323,6 +359,12 @@ export default function CompetitionOverviewScreen() {
   const canToggleRegistration =
     overview.role === 'organiser' &&
     (competition.status === 'registration_open' || competition.status === 'registration_locked');
+  const canEditPlacementSetting =
+    overview.role === 'organiser' &&
+    competition.format !== 'poules_only' &&
+    ['registration_open', 'registration_locked', 'poules_generated', 'poules_locked', 'rankings_locked'].includes(
+      competition.status
+    );
 
   const onToggleRegistration = () => {
     if (!canToggleRegistration || !overview) return;
@@ -416,6 +458,38 @@ export default function CompetitionOverviewScreen() {
           },
         },
       ]
+    );
+  };
+
+  const onUpdatePlacementMode = async (placementMode: 'none' | 'bronze_only') => {
+    if (!canEditPlacementSetting || updatingPlacementMode === placementMode) {
+      return;
+    }
+
+    setUpdatingPlacementMode(placementMode);
+    const result = await updateCompetitionPlacementMode({
+      competitionId: competition.id,
+      placementMode,
+    });
+    setUpdatingPlacementMode(null);
+
+    if (!result.ok) {
+      setErrorText(result.message);
+      return;
+    }
+
+    analytics.capture('competition_placement_mode_updated', {
+      competition_id: competition.id,
+      placement_mode: placementMode,
+    });
+
+    setOverview((previous) =>
+      previous
+        ? {
+            ...previous,
+            competition: result.data,
+          }
+        : previous
     );
   };
 
@@ -521,6 +595,54 @@ export default function CompetitionOverviewScreen() {
                 </Text>
               )}
             </Pressable>
+          </View>
+        ) : null}
+
+        {overview.role === 'organiser' && competition.format !== 'poules_only' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Placement Matches</Text>
+            <Text style={styles.progressText}>
+              Current mode: {COMPETITION_PLACEMENT_MODE_LABELS[competition.placement_mode]}
+            </Text>
+            <Text style={styles.finaliseHintText}>
+              This setting locks as soon as the DE tableau is generated.
+            </Text>
+            <View style={styles.placementModeRow}>
+              {(['none', 'bronze_only'] as const).map((value) => {
+                const active = competition.placement_mode === value;
+                const loading = updatingPlacementMode === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => onUpdatePlacementMode(value)}
+                    disabled={!canEditPlacementSetting || loading || active}
+                    style={[
+                      styles.placementModeButton,
+                      active && styles.placementModeButtonActive,
+                      (!canEditPlacementSetting || loading) && styles.disabledButton,
+                    ]}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.placementModeButtonText,
+                          active && styles.placementModeButtonTextActive,
+                        ]}
+                      >
+                        {COMPETITION_PLACEMENT_MODE_LABELS[value]}
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!canEditPlacementSetting ? (
+              <Text style={styles.finaliseHintText}>
+                Placement mode can only be changed before DE generation.
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -822,6 +944,36 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  placementModeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  placementModeButton: {
+    flex: 1,
+    minHeight: 42,
+    minWidth: 140,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#171717',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  placementModeButtonActive: {
+    backgroundColor: 'rgba(139,92,246,0.22)',
+    borderColor: Colors.purple.primary,
+  },
+  placementModeButtonText: {
+    color: '#B9B9B9',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  placementModeButtonTextActive: {
+    color: '#FFFFFF',
   },
   disabledButton: {
     opacity: 0.45,

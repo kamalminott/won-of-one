@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import { analytics } from '@/lib/analytics';
 import { getCompetitionFinalStandingsData } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -45,9 +46,13 @@ export default function FinalStandingsScreen() {
     null
   );
   const standingsVersionRef = useRef('');
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
@@ -61,31 +66,51 @@ export default function FinalStandingsScreen() {
       }
       setErrorText(null);
 
-      const payload = await getCompetitionFinalStandingsData({
-        userId: user.id,
-        competitionId,
-      });
+      try {
+        const payload = await withCompetitionReadTimeout(
+          () =>
+            getCompetitionFinalStandingsData({
+              userId: user.id,
+              competitionId,
+            }),
+          { label: 'Competition final standings' }
+        );
 
-      if (!payload) {
-        setData(null);
-        setLoading(false);
-        setRefreshing(false);
-        setErrorText('You do not have access to this competition.');
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        if (!payload) {
+          setData(null);
+          setErrorText('You do not have access to this competition.');
+          standingsVersionRef.current = '';
+          return null;
+        }
+
+        setData(payload);
+        const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.standings
+          .map(
+            (entry) =>
+              `${entry.participant.id}:${entry.positionLabel}:${entry.medal ?? 'none'}:${entry.deExitRoundLabel ?? 'none'}:${entry.participant.status}`
+          )
+          .join('|')}`;
+        standingsVersionRef.current = version;
+        return version;
+      } catch (error) {
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        console.warn('Competition final standings load failed:', error);
+        setErrorText('Could not load final standings right now. Pull to retry.');
         standingsVersionRef.current = '';
         return null;
+      } finally {
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-
-      setData(payload);
-      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.standings
-        .map(
-          (entry) =>
-            `${entry.participant.id}:${entry.positionLabel}:${entry.medal ?? 'none'}:${entry.deExitRoundLabel ?? 'none'}:${entry.participant.status}`
-        )
-        .join('|')}`;
-      standingsVersionRef.current = version;
-      setLoading(false);
-      setRefreshing(false);
-      return version;
     },
     [competitionId, user?.id]
   );
@@ -207,7 +232,9 @@ export default function FinalStandingsScreen() {
           </Text>
           <Text style={styles.metaText}>{standingsCountText}</Text>
           <Text style={styles.noteText}>
-            Bronze medals: two participants can finish in 3rd place.
+            {data.competition.placement_mode === 'bronze_only'
+              ? 'Bronze match mode: 3rd and 4th are decided by a separate placement bout.'
+              : 'Bronze medals: two participants can finish in 3rd place.'}
           </Text>
         </View>
 

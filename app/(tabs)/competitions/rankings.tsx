@@ -14,6 +14,7 @@ import {
   lockCompetitionRankings,
   reorderCompetitionDeSeeds,
 } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import type { CompetitionRankingEntry } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
@@ -104,9 +105,13 @@ export default function RankingsScreen() {
   const rankingRowRectsRef = useRef<Record<string, RankingRowRect>>({});
   const rankingDragRef = useRef<RankingDragState | null>(null);
   const rankingDropTargetRef = useRef<RankingDropTarget | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
@@ -120,31 +125,51 @@ export default function RankingsScreen() {
       }
       setErrorText(null);
 
-      const payload = await getCompetitionRankingsData({
-        userId: user.id,
-        competitionId,
-      });
+      try {
+        const payload = await withCompetitionReadTimeout(
+          () =>
+            getCompetitionRankingsData({
+              userId: user.id,
+              competitionId,
+            }),
+          { label: 'Competition rankings' }
+        );
 
-      if (!payload) {
-        setData(null);
-        setLoading(false);
-        setRefreshing(false);
-        setErrorText('You do not have access to this competition.');
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        if (!payload) {
+          setData(null);
+          setErrorText('You do not have access to this competition.');
+          rankingsVersionRef.current = '';
+          return null;
+        }
+
+        setData(payload);
+        const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rankings
+          .map(
+            (entry) =>
+              `${entry.participant.id}:${entry.ranking.rank}:${entry.ranking.wins}:${entry.ranking.losses}:${entry.ranking.indicator}:${entry.ranking.hits_scored}:${entry.ranking.hits_received}`
+          )
+          .join('|')}`;
+        rankingsVersionRef.current = version;
+        return version;
+      } catch (error) {
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        console.warn('Competition rankings load failed:', error);
+        setErrorText('Could not load rankings right now. Pull to retry.');
         rankingsVersionRef.current = '';
         return null;
+      } finally {
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-
-      setData(payload);
-      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rankings
-        .map(
-          (entry) =>
-            `${entry.participant.id}:${entry.ranking.rank}:${entry.ranking.wins}:${entry.ranking.losses}:${entry.ranking.indicator}:${entry.ranking.hits_scored}:${entry.ranking.hits_received}`
-        )
-        .join('|')}`;
-      rankingsVersionRef.current = version;
-      setLoading(false);
-      setRefreshing(false);
-      return version;
     },
     [competitionId, user?.id]
   );

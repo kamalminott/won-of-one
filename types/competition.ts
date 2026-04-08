@@ -1,6 +1,7 @@
 export type CompetitionWeapon = 'foil' | 'epee' | 'sabre';
 
 export type CompetitionFormat = 'poules_only' | 'poules_then_de' | 'de_only';
+export type CompetitionPlacementMode = 'none' | 'bronze_only';
 
 export type CompetitionStatus =
   | 'registration_open'
@@ -16,6 +17,7 @@ export type CompetitionRole = 'organiser' | 'participant';
 export type CompetitionParticipantStatus = 'active' | 'withdrawn' | 'dns';
 
 export type CompetitionStage = 'poule' | 'de';
+export type CompetitionDeBranch = 'main' | 'bronze';
 export type CompetitionScoringMode = 'remote' | 'manual';
 
 export type CompetitionMatchStatus =
@@ -44,6 +46,7 @@ export interface ClubCompetitionRecord {
   name: string;
   weapon: CompetitionWeapon;
   format: CompetitionFormat;
+  placement_mode: CompetitionPlacementMode;
   de_touch_limit: 10 | 15;
   status: CompetitionStatus;
   join_code: string;
@@ -97,11 +100,14 @@ export interface ClubCompetitionMatchRecord {
   id: string;
   competition_id: string;
   stage: CompetitionStage;
+  de_branch?: CompetitionDeBranch | null;
   round_label?: string | null;
   de_round_index?: number | null;
   de_match_number?: number | null;
   advances_to_match_id?: string | null;
   advances_to_slot?: 'a' | 'b' | null;
+  loser_advances_to_match_id?: string | null;
+  loser_advances_to_slot?: 'a' | 'b' | null;
   pool_id?: string | null;
   fencer_a_participant_id?: string | null;
   fencer_b_participant_id?: string | null;
@@ -225,6 +231,7 @@ export interface CompetitionDeTableauData {
   competition: ClubCompetitionRecord;
   currentUserRole: CompetitionRole;
   rounds: CompetitionDeRoundView[];
+  bronzeMatch: CompetitionDeMatchView | null;
   canGenerateDe: boolean;
 }
 

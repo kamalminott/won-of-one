@@ -10,12 +10,13 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import {
+  awardCompetitionDeMatchWalkover,
   generateCompetitionDeTableau,
   getCompetitionDeTableauData,
   overrideCompetitionDeMatchResult,
   resetCompetitionDeMatch,
 } from '@/lib/clubCompetitionService';
-import { runCompetitionWriteWithRetry } from '@/lib/competitionRetry';
+import { runCompetitionWriteWithRetry, withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { ClubCompetitionMatchRecord, CompetitionScoringMode } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -95,9 +96,13 @@ export default function DeTableauScreen() {
   const [overrideState, setOverrideState] = useState<OverrideState | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof getCompetitionDeTableauData>>>(null);
   const deVersionRef = useRef('');
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
@@ -111,35 +116,55 @@ export default function DeTableauScreen() {
       }
       setErrorText(null);
 
-      const payload = await getCompetitionDeTableauData({
-        userId: user.id,
-        competitionId,
-      });
+      try {
+        const payload = await withCompetitionReadTimeout(
+          () =>
+            getCompetitionDeTableauData({
+              userId: user.id,
+              competitionId,
+            }),
+          { label: 'Competition DE tableau' }
+        );
 
-      if (!payload) {
-        setData(null);
-        setLoading(false);
-        setRefreshing(false);
-        setErrorText('You do not have access to this competition.');
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        if (!payload) {
+          setData(null);
+          setErrorText('You do not have access to this competition.');
+          deVersionRef.current = '';
+          return null;
+        }
+
+        setData(payload);
+        const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rounds
+          .map((round) =>
+            round.matches
+              .map(
+                (matchView) =>
+                  `${matchView.match.id}:${matchView.match.status}:${matchView.match.score_a ?? ''}:${matchView.match.score_b ?? ''}:${matchView.match.updated_at}`
+              )
+              .join('|')
+          )
+          .join(';')}:${payload.bronzeMatch?.match.id ?? 'none'}:${payload.bronzeMatch?.match.status ?? 'none'}:${payload.bronzeMatch?.match.score_a ?? ''}:${payload.bronzeMatch?.match.score_b ?? ''}:${payload.bronzeMatch?.match.updated_at ?? ''}`;
+        deVersionRef.current = version;
+        return version;
+      } catch (error) {
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        console.warn('Competition DE tableau load failed:', error);
+        setErrorText('Could not load the DE tableau right now. Pull to retry.');
         deVersionRef.current = '';
         return null;
+      } finally {
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-
-      setData(payload);
-      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.rounds
-        .map((round) =>
-          round.matches
-            .map(
-              (matchView) =>
-                `${matchView.match.id}:${matchView.match.status}:${matchView.match.score_a ?? ''}:${matchView.match.score_b ?? ''}:${matchView.match.updated_at}`
-            )
-            .join('|')
-        )
-        .join(';')}`;
-      deVersionRef.current = version;
-      setLoading(false);
-      setRefreshing(false);
-      return version;
     },
     [competitionId, user?.id]
   );
@@ -226,6 +251,13 @@ export default function DeTableauScreen() {
         });
       });
     });
+    if (data?.bronzeMatch) {
+      map.set(data.bronzeMatch.match.id, {
+        canScore: data.bronzeMatch.canScore,
+        canOverride: data.bronzeMatch.canOverride,
+        canReset: data.bronzeMatch.canReset,
+      });
+    }
     return map;
   }, [data]);
 
@@ -246,6 +278,12 @@ export default function DeTableauScreen() {
         });
       });
     });
+    if (data?.bronzeMatch) {
+      map.set(data.bronzeMatch.match.id, {
+        scoreALabel: data.bronzeMatch.fencerA?.display_name ?? 'Fencer A',
+        scoreBLabel: data.bronzeMatch.fencerB?.display_name ?? 'Fencer B',
+      });
+    }
 
     return map;
   }, [data]);
@@ -524,6 +562,62 @@ export default function DeTableauScreen() {
     );
   };
 
+  const onAwardBronze = (
+    match: ClubCompetitionMatchRecord,
+    winnerParticipantId: string,
+    winnerLabel: string
+  ) => {
+    Alert.alert(
+      `Award bronze to ${winnerLabel}?`,
+      'Use this only when the bronze match will not be fenced. The selected fencer will finish 3rd and the other fencer will finish 4th.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Award Bronze',
+          onPress: async () => {
+            setActionKey(`award:${match.id}:${winnerParticipantId}`);
+            const execution = await runCompetitionWriteWithRetry(() =>
+              awardCompetitionDeMatchWalkover({
+                matchId: match.id,
+                winnerParticipantId,
+                reason: 'bronze_match_manual_award',
+              })
+            );
+            const result = execution.result;
+            setActionKey(null);
+
+            if (!result.ok) {
+              if (execution.exhausted) {
+                analytics.capture('competition_write_retry_exhausted', {
+                  competition_id: data?.competition.id ?? competitionId,
+                  match_id: match.id,
+                  stage: 'de',
+                  operation: 'award_bronze_match',
+                  attempts: execution.attempts,
+                });
+              }
+              setErrorText(result.message);
+              analytics.capture('competition_bronze_award_failed', {
+                competition_id: data?.competition.id ?? competitionId,
+                match_id: match.id,
+                winner_participant_id: winnerParticipantId,
+              });
+              return;
+            }
+
+            analytics.capture('competition_bronze_awarded', {
+              competition_id: result.data.competition_id,
+              match_id: result.data.id,
+              winner_participant_id: winnerParticipantId,
+            });
+
+            await loadData(false);
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -552,6 +646,33 @@ export default function DeTableauScreen() {
         scoreBLabel: 'Fencer B',
       }
     : null;
+  const bronzeMatchView = data.bronzeMatch;
+  const bronzeMatch = bronzeMatchView?.match ?? null;
+  const bronzeStatusLabel = bronzeMatch
+    ? COMPETITION_MATCH_STATUS_LABELS[bronzeMatch.status]
+    : null;
+  const bronzeHasScores = bronzeMatch?.score_a != null && bronzeMatch?.score_b != null;
+  const bronzeCanAward =
+    Boolean(
+      bronzeMatchView &&
+        data.currentUserRole === 'organiser' &&
+        data.competition.status !== 'finalised' &&
+        bronzeMatch &&
+        (bronzeMatch.status === 'pending' || bronzeMatch.status === 'live') &&
+        bronzeMatchView.fencerA &&
+        bronzeMatchView.fencerB
+    );
+  const bronzeHintText = bronzeMatch
+    ? bronzeMatch.status === 'live'
+      ? 'Live score updating'
+      : bronzeMatchView?.canScore
+        ? 'Tap to score or award a placement result'
+        : data.competition.status === 'finalised'
+          ? 'Read-only'
+          : bronzeHasScores
+            ? 'Result saved'
+            : 'Waiting for both semi-final losers'
+    : '';
 
   return (
     <View style={styles.container}>
@@ -1105,6 +1226,249 @@ export default function DeTableauScreen() {
             </View>
           </ScrollView>
         )}
+
+        {bronzeMatchView && bronzeMatch ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Bronze Match</Text>
+            <Text style={styles.metaText}>Placement bout for 3rd and 4th place.</Text>
+
+            {bronzeMatchView.canScore ? (
+              <Pressable
+                onPress={() => onPressMatch(bronzeMatch)}
+                style={[
+                  styles.treeNodeCard,
+                  styles.bronzeNodeCard,
+                  bronzeMatch.status === 'completed' && styles.treeNodeCardCompleted,
+                  bronzeMatch.status === 'live' && styles.treeNodeCardLive,
+                  styles.treeNodeCardScorable,
+                ]}
+              >
+                <View style={styles.treeNodeHeader}>
+                  <Text style={styles.bronzeSectionLabel}>Placement Branch</Text>
+                  <View
+                    style={[
+                      styles.treeStatusBadge,
+                      { backgroundColor: COMPETITION_MATCH_STATUS_COLORS[bronzeMatch.status] },
+                    ]}
+                  >
+                    <Text style={styles.treeStatusBadgeText}>{bronzeStatusLabel}</Text>
+                  </View>
+                </View>
+                <View style={styles.bronzeFencerList}>
+                  <View style={styles.bronzeFencerRow}>
+                    <View style={styles.bronzeFencerIdentity}>
+                      {bronzeMatchView.fencerASeedRank != null ? (
+                        <View style={styles.treeSeedBadge}>
+                          <Text style={styles.treeSeedBadgeText}>
+                            #{bronzeMatchView.fencerASeedRank}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.treeFencerName}>
+                        {bronzeMatchView.fencerA?.display_name ?? 'TBD'}
+                      </Text>
+                    </View>
+                    {bronzeHasScores ? (
+                      <View
+                        style={[
+                          styles.treeResultBadge,
+                          bronzeMatch.winner_participant_id === bronzeMatchView.fencerA?.id
+                            ? styles.treeResultBadgeWin
+                            : styles.treeResultBadgeLoss,
+                        ]}
+                      >
+                        <Text style={styles.treeResultBadgeText}>
+                          {bronzeMatch.winner_participant_id === bronzeMatchView.fencerA?.id ? 'V' : 'L'}
+                          {bronzeMatch.score_a}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.treeVsText}>vs</Text>
+                  <View style={styles.bronzeFencerRow}>
+                    <View style={styles.bronzeFencerIdentity}>
+                      {bronzeMatchView.fencerBSeedRank != null ? (
+                        <View style={styles.treeSeedBadge}>
+                          <Text style={styles.treeSeedBadgeText}>
+                            #{bronzeMatchView.fencerBSeedRank}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.treeFencerName}>
+                        {bronzeMatchView.fencerB?.display_name ?? 'TBD'}
+                      </Text>
+                    </View>
+                    {bronzeHasScores ? (
+                      <View
+                        style={[
+                          styles.treeResultBadge,
+                          bronzeMatch.winner_participant_id === bronzeMatchView.fencerB?.id
+                            ? styles.treeResultBadgeWin
+                            : styles.treeResultBadgeLoss,
+                        ]}
+                      >
+                        <Text style={styles.treeResultBadgeText}>
+                          {bronzeMatch.winner_participant_id === bronzeMatchView.fencerB?.id ? 'V' : 'L'}
+                          {bronzeMatch.score_b}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+                <View style={styles.treeNodeFooter}>
+                  <Text
+                    style={styles.treeHintText}
+                    numberOfLines={1}
+                  >
+                    {bronzeHintText}
+                  </Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View
+                style={[
+                  styles.treeNodeCard,
+                  styles.bronzeNodeCard,
+                  bronzeMatch.status === 'completed' && styles.treeNodeCardCompleted,
+                  bronzeMatch.status === 'live' && styles.treeNodeCardLive,
+                ]}
+              >
+                <View style={styles.treeNodeHeader}>
+                  <Text style={styles.bronzeSectionLabel}>Placement Branch</Text>
+                  <View
+                    style={[
+                      styles.treeStatusBadge,
+                      { backgroundColor: COMPETITION_MATCH_STATUS_COLORS[bronzeMatch.status] },
+                    ]}
+                  >
+                    <Text style={styles.treeStatusBadgeText}>{bronzeStatusLabel}</Text>
+                  </View>
+                </View>
+                <View style={styles.bronzeFencerList}>
+                  <View style={styles.bronzeFencerRow}>
+                    <View style={styles.bronzeFencerIdentity}>
+                      {bronzeMatchView.fencerASeedRank != null ? (
+                        <View style={styles.treeSeedBadge}>
+                          <Text style={styles.treeSeedBadgeText}>
+                            #{bronzeMatchView.fencerASeedRank}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.treeFencerName}>
+                        {bronzeMatchView.fencerA?.display_name ?? 'TBD'}
+                      </Text>
+                    </View>
+                    {bronzeHasScores ? (
+                      <View
+                        style={[
+                          styles.treeResultBadge,
+                          bronzeMatch.winner_participant_id === bronzeMatchView.fencerA?.id
+                            ? styles.treeResultBadgeWin
+                            : styles.treeResultBadgeLoss,
+                        ]}
+                      >
+                        <Text style={styles.treeResultBadgeText}>
+                          {bronzeMatch.winner_participant_id === bronzeMatchView.fencerA?.id ? 'V' : 'L'}
+                          {bronzeMatch.score_a}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.treeVsText}>vs</Text>
+                  <View style={styles.bronzeFencerRow}>
+                    <View style={styles.bronzeFencerIdentity}>
+                      {bronzeMatchView.fencerBSeedRank != null ? (
+                        <View style={styles.treeSeedBadge}>
+                          <Text style={styles.treeSeedBadgeText}>
+                            #{bronzeMatchView.fencerBSeedRank}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.treeFencerName}>
+                        {bronzeMatchView.fencerB?.display_name ?? 'TBD'}
+                      </Text>
+                    </View>
+                    {bronzeHasScores ? (
+                      <View
+                        style={[
+                          styles.treeResultBadge,
+                          bronzeMatch.winner_participant_id === bronzeMatchView.fencerB?.id
+                            ? styles.treeResultBadgeWin
+                            : styles.treeResultBadgeLoss,
+                        ]}
+                      >
+                        <Text style={styles.treeResultBadgeText}>
+                          {bronzeMatch.winner_participant_id === bronzeMatchView.fencerB?.id ? 'V' : 'L'}
+                          {bronzeMatch.score_b}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+                <View style={styles.treeNodeFooter}>
+                  <Text
+                    style={styles.treeHintText}
+                    numberOfLines={1}
+                  >
+                    {bronzeHintText}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {bronzeCanAward ? (
+              <View style={styles.bronzeResolveRow}>
+                <Pressable
+                  onPress={() =>
+                    bronzeMatchView.fencerA &&
+                    onAwardBronze(
+                      bronzeMatch,
+                      bronzeMatchView.fencerA.id,
+                      bronzeMatchView.fencerA.display_name
+                    )
+                  }
+                  disabled={
+                    !bronzeMatchView.fencerA ||
+                    actionKey === `award:${bronzeMatch.id}:${bronzeMatchView.fencerA?.id ?? ''}`
+                  }
+                  style={[styles.treeAdminButton, styles.bronzeResolveButton]}
+                >
+                  {actionKey === `award:${bronzeMatch.id}:${bronzeMatchView.fencerA?.id ?? ''}` ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.treeAdminButtonText}>
+                      Award {bronzeMatchView.fencerA?.display_name ?? 'Fencer A'}
+                    </Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    bronzeMatchView.fencerB &&
+                    onAwardBronze(
+                      bronzeMatch,
+                      bronzeMatchView.fencerB.id,
+                      bronzeMatchView.fencerB.display_name
+                    )
+                  }
+                  disabled={
+                    !bronzeMatchView.fencerB ||
+                    actionKey === `award:${bronzeMatch.id}:${bronzeMatchView.fencerB?.id ?? ''}`
+                  }
+                  style={[styles.treeAdminButton, styles.bronzeResolveButton]}
+                >
+                  {actionKey === `award:${bronzeMatch.id}:${bronzeMatchView.fencerB?.id ?? ''}` ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.treeAdminButtonText}>
+                      Award {bronzeMatchView.fencerB?.display_name ?? 'Fencer B'}
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -1370,6 +1734,10 @@ const styles = StyleSheet.create({
   treeNodeCardScorable: {
     borderColor: 'rgba(200,166,255,0.5)',
   },
+  bronzeNodeCard: {
+    minHeight: 160,
+    height: 'auto',
+  },
   treeNodeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1405,6 +1773,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 16,
+  },
+  bronzeSectionLabel: {
+    color: '#E9D7FF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  bronzeFencerList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  bronzeFencerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  bronzeFencerIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   treeSelfNamePill: {
     alignSelf: 'flex-start',
@@ -1526,6 +1916,14 @@ const styles = StyleSheet.create({
     color: '#E9D7FF',
     fontSize: 11,
     fontWeight: '700',
+  },
+  bronzeResolveRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  bronzeResolveButton: {
+    minHeight: 38,
   },
   treeConnector: {
     position: 'absolute',

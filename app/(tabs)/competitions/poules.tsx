@@ -15,6 +15,7 @@ import {
   lockCompetitionPoules,
   moveCompetitionPoolAssignment,
 } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type {
   ClubCompetitionMatchRecord,
@@ -167,9 +168,13 @@ export default function PoulesScreen() {
   const poolTabRectsRef = useRef<Record<string, { x: number; y: number; width: number; height: number }>>({});
   const assignmentDragRef = useRef<AssignmentDragState | null>(null);
   const assignmentDropTargetRef = useRef<AssignmentDropTarget | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+
       if (!user?.id || !competitionId) {
         setLoading(false);
         setData(null);
@@ -183,51 +188,71 @@ export default function PoulesScreen() {
       }
       setErrorText(null);
 
-      const payload = await getCompetitionPoulesData({
-        userId: user.id,
-        competitionId,
-      });
+      try {
+        const payload = await withCompetitionReadTimeout(
+          () =>
+            getCompetitionPoulesData({
+              userId: user.id,
+              competitionId,
+            }),
+          { label: 'Competition poules' }
+        );
 
-      if (!payload) {
-        setData(null);
-        setLoading(false);
-        setRefreshing(false);
-        setErrorText('You do not have access to this competition.');
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        if (!payload) {
+          setData(null);
+          setErrorText('You do not have access to this competition.');
+          dataVersionRef.current = '';
+          return null;
+        }
+
+        setData(payload);
+        const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.pools
+          .map((pool) => {
+            const participantsKey = pool.participants
+              .map((entry) => `${entry.participant.id}:${entry.assignment.position}`)
+              .join(',');
+            const matchesKey = pool.matches
+              .map(
+                (match) =>
+                  `${match.id}:${match.status}:${match.score_a ?? ''}:${match.score_b ?? ''}:${match.updated_at}`
+              )
+              .join(',');
+            return `${pool.pool.id}|${participantsKey}|${matchesKey}`;
+          })
+          .join(';')}`;
+        dataVersionRef.current = version;
+        setSelectedPoolId((previous) => {
+          if (payload.pools.length === 0) return null;
+          if (previous && payload.pools.some((pool) => pool.pool.id === previous)) {
+            return previous;
+          }
+          return payload.pools[0].pool.id;
+        });
+        if (!payload.canEditAssignments) {
+          setAssignmentEditMode(false);
+          setAssignmentDrag(null);
+          setAssignmentDropTarget(null);
+        }
+        return version;
+      } catch (error) {
+        if (loadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        console.warn('Competition poules load failed:', error);
+        setErrorText('Could not load poules right now. Pull to retry.');
         dataVersionRef.current = '';
         return null;
-      }
-
-      setData(payload);
-      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.pools
-        .map((pool) => {
-          const participantsKey = pool.participants
-            .map((entry) => `${entry.participant.id}:${entry.assignment.position}`)
-            .join(',');
-          const matchesKey = pool.matches
-            .map(
-              (match) =>
-                `${match.id}:${match.status}:${match.score_a ?? ''}:${match.score_b ?? ''}:${match.updated_at}`
-            )
-            .join(',');
-          return `${pool.pool.id}|${participantsKey}|${matchesKey}`;
-        })
-        .join(';')}`;
-      dataVersionRef.current = version;
-      setSelectedPoolId((previous) => {
-        if (payload.pools.length === 0) return null;
-        if (previous && payload.pools.some((pool) => pool.pool.id === previous)) {
-          return previous;
+      } finally {
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
         }
-        return payload.pools[0].pool.id;
-      });
-      if (!payload.canEditAssignments) {
-        setAssignmentEditMode(false);
-        setAssignmentDrag(null);
-        setAssignmentDropTarget(null);
       }
-      setLoading(false);
-      setRefreshing(false);
-      return version;
     },
     [competitionId, user?.id]
   );

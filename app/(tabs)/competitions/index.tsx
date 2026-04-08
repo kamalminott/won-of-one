@@ -13,6 +13,7 @@ import {
   listCompetitionSummariesForUser,
   restoreCompetitionForUser,
 } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { supabase } from '@/lib/supabase';
 import type { CompetitionSummary } from '@/types/competition';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,6 +55,7 @@ export default function CompetitionsHubScreen() {
   const realtimeReconnectRef = useRef(false);
   const realtimeDisconnectHandledRef = useRef(false);
   const [realtimeNonce, setRealtimeNonce] = useState(0);
+  const authWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadCompetitions = useCallback(async (options?: { forceBlockingLoader?: boolean }) => {
     const forceBlockingLoader = options?.forceBlockingLoader ?? false;
@@ -84,7 +86,10 @@ export default function CompetitionsHubScreen() {
       let summaries: Awaited<ReturnType<typeof listCompetitionSummariesForUser>>;
 
       try {
-        summaries = await listCompetitionSummariesForUser(user.id);
+        summaries = await withCompetitionReadTimeout(
+          () => listCompetitionSummariesForUser(user.id),
+          { label: 'Competition hub' }
+        );
       } catch (error) {
         if (!canAttemptRecovery) {
           throw error;
@@ -94,8 +99,14 @@ export default function CompetitionsHubScreen() {
           'Competition hub initial load failed; retrying after auth rehydrate:',
           error
         );
-        await retryAuthHydration();
-        summaries = await listCompetitionSummariesForUser(user.id);
+        await withCompetitionReadTimeout(
+          () => retryAuthHydration(),
+          { label: 'Competition auth recovery' }
+        );
+        summaries = await withCompetitionReadTimeout(
+          () => listCompetitionSummariesForUser(user.id),
+          { label: 'Competition hub' }
+        );
       }
 
       if (loadRequestIdRef.current !== requestId) {
@@ -123,6 +134,30 @@ export default function CompetitionsHubScreen() {
       }
     }
   }, [authLoading, authReady, retryAuthHydration, user?.id]);
+
+  useEffect(() => {
+    if (authWaitTimerRef.current) {
+      clearTimeout(authWaitTimerRef.current);
+      authWaitTimerRef.current = null;
+    }
+
+    if (!authLoading && authReady) {
+      return;
+    }
+
+    authWaitTimerRef.current = setTimeout(() => {
+      console.warn('Competition hub auth wait exceeded timeout');
+      setErrorText('Could not sync your session right now. Pull to retry.');
+      setLoading(false);
+    }, 12000);
+
+    return () => {
+      if (authWaitTimerRef.current) {
+        clearTimeout(authWaitTimerRef.current);
+        authWaitTimerRef.current = null;
+      }
+    };
+  }, [authLoading, authReady]);
 
   useFocusEffect(
     useCallback(() => {

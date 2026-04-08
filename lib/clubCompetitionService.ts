@@ -19,6 +19,7 @@ import type {
   CompetitionPoulesData,
   CompetitionPouleView,
   CompetitionOverviewData,
+  CompetitionPlacementMode,
   CompetitionParticipantsData,
   CompetitionSummary,
   CompetitionWeapon,
@@ -47,6 +48,7 @@ type CreateClubCompetitionInput = {
   name: string;
   weapon: CompetitionWeapon;
   format: CompetitionFormat;
+  placementMode: CompetitionPlacementMode;
   deTouchLimit: 10 | 15;
 };
 
@@ -309,15 +311,21 @@ const isDeRoundDependentStarted = (
   match: ClubCompetitionMatchRecord,
   matchById: Map<string, ClubCompetitionMatchRecord>
 ): boolean => {
-  if (!match.advances_to_match_id) return false;
-  const nextMatch = matchById.get(match.advances_to_match_id);
-  if (!nextMatch) return false;
-  return (
-    nextMatch.status !== 'pending' ||
-    nextMatch.score_a != null ||
-    nextMatch.score_b != null ||
-    nextMatch.winner_participant_id != null
-  );
+  const dependentMatchIds = [
+    match.advances_to_match_id ?? null,
+    match.loser_advances_to_match_id ?? null,
+  ].filter((value): value is string => Boolean(value));
+
+  return dependentMatchIds.some((dependentMatchId) => {
+    const nextMatch = matchById.get(dependentMatchId);
+    if (!nextMatch) return false;
+    return (
+      nextMatch.status !== 'pending' ||
+      nextMatch.score_a != null ||
+      nextMatch.score_b != null ||
+      nextMatch.winner_participant_id != null
+    );
+  });
 };
 
 const getPlacementBaseFromRoundLabel = (roundLabel: string | null | undefined): number | null => {
@@ -627,6 +635,7 @@ export const createClubCompetition = async (
         name,
         weapon: input.weapon,
         format: input.format,
+        placement_mode: input.placementMode,
         de_touch_limit: input.deTouchLimit,
         status: 'registration_open',
         join_code: joinCode,
@@ -799,11 +808,28 @@ export const getCompetitionOverviewData = async (input: {
   const participantCount = count ?? 0;
   const competitionRow = competition as ClubCompetitionRecord;
   const isReadOnly = competitionRow.status === 'finalised';
-  const canFinalise =
-    membership.role === 'organiser' &&
-    !isReadOnly &&
-    ((competitionRow.format === 'poules_only' && competitionRow.status === 'rankings_locked') ||
-      (competitionRow.format !== 'poules_only' && competitionRow.status === 'de_generated'));
+  let canFinalise = false;
+  if (membership.role === 'organiser' && !isReadOnly) {
+    if (competitionRow.format === 'poules_only' && competitionRow.status === 'rankings_locked') {
+      const { count: pendingPoulesCount } = await supabase
+        .from(CLUB_COMPETITION_MATCH_TABLE)
+        .select('*', { count: 'exact', head: true })
+        .eq('competition_id', input.competitionId)
+        .eq('stage', 'poule')
+        .in('status', ['pending', 'live']);
+
+      canFinalise = (pendingPoulesCount ?? 0) === 0;
+    } else if (competitionRow.format !== 'poules_only' && competitionRow.status === 'de_generated') {
+      const { count: pendingDeCount } = await supabase
+        .from(CLUB_COMPETITION_MATCH_TABLE)
+        .select('*', { count: 'exact', head: true })
+        .eq('competition_id', input.competitionId)
+        .eq('stage', 'de')
+        .in('status', ['pending', 'live']);
+
+      canFinalise = (pendingDeCount ?? 0) === 0;
+    }
+  }
 
   return {
     competition: competitionRow,
@@ -845,6 +871,44 @@ export const finaliseCompetition = async (input: {
       };
     }
     return { ok: false, message: 'Could not finalise competition right now.' };
+  }
+
+  const competition =
+    Array.isArray(data) && data.length > 0
+      ? (data[0] as ClubCompetitionRecord)
+      : (data as ClubCompetitionRecord);
+
+  if (!competition) {
+    return { ok: false, message: 'Updated competition was not returned.' };
+  }
+
+  return {
+    ok: true,
+    data: competition,
+  };
+};
+
+export const updateCompetitionPlacementMode = async (input: {
+  competitionId: string;
+  placementMode: CompetitionPlacementMode;
+}): Promise<CompetitionActionResult<ClubCompetitionRecord>> => {
+  const { data, error } = await supabase.rpc('update_club_competition_placement_mode', {
+    p_competition_id: input.competitionId,
+    p_placement_mode: input.placementMode,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('not_allowed')) {
+      return { ok: false, message: 'Only organisers can update placement matches.' };
+    }
+    if (message.includes('placement_matches_require_de')) {
+      return { ok: false, message: 'Placement matches require a competition format with DE.' };
+    }
+    if (message.includes('placement_mode_locked_after_de_generation')) {
+      return { ok: false, message: 'Placement matches lock once DE has been generated.' };
+    }
+    return { ok: false, message: 'Could not update placement matches right now.' };
   }
 
   const competition =
@@ -1371,6 +1435,12 @@ export const generateCompetitionDeTableau = async (input: {
     if (message.includes('not_enough_eligible_participants')) {
       return { ok: false, message: 'At least 2 non-withdrawn participants are required.' };
     }
+    if (message.includes('bronze_match_requires_four_participants')) {
+      return {
+        ok: false,
+        message: 'Bronze match mode requires at least 4 eligible participants before DE generation.',
+      };
+    }
     return { ok: false, message: 'Could not generate DE tableau right now.' };
   }
 
@@ -1443,11 +1513,7 @@ export const getCompetitionDeTableauData = async (input: {
 
   const matchRows = matches as ClubCompetitionMatchRecord[];
   const matchById = new Map(matchRows.map((match) => [match.id, match]));
-
-  const roundMap = new Map<number, CompetitionDeRoundView>();
-  matchRows.forEach((match) => {
-    const roundIndex = match.de_round_index ?? 0;
-    const roundLabel = match.round_label ?? `Round ${roundIndex}`;
+  const toMatchView = (match: ClubCompetitionMatchRecord): CompetitionDeMatchView => {
     const fencerA = match.fencer_a_participant_id
       ? participantById.get(match.fencer_a_participant_id) ?? null
       : null;
@@ -1456,7 +1522,7 @@ export const getCompetitionDeTableauData = async (input: {
       : null;
     const downstreamStarted = isDeRoundDependentStarted(match, matchById);
 
-    const matchView: CompetitionDeMatchView = {
+    return {
       match,
       fencerA,
       fencerB,
@@ -1480,6 +1546,17 @@ export const getCompetitionDeTableauData = async (input: {
         match.status === 'completed' &&
         !downstreamStarted,
     };
+  };
+
+  const mainBranchMatches = matchRows.filter((match) => (match.de_branch ?? 'main') !== 'bronze');
+  const bronzeMatchRow =
+    matchRows.find((match) => (match.de_branch ?? 'main') === 'bronze') ?? null;
+
+  const roundMap = new Map<number, CompetitionDeRoundView>();
+  mainBranchMatches.forEach((match) => {
+    const roundIndex = match.de_round_index ?? 0;
+    const roundLabel = match.round_label ?? `Round ${roundIndex}`;
+    const matchView = toMatchView(match);
 
     const existing = roundMap.get(roundIndex);
     if (existing) {
@@ -1514,6 +1591,7 @@ export const getCompetitionDeTableauData = async (input: {
     competition: overview.competition,
     currentUserRole: overview.role,
     rounds,
+    bronzeMatch: bronzeMatchRow ? toMatchView(bronzeMatchRow) : null,
     canGenerateDe,
   };
 };
@@ -1572,12 +1650,15 @@ export const getCompetitionFinalStandingsData = async (input: {
   }
 
   const deMatches = (deMatchesRaw ?? []) as ClubCompetitionMatchRecord[];
-  const deMatchCount = deMatches.length;
+  const mainBranchDeMatches = deMatches.filter((match) => (match.de_branch ?? 'main') !== 'bronze');
+  const bronzeMatch = deMatches.find((match) => (match.de_branch ?? 'main') === 'bronze') ?? null;
+  const mainDeMatchCount = mainBranchDeMatches.length;
   const deLoserPlacementByParticipantId = new Map<string, { position: number; roundLabel: string }>();
+  const semifinalLoserIds = new Set<string>();
   let championParticipantId: string | null = null;
   let finalistLoserParticipantId: string | null = null;
 
-  deMatches.forEach((match) => {
+  mainBranchDeMatches.forEach((match) => {
     if (
       match.status !== 'completed' ||
       !match.fencer_a_participant_id ||
@@ -1592,8 +1673,15 @@ export const getCompetitionFinalStandingsData = async (input: {
         ? match.fencer_b_participant_id
         : match.fencer_a_participant_id;
 
+    if (match.round_label === 'SF' && overview.competition.placement_mode === 'bronze_only') {
+      semifinalLoserIds.add(loserParticipantId);
+    }
+
     const placementBase = getPlacementBaseFromRoundLabel(match.round_label ?? null);
-    if (placementBase != null) {
+    if (
+      placementBase != null &&
+      !(overview.competition.placement_mode === 'bronze_only' && match.round_label === 'SF')
+    ) {
       const existing = deLoserPlacementByParticipantId.get(loserParticipantId);
       if (!existing || placementBase < existing.position) {
         deLoserPlacementByParticipantId.set(loserParticipantId, {
@@ -1618,6 +1706,98 @@ export const getCompetitionFinalStandingsData = async (input: {
     .sort((a, b) => a.display_name.localeCompare(b.display_name));
   const orderedParticipants = [...rankingOrderedParticipants, ...appendedParticipants];
 
+  const seedOrderedParticipantComparator = (
+    a: (typeof orderedParticipants)[number],
+    b: (typeof orderedParticipants)[number]
+  ) => {
+    const aSeed = seedRankByParticipantId.get(a.id) ?? null;
+    const bSeed = seedRankByParticipantId.get(b.id) ?? null;
+    if (aSeed != null && bSeed != null && aSeed !== bSeed) {
+      return aSeed - bSeed;
+    }
+    if (aSeed != null && bSeed == null) return -1;
+    if (aSeed == null && bSeed != null) return 1;
+    return a.display_name.localeCompare(b.display_name);
+  };
+
+  const exactPlacementByParticipantId = new Map<string, { position: number; roundLabel: string }>();
+  if (championParticipantId) {
+    exactPlacementByParticipantId.set(championParticipantId, {
+      position: 1,
+      roundLabel: 'Champion',
+    });
+  }
+  if (finalistLoserParticipantId) {
+    exactPlacementByParticipantId.set(finalistLoserParticipantId, {
+      position: 2,
+      roundLabel: 'F',
+    });
+  }
+
+  const pendingPlacementParticipantIds = new Set<string>();
+  if (overview.competition.placement_mode === 'bronze_only') {
+    const bronzeMatchReady =
+      bronzeMatch?.status === 'completed' &&
+      bronzeMatch.fencer_a_participant_id &&
+      bronzeMatch.fencer_b_participant_id &&
+      bronzeMatch.winner_participant_id;
+
+    if (bronzeMatchReady && bronzeMatch) {
+      const bronzeLoserParticipantId =
+        bronzeMatch.winner_participant_id === bronzeMatch.fencer_a_participant_id
+          ? bronzeMatch.fencer_b_participant_id
+          : bronzeMatch.fencer_a_participant_id;
+
+      exactPlacementByParticipantId.set(bronzeMatch.winner_participant_id!, {
+        position: 3,
+        roundLabel: 'Bronze',
+      });
+      exactPlacementByParticipantId.set(bronzeLoserParticipantId!, {
+        position: 4,
+        roundLabel: 'Bronze',
+      });
+    } else {
+      semifinalLoserIds.forEach((participantId) => {
+        pendingPlacementParticipantIds.add(participantId);
+      });
+    }
+  }
+
+  const rankingResolvedPlacementByParticipantId = new Map<
+    string,
+    { position: number; roundLabel: string }
+  >();
+  if (overview.competition.placement_mode === 'bronze_only') {
+    const participantsByBand = new Map<number, (typeof orderedParticipants)[number][]>();
+
+    orderedParticipants.forEach((participant) => {
+      const loserPlacement = deLoserPlacementByParticipantId.get(participant.id);
+      if (!loserPlacement) return;
+
+      const band = participantsByBand.get(loserPlacement.position);
+      if (band) {
+        band.push(participant);
+      } else {
+        participantsByBand.set(loserPlacement.position, [participant]);
+      }
+    });
+
+    Array.from(participantsByBand.entries())
+      .sort((a, b) => a[0] - b[0])
+      .forEach(([placementBase, bandParticipants]) => {
+        bandParticipants
+          .sort(seedOrderedParticipantComparator)
+          .forEach((participant, index) => {
+            const loserPlacement = deLoserPlacementByParticipantId.get(participant.id);
+            if (!loserPlacement) return;
+            rankingResolvedPlacementByParticipantId.set(participant.id, {
+              position: placementBase + index,
+              roundLabel: loserPlacement.roundLabel,
+            });
+          });
+      });
+  }
+
   const standings: CompetitionFinalStandingEntry[] = orderedParticipants.map((participant) => {
     const seedRank = seedRankByParticipantId.get(participant.id) ?? null;
     let position: number | null = null;
@@ -1627,9 +1807,9 @@ export const getCompetitionFinalStandingsData = async (input: {
 
     if (participant.status === 'dns') {
       positionLabel = 'DNS';
-    } else if (participant.status === 'withdrawn' && deMatchCount === 0) {
+    } else if (participant.status === 'withdrawn' && mainDeMatchCount === 0) {
       positionLabel = 'WD';
-    } else if (overview.competition.format === 'poules_only' || deMatchCount === 0) {
+    } else if (overview.competition.format === 'poules_only' || mainDeMatchCount === 0) {
       if (seedRank != null) {
         position = seedRank;
         positionLabel = `${seedRank}`;
@@ -1638,16 +1818,21 @@ export const getCompetitionFinalStandingsData = async (input: {
       } else {
         positionLabel = '-';
       }
-    } else if (participant.id === championParticipantId) {
-      position = 1;
-      positionLabel = '1';
-      deExitRoundLabel = 'Champion';
-    } else if (participant.id === finalistLoserParticipantId) {
-      position = 2;
-      positionLabel = '2';
-      deExitRoundLabel = 'F';
+    } else if (exactPlacementByParticipantId.has(participant.id)) {
+      const resolvedPlacement = exactPlacementByParticipantId.get(participant.id)!;
+      position = resolvedPlacement.position;
+      positionLabel = `${resolvedPlacement.position}`;
+      deExitRoundLabel = resolvedPlacement.roundLabel;
+    } else if (pendingPlacementParticipantIds.has(participant.id)) {
+      isPending = true;
+      positionLabel = 'TBD';
+      deExitRoundLabel = 'Bronze';
     } else {
-      const loserPlacement = deLoserPlacementByParticipantId.get(participant.id);
+      const loserPlacement =
+        overview.competition.placement_mode === 'bronze_only'
+          ? rankingResolvedPlacementByParticipantId.get(participant.id) ??
+            deLoserPlacementByParticipantId.get(participant.id)
+          : deLoserPlacementByParticipantId.get(participant.id);
       if (loserPlacement) {
         position = loserPlacement.position;
         positionLabel = `${loserPlacement.position}`;
@@ -1784,6 +1969,61 @@ export const resetCompetitionDeMatch = async (input: {
       return { ok: false, message: 'DE results are not editable in the current phase.' };
     }
     return { ok: false, message: 'Could not reset DE match right now.' };
+  }
+
+  const match =
+    Array.isArray(data) && data.length > 0
+      ? (data[0] as ClubCompetitionMatchRecord)
+      : (data as ClubCompetitionMatchRecord);
+
+  if (!match) {
+    return { ok: false, message: 'Updated match was not returned.' };
+  }
+
+  return {
+    ok: true,
+    data: match,
+  };
+};
+
+export const awardCompetitionDeMatchWalkover = async (input: {
+  matchId: string;
+  winnerParticipantId: string;
+  reason: string;
+}): Promise<CompetitionActionResult<ClubCompetitionMatchRecord>> => {
+  const { data, error } = await supabase.rpc('award_club_competition_de_match_walkover', {
+    p_match_id: input.matchId,
+    p_winner_participant_id: input.winnerParticipantId,
+    p_reason: input.reason,
+  });
+
+  if (error) {
+    const message = getSupabaseErrorMessage(error);
+    if (message.includes('not_allowed')) {
+      return { ok: false, message: 'Only organisers can award a placement result.' };
+    }
+    if (message.includes('placement_match_required')) {
+      return { ok: false, message: 'Manual awards are only available for the bronze placement match.' };
+    }
+    if (message.includes('match_not_ready')) {
+      return { ok: false, message: 'This match needs both fencers assigned first.' };
+    }
+    if (message.includes('winner_participant_not_in_match')) {
+      return { ok: false, message: 'The selected winner is not part of this match.' };
+    }
+    if (message.includes('match_already_completed')) {
+      return { ok: false, message: 'This match has already been completed.' };
+    }
+    if (message.includes('downstream_match_started')) {
+      return {
+        ok: false,
+        message: 'This match can no longer be changed because the next round has started.',
+      };
+    }
+    if (message.includes('de_not_editable_in_current_state')) {
+      return { ok: false, message: 'DE results are not editable in the current phase.' };
+    }
+    return { ok: false, message: 'Could not award this placement result right now.' };
   }
 
   const match =

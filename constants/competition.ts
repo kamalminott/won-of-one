@@ -1,4 +1,5 @@
 import type {
+  CompetitionPlacementMode,
   CompetitionFormat,
   CompetitionMatchStatus,
   CompetitionParticipantStatus,
@@ -76,6 +77,11 @@ export const COMPETITION_FORMAT_LABELS: Record<CompetitionFormat, string> = {
   poules_only: 'Poules only',
   poules_then_de: 'Poules + DE',
   de_only: 'DE only',
+};
+
+export const COMPETITION_PLACEMENT_MODE_LABELS: Record<CompetitionPlacementMode, string> = {
+  none: 'None',
+  bronze_only: 'Bronze match only',
 };
 
 export const DE_TOUCH_LIMIT_OPTIONS: (10 | 15)[] = [10, 15];

@@ -2,6 +2,7 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import {
   COMPETITION_FORMAT_LABELS,
+  COMPETITION_PLACEMENT_MODE_LABELS,
   COMPETITION_WEAPON_LABELS,
   DE_TOUCH_LIMIT_OPTIONS,
 } from '@/constants/competition';
@@ -9,7 +10,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { createClubCompetition } from '@/lib/clubCompetitionService';
 import { resolveCompetitionDisplayName } from '@/lib/competitionDisplayName';
-import type { CompetitionFormat, CompetitionWeapon } from '@/types/competition';
+import type {
+  CompetitionFormat,
+  CompetitionPlacementMode,
+  CompetitionWeapon,
+} from '@/types/competition';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
@@ -35,6 +40,7 @@ export default function CreateCompetitionScreen() {
   const [name, setName] = useState('');
   const [weapon, setWeapon] = useState<CompetitionWeapon>('foil');
   const [format, setFormat] = useState<CompetitionFormat>('poules_then_de');
+  const [placementMode, setPlacementMode] = useState<CompetitionPlacementMode>('none');
   const [deTouchLimit, setDeTouchLimit] = useState<10 | 15>(15);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -75,6 +81,7 @@ export default function CreateCompetitionScreen() {
       name: cleanedName,
       weapon,
       format,
+      placementMode: includesDeStage ? placementMode : 'none',
       deTouchLimit,
     });
 
@@ -89,6 +96,7 @@ export default function CreateCompetitionScreen() {
       competition_id: result.competition.id,
       weapon,
       format,
+      placement_mode: includesDeStage ? placementMode : 'none',
       de_touch_limit: deTouchLimit,
     });
 
@@ -168,6 +176,22 @@ export default function CreateCompetitionScreen() {
 
             {includesDeStage ? (
               <>
+                <Text style={styles.fieldLabel}>Placement Matches</Text>
+                <View style={styles.formatColumn}>
+                  {(['none', 'bronze_only'] as const).map((value) => (
+                    <OptionChip
+                      key={value}
+                      label={COMPETITION_PLACEMENT_MODE_LABELS[value]}
+                      active={placementMode === value}
+                      onPress={() => setPlacementMode(value)}
+                      fullWidth
+                    />
+                  ))}
+                </View>
+                <Text style={styles.helperText}>
+                  Bronze match only adds a separate bout for 3rd and 4th place.
+                </Text>
+
                 <Text style={styles.fieldLabel}>DE Touch Limit</Text>
                 <View style={styles.optionRow}>
                   {DE_TOUCH_LIMIT_OPTIONS.map((value) => (

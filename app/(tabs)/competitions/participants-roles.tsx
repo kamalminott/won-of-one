@@ -17,6 +17,7 @@ import {
   updateCompetitionParticipantRole,
   updateCompetitionParticipantWithdrawn,
 } from '@/lib/clubCompetitionService';
+import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { CompetitionParticipantView, CompetitionParticipantsData } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -68,8 +69,12 @@ export default function ParticipantsAndRolesScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const participantsVersionRef = useRef('');
+  const loadRequestIdRef = useRef(0);
 
   const loadData = useCallback(async (showSpinner = true): Promise<string | null> => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+
     if (!user?.id || !competitionId) {
       setLoading(false);
       setErrorText('Competition was not found.');
@@ -81,26 +86,48 @@ export default function ParticipantsAndRolesScreen() {
       setLoading(true);
     }
     setErrorText(null);
-    const payload = await getCompetitionParticipantsData({
-      userId: user.id,
-      competitionId,
-    });
 
-    if (!payload) {
-      setErrorText('You do not have access to this competition.');
-      setData(null);
-      setLoading(false);
+    try {
+      const payload = await withCompetitionReadTimeout(
+        () =>
+          getCompetitionParticipantsData({
+            userId: user.id,
+            competitionId,
+          }),
+        { label: 'Competition participants' }
+      );
+
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      if (!payload) {
+        setErrorText('You do not have access to this competition.');
+        setData(null);
+        participantsVersionRef.current = '';
+        return null;
+      }
+
+      setData(payload);
+      const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.participants
+        .map((participant) => `${participant.user_id}:${participant.role}:${participant.status}`)
+        .join('|')}`;
+      participantsVersionRef.current = version;
+      return version;
+    } catch (error) {
+      if (loadRequestIdRef.current !== requestId) {
+        return null;
+      }
+
+      console.warn('Competition participants load failed:', error);
+      setErrorText('Could not load competition participants right now. Pull to retry.');
       participantsVersionRef.current = '';
       return null;
+    } finally {
+      if (loadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-
-    setData(payload);
-    const version = `${payload.competition.updated_at}:${payload.competition.status}:${payload.participants
-      .map((participant) => `${participant.user_id}:${participant.role}:${participant.status}`)
-      .join('|')}`;
-    participantsVersionRef.current = version;
-    setLoading(false);
-    return version;
   }, [competitionId, user?.id]);
 
   const {
