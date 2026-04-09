@@ -283,11 +283,12 @@ export default function AddMatchScreen() {
       setSelectedCompetitionId(created.competition_id);
       setCompetitionName('');
       setShowCompetitionSuggestions(false);
-      analytics.capture('competition_created', {
+      analytics.capture('personal_competition_created', {
         competition_id: created.competition_id,
         weapon_type: created.weapon_type,
         event_date: created.event_date,
         source: 'add_match',
+        journey: 'personal',
         name_length: pendingName.length,
         is_new_competition: true,
       });

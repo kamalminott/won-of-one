@@ -92,12 +92,14 @@ export default function CreateCompetitionScreen() {
       return;
     }
 
-    analytics.capture('competition_created', {
+    analytics.capture('club_competition_created', {
       competition_id: result.competition.id,
-      weapon,
+      weapon_type: weapon,
       format,
       placement_mode: includesDeStage ? placementMode : 'none',
       de_touch_limit: deTouchLimit,
+      source: 'competitions_tab',
+      journey: 'club',
     });
 
     router.replace({
