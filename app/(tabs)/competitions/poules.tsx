@@ -16,6 +16,7 @@ import {
   moveCompetitionPoolAssignment,
 } from '@/lib/clubCompetitionService';
 import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type {
   ClubCompetitionMatchRecord,
@@ -145,7 +146,7 @@ export default function PoulesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const params = useLocalSearchParams<{ competitionId?: string }>();
   const competitionId = typeof params.competitionId === 'string' ? params.competitionId : '';
 
@@ -686,11 +687,24 @@ export default function PoulesScreen() {
     void endAssignmentDrag();
   }, [endAssignmentDrag]);
 
-  const navigateToScoring = (
+  const navigateToScoring = async (
     match: ClubCompetitionMatchRecord,
     mode: CompetitionScoringMode,
     selectedCompetitionId: string
   ) => {
+    const entryPoint = mode === 'remote' ? 'competition_poule_remote' : 'competition_poule_manual';
+    const access = await requireMatchScoringAccess({
+      user,
+      accessToken: session?.access_token ?? null,
+      entryPoint,
+      competitionMode: true,
+    });
+
+    if (!access.allowed) {
+      router.push(buildMatchPaywallRoute(entryPoint));
+      return;
+    }
+
     if (mode === 'remote') {
       router.push({
         pathname: '/(tabs)/remote',
@@ -726,7 +740,7 @@ export default function PoulesScreen() {
     }
 
     if (match.scoring_mode === 'remote' || match.scoring_mode === 'manual') {
-      navigateToScoring(match, match.scoring_mode, data.competition.id);
+      void navigateToScoring(match, match.scoring_mode, data.competition.id);
       return;
     }
 
@@ -750,7 +764,7 @@ export default function PoulesScreen() {
 
     const match = sheetMatch;
     setSheetMatch(null);
-    navigateToScoring(match, mode, data.competition.id);
+    void navigateToScoring(match, mode, data.competition.id);
   };
 
   if (loading) {

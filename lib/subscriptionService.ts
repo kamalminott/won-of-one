@@ -5,6 +5,7 @@
 
 import { Platform } from 'react-native';
 import type { User } from '@supabase/supabase-js';
+import { adminAccessService } from './adminAccessService';
 import { postgrestSelectOne } from './postgrest';
 import { supabase } from './supabase';
 import { analytics } from './analytics';
@@ -62,10 +63,48 @@ type PaywallPreviewStatus = {
   hasStarted: boolean;
 };
 
+export type FirstCompletedMatchMode = 'manual' | 'remote';
+
+export type MatchScoringAccessReason =
+  | 'no_user'
+  | 'subscription_active'
+  | 'trial_active'
+  | 'paywall_preview_active'
+  | 'manual_access'
+  | 'first_match_free'
+  | 'paywall_required'
+  | 'error';
+
+export type FirstMatchGateStatus = {
+  firstCompletedAt: Date | null;
+  firstCompletedMode: FirstCompletedMatchMode | null;
+  firstManualCompletedAt: Date | null;
+  firstRemoteCompletedAt: Date | null;
+  hasCompletedFirstMatch: boolean;
+};
+
+export type FirstMatchTrackingResult = {
+  status: FirstMatchGateStatus;
+  firstMatchRecorded: boolean;
+  firstModeRecorded: boolean;
+};
+
+export type MatchScoringAccessResult = {
+  allowed: boolean;
+  reason: MatchScoringAccessReason;
+  gateStatus: FirstMatchGateStatus;
+};
+
 const PAYWALL_PREVIEW_DEFAULT_DAYS = 3;
 const PAYWALL_PREVIEW_METADATA_KEYS = {
   startedAt: 'paywall_preview_started_at',
   endsAt: 'paywall_preview_ends_at',
+} as const;
+const FIRST_MATCH_GATE_METADATA_KEYS = {
+  firstCompletedAt: 'first_match_completed_at',
+  firstCompletedMode: 'first_match_completed_mode',
+  firstManualCompletedAt: 'first_manual_match_completed_at',
+  firstRemoteCompletedAt: 'first_remote_match_completed_at',
 } as const;
 
 const parseMetadataDate = (value: unknown): Date | null => {
@@ -90,6 +129,38 @@ const buildPaywallPreviewStatus = (
     isActive,
     isExpired,
     hasStarted,
+  };
+};
+
+const parseFirstCompletedMatchMode = (value: unknown): FirstCompletedMatchMode | null => {
+  if (value === 'manual' || value === 'remote') {
+    return value;
+  }
+  return null;
+};
+
+const buildFirstMatchGateStatus = (
+  metadata?: Record<string, any> | null
+): FirstMatchGateStatus => {
+  const firstCompletedAt = parseMetadataDate(
+    metadata?.[FIRST_MATCH_GATE_METADATA_KEYS.firstCompletedAt]
+  );
+  const firstCompletedMode = parseFirstCompletedMatchMode(
+    metadata?.[FIRST_MATCH_GATE_METADATA_KEYS.firstCompletedMode]
+  );
+  const firstManualCompletedAt = parseMetadataDate(
+    metadata?.[FIRST_MATCH_GATE_METADATA_KEYS.firstManualCompletedAt]
+  );
+  const firstRemoteCompletedAt = parseMetadataDate(
+    metadata?.[FIRST_MATCH_GATE_METADATA_KEYS.firstRemoteCompletedAt]
+  );
+
+  return {
+    firstCompletedAt,
+    firstCompletedMode,
+    firstManualCompletedAt,
+    firstRemoteCompletedAt,
+    hasCompletedFirstMatch: !!firstCompletedAt,
   };
 };
 
@@ -437,6 +508,12 @@ export const subscriptionService = {
     return buildPaywallPreviewStatus(metadata);
   },
 
+  getFirstMatchGateStatusFromMetadata(
+    metadata?: Record<string, any> | null
+  ): FirstMatchGateStatus {
+    return buildFirstMatchGateStatus(metadata);
+  },
+
   async getPaywallPreviewStatus(user?: User | null): Promise<PaywallPreviewStatus> {
     if (user?.user_metadata) {
       return buildPaywallPreviewStatus(user.user_metadata);
@@ -447,6 +524,136 @@ export const subscriptionService = {
     } catch (error) {
       console.error('❌ Error loading paywall preview status:', error);
       return buildPaywallPreviewStatus(null);
+    }
+  },
+
+  async getFirstMatchGateStatus(user?: User | null): Promise<FirstMatchGateStatus> {
+    if (user?.user_metadata) {
+      return buildFirstMatchGateStatus(user.user_metadata);
+    }
+    try {
+      const { data } = await supabase.auth.getUser();
+      return buildFirstMatchGateStatus(data.user?.user_metadata ?? null);
+    } catch (error) {
+      console.error('❌ Error loading first match gate status:', error);
+      return buildFirstMatchGateStatus(null);
+    }
+  },
+
+  async recordFirstCompletedMatch(
+    mode: FirstCompletedMatchMode,
+    user?: User | null
+  ): Promise<FirstMatchTrackingResult> {
+    const resolvedUser =
+      user ??
+      (await supabase.auth.getUser().then(result => result.data.user).catch(() => null));
+    if (!resolvedUser) {
+      return {
+        status: buildFirstMatchGateStatus(null),
+        firstMatchRecorded: false,
+        firstModeRecorded: false,
+      };
+    }
+
+    const existingMetadata = resolvedUser.user_metadata ?? {};
+    const existingStatus = buildFirstMatchGateStatus(existingMetadata);
+    const nextMetadata: Record<string, any> = {};
+    const nowIso = new Date().toISOString();
+    let firstMatchRecorded = false;
+    let firstModeRecorded = false;
+
+    if (!existingStatus.firstCompletedAt) {
+      nextMetadata[FIRST_MATCH_GATE_METADATA_KEYS.firstCompletedAt] = nowIso;
+      nextMetadata[FIRST_MATCH_GATE_METADATA_KEYS.firstCompletedMode] = mode;
+      firstMatchRecorded = true;
+    }
+
+    if (mode === 'manual' && !existingStatus.firstManualCompletedAt) {
+      nextMetadata[FIRST_MATCH_GATE_METADATA_KEYS.firstManualCompletedAt] = nowIso;
+      firstModeRecorded = true;
+    }
+
+    if (mode === 'remote' && !existingStatus.firstRemoteCompletedAt) {
+      nextMetadata[FIRST_MATCH_GATE_METADATA_KEYS.firstRemoteCompletedAt] = nowIso;
+      firstModeRecorded = true;
+    }
+
+    if (Object.keys(nextMetadata).length === 0) {
+      return {
+        status: existingStatus,
+        firstMatchRecorded: false,
+        firstModeRecorded: false,
+      };
+    }
+
+    const { data, error } = await supabase.auth.updateUser({
+      data: {
+        ...existingMetadata,
+        ...nextMetadata,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      status: buildFirstMatchGateStatus(data.user?.user_metadata ?? null),
+      firstMatchRecorded,
+      firstModeRecorded,
+    };
+  },
+
+  async getMatchScoringAccess(
+    user?: User | null,
+    accessToken?: string | null
+  ): Promise<MatchScoringAccessResult> {
+    if (!user?.id) {
+      return {
+        allowed: true,
+        reason: 'no_user',
+        gateStatus: buildFirstMatchGateStatus(null),
+      };
+    }
+
+    try {
+      await this.initialize(user.id);
+
+      const [subscriptionInfo, previewStatus, manualAccessStatus, gateStatus] = await Promise.all([
+        this.getSubscriptionInfo(),
+        this.getPaywallPreviewStatus(user),
+        adminAccessService.getCurrentManualAccessStatus(accessToken),
+        this.getFirstMatchGateStatus(user),
+      ]);
+
+      if (subscriptionInfo.isActive) {
+        return { allowed: true, reason: 'subscription_active', gateStatus };
+      }
+
+      if (subscriptionInfo.isTrial) {
+        return { allowed: true, reason: 'trial_active', gateStatus };
+      }
+
+      if (previewStatus.isActive) {
+        return { allowed: true, reason: 'paywall_preview_active', gateStatus };
+      }
+
+      if (manualAccessStatus) {
+        return { allowed: true, reason: 'manual_access', gateStatus };
+      }
+
+      if (!gateStatus.hasCompletedFirstMatch) {
+        return { allowed: true, reason: 'first_match_free', gateStatus };
+      }
+
+      return { allowed: false, reason: 'paywall_required', gateStatus };
+    } catch (error) {
+      console.error('❌ Error resolving match scoring access:', error);
+      return {
+        allowed: true,
+        reason: 'error',
+        gateStatus: buildFirstMatchGateStatus(user?.user_metadata ?? null),
+      };
     }
   },
 
@@ -513,7 +720,7 @@ export const subscriptionService = {
     }
 
     // Check if there are any expired entitlements
-    const allEntitlements = Object.values((customerInfo as any).entitlements?.all || {});
+    const allEntitlements = Object.values((customerInfo as any).entitlements?.all || {}) as any[];
     const hasExpired = allEntitlements.some((e: any) => !e.isActive);
     const expiredEntitlements = allEntitlements.filter((e: any) => !e.isActive);
     const mostRecentExpired = expiredEntitlements

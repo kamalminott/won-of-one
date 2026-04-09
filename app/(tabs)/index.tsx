@@ -3,7 +3,6 @@ import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
 import { sessionTracker } from '@/lib/sessionTracker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, InteractionManager, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -22,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { adminAccessService, type ManualAccessStatus } from '@/lib/adminAccessService';
 import { goalService, matchService, userService } from '@/lib/database';
 import { isPlaceholderDisplayName, resolveAuthMetadataDisplayName } from '@/lib/displayName';
-import { subscriptionService } from '@/lib/subscriptionService';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { Goal, SimpleGoal, SimpleMatch } from '@/types/database';
 
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
@@ -106,25 +105,6 @@ const profileCompletedStorageKey = (userId: string) => `profile_completed:${user
 const manualAccessMessageSeenStorageKey = (userId: string, grantId: string) =>
   `manual_access_message_seen:${userId}:${grantId}`;
 
-const getResolvedUpdateChannel = () => {
-  const manifest = Updates.manifest as
-    | {
-        extra?: {
-          expoConfig?: {
-            updates?: {
-              requestHeaders?: Record<string, string | undefined>;
-            };
-          };
-        };
-      }
-    | undefined;
-
-  const manifestChannel =
-    manifest?.extra?.expoConfig?.updates?.requestHeaders?.['expo-channel-name'] || null;
-
-  return Updates.channel || manifestChannel;
-};
-
 export default function HomeScreen() {
   // console.log('🏠 HomeScreen rendered!');
   const { width, height } = useWindowDimensions();
@@ -140,9 +120,6 @@ export default function HomeScreen() {
   } = useAuth();
   const params = useLocalSearchParams();
   const goalCardRef = useRef<GoalCardRef>(null);
-  const bypassPaywallRef = useRef(false);
-  const paywallNavigationRef = useRef(false);
-  const shouldAutoShowPaywall = getResolvedUpdateChannel() === 'production';
   const trimmedUserName = userName.trim();
   const authMetadataName = getAuthMetadataName(user)?.trim() || '';
   const metadataNameReady = !!authMetadataName && !isPlaceholderName(authMetadataName, user?.email);
@@ -645,14 +622,6 @@ export default function HomeScreen() {
   }, [user?.id, authReady, hasLoadedOnce]);
 
   useEffect(() => {
-    if (params.bypassPaywall === 'true') {
-      bypassPaywallRef.current = true;
-      paywallNavigationRef.current = false;
-      router.setParams({ bypassPaywall: undefined });
-    }
-  }, [params.bypassPaywall]);
-
-  useEffect(() => {
     if (params.profilePrompt === 'true') {
       if (!profilePromptDismissed) {
         setProfilePromptRequested(true);
@@ -660,87 +629,6 @@ export default function HomeScreen() {
       router.setParams({ profilePrompt: undefined });
     }
   }, [params.profilePrompt, profilePromptDismissed, router]);
-
-  useEffect(() => {
-    if (!user?.id) {
-      paywallNavigationRef.current = false;
-      bypassPaywallRef.current = false;
-    }
-  }, [user?.id]);
-
-  // Check subscription status and redirect to paywall if needed, but only while Home is focused.
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-
-      const checkSubscription = async () => {
-        if (!user || loading || !authReady) return;
-        if (!shouldAutoShowPaywall) return;
-        if (bypassPaywallRef.current) return;
-        if (paywallNavigationRef.current) return;
-
-        try {
-          await subscriptionService.initialize(user.id);
-
-          const [subscriptionInfo, previewStatus, manualAccessStatus] = await Promise.all([
-            subscriptionService.getSubscriptionInfo(),
-            subscriptionService.getPaywallPreviewStatus(user),
-            adminAccessService.getCurrentManualAccessStatus(session?.access_token),
-          ]);
-
-          if (cancelled) return;
-
-          // If user has no active subscription, trial, preview, or manual access, show paywall
-          if (
-            !subscriptionInfo.isActive &&
-            !subscriptionInfo.isTrial &&
-            !previewStatus.isActive &&
-            !manualAccessStatus
-          ) {
-            console.log('🔒 No active paid, trial, preview, or manual access; redirecting to paywall');
-            paywallNavigationRef.current = true;
-            router.replace('/paywall');
-          } else if (subscriptionInfo.isTrial && subscriptionInfo.expiresAt) {
-            // Check if trial has expired
-            const now = new Date();
-            const expiresAt = subscriptionInfo.expiresAt;
-            if (now >= expiresAt) {
-              if (previewStatus.isActive) {
-                console.log('✅ Preview active, allowing access');
-              } else if (manualAccessStatus) {
-                console.log('✅ Manual access active, allowing access');
-              } else {
-                console.log('⏰ Trial expired, redirecting to paywall');
-                paywallNavigationRef.current = true;
-                router.replace('/paywall');
-              }
-            } else {
-              console.log('✅ Trial active, allowing access');
-            }
-          } else if (manualAccessStatus) {
-            console.log('✅ Manual access active, allowing access');
-            paywallNavigationRef.current = false;
-          } else if (previewStatus.isActive) {
-            console.log('✅ Preview active, allowing access');
-            paywallNavigationRef.current = false;
-          } else if (subscriptionInfo.isActive) {
-            console.log('✅ Active subscription, allowing access');
-            paywallNavigationRef.current = false;
-          }
-        } catch (error) {
-          if (cancelled) return;
-          console.error('Error checking subscription:', error);
-          // On error, allow access (fail open) - you can change this to fail closed if preferred
-        }
-      };
-
-      void checkSubscription();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [user, loading, authReady, session?.access_token, shouldAutoShowPaywall])
-  );
 
   // Screen tracking and identify
   useEffect(() => {
@@ -1036,8 +924,20 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAddNewMatch = () => {
+  const handleAddNewMatch = async () => {
     analytics.quickActionClick({ action: 'log_match' });
+
+    const access = await requireMatchScoringAccess({
+      user,
+      accessToken: session?.access_token ?? null,
+      entryPoint: 'home_add_match',
+    });
+
+    if (!access.allowed) {
+      router.push(buildMatchPaywallRoute('home_add_match'));
+      return;
+    }
+
     router.push('/add-match');
   };
 

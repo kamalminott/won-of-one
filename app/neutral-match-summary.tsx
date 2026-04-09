@@ -1,6 +1,7 @@
 import { BounceBackTimeCard, LeadChangesCard, LongestRunCard, ScoreBasedLeadingCard, TimeLeadingCard } from '@/components';
 import { ScoreProgressionChart } from '@/components/ScoreProgressionChart';
 import { TouchesByPeriodChart } from '@/components/TouchesByPeriodChart';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { matchService } from '@/lib/database';
 import { offlineCache } from '@/lib/offlineCache';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
@@ -27,7 +28,7 @@ export default function NeutralMatchSummary() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const postgrestOptions = session?.access_token ? { accessToken: session?.access_token } : { allowAnon: true };
   
   const [matchData, setMatchData] = useState<any>(null);
@@ -70,6 +71,27 @@ export default function NeutralMatchSummary() {
   }>({ fencer1: 0, fencer2: 0 });
   const [showNewMatchModal, setShowNewMatchModal] = useState(false);
   const [localMatchEvents, setLocalMatchEvents] = useState<any[]>([]);
+
+  const startAnotherRemoteMatch = useCallback(
+    async (entryPoint: string, nextParams: Record<string, string>) => {
+      const access = await requireMatchScoringAccess({
+        user,
+        accessToken: session?.access_token ?? null,
+        entryPoint,
+      });
+
+      if (!access.allowed) {
+        router.push(buildMatchPaywallRoute(entryPoint));
+        return;
+      }
+
+      router.push({
+        pathname: '/(tabs)/remote',
+        params: nextParams,
+      });
+    },
+    [router, session?.access_token, user]
+  );
 
   const getResetSegmentValue = (value?: number | null) => {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -1857,7 +1879,7 @@ export default function NeutralMatchSummary() {
           <View style={styles.offlineBanner}>
             <Ionicons name="cloud-offline-outline" size={18} color="white" />
             <Text style={styles.offlineBannerText}>
-              Saved offline - Will sync when you're online
+              Saved offline - Will sync when you are online
             </Text>
           </View>
         )}
@@ -2136,14 +2158,11 @@ export default function NeutralMatchSummary() {
                     style={[styles.modalButton, styles.sameFencersButton]}
                     onPress={() => {
                       setShowNewMatchModal(false);
-                      router.push({
-                        pathname: '/(tabs)/remote',
-                        params: {
-                          resetAll: 'true',
-                          fencer1Name: fencer1Name as string,
-                          fencer2Name: fencer2Name as string,
-                          isAnonymous: 'true', // Flag to indicate anonymous match
-                        }
+                      void startAnotherRemoteMatch('neutral_summary_remote_same', {
+                        resetAll: 'true',
+                        fencer1Name: fencer1Name as string,
+                        fencer2Name: fencer2Name as string,
+                        isAnonymous: 'true',
                       });
                     }}
                   >
@@ -2171,15 +2190,12 @@ export default function NeutralMatchSummary() {
                             text: fencer1Name as string,
                             onPress: () => {
                               console.log(`🔄 User chose to keep first fencer (${fencer1Name})`);
-                              router.push({
-                                pathname: '/(tabs)/remote',
-                                params: {
-                                  resetAll: 'true',
-                                  resetNames: 'true', // Flag to reset names
-                                  keepToggleOff: 'true', // Flag to keep toggle off
-                                  changeOneFencer: 'true', // Flag to indicate changing one fencer
-                                  fencer1Name: fencer1Name as string, // Keep first fencer name
-                                }
+                              void startAnotherRemoteMatch('neutral_summary_remote_change_one', {
+                                resetAll: 'true',
+                                resetNames: 'true',
+                                keepToggleOff: 'true',
+                                changeOneFencer: 'true',
+                                fencer1Name: fencer1Name as string,
                               });
                             }
                           },
@@ -2187,15 +2203,12 @@ export default function NeutralMatchSummary() {
                             text: fencer2Name as string,
                             onPress: () => {
                               console.log(`🔄 User chose to keep second fencer (${fencer2Name})`);
-                              router.push({
-                                pathname: '/(tabs)/remote',
-                                params: {
-                                  resetAll: 'true',
-                                  resetNames: 'true', // Flag to reset names
-                                  keepToggleOff: 'true', // Flag to keep toggle off
-                                  changeOneFencer: 'true', // Flag to indicate changing one fencer
-                                  fencer2Name: fencer2Name as string, // Keep second fencer name
-                                }
+                              void startAnotherRemoteMatch('neutral_summary_remote_change_one', {
+                                resetAll: 'true',
+                                resetNames: 'true',
+                                keepToggleOff: 'true',
+                                changeOneFencer: 'true',
+                                fencer2Name: fencer2Name as string,
                               });
                             }
                           }
@@ -2211,13 +2224,10 @@ export default function NeutralMatchSummary() {
                     style={[styles.modalButton, styles.changeBothFencersButton]}
                     onPress={() => {
                       setShowNewMatchModal(false);
-                      router.push({
-                        pathname: '/(tabs)/remote',
-                        params: {
-                          resetAll: 'true',
-                          resetNames: 'true', // Flag to reset names
-                          keepToggleOff: 'true', // Flag to keep toggle off
-                        }
+                      void startAnotherRemoteMatch('neutral_summary_remote_change_both', {
+                        resetAll: 'true',
+                        resetNames: 'true',
+                        keepToggleOff: 'true',
                       });
                     }}
                   >

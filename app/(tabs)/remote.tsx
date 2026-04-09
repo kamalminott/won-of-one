@@ -2,7 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import useDynamicLayout from '@/hooks/useDynamicLayout';
 import { analytics } from '@/lib/analytics';
-import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
+import { trackFeatureFirstUse } from '@/lib/analyticsTracking';
 import {
   completeCompetitionMatchScore,
   getCompetitionMatchScoringData,
@@ -11,12 +11,14 @@ import {
   takeOverCompetitionMatchRemoteScoring,
 } from '@/lib/clubCompetitionService';
 import { fencingRemoteService, goalService, matchEventService, matchPeriodService, matchService, userService } from '@/lib/database';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { networkService } from '@/lib/networkService';
 import { offlineCache } from '@/lib/offlineCache';
 import { offlineRemoteService } from '@/lib/offlineRemoteService';
 import { postgrestSelect, postgrestSelectOne } from '@/lib/postgrest';
 import { sessionTracker } from '@/lib/sessionTracker';
 import { userProfileImageStorageKey, userProfileImageUrlStorageKey } from '@/lib/storageKeys';
+import { subscriptionService } from '@/lib/subscriptionService';
 import { supabase } from '@/lib/supabase';
 import { setupAutoSync } from '@/lib/syncManager';
 import type { CompetitionMatchScoringData } from '@/types/competition';
@@ -132,6 +134,30 @@ export default function RemoteScreen() {
     typeof params.competitionFrom === 'string' ? params.competitionFrom : 'poules';
   const isCompetitionRemoteMode =
     competitionMode && !!competitionIdParam && !!competitionMatchIdParam;
+
+  const recordRemoteCompletionMilestones = useCallback(async () => {
+    try {
+      const firstMatchTracking = await subscriptionService.recordFirstCompletedMatch(
+        'remote',
+        user
+      );
+
+      if (firstMatchTracking.firstMatchRecorded) {
+        analytics.capture('first_match_completed', {
+          mode: 'remote',
+          competition_mode: isCompetitionRemoteMode,
+        });
+      }
+
+      if (firstMatchTracking.firstModeRecorded) {
+        analytics.capture('first_remote_match_completed', {
+          competition_mode: isCompetitionRemoteMode,
+        });
+      }
+    } catch (trackingError) {
+      console.warn('Failed to record first remote match completion:', trackingError);
+    }
+  }, [isCompetitionRemoteMode, user]);
   
   // Responsive breakpoints for small screens - simplified for consistency across devices
   
@@ -1096,6 +1122,32 @@ export default function RemoteScreen() {
     useCallback(() => {
       analytics.screen('Remote');
     }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      const checkMatchStartAccess = async () => {
+        const entryPoint = isCompetitionRemoteMode ? 'competition_remote_score' : 'remote_tab';
+        const access = await requireMatchScoringAccess({
+          user,
+          accessToken,
+          entryPoint,
+          competitionMode: isCompetitionRemoteMode,
+        });
+
+        if (!cancelled && !access.allowed) {
+          router.replace(buildMatchPaywallRoute(entryPoint));
+        }
+      };
+
+      void checkMatchStartAccess();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [accessToken, isCompetitionRemoteMode, router, user])
   );
 
   // Handle true focus/blur transitions for resume persistence
@@ -2533,6 +2585,20 @@ export default function RemoteScreen() {
         setCompetitionErrorText(null);
         setCompetitionInfoText(null);
 
+        const access = await requireMatchScoringAccess({
+          user,
+          accessToken,
+          entryPoint: 'competition_remote_score',
+          competitionMode: true,
+        });
+
+        if (!access.allowed) {
+          if (!cancelled) {
+            router.replace(buildMatchPaywallRoute('competition_remote_score'));
+          }
+          return;
+        }
+
         const initialData = await getCompetitionMatchScoringData({
           userId: user.id,
           competitionId: competitionIdParam,
@@ -2594,8 +2660,10 @@ export default function RemoteScreen() {
       competitionIdParam,
       competitionMatchIdParam,
       isCompetitionRemoteMode,
+      accessToken,
+      router,
       updateCompetitionScoringState,
-      user?.id,
+      user,
     ])
   );
 
@@ -4097,7 +4165,7 @@ export default function RemoteScreen() {
           match_id: currentMatchPeriod.match_id,
         });
         sessionTracker.incrementMatches();
-        void trackOnce('first_match_completed', { mode: 'remote' }, user?.id);
+        await recordRemoteCompletionMilestones();
         
         // Update goals if user is registered and match has a result
         if (user?.id && result) {
@@ -4354,7 +4422,7 @@ export default function RemoteScreen() {
         match_id: matchId || undefined,
       });
       sessionTracker.incrementMatches();
-      void trackOnce('first_match_completed', { mode: 'remote' }, user?.id);
+      await recordRemoteCompletionMilestones();
 
       // Get current fencer names based on positions (handles swaps correctly)
       // (leftEntity/rightEntity already computed above)

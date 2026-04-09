@@ -5,6 +5,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { competitionService, matchService } from '@/lib/database';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { Competition, SimpleMatch } from '@/types/database';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -927,8 +928,20 @@ export default function CompetitionDetailScreen() {
     setShowDatePicker(false);
   };
 
-  const handleAddMatch = () => {
+  const handleAddMatch = async () => {
     if (!competition) return;
+
+    const access = await requireMatchScoringAccess({
+      user,
+      accessToken: session?.access_token ?? null,
+      entryPoint: 'legacy_competition_add_match',
+    });
+
+    if (!access.allowed) {
+      router.push(buildMatchPaywallRoute('legacy_competition_add_match'));
+      return;
+    }
+
     const phase = latestMatch?.competitionPhase === 'DE' ? 'DE' : 'POULE';
     const deRound = latestMatch?.competitionRound || undefined;
     router.push({

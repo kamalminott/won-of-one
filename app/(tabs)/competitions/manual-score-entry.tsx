@@ -15,6 +15,8 @@ import {
   takeOverCompetitionMatchRemoteScoring,
 } from '@/lib/clubCompetitionService';
 import { runCompetitionWriteWithRetry, withCompetitionReadTimeout } from '@/lib/competitionRetry';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
+import { subscriptionService } from '@/lib/subscriptionService';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { CompetitionMatchScoringData, CompetitionScoringMode } from '@/types/competition';
 import NetInfo from '@react-native-community/netinfo';
@@ -53,7 +55,7 @@ export default function ManualScoreEntryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const params = useLocalSearchParams<{
     competitionId?: string;
     matchId?: string;
@@ -97,6 +99,22 @@ export default function ManualScoreEntryScreen() {
     setInfoText(null);
 
     try {
+      const access = await requireMatchScoringAccess({
+        user,
+        accessToken: session?.access_token ?? null,
+        entryPoint: routeMode === 'remote' ? 'competition_manual_score_remote' : 'competition_manual_score_manual',
+        competitionMode: true,
+      });
+
+      if (!access.allowed) {
+        router.replace(
+          buildMatchPaywallRoute(
+            routeMode === 'remote' ? 'competition_manual_score_remote' : 'competition_manual_score_manual'
+          )
+        );
+        return null;
+      }
+
       const initial = await withCompetitionReadTimeout(
         () =>
           getCompetitionMatchScoringData({
@@ -205,7 +223,7 @@ export default function ManualScoreEntryScreen() {
         setLoading(false);
       }
     }
-  }, [competitionId, matchId, routeMode, user?.id]);
+  }, [competitionId, matchId, routeMode, router, session?.access_token, user]);
 
   const {
     bannerText: realtimeBannerText,
@@ -373,6 +391,34 @@ export default function ManualScoreEntryScreen() {
         match_id: matchId,
         stage: data.match.stage,
       });
+    }
+
+    try {
+      const completionMode = scoringMode === 'remote' ? 'remote' : 'manual';
+      const firstMatchTracking = await subscriptionService.recordFirstCompletedMatch(
+        completionMode,
+        user
+      );
+
+      if (firstMatchTracking.firstMatchRecorded) {
+        analytics.capture('first_match_completed', {
+          mode: completionMode,
+          competition_mode: true,
+        });
+      }
+
+      if (firstMatchTracking.firstModeRecorded) {
+        analytics.capture(
+          completionMode === 'remote'
+            ? 'first_remote_match_completed'
+            : 'first_manual_match_completed',
+          {
+            competition_mode: true,
+          }
+        );
+      }
+    } catch (trackingError) {
+      console.warn('Failed to record first competition match completion:', trackingError);
     }
 
     showSuccessToast('Score saved');

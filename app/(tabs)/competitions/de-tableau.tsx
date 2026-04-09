@@ -17,6 +17,7 @@ import {
   resetCompetitionDeMatch,
 } from '@/lib/clubCompetitionService';
 import { runCompetitionWriteWithRetry, withCompetitionReadTimeout } from '@/lib/competitionRetry';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
 import { useCompetitionRealtime } from '@/hooks/useCompetitionRealtime';
 import type { ClubCompetitionMatchRecord, CompetitionScoringMode } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -84,7 +85,7 @@ export default function DeTableauScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const params = useLocalSearchParams<{ competitionId?: string }>();
   const competitionId = typeof params.competitionId === 'string' ? params.competitionId : '';
 
@@ -204,11 +205,24 @@ export default function DeTableauScreen() {
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
   const contentBottomPadding = tabBarOverlayHeight + 20;
 
-  const navigateToScoring = (
+  const navigateToScoring = async (
     match: ClubCompetitionMatchRecord,
     mode: CompetitionScoringMode,
     selectedCompetitionId: string
   ) => {
+    const entryPoint = mode === 'remote' ? 'competition_de_remote' : 'competition_de_manual';
+    const access = await requireMatchScoringAccess({
+      user,
+      accessToken: session?.access_token ?? null,
+      entryPoint,
+      competitionMode: true,
+    });
+
+    if (!access.allowed) {
+      router.push(buildMatchPaywallRoute(entryPoint));
+      return;
+    }
+
     if (mode === 'remote') {
       router.push({
         pathname: '/(tabs)/remote',
@@ -371,7 +385,7 @@ export default function DeTableauScreen() {
     }
 
     if (match.scoring_mode === 'remote' || match.scoring_mode === 'manual') {
-      navigateToScoring(match, match.scoring_mode, data.competition.id);
+      void navigateToScoring(match, match.scoring_mode, data.competition.id);
       return;
     }
 
@@ -395,7 +409,7 @@ export default function DeTableauScreen() {
 
     const targetMatch = sheetMatch;
     setSheetMatch(null);
-    navigateToScoring(targetMatch, mode, data.competition.id);
+    void navigateToScoring(targetMatch, mode, data.competition.id);
   };
 
   const onGenerateDe = () => {

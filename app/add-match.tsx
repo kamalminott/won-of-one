@@ -2,8 +2,10 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
-import { trackFeatureFirstUse, trackOnce } from '@/lib/analyticsTracking';
+import { trackFeatureFirstUse } from '@/lib/analyticsTracking';
 import { competitionService, goalService, matchService, userService } from '@/lib/database';
+import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
+import { subscriptionService } from '@/lib/subscriptionService';
 import type { ManualMatchSaveError } from '@/lib/database';
 import type { Competition } from '@/types/database';
 import { sessionTracker } from '@/lib/sessionTracker';
@@ -54,6 +56,34 @@ export default function AddMatchScreen() {
   // Check if we're in edit mode
   const isEditMode = params.editMode === 'true';
   const currentMatchId = typeof params.matchId === 'string' ? params.matchId : null;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isEditMode) {
+        return () => {};
+      }
+
+      let cancelled = false;
+
+      const checkMatchStartAccess = async () => {
+        const access = await requireMatchScoringAccess({
+          user,
+          accessToken: session?.access_token ?? null,
+          entryPoint: 'manual_add_match',
+        });
+
+        if (!cancelled && !access.allowed) {
+          router.replace(buildMatchPaywallRoute('manual_add_match'));
+        }
+      };
+
+      void checkMatchStartAccess();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [isEditMode, session?.access_token, user])
+  );
   
   // Parse date/time from params with fallbacks
   const parseInitialDateTime = () => {
@@ -1027,7 +1057,27 @@ export default function AddMatchScreen() {
             match_id: savedMatch.match_id,
           });
           sessionTracker.incrementMatches();
-          void trackOnce('first_match_completed', { mode: 'manual' }, user?.id);
+          try {
+            const firstMatchTracking = await subscriptionService.recordFirstCompletedMatch(
+              'manual',
+              user
+            );
+
+            if (firstMatchTracking.firstMatchRecorded) {
+              analytics.capture('first_match_completed', {
+                mode: 'manual',
+                competition_mode: event === 'Competition',
+              });
+            }
+
+            if (firstMatchTracking.firstModeRecorded) {
+              analytics.capture('first_manual_match_completed', {
+                competition_mode: event === 'Competition',
+              });
+            }
+          } catch (trackingError) {
+            console.warn('Failed to record first manual match completion:', trackingError);
+          }
         }
         
         const returnCompetitionId =
