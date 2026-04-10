@@ -251,3 +251,30 @@ export interface WeeklySessionLog {
   notes?: string;
   created_at: string;
 }
+
+export interface WeeklyLeaderboardEntry {
+  rank: number;
+  userId: string;
+  displayName: string;
+  profileImageUrl?: string | null;
+  wins: number;
+  matchesPlayed: number;
+  latestActivityAt?: string | null;
+}
+
+export interface WeeklyLeaderboardMetricData {
+  entries: WeeklyLeaderboardEntry[];
+  currentUserEntry: WeeklyLeaderboardEntry | null;
+}
+
+export interface WeeklyLeaderboardData {
+  weekStartUtc: string;
+  weekEndUtc: string;
+  nextResetUtc: string;
+  totalRankedUsers: number;
+  winsLeaderboard: WeeklyLeaderboardMetricData;
+  matchesLeaderboard: WeeklyLeaderboardMetricData;
+  allTimeTotalRankedUsers: number;
+  allTimeWinsLeaderboard: WeeklyLeaderboardMetricData;
+  allTimeMatchesLeaderboard: WeeklyLeaderboardMetricData;
+}

@@ -10,10 +10,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddNewMatchButton } from '@/components/AddNewMatchButton';
 import { GoalCard, GoalCardRef } from '@/components/GoalCard';
-import { ProgressCard } from '@/components/ProgressCard';
 import { RecentMatches } from '@/components/RecentMatches';
 import { SummaryCard } from '@/components/SummaryCard';
 import { UserHeader } from '@/components/UserHeader';
+import { WeeklyLeaderboardCard } from '@/components/WeeklyLeaderboardCard';
 import { CompleteProfilePrompt } from '@/components/CompleteProfilePrompt';
 import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { Colors } from '@/constants/Colors';
@@ -22,7 +22,7 @@ import { adminAccessService, type ManualAccessStatus } from '@/lib/adminAccessSe
 import { goalService, matchService, userService } from '@/lib/database';
 import { isPlaceholderDisplayName, resolveAuthMetadataDisplayName } from '@/lib/displayName';
 import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
-import { Goal, SimpleGoal, SimpleMatch } from '@/types/database';
+import { Goal, SimpleGoal, SimpleMatch, WeeklyLeaderboardData } from '@/types/database';
 
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
 const PROFILE_CHECK_TIMEOUT_MS = 5000;
@@ -150,6 +150,8 @@ export default function HomeScreen() {
   const [winRate, setWinRate] = useState<number>(0);
   const [trainingTime, setTrainingTime] = useState<{ value: string; label: string }>({ value: '0m', label: 'Minutes Trained' });
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
+  const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<WeeklyLeaderboardData | null>(null);
+  const [weeklyLeaderboardLoaded, setWeeklyLeaderboardLoaded] = useState(false);
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
   const [profilePromptRequested, setProfilePromptRequested] = useState(false);
   const [manualAccessBannerMessage, setManualAccessBannerMessage] = useState<string | null>(null);
@@ -249,7 +251,7 @@ export default function HomeScreen() {
     if (!user || loading) return;
 
     let cancelled = false;
-    const cacheKey = `home_cache_v2:${user.id}`;
+    const cacheKey = `home_cache_v3:${user.id}`;
 
     (async () => {
       try {
@@ -263,9 +265,10 @@ export default function HomeScreen() {
           winRate: number;
           trainingTime: { value: string; label: string };
           matchCounts: { totalMatches: number; winMatches: number } | null;
+          weeklyLeaderboard: WeeklyLeaderboardData | null;
         }>;
 
-        if (cached.version !== 2) return;
+        if (cached.version !== 3) return;
         if (liveDataAppliedRef.current) return;
 
         if (Array.isArray(cached.matches)) setMatches(cached.matches);
@@ -273,6 +276,10 @@ export default function HomeScreen() {
         if (typeof cached.winRate === 'number') setWinRate(cached.winRate);
         if (cached.trainingTime?.value && cached.trainingTime?.label) setTrainingTime(cached.trainingTime);
         if (cached.matchCounts) setMatchCounts(cached.matchCounts);
+        if (cached.weeklyLeaderboard !== undefined) {
+          setWeeklyLeaderboard(cached.weeklyLeaderboard);
+          setWeeklyLeaderboardLoaded(true);
+        }
 
         setHasLoadedOnce(true);
       } catch (error) {
@@ -313,6 +320,8 @@ export default function HomeScreen() {
     setShowCompleteProfilePrompt(false);
     setUserNameWaitTimedOut(false);
     setProfilePromptRequested(false);
+    setWeeklyLeaderboard(null);
+    setWeeklyLeaderboardLoaded(false);
   }, [user?.id]);
 
   useEffect(() => {
@@ -474,13 +483,18 @@ export default function HomeScreen() {
 
     const userId = user.id;
     const userEmail = user.email || '';
-    const cacheKey = `home_cache_v2:${userId}`;
+    const cacheKey = `home_cache_v3:${userId}`;
 
     try {
       // Fetch lightweight stats/goals first (small payload)
-      const [goalsData, countsData] = await Promise.all([
+      const [goalsData, countsData, leaderboardData] = await Promise.all([
         safeRequest('home_active_goals', goalService.getActiveGoals(userId, session?.access_token), userId),
         safeRequest('home_match_counts', matchService.getMatchCounts(userId, session?.access_token), userId),
+        safeRequest(
+          'home_weekly_leaderboard',
+          matchService.getGlobalWeeklyLeaderboard(3, session?.access_token),
+          userId
+        ),
       ]);
 
       const goalsForCalc = goalsData ?? [];
@@ -499,9 +513,11 @@ export default function HomeScreen() {
         setMatchCounts(countsData);
         setWinRate(calculatedWinRate);
       }
+      setWeeklyLeaderboard(leaderboardData ?? null);
+      setWeeklyLeaderboardLoaded(true);
 
       setHasLoadedOnce(true);
-      if (goalsData || countsData) {
+      if (goalsData || countsData || leaderboardData) {
         liveDataAppliedRef.current = true;
       }
 
@@ -520,13 +536,14 @@ export default function HomeScreen() {
       if (matchesData && goalsData && countsData) {
         void AsyncStorage.setItem(
           cacheKey,
-          JSON.stringify({
-            version: 2,
+              JSON.stringify({
+            version: 3,
             matches: matchesData,
             goals: goalsData,
             winRate: calculatedWinRate,
             trainingTime: trainingTimeRef.current,
             matchCounts: countsData,
+            weeklyLeaderboard: leaderboardData ?? null,
           })
         ).catch(error => console.warn('Failed to persist Home cache:', error));
       }
@@ -578,12 +595,13 @@ export default function HomeScreen() {
               void AsyncStorage.setItem(
                 cacheKey,
                 JSON.stringify({
-                  version: 2,
+                  version: 3,
                   matches: matchesData,
                   goals: goalsData,
                   winRate: calculatedWinRate,
                   trainingTime: formattedTrainingTime,
                   matchCounts: countsData,
+                  weeklyLeaderboard: leaderboardData ?? null,
                 })
               ).catch(error => console.warn('Failed to persist Home cache:', error));
             }
@@ -893,6 +911,13 @@ export default function HomeScreen() {
     router.push('/match-history');
   };
 
+  const handleOpenWeeklyLeaderboard = () => {
+    analytics.capture('weekly_leaderboard_opened', {
+      entry_point: 'home',
+    });
+    router.push('/weekly-leaderboard');
+  };
+
   const calculateDaysLeft = (deadline: string): number => {
     const today = new Date();
     const goalDeadline = new Date(deadline);
@@ -974,6 +999,7 @@ export default function HomeScreen() {
     },
     progressCardContainer: {
       marginTop: height * 0.005,
+      marginBottom: height * 0.005,
     },
     addButtonContainer: {
       alignItems: 'flex-end',
@@ -1092,8 +1118,10 @@ export default function HomeScreen() {
               </View>
             ) : null}
             <View style={styles.progressCardContainer}>
-              <ProgressCard
-                activityType="Footwork"
+              <WeeklyLeaderboardCard
+                leaderboard={weeklyLeaderboard}
+                isLoading={!weeklyLeaderboardLoaded}
+                onPress={handleOpenWeeklyLeaderboard}
               />
             </View>
             

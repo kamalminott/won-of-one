@@ -10,7 +10,7 @@ import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import React, { useEffect } from 'react';
-import { AppState, Platform, StatusBar as RNStatusBar } from 'react-native';
+import { AppState, AppStateStatus, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Safely import expo-updates for automatic update checking
@@ -141,7 +141,7 @@ export default function RootLayout() {
   React.useEffect(() => {
     let currentState = AppState.currentState;
 
-    const handleAppStateChange = (nextState: string) => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
       if (currentState === 'active' && (nextState === 'inactive' || nextState === 'background')) {
         sessionTracker.endSession(nextState);
       } else if ((currentState === 'inactive' || currentState === 'background') && nextState === 'active') {
@@ -478,6 +478,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="add-match" options={{ headerShown: false }} />
           <Stack.Screen name="match-history" options={{ headerShown: false }} />
+          <Stack.Screen name="weekly-leaderboard" options={{ headerShown: false }} />
           <Stack.Screen name="match-history-details" options={{ headerShown: false }} />
           <Stack.Screen name="match-summary" options={{ headerShown: false }} />
           <Stack.Screen name="neutral-match-summary" options={{ headerShown: false }} />

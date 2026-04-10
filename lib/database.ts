@@ -2,7 +2,7 @@ import {
     AppUser, Competition, DiaryEntry, Drill, Equipment,
     FencingRemote, Goal, Match, MatchPeriod,
     MatchApproval, MatchEvent,
-    SimpleGoal, SimpleMatch
+    SimpleGoal, SimpleMatch, WeeklyLeaderboardData, WeeklyLeaderboardEntry, WeeklyLeaderboardMetricData
 } from '@/types/database';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -260,6 +260,99 @@ const setAuthSessionCache = (session: Session | null) => {
 const resolveAccessToken = (accessToken?: string | null) => {
   if (accessToken) return accessToken;
   return getCachedAuthSession()?.access_token ?? null;
+};
+
+type WeeklyLeaderboardEntryRpcRow = {
+  rank?: number | null;
+  user_id?: string | null;
+  display_name?: string | null;
+  profile_image_url?: string | null;
+  wins?: number | null;
+  matches_played?: number | null;
+  latest_activity_at?: string | null;
+};
+
+type WeeklyLeaderboardRpcPayload = {
+  week_start_utc?: string | null;
+  week_end_utc?: string | null;
+  next_reset_utc?: string | null;
+  total_ranked_users?: number | null;
+  all_time_total_ranked_users?: number | null;
+  wins_leaderboard?: {
+    entries?: WeeklyLeaderboardEntryRpcRow[] | null;
+    current_user_entry?: WeeklyLeaderboardEntryRpcRow | null;
+  } | null;
+  matches_leaderboard?: {
+    entries?: WeeklyLeaderboardEntryRpcRow[] | null;
+    current_user_entry?: WeeklyLeaderboardEntryRpcRow | null;
+  } | null;
+  all_time_wins_leaderboard?: {
+    entries?: WeeklyLeaderboardEntryRpcRow[] | null;
+    current_user_entry?: WeeklyLeaderboardEntryRpcRow | null;
+  } | null;
+  all_time_matches_leaderboard?: {
+    entries?: WeeklyLeaderboardEntryRpcRow[] | null;
+    current_user_entry?: WeeklyLeaderboardEntryRpcRow | null;
+  } | null;
+};
+
+const normalizeWeeklyLeaderboardEntry = (
+  row?: WeeklyLeaderboardEntryRpcRow | null
+): WeeklyLeaderboardEntry | null => {
+  if (!row?.user_id) {
+    return null;
+  }
+
+  const rank = Number(row.rank ?? 0);
+  const wins = Number(row.wins ?? 0);
+  const matchesPlayed = Number(row.matches_played ?? 0);
+
+  return {
+    rank: Number.isFinite(rank) && rank > 0 ? rank : 0,
+    userId: row.user_id,
+    displayName: row.display_name?.trim() || 'Won Of One User',
+    profileImageUrl: row.profile_image_url ?? null,
+    wins: Number.isFinite(wins) && wins >= 0 ? wins : 0,
+    matchesPlayed: Number.isFinite(matchesPlayed) && matchesPlayed >= 0 ? matchesPlayed : 0,
+    latestActivityAt: row.latest_activity_at ?? null,
+  };
+};
+
+const normalizeWeeklyLeaderboardPayload = (
+  payload?: WeeklyLeaderboardRpcPayload | null
+): WeeklyLeaderboardData | null => {
+  const weekStartUtc = payload?.week_start_utc?.trim();
+  const weekEndUtc = payload?.week_end_utc?.trim();
+  const nextResetUtc = payload?.next_reset_utc?.trim() || weekEndUtc;
+
+  if (!weekStartUtc || !weekEndUtc || !nextResetUtc) {
+    return null;
+  }
+
+  const normalizeMetric = (
+    metricPayload?: {
+      entries?: WeeklyLeaderboardEntryRpcRow[] | null;
+      current_user_entry?: WeeklyLeaderboardEntryRpcRow | null;
+    } | null
+  ): WeeklyLeaderboardMetricData => ({
+    entries: (metricPayload?.entries ?? [])
+      .map(normalizeWeeklyLeaderboardEntry)
+      .filter((entry): entry is WeeklyLeaderboardEntry => !!entry)
+      .sort((a, b) => a.rank - b.rank),
+    currentUserEntry: normalizeWeeklyLeaderboardEntry(metricPayload?.current_user_entry),
+  });
+
+  return {
+    weekStartUtc,
+    weekEndUtc,
+    nextResetUtc,
+    totalRankedUsers: Math.max(0, Number(payload?.total_ranked_users ?? 0) || 0),
+    winsLeaderboard: normalizeMetric(payload?.wins_leaderboard),
+    matchesLeaderboard: normalizeMetric(payload?.matches_leaderboard),
+    allTimeTotalRankedUsers: Math.max(0, Number(payload?.all_time_total_ranked_users ?? 0) || 0),
+    allTimeWinsLeaderboard: normalizeMetric(payload?.all_time_wins_leaderboard),
+    allTimeMatchesLeaderboard: normalizeMetric(payload?.all_time_matches_leaderboard),
+  };
 };
 
 const ensureAuthSession = async (label: string): Promise<Session | null> => {
@@ -1969,6 +2062,32 @@ export const matchService = {
       totalMatches: totalResult.count ?? 0,
       winMatches: winResult.count ?? 0,
     };
+  },
+
+  async getGlobalWeeklyLeaderboard(
+    limit: number = 10,
+    accessToken?: string | null
+  ): Promise<WeeklyLeaderboardData | null> {
+    const token = resolveAccessToken(accessToken);
+    if (!token) {
+      console.warn('⚠️ getGlobalWeeklyLeaderboard blocked - auth session not ready');
+      return null;
+    }
+
+    const rpcResult = await postgrestRpc<WeeklyLeaderboardRpcPayload>(
+      'get_global_weekly_match_leaderboard',
+      {
+        p_limit: limit,
+      },
+      { accessToken: token }
+    );
+
+    if (rpcResult.error) {
+      console.warn('⚠️ Failed to fetch weekly leaderboard:', formatErrorForLog(rpcResult.error));
+      return null;
+    }
+
+    return normalizeWeeklyLeaderboardPayload(rpcResult.data);
   },
 
   // Get all matches for training time calculation
