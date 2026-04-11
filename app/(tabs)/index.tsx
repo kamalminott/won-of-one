@@ -152,6 +152,7 @@ export default function HomeScreen() {
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
   const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<WeeklyLeaderboardData | null>(null);
   const [weeklyLeaderboardLoaded, setWeeklyLeaderboardLoaded] = useState(false);
+  const [homeCountryCode, setHomeCountryCode] = useState<string | null>(null);
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
   const [profilePromptRequested, setProfilePromptRequested] = useState(false);
   const [manualAccessBannerMessage, setManualAccessBannerMessage] = useState<string | null>(null);
@@ -487,7 +488,7 @@ export default function HomeScreen() {
 
     try {
       // Fetch lightweight stats/goals first (small payload)
-      const [goalsData, countsData, leaderboardData] = await Promise.all([
+      const [goalsData, countsData, leaderboardData, userProfile] = await Promise.all([
         safeRequest('home_active_goals', goalService.getActiveGoals(userId, session?.access_token), userId),
         safeRequest('home_match_counts', matchService.getMatchCounts(userId, session?.access_token), userId),
         safeRequest(
@@ -495,6 +496,7 @@ export default function HomeScreen() {
           matchService.getGlobalWeeklyLeaderboard(3, session?.access_token),
           userId
         ),
+        safeRequest('home_user_profile', userService.getUserById(userId, session?.access_token), userId),
       ]);
 
       const goalsForCalc = goalsData ?? [];
@@ -515,6 +517,7 @@ export default function HomeScreen() {
       }
       setWeeklyLeaderboard(leaderboardData ?? null);
       setWeeklyLeaderboardLoaded(true);
+      setHomeCountryCode(userProfile?.country_code?.trim().toUpperCase() || null);
 
       setHasLoadedOnce(true);
       if (goalsData || countsData || leaderboardData) {
@@ -1103,6 +1106,7 @@ export default function HomeScreen() {
               userName={effectiveUserName}
               streak={7}
               avatarUrl={profileImage || undefined}
+              countryCode={homeCountryCode}
               onSettingsPress={handleSettings}
             />
           </View>

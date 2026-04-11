@@ -267,7 +267,7 @@ export const analytics = {
     }
   },
 
-  profileUpdate: (props: { field: 'name' | 'handedness' | 'preferred_weapon' }) => {
+  profileUpdate: (props: { field: 'name' | 'handedness' | 'preferred_weapon' | 'country_code' }) => {
     if (!isAvailable || !posthogInstance) return;
     try {
       posthogInstance.capture('profile_update', props);

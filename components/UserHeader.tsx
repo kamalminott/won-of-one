@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { getCountryFlagEmoji } from '@/lib/countryUtils';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
@@ -8,6 +9,7 @@ interface UserHeaderProps {
   userName: string;
   streak: number;
   avatarUrl?: string | null;
+  countryCode?: string | null;
   onSettingsPress: () => void;
 }
 
@@ -15,6 +17,7 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
   userName,
   streak,
   avatarUrl,
+  countryCode,
   onSettingsPress,
 }) => {
   const { width, height } = useWindowDimensions();
@@ -38,6 +41,13 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
       flex: 1,
       marginRight: width * 0.03,
     },
+    textAndCountryRow: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: width * 0.02,
+    },
     avatar: {
       width: width * 0.08,
       height: width * 0.08,
@@ -46,6 +56,32 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: width * 0.025,
+    },
+    countryContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: width * 0.095,
+      flexShrink: 0,
+    },
+    countryCircle: {
+      width: width * 0.058,
+      height: width * 0.058,
+      borderRadius: width * 0.029,
+      backgroundColor: Colors.gray.medium,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: height * 0.004,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.14)',
+    },
+    countryFlag: {
+      fontSize: width * 0.032,
+    },
+    countryCode: {
+      fontSize: width * 0.023,
+      color: Colors.gray.light,
+      fontWeight: '700',
+      letterSpacing: 0.6,
     },
     avatarText: {
       color: 'white',
@@ -98,6 +134,8 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
   const firstName = trimmedName ? trimmedName.split(' ')[0] : '';
   const greeting = firstName ? `Hi, ${firstName}` : 'Hi';
   const avatarInitial = trimmedName ? trimmedName.charAt(0) : '';
+  const normalizedCountryCode = countryCode?.trim().toUpperCase() || null;
+  const countryFlag = getCountryFlagEmoji(normalizedCountryCode);
 
   return (
     <View style={styles.container}>
@@ -117,9 +155,19 @@ export const UserHeader: React.FC<UserHeaderProps> = ({
             <Text style={styles.avatarText}>{avatarInitial}</Text>
           )}
         </View>
-        <View style={styles.textContainer}>
-          <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.subtitle}>Your Daily Fitness Goals</Text>
+        <View style={styles.textAndCountryRow}>
+          <View style={styles.textContainer}>
+            <Text style={styles.greeting}>{greeting}</Text>
+            <Text style={styles.subtitle}>Your Daily Fitness Goals</Text>
+          </View>
+          {normalizedCountryCode && countryFlag ? (
+            <View style={styles.countryContainer}>
+              <View style={styles.countryCircle}>
+                <Text style={styles.countryFlag}>{countryFlag}</Text>
+              </View>
+              <Text style={styles.countryCode}>{normalizedCountryCode}</Text>
+            </View>
+          ) : null}
         </View>
       </TouchableOpacity>
       

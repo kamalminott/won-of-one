@@ -267,6 +267,7 @@ type WeeklyLeaderboardEntryRpcRow = {
   user_id?: string | null;
   display_name?: string | null;
   profile_image_url?: string | null;
+  country_code?: string | null;
   wins?: number | null;
   matches_played?: number | null;
   latest_activity_at?: string | null;
@@ -312,6 +313,7 @@ const normalizeWeeklyLeaderboardEntry = (
     userId: row.user_id,
     displayName: row.display_name?.trim() || 'Won Of One User',
     profileImageUrl: row.profile_image_url ?? null,
+    countryCode: row.country_code?.trim()?.toUpperCase() || null,
     wins: Number.isFinite(wins) && wins >= 0 ? wins : 0,
     matchesPlayed: Number.isFinite(matchesPlayed) && matchesPlayed >= 0 ? matchesPlayed : 0,
     latestActivityAt: row.latest_activity_at ?? null,
@@ -577,6 +579,13 @@ export const userService = {
 
     if ('name' in payload && payload.name) {
       payload.name = formatFullName(payload.name, undefined, undefined);
+    }
+
+    if ('country_code' in payload) {
+      const normalizedCountryCode = payload.country_code?.trim().toUpperCase() || null;
+      payload.country_code = normalizedCountryCode && /^[A-Z]{2}$/.test(normalizedCountryCode)
+        ? normalizedCountryCode
+        : null;
     }
 
     try {

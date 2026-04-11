@@ -108,6 +108,7 @@ export interface AppUser {
   profile_image_url?: string | null;
   preferred_weapon?: string;
   handedness?: string;
+  country_code?: string | null;
   created_at?: string;
 }
 
@@ -257,6 +258,7 @@ export interface WeeklyLeaderboardEntry {
   userId: string;
   displayName: string;
   profileImageUrl?: string | null;
+  countryCode?: string | null;
   wins: number;
   matchesPlayed: number;
   latestActivityAt?: string | null;

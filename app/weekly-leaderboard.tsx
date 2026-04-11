@@ -2,6 +2,7 @@ import { BackButton } from '@/components/BackButton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { getCountryDisplay } from '@/lib/countryUtils';
 import { matchService } from '@/lib/database';
 import { formatUtcResetCountdown, formatUtcWeekRange, getUtcWeekWindow } from '@/lib/weeklyLeaderboard';
 import { WeeklyLeaderboardData, WeeklyLeaderboardEntry, WeeklyLeaderboardMetricData } from '@/types/database';
@@ -441,8 +442,17 @@ export default function WeeklyLeaderboardScreen() {
       fontSize: width * 0.031,
       color: '#FFFFFF',
       textAlign: 'center',
-      marginBottom: height * 0.006,
-      minHeight: width * 0.078,
+      marginBottom: height * 0.004,
+      minHeight: width * 0.056,
+    },
+    podiumMeta: {
+      fontFamily: 'Articulat CF',
+      fontWeight: '500',
+      fontSize: width * 0.026,
+      color: 'rgba(255, 255, 255, 0.78)',
+      textAlign: 'center',
+      marginBottom: height * 0.008,
+      minHeight: width * 0.058,
     },
     podiumScoreChip: {
       backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -682,6 +692,7 @@ export default function WeeklyLeaderboardScreen() {
 
     const metricValue = getMetricValue(entry, activeMetric);
     const isCurrentUser = currentUserEntry?.userId === entry.userId;
+    const countryDisplay = getCountryDisplay(entry.countryCode);
 
     return (
       <View style={[styles.podiumSlot, center && styles.podiumSlotCenter]}>
@@ -692,6 +703,9 @@ export default function WeeklyLeaderboardScreen() {
         </View>
         <Text style={styles.podiumName} numberOfLines={2}>
           {entry.displayName}
+        </Text>
+        <Text style={styles.podiumMeta} numberOfLines={1}>
+          {countryDisplay || ' '}
         </Text>
         <View style={styles.podiumScoreChip}>
           <Text style={styles.podiumScoreText}>{metricValue}</Text>
@@ -714,7 +728,10 @@ export default function WeeklyLeaderboardScreen() {
 
   const renderStandingsRow = (entry: WeeklyLeaderboardEntry) => {
     const isCurrentUser = currentUserEntry?.userId === entry.userId;
-    const rowMeta = isCurrentUser && !isCurrentUserInTopThree ? 'Your current position' : null;
+    const countryDisplay = getCountryDisplay(entry.countryCode);
+    const rowMeta = [countryDisplay, isCurrentUser && !isCurrentUserInTopThree ? 'Your current position' : null]
+      .filter(Boolean)
+      .join(' • ') || null;
 
     return (
       <View

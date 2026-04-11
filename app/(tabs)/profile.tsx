@@ -4,6 +4,7 @@ import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
 import { trackOnce } from '@/lib/analyticsTracking';
+import { COUNTRY_OPTIONS, getCountryDisplay } from '@/lib/countryUtils';
 import { matchService, userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,7 +23,6 @@ export default function ProfileScreen() {
     user,
     userName,
     setUserName,
-    loadUserName,
     profileImage,
     setProfileImage,
     signOut,
@@ -30,18 +30,16 @@ export default function ProfileScreen() {
   } = useAuth();
   const accessToken = session?.access_token ?? undefined;
   
-  // Helper function to get stable dimensions
-  const getDimension = (percentage: number, base: number) => {
-    return Math.round(base * percentage);
-  };
-  
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(true);
   const [handedness, setHandedness] = useState<string>('right');
   const [preferredWeapon, setPreferredWeapon] = useState<string>('foil');
+  const [countryCode, setCountryCode] = useState<string | null>(null);
   const [showHandednessPicker, setShowHandednessPicker] = useState(false);
   const [showWeaponPicker, setShowWeaponPicker] = useState(false);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [showNameEditModal, setShowNameEditModal] = useState(false);
+  const [countrySearch, setCountrySearch] = useState<string>('');
   const [firstName, setFirstName] = useState<string>('');
   const [lastName, setLastName] = useState<string>('');
   
@@ -205,6 +203,7 @@ export default function ProfileScreen() {
           // Cache for offline/default weapon selection across the app
           await AsyncStorage.setItem('preferred_weapon', userData.preferred_weapon);
         }
+        setCountryCode(userData.country_code?.trim().toUpperCase() || null);
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
@@ -520,6 +519,24 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleCountrySelect = async (value: string | null) => {
+    setCountryCode(value);
+    setShowCountryPicker(false);
+    setCountrySearch('');
+
+    if (user?.id) {
+      try {
+        await userService.updateUser(user.id, { country_code: value }, accessToken);
+        analytics.profileUpdate({ field: 'country_code' });
+        analytics.identify(user.id, { country_code: value || undefined });
+        console.log('✅ Country updated:', value);
+      } catch (error) {
+        console.error('Error updating country:', error);
+        Alert.alert('Error', 'Failed to update country. Please try again.');
+      }
+    }
+  };
+
   // Format handedness for display
   const getHandednessDisplay = (value: string) => {
     return value === 'left' ? 'Left-handed' : 'Right-handed';
@@ -529,6 +546,18 @@ export default function ProfileScreen() {
   const getWeaponDisplay = (value: string) => {
     return value.charAt(0).toUpperCase() + value.slice(1);
   };
+
+  const countryDisplay = getCountryDisplay(countryCode) || 'Not set';
+  const filteredCountries = useMemo(() => {
+    const query = countrySearch.trim().toLowerCase();
+    if (!query) {
+      return COUNTRY_OPTIONS;
+    }
+
+    return COUNTRY_OPTIONS.filter((country) =>
+      country.name.toLowerCase().includes(query) || country.code.toLowerCase().includes(query)
+    );
+  }, [countrySearch]);
 
   return (
     <SafeAreaView style={[styles.container, {
@@ -592,6 +621,11 @@ export default function ProfileScreen() {
           <Text style={[styles.userHandedness, { fontSize: width * 0.035 }]}>
             {getHandednessDisplay(handedness)}
           </Text>
+          {countryCode ? (
+            <Text style={[styles.userCountry, { fontSize: width * 0.033 }]}>
+              {countryDisplay}
+            </Text>
+          ) : null}
         </View>
           <View style={[styles.weaponTag, {
             paddingHorizontal: width * 0.025,
@@ -727,6 +761,29 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={20} color="#9D9D9D" />
         </TouchableOpacity>
         
+        <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
+
+        <TouchableOpacity
+          style={styles.infoItem}
+          onPress={() => setShowCountryPicker(true)}
+        >
+          <View style={[styles.infoIcon, {
+            width: width * 0.14,
+            height: width * 0.14,
+            borderRadius: width * 0.07,
+            marginRight: width * 0.04
+          }]}>
+            <Ionicons name="flag-outline" size={width * 0.06} color="white" />
+          </View>
+          <View style={styles.infoContent}>
+            <Text style={[styles.infoLabel, { fontSize: width * 0.04 }]}>Country</Text>
+            <Text style={[styles.infoValue, { fontSize: width * 0.035 }]}>
+              {countryDisplay}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#9D9D9D" />
+        </TouchableOpacity>
+
         <View style={[styles.divider, { marginVertical: height * 0.015 }]} />
         
         <TouchableOpacity 
@@ -913,6 +970,78 @@ export default function ProfileScreen() {
               <Text style={styles.modalCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      )}
+
+      {/* Handedness Picker Modal */}
+      {showCountryPicker && (
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.countryPickerWrap}
+          >
+            <View style={[styles.modalContainer, styles.countryModalContainer]}>
+              <Text style={styles.modalTitle}>Select Country</Text>
+              <TextInput
+                style={styles.countrySearchInput}
+                value={countrySearch}
+                onChangeText={setCountrySearch}
+                placeholder="Search countries"
+                placeholderTextColor="#9D9D9D"
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+
+              <ScrollView
+                style={styles.countryList}
+                contentContainerStyle={styles.countryListContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <TouchableOpacity
+                  style={[styles.modalOption, !countryCode && styles.modalOptionSelected]}
+                  onPress={() => handleCountrySelect(null)}
+                >
+                  <Text style={[styles.modalOptionText, !countryCode && styles.modalOptionTextSelected]}>
+                    No country
+                  </Text>
+                  {!countryCode ? <Ionicons name="checkmark" size={20} color="#6C5CE7" /> : null}
+                </TouchableOpacity>
+
+                {filteredCountries.map((country) => {
+                  const isSelected = country.code === countryCode;
+                  return (
+                    <TouchableOpacity
+                      key={country.code}
+                      style={[styles.modalOption, isSelected && styles.modalOptionSelected]}
+                      onPress={() => handleCountrySelect(country.code)}
+                    >
+                      <Text style={[styles.modalOptionText, isSelected && styles.modalOptionTextSelected]}>
+                        {country.flag} {country.name}
+                      </Text>
+                      {isSelected ? <Ionicons name="checkmark" size={20} color="#6C5CE7" /> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {filteredCountries.length === 0 ? (
+                  <View style={styles.countryEmptyState}>
+                    <Text style={styles.countryEmptyText}>No countries found.</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => {
+                  setShowCountryPicker(false);
+                  setCountrySearch('');
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -1245,6 +1374,10 @@ const styles = StyleSheet.create({
     color: '#9D9D9D',
     marginTop: 4,
   },
+  userCountry: {
+    color: '#9D9D9D',
+    marginTop: 4,
+  },
   weaponTag: {
     backgroundColor: '#393939',
     flexDirection: 'row',
@@ -1428,6 +1561,15 @@ const styles = StyleSheet.create({
     elevation: 8,
     alignSelf: 'center',
   },
+  countryPickerWrap: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countryModalContainer: {
+    maxHeight: '78%',
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -1560,5 +1702,31 @@ const styles = StyleSheet.create({
   eyeIcon: {
     padding: 4,
     marginLeft: 8,
+  },
+  countrySearchInput: {
+    backgroundColor: '#393939',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: 'white',
+    borderWidth: 1,
+    borderColor: '#464646',
+    marginBottom: 14,
+  },
+  countryList: {
+    maxHeight: 360,
+  },
+  countryListContent: {
+    paddingBottom: 4,
+  },
+  countryEmptyState: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  countryEmptyText: {
+    fontSize: 15,
+    color: '#9D9D9D',
+    fontWeight: '500',
   },
 });
