@@ -8103,12 +8103,13 @@ export default function RemoteScreen() {
   const fencerScoreMarginBottomTimerReady = height * (isAndroid ? 0.006 : 0.015) * competitionCompactScale;
   const timerReadyBottomControlsGap = height * (isAndroid ? 0.003 : 0.018) * competitionCompactScale;
   const timerReadyBottomControlsGapNoCards = timerReadyBottomControlsGap + height * (isAndroid ? 0.006 : 0.008);
-  const timerReadyCardsLowering = height * (isAndroid ? 0.006 : 0);
+  const androidNonSabreDockLayout = isAndroid && selectedWeapon !== 'sabre';
+  const timerReadyCardsLowering = androidNonSabreDockLayout ? 0 : height * (isAndroid ? 0.006 : 0);
   const timerReadyPlayBlockGap = height * (isAndroid ? 0.001 : 0.012) * competitionCompactScale;
   const timerReadyPlayBlockMarginTop = height * (isAndroid ? 0 : 0.006) * competitionCompactScale;
   const timerReadyPlayBlockMarginVertical = height * (isAndroid ? 0 : 0.012) * competitionCompactScale;
   const timerReadyPlayBlockOffset =
-    height * (isAndroid ? 0.014 : -0.012) +
+    height * (androidNonSabreDockLayout ? 0 : -0.012) +
     (isCompetitionRemoteMode && !isAndroid ? height * 0.01 : 0);
   const inProgressCardsLowering = height * (isAndroid ? 0.016 : 0.012);
   const inProgressPlayBlockOffset = height * (isAndroid ? 0.018 : 0.014);
@@ -9685,7 +9686,7 @@ export default function RemoteScreen() {
     !hasMatchStarted &&
     !isPlaying &&
     timeRemaining === matchTime;
-  const lockAndroidTimerReadyLayout = isAndroid && selectedWeapon !== 'sabre';
+  const lockAndroidTimerReadyLayout = androidNonSabreDockLayout;
   const useTimerReadyLayout = isNonSabreTimerReady || lockAndroidTimerReadyLayout;
   const isNonSabreActive =
     selectedWeapon !== 'sabre' &&
@@ -9733,9 +9734,18 @@ export default function RemoteScreen() {
       ? height * 0.03
       : 0;
   const sabreBottomControlsPullUp = isSabre ? height * (isAndroid ? 0.03 : 0.025) : 0;
+  const androidNonSabreSpacerTrim =
+    androidNonSabreDockLayout
+      ? height * (isCompetitionRemoteMode ? 0.018 : 0.03)
+      : 0;
   const bottomControlsSpacerHeight = Math.max(
     height * 0.04,
-    bottomControlsReserve + bottomControlsDockBottom + bottomControlsReserveExtra + bottomControlsActiveExtra - sabreBottomControlsPullUp
+    bottomControlsReserve +
+      bottomControlsDockBottom +
+      bottomControlsReserveExtra +
+      bottomControlsActiveExtra -
+      sabreBottomControlsPullUp -
+      androidNonSabreSpacerTrim
   );
   const sabreMatchReady = isSabre && !hasMatchStarted && !isPlaying;
   const canAssignPriority = !isSabre && timeRemaining === 0 && scores.fencerA === scores.fencerB;
