@@ -248,7 +248,7 @@ export default function CreateAccountScreen() {
   return (
     <SafeAreaView
       style={styles.container}
-      edges={Platform.OS === 'ios' ? ['left', 'right', 'bottom'] : ['top', 'left', 'right', 'bottom']}
+      edges={['top', 'left', 'right', 'bottom']}
     >
       <ExpoStatusBar style="light" />
       
@@ -258,9 +258,7 @@ export default function CreateAccountScreen() {
       {/* Header Background */}
       <View style={[styles.headerBackground, { 
         paddingHorizontal: width * 0.04,
-        paddingTop: Platform.OS === 'ios'
-          ? Math.max(insets.top * 0.4, height * 0.004)
-          : Math.max(insets.top, height * 0.01),
+        paddingTop: height * 0.01,
         paddingBottom: height * 0.015,
         flexDirection: 'row',
         alignItems: 'center',
