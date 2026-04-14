@@ -221,6 +221,7 @@ export default function RecentMatchesScreen() {
     date: string;
     weapon: string;
     isChampion: boolean;
+    deSummaryLabel: string | null;
     wins: number;
     losses: number;
     pouleWins: number;
@@ -290,6 +291,29 @@ export default function RecentMatchesScreen() {
     QF: 7,
     SF: 8,
     F: 9,
+  };
+
+  const getDeSummary = (deMatches: Match[]) => {
+    const bestRoundMatch = deMatches.reduce<Match | null>((bestMatch, match) => {
+      const bestRank = roundOrder[bestMatch?.competitionRound || ''] ?? -1;
+      const currentRank = roundOrder[match.competitionRound || ''] ?? -1;
+      return currentRank >= bestRank ? match : bestMatch;
+    }, null);
+
+    const bestRound = bestRoundMatch?.competitionRound;
+    const isChampion = !!deMatches.find(
+      (match) => match.competitionRound === 'F' && match.outcome === 'Victory'
+    );
+
+    if (isChampion) {
+      return { label: 'Champion', isChampion: true };
+    }
+
+    if (!bestRound) {
+      return { label: 'Reached DE', isChampion: false };
+    }
+
+    return { label: `Reached ${bestRound}`, isChampion: false };
   };
 
   const getMatchTimestamp = (match: Match): number => {
@@ -483,6 +507,7 @@ export default function RecentMatchesScreen() {
             date,
             weapon,
             isChampion: false,
+            deSummaryLabel: null,
             wins: 0,
             losses: 0,
             pouleWins: 0,
@@ -516,13 +541,12 @@ export default function RecentMatchesScreen() {
 
         const pouleWins = pouleMatches.filter((m) => m.outcome === 'Victory').length;
         const pouleLosses = pouleMatches.filter((m) => m.outcome === 'Defeat').length;
-        const isChampion = deMatches.some(
-          (m) => m.competitionRound === 'F' && m.outcome === 'Victory'
-        );
+        const deSummary = getDeSummary(deMatches);
 
         return {
           ...group,
-          isChampion,
+          isChampion: deSummary.isChampion,
+          deSummaryLabel: deMatches.length > 0 ? deSummary.label : null,
           wins,
           losses,
           pouleWins,
@@ -1036,6 +1060,11 @@ export default function RecentMatchesScreen() {
       alignItems: 'center',
       flex: 1,
       marginRight: width * 0.02,
+      minWidth: 0,
+    },
+    competitionHeaderTextBlock: {
+      flex: 1,
+      minWidth: 0,
     },
     competitionIcon: {
       width: width * 0.1,
@@ -1060,8 +1089,10 @@ export default function RecentMatchesScreen() {
       marginTop: height * 0.002,
     },
     competitionHeaderRight: {
+      flexDirection: 'row',
       alignItems: 'flex-end',
       justifyContent: 'center',
+      gap: width * 0.02,
     },
     competitionRecord: {
       fontSize: width * 0.035,
@@ -1069,8 +1100,29 @@ export default function RecentMatchesScreen() {
       fontWeight: '600',
       marginBottom: height * 0.004,
     },
+    competitionSummaryPill: {
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      backgroundColor: 'rgba(16, 185, 129, 0.16)',
+      borderWidth: 1,
+      borderColor: 'rgba(52, 211, 153, 0.32)',
+    },
+    competitionSummaryPillChampion: {
+      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+      borderColor: 'rgba(251, 191, 36, 0.45)',
+    },
+    competitionSummaryPillText: {
+      color: '#D1FAE5',
+      fontSize: width * 0.028,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+    },
+    competitionSummaryPillTextChampion: {
+      color: '#FDE68A',
+    },
     competitionChevron: {
-      marginTop: height * 0.002,
+      marginTop: 0,
     },
     competitionBody: {
       paddingHorizontal: width * 0.04,
@@ -1654,9 +1706,21 @@ export default function RecentMatchesScreen() {
                         <View style={styles.competitionIcon}>
                           <Text style={styles.competitionIconText}>🏆</Text>
                         </View>
-                        <View>
-                          <Text style={styles.competitionTitle}>{competition.name}</Text>
-                          <Text style={styles.competitionSubtitle}>{subtitle}</Text>
+                        <View style={styles.competitionHeaderTextBlock}>
+                          <Text
+                            style={styles.competitionTitle}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
+                            {competition.name}
+                          </Text>
+                          <Text
+                            style={styles.competitionSubtitle}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
+                            {subtitle}
+                          </Text>
                         </View>
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -1664,14 +1728,33 @@ export default function RecentMatchesScreen() {
                         onPress={() => toggleCompetitionExpanded(competition.id)}
                         activeOpacity={0.8}
                       >
-                        <Text style={styles.competitionRecord}>
-                          {competition.wins}W - {competition.losses}L
-                        </Text>
+                        {competition.deSummaryLabel ? (
+                          <View
+                            style={[
+                              styles.competitionSummaryPill,
+                              competition.isChampion && styles.competitionSummaryPillChampion,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.competitionSummaryPillText,
+                                competition.isChampion && styles.competitionSummaryPillTextChampion,
+                              ]}
+                            >
+                              {competition.deSummaryLabel}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.sectionRecordChip}>
+                            <Text style={styles.sectionRecordText}>
+                              {competition.pouleWins}W - {competition.pouleLosses}L
+                            </Text>
+                          </View>
+                        )}
                         <Ionicons
                           name={expanded ? 'chevron-up' : 'chevron-down'}
                           size={18}
                           color="rgba(255,255,255,0.7)"
-                          style={styles.competitionChevron}
                         />
                       </TouchableOpacity>
                     </View>
