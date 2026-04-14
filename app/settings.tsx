@@ -2,6 +2,7 @@ import { BackButton } from '@/components/BackButton';
 import { BugReportModal } from '@/components/BugReportModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { adminAccessService } from '@/lib/adminAccessService';
+import { subscriptionService } from '@/lib/subscriptionService';
 import { accountService } from '@/lib/database';
 import { analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
@@ -60,7 +61,28 @@ export default function SettingsScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
-  const showDiagnostics = __DEV__;
+  const [subscriptionDebug, setSubscriptionDebug] = useState<{
+    platform: string;
+    hasApiKey: boolean;
+    maskedApiKey: string | null;
+    hasNativeModule: boolean;
+    isInitialized: boolean;
+    isConfigured: boolean;
+    currentRevenueCatUserId: string | null;
+    lastInitializationStep: string;
+    lastInitializationError: string | null;
+  }>({
+    platform: 'unknown',
+    hasApiKey: false,
+    maskedApiKey: null,
+    hasNativeModule: false,
+    isInitialized: false,
+    isConfigured: false,
+    currentRevenueCatUserId: null,
+    lastInitializationStep: 'idle',
+    lastInitializationError: null,
+  });
+  const showDiagnostics = __DEV__ || isAdmin;
   const showPaywallOption = true;
 
   const loadAdminStatus = useCallback(async (accessTokenOverride?: string | null) => {
@@ -83,6 +105,7 @@ export default function SettingsScreen() {
       if (showDiagnostics) {
         loadUpdateInfo();
         loadTokenInfo();
+        loadSubscriptionDebug();
       }
     }, [loadAdminStatus, showDiagnostics, user?.id, session?.access_token])
   );
@@ -222,6 +245,14 @@ export default function SettingsScreen() {
         runtimeVersion: 'N/A',
         isChecking: false,
       });
+    }
+  }
+
+  function loadSubscriptionDebug() {
+    try {
+      setSubscriptionDebug(subscriptionService.getDebugState());
+    } catch (error) {
+      console.error('Error loading subscription diagnostics:', error);
     }
   }
 
@@ -792,6 +823,97 @@ export default function SettingsScreen() {
                 {updateInfo.isChecking && (
                   <ActivityIndicator size="small" color="#6C5CE7" style={{ marginLeft: width * 0.02 }} />
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {showDiagnostics && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subscription Diagnostics</Text>
+            <View style={[styles.card, styles.matchDefaultsCard]}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Platform</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.platform}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>API Key Present</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.hasApiKey ? 'Yes' : 'No'}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>API Key</Text>
+                <Text style={[styles.settingValue, { fontSize: width * 0.03 }]} numberOfLines={1}>
+                  {subscriptionDebug.maskedApiKey || 'Missing'}
+                </Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Native Module</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.hasNativeModule ? 'Loaded' : 'Missing'}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Initialized</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.isInitialized ? 'Yes' : 'No'}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Configured</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.isConfigured ? 'Yes' : 'No'}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Init Step</Text>
+                <Text style={styles.settingValue}>{subscriptionDebug.lastInitializationStep}</Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>RC User</Text>
+                <Text style={[styles.settingValue, { fontSize: width * 0.03 }]} numberOfLines={1}>
+                  {subscriptionDebug.currentRevenueCatUserId || 'Not linked'}
+                </Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Last Error</Text>
+                <Text
+                  style={[
+                    styles.settingValue,
+                    { fontSize: width * 0.03, textAlign: 'right', maxWidth: '60%' },
+                  ]}
+                >
+                  {subscriptionDebug.lastInitializationError || 'None'}
+                </Text>
+              </View>
+
+              <View style={styles.separator} />
+
+              <TouchableOpacity
+                style={[styles.settingRow, styles.settingRowLast]}
+                onPress={loadSubscriptionDebug}
+              >
+                <View style={styles.iconContainer}>
+                  <Ionicons name="refresh" size={width * 0.06} color="#FFFFFF" />
+                </View>
+                <Text style={styles.optionText}>Refresh Subscription Diagnostics</Text>
               </TouchableOpacity>
             </View>
           </View>

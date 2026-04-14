@@ -175,6 +175,22 @@ let isInitialized = false;
 let isActuallyConfigured = false; // Track if RevenueCat SDK is actually configured (not just skipped)
 let currentRevenueCatUserId: string | null = null;
 let initializationPromise: Promise<void> | null = null;
+let lastInitializationError: string | null = null;
+let lastInitializationStep:
+  | 'idle'
+  | 'missing_api_key'
+  | 'test_key_blocked'
+  | 'native_module_unavailable'
+  | 'configuring'
+  | 'configured'
+  | 'configure_failed' = 'idle';
+
+const getMaskedRevenueCatKey = () => {
+  const apiKey = getRevenueCatApiKey();
+  if (!apiKey) return null;
+  if (apiKey.length <= 10) return `${apiKey.slice(0, 3)}...`;
+  return `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
+};
 
 const getAuthenticatedUserId = async (): Promise<string | null> => {
   try {
@@ -249,6 +265,8 @@ export const subscriptionService = {
         const isTestKey = !!apiKey && apiKey.startsWith('test_');
 
         if (!apiKey) {
+          lastInitializationStep = 'missing_api_key';
+          lastInitializationError = 'RevenueCat API key missing';
           console.warn('⚠️ RevenueCat API key missing - skipping initialization');
           isInitialized = true;
           isActuallyConfigured = false;
@@ -256,6 +274,8 @@ export const subscriptionService = {
         }
 
         if (isTestKey && !isDev) {
+          lastInitializationStep = 'test_key_blocked';
+          lastInitializationError = 'RevenueCat test key blocked in non-dev build';
           console.warn('⚠️ RevenueCat test API key detected - skipping initialization to prevent app crash');
           console.warn('⚠️ Configure a production API key in RevenueCat dashboard to enable subscriptions');
           // Mark as initialized to prevent retry loops, but don't actually configure
@@ -269,18 +289,24 @@ export const subscriptionService = {
         }
 
         if (!Purchases) {
+          lastInitializationStep = 'native_module_unavailable';
+          lastInitializationError = 'RevenueCat native module unavailable';
           console.warn('⚠️ RevenueCat SDK not available - skipping configuration');
           isInitialized = true;
           isActuallyConfigured = false;
           return;
         }
 
+        lastInitializationStep = 'configuring';
+        lastInitializationError = null;
         const initialUserId = userId ?? (await getAuthenticatedUserId());
         await Purchases.configure(
           initialUserId ? { apiKey, appUserID: initialUserId } : { apiKey }
         );
         isInitialized = true;
         isActuallyConfigured = true;
+        lastInitializationStep = 'configured';
+        lastInitializationError = null;
         console.log('✅ RevenueCat initialized');
         currentRevenueCatUserId = initialUserId ?? null;
 
@@ -308,6 +334,8 @@ export const subscriptionService = {
         }
       } catch (error: any) {
         // Don't crash the app if RevenueCat fails to initialize
+        lastInitializationStep = 'configure_failed';
+        lastInitializationError = error?.message || String(error);
         console.error('❌ Error initializing RevenueCat (non-fatal):', error?.message || error);
         // Mark as initialized anyway to prevent retry loops
         isInitialized = true;
@@ -328,6 +356,20 @@ export const subscriptionService = {
    */
   isConfigured(): boolean {
     return !!isActuallyConfigured && !!Purchases;
+  },
+
+  getDebugState() {
+    return {
+      platform: Platform.OS,
+      hasApiKey: !!getRevenueCatApiKey(),
+      maskedApiKey: getMaskedRevenueCatKey(),
+      hasNativeModule: !!Purchases,
+      isInitialized,
+      isConfigured: !!isActuallyConfigured && !!Purchases,
+      currentRevenueCatUserId,
+      lastInitializationStep,
+      lastInitializationError,
+    };
   },
 
   /**
