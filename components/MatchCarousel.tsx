@@ -746,133 +746,132 @@ export const MatchCarousel: React.FC<MatchCarouselProps> = ({
 
       {/* Carousel */}
       {isLayoutReady && (
-        <View {...panResponder.panHandlers}>
-          <Animated.View
-            style={[
-              styles.carouselContainer,
-              { transform: [{ translateX }] }
-            ]}
-          >
-            {customItemRenderer ? (
-              customItemRenderer(currentItem, safeIndex)
-            ) : competitionItem ? (
-              <TouchableOpacity
-                key={competitionItem.id}
-                style={styles.competitionCard}
-                onPress={() => handleItemPress(competitionItem)}
-                activeOpacity={0.9}
-              >
-                <View style={styles.competitionHeader}>
-                  <View style={styles.competitionHeaderLeft}>
-                    <View style={styles.competitionIcon}>
-                      <Text style={styles.competitionIconText}>🏆</Text>
-                    </View>
-                    <View style={styles.competitionTitleBlock}>
-                      <Text
-                        style={styles.competitionName}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                      >
-                        {competitionItem.competitionName}
-                      </Text>
-                      <Text style={styles.competitionMeta}>
-                        {formatDate(competitionItem.date)}
-                        {competitionItem.competitionWeaponType
-                          ? ` · ${formatWeapon(competitionItem.competitionWeaponType)}`
-                          : ''}
-                      </Text>
-                    </View>
+        <Animated.View
+          {...panResponder.panHandlers}
+          style={[
+            styles.carouselContainer,
+            { transform: [{ translateX }] }
+          ]}
+        >
+          {customItemRenderer ? (
+            customItemRenderer(currentItem, safeIndex)
+          ) : competitionItem ? (
+            <TouchableOpacity
+              key={competitionItem.id}
+              style={styles.competitionCard}
+              onPress={() => handleItemPress(competitionItem)}
+              activeOpacity={0.9}
+            >
+              <View style={styles.competitionHeader}>
+                <View style={styles.competitionHeaderLeft}>
+                  <View style={styles.competitionIcon}>
+                    <Text style={styles.competitionIconText}>🏆</Text>
                   </View>
-                  <View style={styles.competitionPill}>
-                    <Text style={styles.competitionPillText}>Competition</Text>
+                  <View style={styles.competitionTitleBlock}>
+                    <Text
+                      style={styles.competitionName}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {competitionItem.competitionName}
+                    </Text>
+                    <Text style={styles.competitionMeta}>
+                      {formatDate(competitionItem.date)}
+                      {competitionItem.competitionWeaponType
+                        ? ` · ${formatWeapon(competitionItem.competitionWeaponType)}`
+                        : ''}
+                    </Text>
                   </View>
                 </View>
-                <View style={styles.competitionStats}>
-                  <View style={styles.competitionStatBlock}>
-                    <Text style={styles.competitionStatValue}>
-                      {competitionItem.wins}W - {competitionItem.losses}L
-                    </Text>
-                    <Text style={styles.competitionStatLabel}>Record</Text>
-                  </View>
-                  <View style={styles.competitionStatDivider} />
-                  <View style={styles.competitionStatBlock}>
-                    <Text style={styles.competitionStatValue}>
-                      {formatPlacement(
-                        competitionItem.placement,
-                        competitionItem.fieldSize
-                      ) ?? '—'}
-                    </Text>
-                    <Text style={styles.competitionStatLabel}>Placement</Text>
-                  </View>
+                <View style={styles.competitionPill}>
+                  <Text style={styles.competitionPillText}>Competition</Text>
                 </View>
-              </TouchableOpacity>
-            ) : matchItem ? (
-              <TouchableOpacity
-                key={matchItem.id}
-                style={styles.matchCard}
-                onPress={() => handleItemPress(matchItem)}
-              >
-                {/* Left Profile Container */}
-                <View style={styles.profileContainerLeft}>
-                  <View style={styles.profileCircle}>
-                    {userProfileImage &&
-                    userProfileImage !== 'https://via.placeholder.com/60x60' &&
-                    !userProfileImage.includes('example.com') &&
-                    !userProfileImage.includes('placeholder') &&
-                    (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
-                      <Image
-                        source={{ uri: userProfileImage }}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          borderRadius: width * 0.05,
-                        }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Text style={styles.profileInitial}>
-                        {getInitials(userName)}
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                    {userName || 'You'}
+              </View>
+              <View style={styles.competitionStats}>
+                <View style={styles.competitionStatBlock}>
+                  <Text style={styles.competitionStatValue}>
+                    {competitionItem.wins}W - {competitionItem.losses}L
                   </Text>
+                  <Text style={styles.competitionStatLabel}>Record</Text>
                 </View>
-
-                {/* Right Profile Container */}
-                <View style={styles.profileContainerRight}>
-                  <View style={styles.profileCircle}>
+                <View style={styles.competitionStatDivider} />
+                <View style={styles.competitionStatBlock}>
+                  <Text style={styles.competitionStatValue}>
+                    {formatPlacement(
+                      competitionItem.placement,
+                      competitionItem.fieldSize
+                    ) ?? '—'}
+                  </Text>
+                  <Text style={styles.competitionStatLabel}>Placement</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ) : matchItem ? (
+            <TouchableOpacity
+              key={matchItem.id}
+              style={styles.matchCard}
+              onPress={() => handleItemPress(matchItem)}
+            >
+              {/* Left Profile Container */}
+              <View style={styles.profileContainerLeft}>
+                <View style={styles.profileCircle}>
+                  {userProfileImage &&
+                  userProfileImage !== 'https://via.placeholder.com/60x60' &&
+                  !userProfileImage.includes('example.com') &&
+                  !userProfileImage.includes('placeholder') &&
+                  (userProfileImage.startsWith('http') || userProfileImage.startsWith('file://')) ? (
+                    <Image
+                      source={{ uri: userProfileImage }}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: width * 0.05,
+                      }}
+                      resizeMode="cover"
+                    />
+                  ) : (
                     <Text style={styles.profileInitial}>
-                      {getInitials(matchItem.opponentName)}
+                      {getInitials(userName)}
                     </Text>
-                  </View>
-                  <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
-                    {matchItem.opponentName}
+                  )}
+                </View>
+                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                  {userName || 'You'}
+                </Text>
+              </View>
+
+              {/* Right Profile Container */}
+              <View style={styles.profileContainerRight}>
+                <View style={styles.profileCircle}>
+                  <Text style={styles.profileInitial}>
+                    {getInitials(matchItem.opponentName)}
                   </Text>
                 </View>
+                <Text style={styles.playerName} numberOfLines={2} ellipsizeMode="tail">
+                  {matchItem.opponentName}
+                </Text>
+              </View>
 
-                {/* Score Group with Equal Spacing */}
-                <View style={styles.scoreGroup}>
-                  <View style={styles.scoreContainer}>
-                    <View style={styles.scoreDotLeft} />
-                    <Text style={styles.score}>{matchItem.youScore}</Text>
-                  </View>
-
-                  <Text style={styles.dash}>-</Text>
-
-                  <View style={styles.scoreContainer}>
-                    <Text style={styles.score}>{matchItem.opponentScore}</Text>
-                    <View style={styles.scoreDotRight} />
-                  </View>
+              {/* Score Group with Equal Spacing */}
+              <View style={styles.scoreGroup}>
+                <View style={styles.scoreContainer}>
+                  <View style={styles.scoreDotLeft} />
+                  <Text style={styles.score}>{matchItem.youScore}</Text>
                 </View>
 
-                {/* Date */}
-                <Text style={styles.matchDate}>{formatDate(matchItem.date)}</Text>
-              </TouchableOpacity>
-            ) : null}
-          </Animated.View>
-        </View>
+                <Text style={styles.dash}>-</Text>
+
+                <View style={styles.scoreContainer}>
+                  <Text style={styles.score}>{matchItem.opponentScore}</Text>
+                  <View style={styles.scoreDotRight} />
+                </View>
+              </View>
+
+              {/* Date */}
+              <Text style={styles.matchDate}>{formatDate(matchItem.date)}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </Animated.View>
       )}
 
       {/* Dot Indicators */}

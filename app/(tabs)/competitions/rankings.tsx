@@ -17,16 +17,19 @@ import {
 import { withCompetitionReadTimeout } from '@/lib/competitionRetry';
 import type { CompetitionRankingEntry } from '@/types/competition';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   GestureResponderEvent,
+  LayoutAnimation,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  UIManager,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -84,6 +87,15 @@ const reorderRankingEntries = (
   return resequenceRankingEntries(nextEntries);
 };
 
+const shuffleArray = <T,>(items: T[]): T[] => {
+  const nextItems = items.slice();
+  for (let index = nextItems.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [nextItems[index], nextItems[randomIndex]] = [nextItems[randomIndex], nextItems[index]];
+  }
+  return nextItems;
+};
+
 export default function RankingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -95,7 +107,7 @@ export default function RankingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [actionKey, setActionKey] = useState<'lock' | 'generate' | null>(null);
+  const [actionKey, setActionKey] = useState<'lock' | 'generate' | 'randomize' | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof getCompetitionRankingsData>>>(null);
   const [rankingDrag, setRankingDrag] = useState<RankingDragState | null>(null);
   const [rankingDropTarget, setRankingDropTarget] = useState<RankingDropTarget | null>(null);
@@ -106,6 +118,15 @@ export default function RankingsScreen() {
   const rankingDragRef = useRef<RankingDragState | null>(null);
   const rankingDropTargetRef = useRef<RankingDropTarget | null>(null);
   const loadRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    if (
+      Platform.OS === 'android' &&
+      UIManager.setLayoutAnimationEnabledExperimental
+    ) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   const loadData = useCallback(
     async (showSpinner = true): Promise<string | null> => {
@@ -502,6 +523,79 @@ export default function RankingsScreen() {
     );
   };
 
+  const onRandomizeSeeds = () => {
+    if (!data || !data.canEditSeedOrder) return;
+
+    Alert.alert(
+      'Randomise seeds?',
+      'This will shuffle the DE seed order for active participants. You can still drag to adjust it before locking rankings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Randomise',
+          onPress: async () => {
+            const activeEntries = data.rankings.filter(
+              (entry) => entry.participant.status !== 'withdrawn'
+            );
+            const withdrawnEntries = data.rankings.filter(
+              (entry) => entry.participant.status === 'withdrawn'
+            );
+
+            if (activeEntries.length < 2) {
+              setErrorText('At least two active participants are needed to randomise seeds.');
+              return;
+            }
+
+            const shuffledActiveEntries = shuffleArray(activeEntries);
+            const nextRankings = resequenceRankingEntries([
+              ...shuffledActiveEntries,
+              ...withdrawnEntries,
+            ]);
+            const previousRankings = data.rankings;
+
+            setActionKey('randomize');
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setData((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    rankings: nextRankings,
+                  }
+                : previous
+            );
+
+            const result = await reorderCompetitionDeSeeds({
+              competitionId: data.competition.id,
+              participantIds: nextRankings.map((entry) => entry.participant.id),
+            });
+
+            if (!result.ok) {
+              setData((previous) =>
+                previous
+                  ? {
+                      ...previous,
+                      rankings: previousRankings,
+                    }
+                  : previous
+              );
+              setActionKey(null);
+              setErrorText(result.message);
+              return;
+            }
+
+            analytics.capture('de_seed_order_randomized', {
+              competition_id: data.competition.id,
+              participant_count: activeEntries.length,
+            });
+
+            await loadData(false);
+            setActionKey(null);
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -599,8 +693,16 @@ export default function RankingsScreen() {
                   text="Lock Rankings"
                   onPress={onLockRankings}
                   loading={actionKey === 'lock'}
-                  disabled={actionKey === 'generate' || isSavingSeedOrder}
+                  disabled={actionKey === 'generate' || actionKey === 'randomize' || isSavingSeedOrder}
                   primary
+                />
+              ) : null}
+              {data.canEditSeedOrder ? (
+                <ActionButton
+                  text="Randomise Seeds"
+                  onPress={onRandomizeSeeds}
+                  loading={actionKey === 'randomize'}
+                  disabled={actionKey === 'lock' || actionKey === 'generate' || isSavingSeedOrder}
                 />
               ) : null}
               {data.canGenerateDe ? (
@@ -608,7 +710,7 @@ export default function RankingsScreen() {
                   text="Generate DE"
                   onPress={onGenerateDe}
                   loading={actionKey === 'generate'}
-                  disabled={actionKey === 'lock' || isSavingSeedOrder}
+                  disabled={actionKey === 'lock' || actionKey === 'randomize' || isSavingSeedOrder}
                 />
               ) : null}
             </View>

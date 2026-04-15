@@ -140,9 +140,9 @@ export default function JoinCompetitionScreen() {
   const tabBarOverlayHeight = windowHeight * 0.08 + insets.bottom;
   const contentBottomPadding = tabBarOverlayHeight + 20;
 
-  const navigateToOverview = useCallback((competitionId: string) => {
+  const navigateToParticipantsAndRoles = useCallback((competitionId: string) => {
     router.replace({
-      pathname: '/(tabs)/competitions/overview',
+      pathname: '/(tabs)/competitions/participants-roles',
       params: {
         competitionId,
       },
@@ -225,8 +225,8 @@ export default function JoinCompetitionScreen() {
       read_only: result.readOnly,
       already_joined: result.alreadyJoined,
     });
-    navigateToOverview(result.competition.id);
-  }, [checkCooldown, competitionDisplayName, navigateToOverview, user?.id]);
+    navigateToParticipantsAndRoles(result.competition.id);
+  }, [checkCooldown, competitionDisplayName, navigateToParticipantsAndRoles, user?.id]);
 
   const submitCodeValue = useCallback(async (
     normalizedCode: string,
@@ -295,8 +295,8 @@ export default function JoinCompetitionScreen() {
       read_only: result.readOnly,
       already_joined: result.alreadyJoined,
     });
-    navigateToOverview(result.competition.id);
-  }, [checkCooldown, competitionDisplayName, navigateToOverview, user?.id]);
+    navigateToParticipantsAndRoles(result.competition.id);
+  }, [checkCooldown, competitionDisplayName, navigateToParticipantsAndRoles, user?.id]);
 
   const onJoinByCode = async () => {
     const normalizedCode = sanitizeCode(code);

@@ -156,6 +156,7 @@ export default function HomeScreen() {
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
   const [profilePromptRequested, setProfilePromptRequested] = useState(false);
   const [manualAccessBannerMessage, setManualAccessBannerMessage] = useState<string | null>(null);
+  const [recentMatchesRenderKey, setRecentMatchesRenderKey] = useState(0);
 
   const fetchInFlightRef = useRef(false);
   const lastFetchAtMsRef = useRef(0);
@@ -849,6 +850,12 @@ export default function HomeScreen() {
   // Refresh data when screen comes into focus (e.g., when returning from set-goal page)
   useFocusEffect(
     useCallback(() => {
+      setRecentMatchesRenderKey(previous => previous + 1);
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       if (user && authReady) {
         fetchUserData();
       }
@@ -1239,6 +1246,7 @@ export default function HomeScreen() {
             
             <View style={styles.recentMatchesWrapper}>
               <RecentMatches
+                key={`recent-matches-${recentMatchesRenderKey}`}
                 matches={matches}
                 onViewAll={handleViewAllMatches}
                 onSwipeRight={handleSwipeRight}
