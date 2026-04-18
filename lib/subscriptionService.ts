@@ -55,6 +55,11 @@ export interface SubscriptionInfo {
   periodType?: string | null;
 }
 
+type SubscriptionInfoResult = {
+  info: SubscriptionInfo;
+  errorMessage: string | null;
+};
+
 type PaywallPreviewStatus = {
   startedAt: Date | null;
   endsAt: Date | null;
@@ -113,6 +118,17 @@ const parseMetadataDate = (value: unknown): Date | null => {
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 };
+
+const buildEmptySubscriptionInfo = (): SubscriptionInfo => ({
+  status: 'none',
+  isActive: false,
+  isTrial: false,
+  expiresAt: null,
+  productId: null,
+  entitlementId: null,
+  expirationReason: null,
+  periodType: null,
+});
 
 const buildPaywallPreviewStatus = (
   metadata?: Record<string, any> | null
@@ -487,46 +503,37 @@ export const subscriptionService = {
    * Get current subscription info
    */
   async getSubscriptionInfo(): Promise<SubscriptionInfo> {
+    const { info } = await this.getSubscriptionInfoResult();
+    return info;
+  },
+
+  async getSubscriptionInfoResult(): Promise<SubscriptionInfoResult> {
     // If RevenueCat isn't actually configured, return no subscription
     if (!isActuallyConfigured) {
       return {
-        status: 'none',
-        isActive: false,
-        isTrial: false,
-        expiresAt: null,
-        productId: null,
-        entitlementId: null,
+        info: buildEmptySubscriptionInfo(),
+        errorMessage: null,
       };
     }
 
     try {
       if (!Purchases) {
         return {
-          status: 'none',
-          isActive: false,
-          isTrial: false,
-          expiresAt: null,
-          productId: null,
-          entitlementId: null,
-          expirationReason: null,
-          periodType: null,
+          info: buildEmptySubscriptionInfo(),
+          errorMessage: 'revenuecat_native_module_missing',
         };
       }
       await ensureRevenueCatUser();
       const customerInfo = await Purchases.getCustomerInfo();
-      return this.parseCustomerInfo(customerInfo);
+      return {
+        info: this.parseCustomerInfo(customerInfo),
+        errorMessage: null,
+      };
     } catch (error: any) {
       console.error('❌ Error getting subscription info (non-fatal):', error?.message || error);
-      // Return no subscription on error instead of crashing
       return {
-        status: 'none',
-        isActive: false,
-        isTrial: false,
-        expiresAt: null,
-        productId: null,
-        entitlementId: null,
-        expirationReason: null,
-        periodType: null,
+        info: buildEmptySubscriptionInfo(),
+        errorMessage: error?.message || 'subscription_lookup_failed',
       };
     }
   },
@@ -661,12 +668,14 @@ export const subscriptionService = {
     try {
       await this.initialize(user.id);
 
-      const [subscriptionInfo, previewStatus, manualAccessStatus, gateStatus] = await Promise.all([
-        this.getSubscriptionInfo(),
+      const [subscriptionResult, previewStatus, manualAccessStatus, gateStatus] = await Promise.all([
+        this.getSubscriptionInfoResult(),
         this.getPaywallPreviewStatus(user),
         adminAccessService.getCurrentManualAccessStatus(accessToken),
         this.getFirstMatchGateStatus(user),
       ]);
+
+      const subscriptionInfo = subscriptionResult.info;
 
       if (subscriptionInfo.isActive) {
         return { allowed: true, reason: 'subscription_active', gateStatus };
@@ -686,6 +695,10 @@ export const subscriptionService = {
 
       if (!gateStatus.hasCompletedFirstMatch) {
         return { allowed: true, reason: 'first_match_free', gateStatus };
+      }
+
+      if (subscriptionResult.errorMessage) {
+        return { allowed: true, reason: 'error', gateStatus };
       }
 
       return { allowed: false, reason: 'paywall_required', gateStatus };

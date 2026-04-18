@@ -482,6 +482,7 @@ export default function RootLayout() {
           <Stack.Screen name="match-history-details" options={{ headerShown: false }} />
           <Stack.Screen name="match-summary" options={{ headerShown: false }} />
           <Stack.Screen name="neutral-match-summary" options={{ headerShown: false }} />
+          <Stack.Screen name="achievements" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="admin-access" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />

@@ -1,12 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 interface AddNewMatchButtonProps {
   onPress: () => void;
+  isLoading?: boolean;
 }
 
-export function AddNewMatchButton({ onPress }: AddNewMatchButtonProps) {
+export function AddNewMatchButton({ onPress, isLoading = false }: AddNewMatchButtonProps) {
   const { width, height } = useWindowDimensions();
 
   const styles = StyleSheet.create({
@@ -36,13 +44,24 @@ export function AddNewMatchButton({ onPress }: AddNewMatchButtonProps) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    containerDisabled: {
+      opacity: 0.75,
+    },
   });
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress}>
-      <Text style={styles.text}>Add new match</Text>
+    <TouchableOpacity
+      style={[styles.container, isLoading && styles.containerDisabled]}
+      onPress={onPress}
+      disabled={isLoading}
+    >
+      <Text style={styles.text}>{isLoading ? 'Opening...' : 'Add new match'}</Text>
       <View style={styles.iconButton}>
-        <Ionicons name="add" size={width * 0.045} color="#FFFFFF" />
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Ionicons name="add" size={width * 0.045} color="#FFFFFF" />
+        )}
       </View>
     </TouchableOpacity>
   );

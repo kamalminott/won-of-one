@@ -1,19 +1,22 @@
 import { BackButton } from '@/components/BackButton';
 import { ActivityCalendarCard } from '@/components/ActivityCalendarCard';
+import { AchievementCard } from '@/components/achievements/AchievementCard';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { useAuth } from '@/contexts/AuthContext';
 import { analytics } from '@/lib/analytics';
+import { achievementService } from '@/lib/achievementService';
 import { trackOnce } from '@/lib/analyticsTracking';
 import { COUNTRY_OPTIONS, getCountryDisplay } from '@/lib/countryUtils';
 import { matchService, userService } from '@/lib/database';
 import { supabase } from '@/lib/supabase';
+import type { AchievementDashboardData } from '@/types/achievements';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
@@ -64,6 +67,10 @@ export default function ProfileScreen() {
     totalPoints: 0,
     currentStreak: 0
   });
+  const [achievementDashboard, setAchievementDashboard] =
+    useState<AchievementDashboardData | null>(null);
+  const [achievementLoading, setAchievementLoading] = useState(false);
+  const [achievementError, setAchievementError] = useState<string | null>(null);
 
   const maybeTrackProfileCompletion = useCallback(
     (next?: { name?: string; handedness?: string; weapon?: string }) => {
@@ -110,7 +117,7 @@ export default function ProfileScreen() {
   };
 
   // Fetch user match statistics
-  const fetchMatchStatistics = async () => {
+  const fetchMatchStatistics = useCallback(async () => {
     if (!user?.id) return;
 
     try {
@@ -178,18 +185,10 @@ export default function ProfileScreen() {
     } catch (error) {
       console.error('Error fetching match statistics:', error);
     }
-  };
-
-  // Load match statistics when component mounts or user changes
-  useEffect(() => {
-    if (user?.id) {
-      fetchMatchStatistics();
-      loadUserProfile();
-    }
-  }, [user?.id, accessToken]);
+  }, [session?.access_token, user?.id]);
 
   // Load user profile data (handedness and weapon)
-  const loadUserProfile = async () => {
+  const loadUserProfile = useCallback(async () => {
     if (!user?.id) return;
     
     try {
@@ -208,7 +207,14 @@ export default function ProfileScreen() {
     } catch (error) {
       console.error('Error loading user profile:', error);
     }
-  };
+  }, [accessToken, user?.id]);
+
+  // Load match statistics when component mounts or user changes
+  useEffect(() => {
+    if (!user?.id) return;
+    void fetchMatchStatistics();
+    void loadUserProfile();
+  }, [fetchMatchStatistics, loadUserProfile, user?.id]);
 
   // Parse userName into first and last name
   useEffect(() => {
@@ -224,14 +230,62 @@ export default function ProfileScreen() {
     }
   }, [userName]);
 
+  const loadAchievementsPreview = useCallback(async () => {
+    if (!user?.id) {
+      setAchievementDashboard(null);
+      setAchievementError(null);
+      return;
+    }
+
+    setAchievementLoading(true);
+    setAchievementError(null);
+
+    try {
+      const nextDashboard = await achievementService.loadDashboard({
+        userId: user.id,
+        accessToken,
+        userName,
+        syncSource: 'profile_preview',
+      });
+
+      setAchievementDashboard(nextDashboard);
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error ? loadError.message : 'Failed to load achievements';
+      setAchievementError(message);
+    } finally {
+      setAchievementLoading(false);
+    }
+  }, [accessToken, user?.id, userName]);
+
   // Track screen view
   useFocusEffect(
     useCallback(() => {
       analytics.screen('Profile');
-    }, [])
+      void loadAchievementsPreview();
+    }, [loadAchievementsPreview])
+  );
+
+  useEffect(() => {
+    if (!achievementDashboard) return;
+    analytics.capture('profile_achievements_preview_viewed', {
+      unlocked_tiers: achievementDashboard.totalUnlockedTierCount,
+      total_tiers: achievementDashboard.totalTierCount,
+      highlighted_count: achievementDashboard.highlightedAchievements.length,
+    });
+  }, [achievementDashboard]);
+
+  const newAchievementKeys = useMemo(
+    () => new Set(achievementDashboard?.newUnlocks.map((unlock) => unlock.achievementKey) ?? []),
+    [achievementDashboard?.newUnlocks]
   );
 
   // No need to load profile data since it's handled by context
+
+  const handleOpenAchievements = () => {
+    analytics.capture('achievements_view_all_tapped', { source: 'profile' });
+    router.push('/achievements');
+  };
 
   const handleImagePicker = () => {
     if (Platform.OS === 'android') {
@@ -676,42 +730,79 @@ export default function ProfileScreen() {
         padding: width * 0.04,
         borderRadius: width * 0.05
       }]}>
-        <Text style={[styles.sectionTitle, { fontSize: width * 0.045 }]}>Achievements</Text>
-        
-        <View style={styles.achievementsContainer}>
-          <View style={styles.achievementItem}>
-            <View style={[styles.achievementIcon, {
-              width: width * 0.14,
-              height: width * 0.14,
-              borderRadius: width * 0.07
-            }]}>
-              <Ionicons name="trophy" size={width * 0.06} color="white" />
-            </View>
-            <Text style={[styles.achievementText, { fontSize: width * 0.035 }]}>First Win</Text>
-          </View>
-          
-          <View style={styles.achievementItem}>
-            <View style={[styles.achievementIcon, {
-              width: width * 0.14,
-              height: width * 0.14,
-              borderRadius: width * 0.07
-            }]}>
-              <Ionicons name="fitness" size={width * 0.06} color="white" />
-            </View>
-            <Text style={[styles.achievementText, { fontSize: width * 0.035 }]}>Perfect Bout</Text>
-          </View>
-          
-          <View style={styles.achievementItem}>
-            <View style={[styles.achievementIcon, {
-              width: width * 0.14,
-              height: width * 0.14,
-              borderRadius: width * 0.07
-            }]}>
-              <Ionicons name="medal" size={width * 0.06} color="white" />
-            </View>
-            <Text style={[styles.achievementText, { fontSize: width * 0.035 }]}>10 Wins in a Season</Text>
-          </View>
+        <View style={styles.achievementsHeaderRow}>
+          <Text style={[styles.sectionTitle, { fontSize: width * 0.045 }]}>Achievements</Text>
+          <TouchableOpacity activeOpacity={0.8} onPress={handleOpenAchievements}>
+            <Text style={[styles.achievementsViewAll, { fontSize: width * 0.032 }]}>
+              View all
+            </Text>
+          </TouchableOpacity>
         </View>
+
+        {achievementLoading && !achievementDashboard ? (
+          <View style={styles.achievementsLoadingState}>
+            <ActivityIndicator color="#8B5CF6" />
+            <Text style={[styles.achievementsHelperText, { fontSize: width * 0.034 }]}>
+              Loading progress...
+            </Text>
+          </View>
+        ) : achievementError && !achievementDashboard ? (
+          <View style={styles.achievementsLoadingState}>
+            <Text style={[styles.achievementsErrorText, { fontSize: width * 0.034 }]}>
+              {achievementError}
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.82}
+              onPress={() => void loadAchievementsPreview()}
+              style={styles.achievementsRetryButton}
+            >
+              <Text style={styles.achievementsRetryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : achievementDashboard ? (
+          <View style={styles.achievementsContainer}>
+            <View style={styles.achievementsCompactSummary}>
+              <View style={styles.achievementsCompactSummaryRow}>
+                <Text style={[styles.achievementsCompactTitle, { fontSize: width * 0.04 }]}>
+                  {achievementDashboard.totalUnlockedTierCount}/{achievementDashboard.totalTierCount} unlocked
+                </Text>
+                <Text style={[styles.achievementsCompactPercent, { fontSize: width * 0.038 }]}>
+                  {achievementDashboard.completionPercentage}%
+                </Text>
+              </View>
+
+              <View style={styles.achievementsCompactTrack}>
+                <View
+                  style={[
+                    styles.achievementsCompactFill,
+                    { width: `${achievementDashboard.completionPercentage}%` },
+                  ]}
+                />
+              </View>
+
+              {achievementDashboard.newUnlocks.length > 0 ? (
+                <Text style={[styles.achievementsNewText, { fontSize: width * 0.028 }]}>
+                  {achievementDashboard.newUnlocks.length === 1
+                    ? '1 new unlock'
+                    : `${achievementDashboard.newUnlocks.length} new unlocks`}
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.achievementsPreviewGrid}>
+              {achievementDashboard.highlightedAchievements.map((achievement) => (
+                <View key={achievement.key} style={styles.achievementsPreviewCell}>
+                  <AchievementCard
+                    achievement={achievement}
+                    compact
+                    isNew={newAchievementKeys.has(achievement.key)}
+                    onPress={handleOpenAchievements}
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
       </View>
 
 
@@ -1474,24 +1565,84 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   achievementsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-start',
     marginTop: 16,
+    gap: 12,
   },
-  achievementItem: {
+  achievementsCompactFill: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 999,
+    height: 5,
+  },
+  achievementsCompactPercent: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  achievementsCompactSummary: {
+    backgroundColor: '#1A1A1A',
+    borderColor: '#2A2A30',
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  achievementsCompactSummaryRow: {
     alignItems: 'center',
-    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  achievementIcon: {
-    backgroundColor: '#393939',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
+  achievementsCompactTitle: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
-  achievementText: {
-    color: '#9D9D9D',
+  achievementsCompactTrack: {
+    backgroundColor: '#26262B',
+    borderRadius: 999,
+    height: 5,
+    marginTop: 12,
+    overflow: 'hidden',
+  },
+  achievementsErrorText: {
+    color: '#FCA5A5',
     textAlign: 'center',
+  },
+  achievementsHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  achievementsLoadingState: {
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+  },
+  achievementsNewText: {
+    color: '#F5E39A',
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  achievementsPreviewCell: {
+    width: '31%',
+  },
+  achievementsPreviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  achievementsRetryButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  achievementsRetryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  achievementsViewAll: {
+    color: '#8B5CF6',
+    fontWeight: '700',
   },
   infoItem: {
     flexDirection: 'row',

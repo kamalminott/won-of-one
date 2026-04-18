@@ -21,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { adminAccessService, type ManualAccessStatus } from '@/lib/adminAccessService';
 import { goalService, matchService, userService } from '@/lib/database';
 import { isPlaceholderDisplayName, resolveAuthMetadataDisplayName } from '@/lib/displayName';
-import { buildMatchPaywallRoute, requireMatchScoringAccess } from '@/lib/matchPaywallGate';
+import { buildMatchPaywallRoute, resolveTimedMatchAccess } from '@/lib/matchPaywallGate';
 import { Goal, SimpleGoal, SimpleMatch, WeeklyLeaderboardData } from '@/types/database';
 
 const PROFILE_NAME_SETTLE_DELAY_MS = 800;
@@ -101,6 +101,18 @@ const getMatchTimestamp = (match: SimpleMatch): number => {
   return date.getTime();
 };
 
+const getWinRateStatsFromMatches = (matches: SimpleMatch[]) => {
+  const totalMatches = matches.length;
+  const winMatches = matches.filter(match => match.isWin).length;
+  const winRate = totalMatches > 0 ? Math.round((winMatches / totalMatches) * 100) : 0;
+
+  return {
+    totalMatches,
+    winMatches,
+    winRate,
+  };
+};
+
 const profileCompletedStorageKey = (userId: string) => `profile_completed:${userId}`;
 const manualAccessMessageSeenStorageKey = (userId: string, grantId: string) =>
   `manual_access_message_seen:${userId}:${grantId}`;
@@ -152,6 +164,7 @@ export default function HomeScreen() {
   const [matchCounts, setMatchCounts] = useState<{ totalMatches: number; winMatches: number } | null>(null);
   const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<WeeklyLeaderboardData | null>(null);
   const [weeklyLeaderboardLoaded, setWeeklyLeaderboardLoaded] = useState(false);
+  const [isAddMatchPending, setIsAddMatchPending] = useState(false);
   const [homeCountryCode, setHomeCountryCode] = useState<string | null>(null);
   const [showCompleteProfilePrompt, setShowCompleteProfilePrompt] = useState(false);
   const [profilePromptRequested, setProfilePromptRequested] = useState(false);
@@ -489,9 +502,13 @@ export default function HomeScreen() {
 
     try {
       // Fetch lightweight stats/goals first (small payload)
-      const [goalsData, countsData, leaderboardData, userProfile] = await Promise.all([
+      const [goalsData, statsMatchesData, leaderboardData, userProfile] = await Promise.all([
         safeRequest('home_active_goals', goalService.getActiveGoals(userId, session?.access_token), userId),
-        safeRequest('home_match_counts', matchService.getMatchCounts(userId, session?.access_token), userId),
+        safeRequest(
+          'home_stats_matches',
+          matchService.getRecentMatches(userId, 1000, undefined, session?.access_token),
+          userId
+        ),
         safeRequest(
           'home_weekly_leaderboard',
           matchService.getGlobalWeeklyLeaderboard(3, session?.access_token),
@@ -506,14 +523,20 @@ export default function HomeScreen() {
         0
       );
 
-      const calculatedWinRate =
-        countsData && countsData.totalMatches > 0
-          ? Math.round((countsData.winMatches / countsData.totalMatches) * 100)
-          : 0;
+      const statsSummary = statsMatchesData
+        ? getWinRateStatsFromMatches(statsMatchesData)
+        : null;
+      const statsMatchCounts = statsSummary
+        ? {
+            totalMatches: statsSummary.totalMatches,
+            winMatches: statsSummary.winMatches,
+          }
+        : null;
+      const calculatedWinRate = statsSummary?.winRate ?? 0;
 
       if (goalsData) setGoals(goalsData);
-      if (countsData) {
-        setMatchCounts(countsData);
+      if (statsMatchCounts) {
+        setMatchCounts(statsMatchCounts);
         setWinRate(calculatedWinRate);
       }
       setWeeklyLeaderboard(leaderboardData ?? null);
@@ -521,7 +544,7 @@ export default function HomeScreen() {
       setHomeCountryCode(userProfile?.country_code?.trim().toUpperCase() || null);
 
       setHasLoadedOnce(true);
-      if (goalsData || countsData || leaderboardData) {
+      if (goalsData || statsMatchesData || leaderboardData) {
         liveDataAppliedRef.current = true;
       }
 
@@ -537,7 +560,7 @@ export default function HomeScreen() {
         liveDataAppliedRef.current = true;
       }
 
-      if (matchesData && goalsData && countsData) {
+      if (matchesData && goalsData && statsMatchCounts) {
         void AsyncStorage.setItem(
           cacheKey,
               JSON.stringify({
@@ -546,7 +569,7 @@ export default function HomeScreen() {
             goals: goalsData,
             winRate: calculatedWinRate,
             trainingTime: trainingTimeRef.current,
-            matchCounts: countsData,
+            matchCounts: statsMatchCounts,
             weeklyLeaderboard: leaderboardData ?? null,
           })
         ).catch(error => console.warn('Failed to persist Home cache:', error));
@@ -595,7 +618,7 @@ export default function HomeScreen() {
             const formattedTrainingTime = formatTrainingTime(totalSeconds);
             setTrainingTime(formattedTrainingTime);
 
-            if (matchesData && goalsData && countsData) {
+            if (matchesData && goalsData && statsMatchCounts) {
               void AsyncStorage.setItem(
                 cacheKey,
                 JSON.stringify({
@@ -604,7 +627,7 @@ export default function HomeScreen() {
                   goals: goalsData,
                   winRate: calculatedWinRate,
                   trainingTime: formattedTrainingTime,
-                  matchCounts: countsData,
+                  matchCounts: statsMatchCounts,
                   weeklyLeaderboard: leaderboardData ?? null,
                 })
               ).catch(error => console.warn('Failed to persist Home cache:', error));
@@ -960,19 +983,35 @@ export default function HomeScreen() {
   };
 
   const handleAddNewMatch = async () => {
+    if (isAddMatchPending) {
+      return;
+    }
+
+    setIsAddMatchPending(true);
     analytics.quickActionClick({ action: 'log_match' });
 
-    const access = await requireMatchScoringAccess({
+    const access = await resolveTimedMatchAccess({
       user,
       accessToken: session?.access_token ?? null,
       entryPoint: 'home_add_match',
     });
 
-    if (!access.allowed) {
+    if (access.outcome === 'denied') {
+      setIsAddMatchPending(false);
       router.push(buildMatchPaywallRoute('home_add_match'));
       return;
     }
 
+    if (access.outcome === 'deferred') {
+      setIsAddMatchPending(false);
+      Alert.alert(
+        'Connection Issue',
+        'We could not verify match access right now. Please check your connection and try again.'
+      );
+      return;
+    }
+
+    setIsAddMatchPending(false);
     router.push('/add-match');
   };
 
@@ -1241,7 +1280,7 @@ export default function HomeScreen() {
             )}
             
             <View style={styles.addButtonContainer}>
-              <AddNewMatchButton onPress={handleAddNewMatch} />
+              <AddNewMatchButton onPress={handleAddNewMatch} isLoading={isAddMatchPending} />
             </View>
             
             <View style={styles.recentMatchesWrapper}>

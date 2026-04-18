@@ -32,6 +32,27 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+type CompetitionHubLoadSource =
+  | 'focus'
+  | 'pull_to_refresh'
+  | 'realtime'
+  | 'realtime_reconnect'
+  | 'action';
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'unknown_error';
+  }
+};
+
 export default function CompetitionsHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -56,9 +77,14 @@ export default function CompetitionsHubScreen() {
   const realtimeDisconnectHandledRef = useRef(false);
   const [realtimeNonce, setRealtimeNonce] = useState(0);
   const authWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authWaitStartedAtRef = useRef<number | null>(null);
 
-  const loadCompetitions = useCallback(async (options?: { forceBlockingLoader?: boolean }) => {
+  const loadCompetitions = useCallback(async (options?: {
+    forceBlockingLoader?: boolean;
+    source?: CompetitionHubLoadSource;
+  }) => {
     const forceBlockingLoader = options?.forceBlockingLoader ?? false;
+    const source = options?.source ?? 'focus';
 
     if (authLoading || !authReady) {
       return;
@@ -77,6 +103,16 @@ export default function CompetitionsHubScreen() {
     loadRequestIdRef.current = requestId;
     const shouldBlock = forceBlockingLoader || !hasLoadedCompetitionsSuccessfullyRef.current;
     const canAttemptRecovery = !hasLoadedCompetitionsSuccessfullyRef.current;
+    const startedAt = Date.now();
+    let stage: 'initial_fetch' | 'auth_recovery' | 'retry_fetch' = 'initial_fetch';
+
+    analytics.capture('competition_hub_load_started', {
+      source,
+      request_id: requestId,
+      has_cached_data: hasLoadedCompetitionsSuccessfullyRef.current,
+      blocking_loader: shouldBlock,
+      can_attempt_recovery: canAttemptRecovery,
+    });
 
     try {
       if (shouldBlock) {
@@ -91,22 +127,64 @@ export default function CompetitionsHubScreen() {
           { label: 'Competition hub' }
         );
       } catch (error) {
+        analytics.capture('competition_hub_initial_fetch_failed', {
+          source,
+          request_id: requestId,
+          duration_ms: Date.now() - startedAt,
+          error_message: getErrorMessage(error),
+          can_attempt_recovery: canAttemptRecovery,
+        });
+
         if (!canAttemptRecovery) {
           throw error;
         }
 
-        console.warn(
-          'Competition hub initial load failed; retrying after auth rehydrate:',
-          error
-        );
-        await withCompetitionReadTimeout(
-          () => retryAuthHydration(),
-          { label: 'Competition auth recovery' }
-        );
-        summaries = await withCompetitionReadTimeout(
-          () => listCompetitionSummariesForUser(user.id),
-          { label: 'Competition hub' }
-        );
+        if (__DEV__) {
+          console.warn(
+            'Competition hub initial load failed; retrying after auth rehydrate:',
+            error
+          );
+        }
+        stage = 'auth_recovery';
+        analytics.capture('competition_hub_auth_recovery_attempted', {
+          source,
+          request_id: requestId,
+          initial_error_message: getErrorMessage(error),
+        });
+        try {
+          await withCompetitionReadTimeout(
+            () => retryAuthHydration(),
+            { label: 'Competition auth recovery' }
+          );
+        } catch (recoveryError) {
+          analytics.capture('competition_hub_auth_recovery_failed', {
+            source,
+            request_id: requestId,
+            duration_ms: Date.now() - startedAt,
+            error_message: getErrorMessage(recoveryError),
+          });
+          throw recoveryError;
+        }
+        analytics.capture('competition_hub_auth_recovery_succeeded', {
+          source,
+          request_id: requestId,
+          duration_ms: Date.now() - startedAt,
+        });
+        stage = 'retry_fetch';
+        try {
+          summaries = await withCompetitionReadTimeout(
+            () => listCompetitionSummariesForUser(user.id),
+            { label: 'Competition hub' }
+          );
+        } catch (retryError) {
+          analytics.capture('competition_hub_retry_fetch_failed', {
+            source,
+            request_id: requestId,
+            duration_ms: Date.now() - startedAt,
+            error_message: getErrorMessage(retryError),
+          });
+          throw retryError;
+        }
       }
 
       if (loadRequestIdRef.current !== requestId) {
@@ -117,17 +195,36 @@ export default function CompetitionsHubScreen() {
       setPastCompetitions(summaries.past);
       setArchivedCompetitions(summaries.archived);
       hasLoadedCompetitionsSuccessfullyRef.current = true;
+      analytics.capture('competition_hub_load_succeeded', {
+        source,
+        request_id: requestId,
+        duration_ms: Date.now() - startedAt,
+        recovered_via_auth_retry: stage === 'retry_fetch',
+        active_count: summaries.active.length,
+        past_count: summaries.past.length,
+        archived_count: summaries.archived.length,
+      });
     } catch (error) {
       if (loadRequestIdRef.current !== requestId) {
         return;
       }
-      console.warn('Competition hub load failed:', error);
+      if (__DEV__) {
+        console.warn('Competition hub load failed:', error);
+      }
       if (!hasLoadedCompetitionsSuccessfullyRef.current) {
         setActiveCompetitions([]);
         setPastCompetitions([]);
         setArchivedCompetitions([]);
       }
       setErrorText('Could not load competitions. Pull to refresh and try again.');
+      analytics.capture('competition_hub_load_failed', {
+        source,
+        request_id: requestId,
+        duration_ms: Date.now() - startedAt,
+        stage,
+        error_message: getErrorMessage(error),
+        had_cached_data: hasLoadedCompetitionsSuccessfullyRef.current,
+      });
     } finally {
       if (loadRequestIdRef.current === requestId) {
         setLoading(false);
@@ -142,13 +239,36 @@ export default function CompetitionsHubScreen() {
     }
 
     if (!authLoading && authReady) {
+      if (authWaitStartedAtRef.current) {
+        analytics.capture('competition_hub_auth_wait_resolved', {
+          duration_ms: Date.now() - authWaitStartedAtRef.current,
+        });
+        authWaitStartedAtRef.current = null;
+      }
       return;
     }
 
+    if (!authWaitStartedAtRef.current) {
+      authWaitStartedAtRef.current = Date.now();
+      analytics.capture('competition_hub_auth_wait_started', {
+        auth_loading: authLoading,
+        auth_ready: authReady,
+      });
+    }
+
     authWaitTimerRef.current = setTimeout(() => {
-      console.warn('Competition hub auth wait exceeded timeout');
+      if (__DEV__) {
+        console.warn('Competition hub auth wait exceeded timeout');
+      }
       setErrorText('Could not sync your session right now. Pull to retry.');
       setLoading(false);
+      analytics.capture('competition_hub_auth_wait_timeout', {
+        duration_ms: authWaitStartedAtRef.current
+          ? Date.now() - authWaitStartedAtRef.current
+          : 12000,
+        auth_loading: authLoading,
+        auth_ready: authReady,
+      });
     }, 12000);
 
     return () => {
@@ -176,7 +296,7 @@ export default function CompetitionsHubScreen() {
       }
 
       analytics.capture('competition_hub_viewed');
-      void loadCompetitions();
+      void loadCompetitions({ source: 'focus' });
     }, [authLoading, authReady, loadCompetitions, user?.id])
   );
 
@@ -211,7 +331,10 @@ export default function CompetitionsHubScreen() {
         return;
       }
       realtimeLastEventMsRef.current = eventMs;
-      void loadCompetitions();
+      analytics.capture('competition_hub_realtime_event_received', {
+        event_ms: eventMs,
+      });
+      void loadCompetitions({ source: 'realtime' });
     };
 
     const scheduleReconnect = (status: string) => {
@@ -293,7 +416,7 @@ export default function CompetitionsHubScreen() {
             attempts: realtimeRetryAttemptRef.current,
           });
           realtimeReconnectRef.current = false;
-          void loadCompetitions();
+          void loadCompetitions({ source: 'realtime_reconnect' });
         }
         realtimeRetryAttemptRef.current = 0;
         setRealtimeBannerText(null);
@@ -332,7 +455,8 @@ export default function CompetitionsHubScreen() {
       return;
     }
     setRefreshing(true);
-    await loadCompetitions();
+    analytics.capture('competition_hub_pull_to_refresh');
+    await loadCompetitions({ source: 'pull_to_refresh' });
     setRefreshing(false);
   };
 
@@ -360,7 +484,7 @@ export default function CompetitionsHubScreen() {
         return;
       }
 
-      await loadCompetitions();
+      await loadCompetitions({ source: 'action' });
       setActionCompetitionId(null);
     },
     [actionCompetitionId, loadCompetitions]
