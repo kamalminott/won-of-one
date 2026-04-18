@@ -6472,7 +6472,19 @@ export const accountService = {
         // Continue - not critical
       }
 
-      // 11. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
+      // 11. Delete user achievements
+      const { error: achievementsError } = await postgrestDelete(
+        'user_achievements',
+        { user_id: `eq.${userId}` },
+        { accessToken: token }
+      );
+      
+      if (achievementsError) {
+        console.error('❌ Error deleting user achievements:', achievementsError);
+        // Continue - table may not exist in older environments yet
+      }
+
+      // 12. Delete user subscriptions (has ON DELETE CASCADE, but explicit for clarity)
       const { error: subscriptionsError } = await postgrestDelete(
         'user_subscriptions',
         { user_id: `eq.${userId}` },
@@ -6484,7 +6496,7 @@ export const accountService = {
         // Continue - might not have subscription
       }
 
-      // 12. Delete app_user record
+      // 13. Delete app_user record
       const { error: appUserError } = await postgrestDelete(
         'app_user',
         { user_id: `eq.${userId}` },
