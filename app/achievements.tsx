@@ -34,11 +34,7 @@ const getProgressSummary = (achievement: AchievementCardData): string => {
     return `${achievement.currentValue} / ${achievement.nextTier.threshold} to ${achievement.nextTier.label}`;
   }
 
-  if (achievement.latestUnlockedTier && achievement.tiers.length > 1) {
-    return `${achievement.currentValueLabel} · ${achievement.latestUnlockedTier.label} complete`;
-  }
-
-  return achievement.currentValueLabel;
+  return 'Complete';
 };
 
 const formatCount = (value: number, singular: string, plural: string) =>
@@ -81,7 +77,7 @@ const getThresholdLabel = (achievement: AchievementCardData, threshold: number):
 
 const getModalDescription = (achievement: AchievementCardData): string => {
   if (!achievement.nextTier) {
-    return 'All tiers complete.';
+    return achievement.tiers.length > 1 ? 'All tiers complete.' : 'Complete.';
   }
 
   const nextTierLabel =
@@ -367,7 +363,12 @@ export default function AchievementsScreen() {
                 </View>
               ) : null}
 
-              <View style={styles.modalProgressTrack}>
+              <View
+                style={[
+                  styles.modalProgressTrack,
+                  !selectedAchievement.nextTier ? styles.modalProgressTrackComplete : null,
+                ]}
+              >
                 <View
                   style={[
                     styles.modalProgressFill,
@@ -378,9 +379,11 @@ export default function AchievementsScreen() {
                   ]}
                 />
               </View>
-              <Text style={styles.modalProgressText}>
-                {getProgressSummary(selectedAchievement)}
-              </Text>
+              {selectedAchievement.nextTier ? (
+                <Text style={styles.modalProgressText}>
+                  {getProgressSummary(selectedAchievement)}
+                </Text>
+              ) : null}
 
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -504,6 +507,9 @@ const styles = StyleSheet.create({
     height: 6,
     marginTop: 16,
     overflow: 'hidden',
+  },
+  modalProgressTrackComplete: {
+    marginBottom: 22,
   },
   modalTierMarkerRow: {
     alignItems: 'flex-start',
