@@ -44,43 +44,6 @@ const getProgressSummary = (achievement: AchievementCardData): string => {
 const formatCount = (value: number, singular: string, plural: string) =>
   `${value} ${value === 1 ? singular : plural}`;
 
-const getAchievementActionLabel = (achievement: AchievementCardData): string => {
-  switch (achievement.key) {
-    case 'first_match':
-    case 'match_master':
-      return 'log matches in the app';
-    case 'first_win':
-    case 'victory_hunter':
-      return 'record wins in saved matches';
-    case 'hot_streak':
-      return 'build a consecutive win streak';
-    case 'shutout_artist':
-      return 'win a saved match without allowing your opponent to score a touch';
-    case 'competitor':
-      return 'join competitions in the app';
-    case 'organiser':
-      return 'create competitions in the app';
-    case 'closer':
-      return 'finalise competitions you created';
-    case 'competition_scorer':
-      return 'save matches inside competitions';
-    case 'training_ground':
-      return 'log training sessions in the app';
-    case 'consistency_chain':
-      return 'train on consecutive days';
-    case 'goal_setter':
-      return 'create goals in the app';
-    case 'goal_crusher':
-      return 'complete goals you created';
-    case 'remote_contender':
-      return 'score matches using Remote';
-    case 'profile_ready':
-      return 'complete your profile details';
-    default:
-      return achievement.description.charAt(0).toLowerCase() + achievement.description.slice(1);
-  }
-};
-
 const getThresholdLabel = (achievement: AchievementCardData, threshold: number): string => {
   switch (achievement.key) {
     case 'match_master':
@@ -117,29 +80,48 @@ const getThresholdLabel = (achievement: AchievementCardData, threshold: number):
 };
 
 const getModalDescription = (achievement: AchievementCardData): string => {
-  const actionLabel = getAchievementActionLabel(achievement);
-  const latestTierLabel = achievement.latestUnlockedTier?.label ?? null;
-
   if (!achievement.nextTier) {
-    if (achievement.tiers.length > 1 && achievement.latestUnlockedTier) {
-      return `You’ve completed every tier for ${achievement.title} by continuing to ${actionLabel}. You’ve already reached ${getThresholdLabel(
-        achievement,
-        achievement.latestUnlockedTier.threshold
-      )} and finished at ${latestTierLabel}.`;
-    }
-
-    return `You’ve completed ${achievement.title} by ${actionLabel}.`;
+    return 'All tiers complete.';
   }
 
   const nextTierLabel =
     achievement.nextTier.label === 'Unlocked' ? 'this achievement' : achievement.nextTier.label;
   const nextThresholdLabel = getThresholdLabel(achievement, achievement.nextTier.threshold);
 
-  if (achievement.latestUnlockedTier) {
-    return `You’ve unlocked ${latestTierLabel} by continuing to ${actionLabel}. Next up: reach ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+  switch (achievement.key) {
+    case 'first_match':
+    case 'match_master':
+      return `Log ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+    case 'first_win':
+    case 'victory_hunter':
+      return `Win ${nextThresholdLabel} in saved matches to unlock ${nextTierLabel}.`;
+    case 'hot_streak':
+      return `Win ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+    case 'shutout_artist':
+      return 'Win 1 saved match without conceding a touch to unlock this achievement.';
+    case 'competitor':
+      return `Join ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+    case 'organiser':
+      return 'Create 1 competition to unlock this achievement.';
+    case 'closer':
+      return 'Finalise 1 competition you created to unlock this achievement.';
+    case 'competition_scorer':
+      return 'Save 1 match inside a competition to unlock this achievement.';
+    case 'training_ground':
+      return `Log ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+    case 'consistency_chain':
+      return `Log training sessions on ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
+    case 'goal_setter':
+      return 'Create 1 goal to unlock this achievement.';
+    case 'goal_crusher':
+      return `Complete ${nextThresholdLabel} you created to unlock ${nextTierLabel}.`;
+    case 'remote_contender':
+      return `Score ${nextThresholdLabel} using Remote to unlock ${nextTierLabel}.`;
+    case 'profile_ready':
+      return 'Complete your full name, handedness, and preferred weapon to unlock this achievement.';
+    default:
+      return `Reach ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
   }
-
-  return `${achievement.description} Your next goal is ${nextThresholdLabel} to unlock ${nextTierLabel}.`;
 };
 
 export default function AchievementsScreen() {
